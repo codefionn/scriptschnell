@@ -1,0 +1,49 @@
+# Binaries
+/statcode-ai
+/test_menu
+/cmd/statcode-ai/statcode-ai
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+/.claude
+
+# Config files (contain API keys)
+.config/
+
+# Local agent context (for user-specific customizations)
+AGENTS.local.md
+
+# Temporary files
+*.tmp
+/tmp/
+.statcode-todos.json
+
+# macOS
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+/.gocache

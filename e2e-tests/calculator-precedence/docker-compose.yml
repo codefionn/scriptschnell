@@ -1,0 +1,45 @@
+version: '3.8'
+
+# Operator Precedence E2E Test
+# The AI upgrades an existing calculator implementation to support operator precedence
+
+services:
+  statcode-ai:
+    build:
+      context: ../..
+      dockerfile: e2e-tests/calculator-precedence/Dockerfile
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - OLLAMA_HOST=${OLLAMA_HOST}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - STATCODE_LOG_LEVEL=${STATCODE_LOG_LEVEL:-info}
+      - STATCODE_LOG_PATH=${STATCODE_LOG_PATH:-/workspace/.logs/statcode-ai.log}
+      - STATCODE_MODEL=${STATCODE_MODEL}
+      - STATCODE_TEMPERATURE=${STATCODE_TEMPERATURE}
+      - STATCODE_TIMEOUT=${STATCODE_TIMEOUT}
+    volumes:
+      - ./workspace:/workspace
+      - ./.logs:/workspace/.logs
+      - ./scripts:/scripts
+    working_dir: /workspace
+    entrypoint: ["/bin/bash"]
+    command: /scripts/build_calculator.sh
+
+  test-runner:
+    image: golang:1.25-bookworm
+    depends_on:
+      statcode-ai:
+        condition: service_completed_successfully
+    environment:
+      - MODULE_NAME=calculator
+    volumes:
+      - ./workspace:/workspace
+      - ./scripts:/scripts
+    working_dir: /workspace
+    command: bash /scripts/test_calculator.sh

@@ -1,0 +1,11 @@
+# Environment variables
+.env
+
+# Workspace directory (created during test runs)
+workspace/
+
+# Docker volumes
+.docker/
+
+# Debug logs (created during test runs)
+.logs/

@@ -10,16 +10,16 @@
 
 ## TODO
 
-[ ] Infinite text loop detection (Gemini loves to repeat itself)
-[ ] Better authorization UI
-[ ] More e2e tests using other programming languages than Go
-[ ] Custom system prompt
-[ ] System prompt optimized for current codebase
-[ ] Better `/init` command for generating AGENTS.md
-[ ] Fix write diff
-[ ] [agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol) for better editor integration
-[ ] Better UI experience for `parallel_tools` call
-[ ] Encourage LLMs to use the `parallel_tools` call (only gemini seems to do this)
+- [ ] Infinite text loop detection (Gemini loves to repeat itself)
+- [ ] Better authorization UI
+- [ ] More e2e tests using other programming languages than Go
+- [ ] Custom system prompt
+- [ ] System prompt optimized for current codebase
+- [ ] Better `/init` command for generating AGENTS.md
+- [ ] Fix write diff
+- [ ] [agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol) for better editor integration
+- [ ] Better UI experience for `parallel_tools` call
+- [ ] Encourage LLMs to use the `parallel_tools` call (only gemini seems to do this)
 
 ### Maybes
 

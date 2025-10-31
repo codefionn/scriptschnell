@@ -23,8 +23,8 @@
 
 ### Maybes
 
-[ ] Implement a small bash parser so bash on Windows works?
-[ ] Support for easy containerization, e.g. devcontainer?
+- [ ] Implement a small bash parser so bash on Windows works?
+- [ ] Support for easy containerization, e.g. devcontainer?
 
 ## Agentic Workflow
 

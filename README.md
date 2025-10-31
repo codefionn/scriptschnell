@@ -1,12 +1,15 @@
 # StatCode AI
 
-**statcode-ai** is a TUI that generate code from prompts using LLMs.
+**statcode-ai** is a TUI that generates code from prompts using LLMs.
 
 ## Features
 
 - Multiple providers supported
 - Native search engine support
 - Golang WASM wasip1 sandbox (compiled with TinyGo)
+- Auto-continue for long-running sessions
+- Auto-compaction during generation for longer sessions
+- Two separate LLM models for orchestration and summarization
 
 ## TODO
 
@@ -20,6 +23,7 @@
 - [ ] [agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol) for better editor integration
 - [ ] Better UI experience for `parallel_tools` call
 - [ ] Encourage LLMs to use the `parallel_tools` call (only gemini seems to do this)
+- [ ] Limit the auto-continue judge so it doesn't get stuck in a loop
 
 ### Maybes
 

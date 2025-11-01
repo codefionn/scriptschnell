@@ -104,6 +104,10 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.logger == nil {
+		m.logger = logger.Global().WithPrefix("tinygo")
+	}
+
 	// Check if TinyGo is already cached
 	tinyGoPath := filepath.Join(m.cacheDir, tinyGoVersion, "bin", "tinygo")
 	if runtime.GOOS == "windows" {

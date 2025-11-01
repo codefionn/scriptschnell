@@ -853,10 +853,31 @@ func (a *wasiAuthorizerAdapter) Authorize(ctx context.Context, toolName string, 
 	}, nil
 }
 
-// containsDangerousOps is a stub function for testing.
-// This was referenced in tests but not implemented. Returning false for now.
+// containsDangerousOps performs a lightweight scan for APIs that should never
+// be allowed inside the sandbox. This is a defensive check used primarily by
+// tests to exercise the policy surface; it intentionally looks for a curated
+// list of risky functions and packages rather than attempting full parsing.
 func containsDangerousOps(code string) bool {
-	// This is a placeholder stub to make tests compile
-	// In production, dangerous ops detection is handled by the authorization system
+	if code == "" {
+		return false
+	}
+
+	lower := strings.ToLower(code)
+
+	dangerous := []string{
+		"os.removeall",
+		"exec.command",
+		"syscall.",
+		"unsafe.",
+		"net.listen",
+		"http.listenandserve",
+	}
+
+	for _, needle := range dangerous {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+
 	return false
 }

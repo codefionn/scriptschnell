@@ -1,0 +1,197 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/statcode-ai/statcode-ai/internal/actor"
+	"github.com/statcode-ai/statcode-ai/internal/logger"
+)
+
+// ToolExecutionMsg requests execution of a tool call.
+type ToolExecutionMsg struct {
+	Call            *ToolCall
+	ToolName        string
+	Approved        bool
+	Context         context.Context
+	StatusCallback  func(string) error
+	Heartbeat       time.Duration
+	ResponseChannel chan *ToolResult
+}
+
+// Type implements actor.Message.
+func (m ToolExecutionMsg) Type() string {
+	return "ToolExecutionMsg"
+}
+
+// ToolExecutorActor serializes tool execution through the actor system.
+type ToolExecutorActor struct {
+	id               string
+	registry         *Registry
+	defaultHeartbeat time.Duration
+}
+
+// NewToolExecutorActor creates a new actor that executes tool calls.
+func NewToolExecutorActor(id string, registry *Registry) *ToolExecutorActor {
+	return &ToolExecutorActor{
+		id:               id,
+		registry:         registry,
+		defaultHeartbeat: 500 * time.Millisecond,
+	}
+}
+
+// ID returns the actor ID.
+func (a *ToolExecutorActor) ID() string {
+	return a.id
+}
+
+// Start initializes the actor.
+func (a *ToolExecutorActor) Start(ctx context.Context) error {
+	return nil
+}
+
+// Stop shuts down the actor.
+func (a *ToolExecutorActor) Stop(ctx context.Context) error {
+	return nil
+}
+
+// Receive handles incoming messages.
+func (a *ToolExecutorActor) Receive(ctx context.Context, msg actor.Message) error {
+	switch m := msg.(type) {
+	case ToolExecutionMsg:
+		if m.Call == nil || m.ResponseChannel == nil {
+			return fmt.Errorf("tool execution message missing call or response channel")
+		}
+		go a.executeTool(ctx, m)
+		return nil
+	default:
+		return fmt.Errorf("tool executor received unknown message type: %T", msg)
+	}
+}
+
+func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecutionMsg) {
+	baseCtx := actorCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+
+	execCtx, cancel := context.WithCancel(baseCtx)
+	defer cancel()
+
+	if msg.Context != nil {
+		reqCtx := msg.Context
+		go func() {
+			select {
+			case <-execCtx.Done():
+			case <-reqCtx.Done():
+				cancel()
+			}
+		}()
+	}
+
+	resultChan := make(chan *ToolResult, 1)
+
+	go func() {
+		if msg.Approved {
+			resultChan <- a.registry.ExecuteWithApproval(execCtx, msg.Call)
+		} else {
+			resultChan <- a.registry.Execute(execCtx, msg.Call)
+		}
+	}()
+
+	heartbeatInterval := msg.Heartbeat
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = a.defaultHeartbeat
+	}
+
+	var ticker *time.Ticker
+	if msg.StatusCallback != nil && heartbeatInterval > 0 {
+		ticker = time.NewTicker(heartbeatInterval)
+		defer ticker.Stop()
+	}
+
+	heartbeatCount := 0
+	for {
+		select {
+		case result := <-resultChan:
+			msg.ResponseChannel <- result
+			return
+		case <-tickerTick(ticker):
+			if msg.StatusCallback != nil {
+				status := fmt.Sprintf("Calling tool: %s%s", msg.ToolName, strings.Repeat(".", heartbeatCount%4))
+				if err := msg.StatusCallback(status); err != nil {
+					logger.Debug("tool executor: status callback error: %v", err)
+				}
+				heartbeatCount++
+			}
+		case <-execCtx.Done():
+			msg.ResponseChannel <- &ToolResult{
+				ID:    msg.Call.ID,
+				Error: "Tool execution cancelled",
+			}
+			return
+		}
+	}
+}
+
+func tickerTick(t *time.Ticker) <-chan time.Time {
+	if t == nil {
+		return nil
+	}
+	return t.C
+}
+
+// ToolExecutorActorClient provides a facade for interacting with ToolExecutorActor.
+type ToolExecutorActorClient struct {
+	actorRef interface {
+		Send(actor.Message) error
+	}
+}
+
+// NewToolExecutorActorClient returns a new client.
+func NewToolExecutorActorClient(ref interface{ Send(actor.Message) error }) *ToolExecutorActorClient {
+	return &ToolExecutorActorClient{actorRef: ref}
+}
+
+// Execute runs the tool call through the actor.
+func (c *ToolExecutorActorClient) Execute(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error) (*ToolResult, error) {
+	return c.execute(ctx, call, toolName, statusCallback, false)
+}
+
+// ExecuteWithApproval runs the tool call with prior approval.
+func (c *ToolExecutorActorClient) ExecuteWithApproval(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error) (*ToolResult, error) {
+	return c.execute(ctx, call, toolName, statusCallback, true)
+}
+
+func (c *ToolExecutorActorClient) execute(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error, approved bool) (*ToolResult, error) {
+	if call == nil {
+		return nil, fmt.Errorf("tool call is nil")
+	}
+
+	respChan := make(chan *ToolResult, 1)
+	msg := ToolExecutionMsg{
+		Call:            call,
+		ToolName:        toolName,
+		Approved:        approved,
+		Context:         ctx,
+		StatusCallback:  statusCallback,
+		ResponseChannel: respChan,
+	}
+
+	if err := c.actorRef.Send(msg); err != nil {
+		return nil, err
+	}
+
+	if ctx == nil {
+		return <-respChan, nil
+	}
+
+	select {
+	case res := <-respChan:
+		return res, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}

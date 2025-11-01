@@ -24,6 +24,11 @@
 - [ ] Better UI experience for `parallel_tools` call
 - [ ] Encourage LLMs to use the `parallel_tools` call (only gemini seems to do this)
 - [ ] Limit the auto-continue judge so it doesn't get stuck in a loop
+- [ ] Unify the model/provider detection (context window size/model specific workarounds)
+- [ ] Fix auto compaction (seems to be really broken)
+- [ ] Get rid of magic literals in the codebase
+
+**Implementation Details**: See [internal/orchestrator/orchestrator.go:1069-1151](internal/orchestrator/orchestrator.go#L1069-L1151) for the `executeToolWithHeartbeat` and `executeToolWithApprovalAndHeartbeat` methods.
 
 ### Maybes
 
@@ -73,4 +78,6 @@ Supported providers:
 - Ollama
 - OpenAI-compatible
 
-Recommended are `Cerebras` with `qwen-3-coder-480b` model for the orchestration model and `gpt-5-nano` for the summarization model.
+Recommended are `Cerebras` with `qwen-3-coder-480b` model (it will be interesting
+how `zai-glm-4.6` performs) for the orchestration model and `gpt-5-nano` for the
+summarization model.

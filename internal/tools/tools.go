@@ -22,11 +22,12 @@ type ToolCall struct {
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
-	ID                string      `json:"id"`
-	Result            interface{} `json:"result"`
-	Error             string      `json:"error,omitempty"`
-	RequiresUserInput bool        `json:"requires_user_input,omitempty"` // If true, user approval is needed
-	AuthReason        string      `json:"auth_reason,omitempty"`         // Reason for requiring authorization
+	ID                     string      `json:"id"`
+	Result                 interface{} `json:"result"`
+	Error                  string      `json:"error,omitempty"`
+	RequiresUserInput      bool        `json:"requires_user_input,omitempty"`      // If true, user approval is needed
+	AuthReason             string      `json:"auth_reason,omitempty"`              // Reason for requiring authorization
+	SuggestedCommandPrefix string      `json:"suggested_command_prefix,omitempty"` // Suggested prefix to remember for future use
 }
 
 // Registry manages available tools
@@ -112,15 +113,17 @@ func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {
 			if decision.RequiresUserInput {
 				// Signal that user approval is needed
 				return &ToolResult{
-					ID:                call.ID,
-					RequiresUserInput: true,
-					AuthReason:        decision.Reason,
+					ID:                     call.ID,
+					RequiresUserInput:      true,
+					AuthReason:             decision.Reason,
+					SuggestedCommandPrefix: decision.SuggestedCommandPrefix,
 				}
 			}
 			// Hard denial (no user input option)
 			return &ToolResult{
-				ID:    call.ID,
-				Error: decision.Reason,
+				ID:                     call.ID,
+				Error:                  decision.Reason,
+				SuggestedCommandPrefix: decision.SuggestedCommandPrefix,
 			}
 		}
 	}

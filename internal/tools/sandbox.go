@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/statcode-ai/statcode-ai/internal/fs"
@@ -131,6 +133,10 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 					"type": "string",
 				},
 			},
+			"background": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Run the sandbox in the background and stream output via the status tool.",
+			},
 		},
 		"required": []string{"code"},
 	}
@@ -158,6 +164,12 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 				}
 			}
 		}
+	}
+
+	background := GetBoolParam(params, "background", false)
+
+	if background {
+		return t.executeBackground(ctx, code, timeout, libraries)
 	}
 
 	// Use builder to execute
@@ -194,6 +206,126 @@ func (t *SandboxTool) executeWithBuilder(ctx context.Context, code string, timeo
 	// Build and execute using internal compilation method
 	// We need to use the internal method to preserve TinyGo manager connection
 	return t.executeInternal(ctx, builder)
+}
+
+func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeout int, libraries []string) (interface{}, error) {
+	if t.session == nil {
+		return nil, fmt.Errorf("background execution requires session support for go_sandbox")
+	}
+
+	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
+	commandSummary := summarizeSandboxCommand(code)
+
+	job := &session.BackgroundJob{
+		ID:         jobID,
+		Command:    commandSummary,
+		WorkingDir: t.workingDir,
+		StartTime:  time.Now(),
+		Completed:  false,
+		Stdout:     make([]string, 0),
+		Stderr:     make([]string, 0),
+		Type:       "go_sandbox",
+		Done:       make(chan struct{}),
+	}
+
+	execCtx, cancel := context.WithCancel(context.Background())
+	job.CancelFunc = cancel
+
+	t.session.AddBackgroundJob(job)
+
+	go func() {
+		defer cancel()
+		defer close(job.Done)
+
+		result, err := t.executeWithBuilder(execCtx, code, timeout, libraries)
+		job.Completed = true
+
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				job.Stderr = append(job.Stderr, "sandbox execution canceled")
+			} else {
+				job.Stderr = append(job.Stderr, fmt.Sprintf("sandbox error: %v", err))
+			}
+			job.ExitCode = -1
+			return
+		}
+
+		job.ExitCode = 0
+
+		if resMap, ok := result.(map[string]interface{}); ok {
+			if exitVal, ok := resMap["exit_code"]; ok {
+				job.ExitCode = coerceExitCode(exitVal)
+			}
+			if stdout, ok := resMap["stdout"].(string); ok && stdout != "" {
+				job.Stdout = append(job.Stdout, splitOutputLines(stdout)...)
+			}
+			if stderrStr, ok := resMap["stderr"].(string); ok && stderrStr != "" {
+				job.Stderr = append(job.Stderr, splitOutputLines(stderrStr)...)
+			}
+			if timeoutFlag, ok := resMap["timeout"].(bool); ok && timeoutFlag {
+				job.Stderr = append(job.Stderr, "sandbox execution timed out")
+			}
+			if errMsg, ok := resMap["error"].(string); ok && errMsg != "" {
+				job.Stderr = append(job.Stderr, errMsg)
+			}
+		} else if result != nil {
+			job.Stdout = append(job.Stdout, fmt.Sprintf("result: %v", result))
+		}
+	}()
+
+	return map[string]interface{}{
+		"job_id":  jobID,
+		"message": "Sandbox execution started in background. Use 'status_program' to stream progress, 'wait_program' to block until completion, or 'stop_program' to terminate.",
+	}, nil
+}
+
+func summarizeSandboxCommand(code string) string {
+	trimmed := strings.TrimSpace(code)
+	if trimmed == "" {
+		return "go_sandbox"
+	}
+
+	line := trimmed
+	if idx := strings.Index(trimmed, "\n"); idx >= 0 {
+		line = trimmed[:idx]
+	}
+	line = strings.TrimSpace(line)
+	if len(line) > 80 {
+		line = line[:80] + "..."
+	}
+	return fmt.Sprintf("go_sandbox: %s", line)
+}
+
+func splitOutputLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	// Trim trailing empty line that results from ending newline
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func coerceExitCode(val interface{}) int {
+	switch v := val.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case uint:
+		return int(v)
+	case uint32:
+		return int(v)
+	case uint64:
+		return int(v)
+	case float32:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
 }
 
 // executeInternal performs the actual WASM compilation and execution

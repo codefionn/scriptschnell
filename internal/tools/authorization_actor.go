@@ -16,9 +16,10 @@ import (
 
 // AuthorizationDecision captures the result of an authorization check.
 type AuthorizationDecision struct {
-	Allowed           bool
-	Reason            string
-	RequiresUserInput bool // If true, the caller should prompt the user for approval
+	Allowed                bool
+	Reason                 string
+	RequiresUserInput      bool   // If true, the caller should prompt the user for approval
+	SuggestedCommandPrefix string // Optional command prefix that can be authorized for future runs
 }
 
 // Authorizer defines the contract for authorizing tool calls before execution.
@@ -611,6 +612,8 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 		Prefix   string `json:"prefix"`
 	}
 
+	suggestedPrefix := ""
+
 	// Clean up response - remove markdown code blocks if present
 	cleanedResponse := strings.TrimSpace(response)
 	cleanedResponse = strings.TrimPrefix(cleanedResponse, "```json")
@@ -619,16 +622,20 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 	cleanedResponse = strings.TrimSpace(cleanedResponse)
 
 	if err := json.Unmarshal([]byte(cleanedResponse), &result); err != nil {
+		suggestedPrefix = ""
 		// If parsing fails, require user approval
 		return &AuthorizationDecision{
-			Allowed:           false,
-			Reason:            fmt.Sprintf("Command requires authorization (failed to parse LLM response): %s", command),
-			RequiresUserInput: true,
+			Allowed:                false,
+			Reason:                 fmt.Sprintf("Command requires authorization (failed to parse LLM response): %s", command),
+			RequiresUserInput:      true,
+			SuggestedCommandPrefix: suggestedPrefix,
 		}, nil
 	}
 
+	suggestedPrefix = strings.TrimSpace(result.Prefix)
+
 	if result.Harmless {
-		return &AuthorizationDecision{Allowed: true}, nil
+		return &AuthorizationDecision{Allowed: true, SuggestedCommandPrefix: suggestedPrefix}, nil
 	}
 
 	// Command is potentially harmful, require user approval
@@ -637,9 +644,14 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 		reason = fmt.Sprintf("Command requires authorization: %s", command)
 	}
 
+	if suggestedPrefix != "" {
+		reason = fmt.Sprintf("%s\nApproving will also allow future commands starting with %q to run without additional prompts in this project.", reason, suggestedPrefix)
+	}
+
 	return &AuthorizationDecision{
-		Allowed:           false,
-		Reason:            reason,
-		RequiresUserInput: true,
+		Allowed:                false,
+		Reason:                 reason,
+		RequiresUserInput:      true,
+		SuggestedCommandPrefix: suggestedPrefix,
 	}, nil
 }

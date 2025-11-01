@@ -1,4 +1,4 @@
-package tui
+package orchestrator
 
 import (
 	"context"
@@ -47,13 +47,13 @@ type Orchestrator struct {
 	statusCbMu           sync.Mutex
 	errorJudge           *tools.ErrorJudgeActorClient
 	errorJudgeCancel     context.CancelFunc
+	toolExecutor         *tools.ToolExecutorActorClient
+	toolExecutorCancel   context.CancelFunc
 }
 
 const (
-	autoContinueTokenLimit   = 1000
-	autoContinueMaxAttempts  = 3
-	autoContinueJudgeTimeout = 15 * time.Second
-	errorRetryMaxAttempts    = 5
+	autoContinueMaxAttempts = 3
+	errorRetryMaxAttempts   = 5
 )
 
 func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode bool) (*Orchestrator, error) {
@@ -93,7 +93,26 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 
 	// Set up authorization actor with summarize client
 	authorizationCtx, authorizationCancel := context.WithCancel(context.Background())
-	authActor := tools.NewAuthorizationActor("authorization", filesystem, sess, orch.summarizeClient, nil)
+	allowedCommandPrefixes := make([]string, 0, len(cfg.AuthorizedCommands))
+	for prefix, enabled := range cfg.AuthorizedCommands {
+		if enabled {
+			allowedCommandPrefixes = append(allowedCommandPrefixes, prefix)
+		}
+	}
+
+	allowedDomainPatterns := make([]string, 0, len(cfg.AuthorizedDomains))
+	for domain, enabled := range cfg.AuthorizedDomains {
+		if enabled {
+			allowedDomainPatterns = append(allowedDomainPatterns, domain)
+		}
+	}
+
+	authOpts := &tools.AuthorizationOptions{
+		AllowedCommands: allowedCommandPrefixes,
+		AllowedDomains:  allowedDomainPatterns,
+	}
+
+	authActor := tools.NewAuthorizationActor("authorization", filesystem, sess, orch.summarizeClient, authOpts)
 	authRef, err := orch.actorSystem.Spawn(authorizationCtx, "authorization", authActor, 32)
 	if err != nil {
 		authorizationCancel()
@@ -138,6 +157,23 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 
 	// Register tools
 	orch.registerTools()
+
+	// Set up tool executor actor
+	toolExecutorCtx, toolExecutorCancel := context.WithCancel(context.Background())
+	toolExecutorActor := tools.NewToolExecutorActor("tool_executor", orch.toolRegistry)
+	toolExecutorRef, err := orch.actorSystem.Spawn(toolExecutorCtx, "tool_executor", toolExecutorActor, 32)
+	if err != nil {
+		toolExecutorCancel()
+		errorJudgeCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start tool executor actor: %v", err)
+		return nil, fmt.Errorf("failed to start tool executor actor: %w", err)
+	}
+	logger.Debug("Tool executor actor spawned")
+	orch.toolExecutor = tools.NewToolExecutorActorClient(toolExecutorRef)
+	orch.toolExecutorCancel = toolExecutorCancel
 
 	return orch, nil
 }
@@ -208,8 +244,12 @@ func (o *Orchestrator) registerTools() {
 	// Register shell tool
 	o.toolRegistry.Register(tools.NewShellTool(o.session, o.workingDir))
 
-	// Register status tool
-	o.toolRegistry.Register(tools.NewStatusTool(o.session))
+	// Register status and wait tools
+	o.toolRegistry.Register(tools.NewStatusProgramTool(o.session))
+	o.toolRegistry.Register(tools.NewWaitProgramTool(o.session))
+
+	// Register stop program tool
+	o.toolRegistry.Register(tools.NewStopProgramTool(o.session))
 
 	// Register sandbox tool with filesystem and session for controlled access
 	sandboxTool := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
@@ -262,6 +302,12 @@ type ContextUsageCallback func(freePercent int, contextWindow int) error
 
 // ProcessPrompt processes a user prompt
 func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamCallback func(string) error, statusCallback StatusCallback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback) error {
+	combinedCtx, cancel := combineContexts(ctx, o.ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+	ctx = combinedCtx
+
 	if o.orchestrationClient == nil {
 		return fmt.Errorf("no orchestration model configured. Use /provider and /models commands to set up")
 	}
@@ -490,13 +536,19 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 				continue
 			}
 
-			// Execute tool
 			toolCallObj := &tools.ToolCall{
 				ID:         toolID,
 				Name:       toolName,
 				Parameters: args,
 			}
-			result := o.toolRegistry.Execute(ctx, toolCallObj)
+
+			result, execErr := o.executeTool(ctx, toolCallObj, toolName, statusCallback)
+			if execErr != nil {
+				result = &tools.ToolResult{
+					ID:    toolID,
+					Error: execErr.Error(),
+				}
+			}
 
 			// Check if authorization is required
 			if result.RequiresUserInput {
@@ -504,6 +556,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 				approved := false
 				if authCallback != nil {
 					var err error
+					suggestedPrefix := result.SuggestedCommandPrefix
 					approved, err = authCallback(toolName, args, result.AuthReason)
 					if err != nil {
 						result = &tools.ToolResult{
@@ -511,8 +564,26 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 							Error: fmt.Sprintf("Authorization error: %v", err),
 						}
 					} else if approved {
-						// Re-execute with approval
-						result = o.toolRegistry.ExecuteWithApproval(ctx, toolCallObj)
+						if suggestedPrefix != "" {
+							o.session.AuthorizeCommand(suggestedPrefix)
+							logger.Info("Authorized command prefix for session: %q", suggestedPrefix)
+							if o.config != nil && !o.config.IsCommandAuthorized(suggestedPrefix) {
+								o.config.AuthorizeCommand(suggestedPrefix)
+								if err := o.config.Save(config.GetConfigPath()); err != nil {
+									logger.Warn("Failed to persist authorized command prefix %q: %v", suggestedPrefix, err)
+								} else {
+									logger.Info("Persisted authorized command prefix %q to config", suggestedPrefix)
+								}
+							}
+						}
+
+						result, execErr = o.executeToolWithApproval(ctx, toolCallObj, toolName, statusCallback)
+						if execErr != nil {
+							result = &tools.ToolResult{
+								ID:    toolID,
+								Error: execErr.Error(),
+							}
+						}
 					} else {
 						// User denied
 						result = &tools.ToolResult{
@@ -689,7 +760,7 @@ func (o *Orchestrator) heuristicErrorDecision(err error, attemptNumber int) tool
 
 	// Temporary service errors - retry with moderate delay
 	if strings.Contains(errMsg, "500") || strings.Contains(errMsg, "503") ||
-	   strings.Contains(errMsg, "timeout") {
+		strings.Contains(errMsg, "timeout") {
 		return tools.ErrorJudgeDecision{
 			ShouldRetry:  true,
 			SleepSeconds: attemptNumber * 3,
@@ -721,187 +792,6 @@ func (o *Orchestrator) heuristicErrorDecision(err error, attemptNumber int) tool
 		SleepSeconds: 0,
 		Reason:       "Error persisted after multiple attempts",
 	}
-}
-
-func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt string) (bool, string) {
-	if o.summarizeClient == nil {
-		logger.Debug("Auto-continue skipped: no summarize client")
-		return false, ""
-	}
-
-	modelID := o.getSummarizeModelID()
-	if modelID == "" {
-		logger.Debug("Auto-continue skipped: no summarize-capable model configured")
-		return false, ""
-	}
-
-	messages := o.session.GetMessages()
-	if len(messages) == 0 {
-		logger.Debug("Auto-continue skipped: no messages in session")
-		return false, ""
-	}
-
-	userPrompts := collectRecentUserPrompts(messages, 10)
-	if len(userPrompts) == 0 {
-		logger.Debug("Auto-continue skipped: no user prompts found")
-		return false, ""
-	}
-
-	recentMessages := selectRecentMessagesByTokens(modelID, messages, autoContinueTokenLimit)
-	if len(recentMessages) == 0 {
-		recentMessages = messages
-	}
-	logger.Debug("Auto-continue judge analyzing %d recent messages (from %d total)", len(recentMessages), len(messages))
-
-	prompt := buildAutoContinueJudgePrompt(userPrompts, recentMessages, systemPrompt)
-
-	judgeCtx, cancel := context.WithTimeout(ctx, autoContinueJudgeTimeout)
-	defer cancel()
-
-	logger.Debug("Calling auto-continue judge with timeout %v", autoContinueJudgeTimeout)
-	result, err := o.summarizeClient.Complete(judgeCtx, prompt)
-	if err != nil {
-		logger.Warn("Auto-continue judge failed: %v", err)
-		return false, ""
-	}
-
-	decision := strings.TrimSpace(result)
-	if decision == "" {
-		logger.Warn("Auto-continue judge returned empty decision")
-		return false, ""
-	}
-
-	upper := strings.ToUpper(decision)
-	fields := strings.Fields(upper)
-	head := upper
-	if len(fields) > 0 {
-		head = fields[0]
-	}
-
-	switch head {
-	case "CONTINUE":
-		logger.Debug("Auto-continue judge decided: CONTINUE (full response: %q)", decision)
-		return true, decision
-	case "STOP":
-		logger.Debug("Auto-continue judge decided: STOP (full response: %q)", decision)
-		return false, decision
-	default:
-		if strings.Contains(upper, "CONTINUE") && !strings.Contains(upper, "DO NOT CONTINUE") {
-			logger.Debug("Auto-continue judge decided: CONTINUE (heuristic match, full response: %q)", decision)
-			return true, decision
-		}
-		logger.Debug("Auto-continue judge decided: STOP (no match, full response: %q)", decision)
-	}
-
-	return false, decision
-}
-
-func collectRecentUserPrompts(messages []*session.Message, limit int) []string {
-	if limit <= 0 {
-		return nil
-	}
-
-	prompts := make([]string, 0, limit)
-	for i := len(messages) - 1; i >= 0 && len(prompts) < limit; i-- {
-		if !strings.EqualFold(messages[i].Role, "user") {
-			continue
-		}
-
-		text := strings.TrimSpace(messages[i].Content)
-		if text == "" {
-			text = "(empty)"
-		}
-
-		prompts = append(prompts, text)
-	}
-
-	for i, j := 0, len(prompts)-1; i < j; i, j = i+1, j-1 {
-		prompts[i], prompts[j] = prompts[j], prompts[i]
-	}
-
-	return prompts
-}
-
-func selectRecentMessagesByTokens(modelID string, messages []*session.Message, tokenLimit int) []*session.Message {
-	if tokenLimit <= 0 || len(messages) == 0 {
-		return nil
-	}
-
-	_, perMessageTokens, _ := estimateContextTokens(modelID, "", messages)
-
-	total := 0
-	start := len(messages)
-
-	for i := len(messages) - 1; i >= 0; i-- {
-		tokens := perMessageTokens[i]
-		if tokens <= 0 {
-			tokens = 1
-		}
-
-		if total+tokens > tokenLimit && start < len(messages) {
-			break
-		}
-
-		total += tokens
-		start = i
-
-		if total >= tokenLimit {
-			break
-		}
-	}
-
-	return messages[start:]
-}
-
-func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Message, systemPrompt string) string {
-	var sb strings.Builder
-	sb.WriteString("You are an auto-continue judge. Decide whether the assistant should keep generating its reply.\n")
-	sb.WriteString("Respond with exactly one word: CONTINUE or STOP.\n")
-	sb.WriteString("Choose CONTINUE when the assistant response appears incomplete, truncated, or when unresolved tasks remain. Choose STOP when the response is complete or further continuation is unnecessary.\n\n")
-
-	trimmedSystemPrompt := strings.TrimSpace(systemPrompt)
-	if trimmedSystemPrompt == "" {
-		sb.WriteString("System prompt: (unavailable)\n")
-	} else {
-		sb.WriteString("System prompt (includes project context):\n")
-		sb.WriteString(trimmedSystemPrompt)
-		if !strings.HasSuffix(trimmedSystemPrompt, "\n") {
-			sb.WriteString("\n")
-		}
-	}
-	sb.WriteString("\n")
-
-	if len(userPrompts) > 0 {
-		sb.WriteString("Recent user prompts (oldest to newest):\n")
-		for i, prompt := range userPrompts {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, prompt))
-		}
-	} else {
-		sb.WriteString("Recent user prompts: (none)\n")
-	}
-
-	sb.WriteString("\nConversation excerpt (most recent context, approx last ")
-	sb.WriteString(fmt.Sprintf("%d tokens):\n", autoContinueTokenLimit))
-
-	if len(messages) == 0 {
-		sb.WriteString("(no messages)\n")
-	} else {
-		for _, msg := range messages {
-			role := formatRoleLabel(msg)
-			content := strings.TrimSpace(msg.Content)
-			if content == "" {
-				content = "(no content)"
-			}
-
-			sb.WriteString(role)
-			sb.WriteString(": ")
-			sb.WriteString(content)
-			sb.WriteString("\n---\n")
-		}
-	}
-
-	sb.WriteString("\nReply with exactly one word: CONTINUE or STOP.")
-	return sb.String()
 }
 
 func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, sessionMessages []*session.Message, perMessageTokens []int, totalTokens int, streamCallback func(string) error, contextCallback ContextUsageCallback) {
@@ -1169,6 +1059,28 @@ func heuristicContextWindow(modelID string) int {
 	return 8192
 }
 
+// combineContexts returns a cancelable context that is cancelled when either input context is done.
+func combineContexts(primary, secondary context.Context) (context.Context, context.CancelFunc) {
+	switch {
+	case primary == nil && secondary == nil:
+		return context.WithCancel(context.Background())
+	case primary == nil:
+		return context.WithCancel(secondary)
+	case secondary == nil:
+		return context.WithCancel(primary)
+	default:
+		combined, cancel := context.WithCancel(primary)
+		go func() {
+			select {
+			case <-combined.Done():
+			case <-secondary.Done():
+				cancel()
+			}
+		}()
+		return combined, cancel
+	}
+}
+
 // Stop stops the current generation
 func (o *Orchestrator) Stop() {
 	if o.cancel != nil {
@@ -1196,6 +1108,10 @@ func (o *Orchestrator) Close() error {
 		o.errorJudgeCancel()
 	}
 
+	if o.toolExecutorCancel != nil {
+		o.toolExecutorCancel()
+	}
+
 	var firstErr error
 
 	if o.actorSystem != nil {
@@ -1216,7 +1132,30 @@ func (o *Orchestrator) Close() error {
 	return firstErr
 }
 
-// GetCurrentModel returns the current orchestration model name
+func (o *Orchestrator) executeTool(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
+	if o.toolExecutor != nil {
+		var cb func(string) error
+		if statusCallback != nil {
+			cb = statusCallback
+		}
+		return o.toolExecutor.Execute(ctx, toolCall, toolName, cb)
+	}
+	// Fallback to direct execution if tool executor is unavailable
+	return o.toolRegistry.Execute(ctx, toolCall), nil
+}
+
+func (o *Orchestrator) executeToolWithApproval(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
+	if o.toolExecutor != nil {
+		var cb func(string) error
+		if statusCallback != nil {
+			cb = statusCallback
+		}
+		return o.toolExecutor.ExecuteWithApproval(ctx, toolCall, toolName, cb)
+	}
+	// Fallback to direct execution if tool executor is unavailable
+	return o.toolRegistry.ExecuteWithApproval(ctx, toolCall), nil
+}
+
 func (o *Orchestrator) GetCurrentModel() string {
 	if o.orchestrationClient == nil {
 		return "none"

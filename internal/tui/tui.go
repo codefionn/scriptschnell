@@ -73,7 +73,10 @@ var (
 			Foreground(lipgloss.Color("196"))
 )
 
-const errorDisplayDuration = 5 * time.Second
+const (
+	errorDisplayDuration   = 5 * time.Second
+	resizeViewportDebounce = 75 * time.Millisecond
+)
 
 // Message represents a chat message with metadata
 type message struct {
@@ -83,45 +86,48 @@ type message struct {
 }
 
 type Model struct {
-	viewport            viewport.Model
-	textarea            textarea.Model
-	messages            []message
-	ready               bool
-	width               int
-	height              int
-	contentWidth        int
-	generating          bool
-	processingStatus    string // Current processing status (e.g., "Calling tool: write_file_diff")
-	spinner             spinner.Model
-	spinnerActive       bool
-	animationsDisabled  bool
-	queuedPrompts       []string
-	err                 error
-	errVisibleUntil     time.Time
-	ctrlCCount          int
-	lastCtrlCTime       time.Time
-	commandMode         bool
-	overlayActive       bool
-	onSubmit            func(string) error
-	onCommand           func(string) error
-	onStop              func() error
-	onBackground        func() error
-	currentModel        string
-	lastUpdateHeight    int
-	renderer            *glamour.TermRenderer
-	contextFile         string
-	suggestions         []string
-	selectedSuggIndex   int
-	filesystem          fs.FileSystem
-	workingDir          string
-	originalSuggestions []string // Store original suggestions for cycling
-	originalInput       string   // Store original input before cycling
-	tabCycleIndex       int      // Tracks current suggestion index for tab cycling
-	contextFreePercent  int
-	contextWindow       int
-	sanitizeState       ansiSanitizeState
-	showTodoPanel       bool
-	todoClient          *tools.TodoActorClient
+	viewport             viewport.Model
+	textarea             textarea.Model
+	messages             []message
+	ready                bool
+	width                int
+	height               int
+	contentWidth         int
+	generating           bool
+	processingStatus     string // Current processing status (e.g., "Calling tool: write_file_diff")
+	spinner              spinner.Model
+	spinnerActive        bool
+	animationsDisabled   bool
+	queuedPrompts        []string
+	err                  error
+	errVisibleUntil      time.Time
+	ctrlCCount           int
+	lastCtrlCTime        time.Time
+	commandMode          bool
+	overlayActive        bool
+	onSubmit             func(string) error
+	onCommand            func(string) error
+	onStop               func() error
+	onBackground         func() error
+	currentModel         string
+	lastUpdateHeight     int
+	renderer             *glamour.TermRenderer
+	renderWrapWidth      int
+	contextFile          string
+	suggestions          []string
+	selectedSuggIndex    int
+	filesystem           fs.FileSystem
+	workingDir           string
+	originalSuggestions  []string // Store original suggestions for cycling
+	originalInput        string   // Store original input before cycling
+	tabCycleIndex        int      // Tracks current suggestion index for tab cycling
+	contextFreePercent   int
+	contextWindow        int
+	sanitizeState        ansiSanitizeState
+	showTodoPanel        bool
+	todoClient           *tools.TodoActorClient
+	viewportDirty        bool
+	viewportRefreshToken int
 }
 
 // ErrMsg is an error message type
@@ -154,6 +160,10 @@ type ToolResultMsg struct {
 type ContextUsageMsg struct {
 	FreePercent   int
 	ContextWindow int
+}
+
+type viewportRefreshMsg struct {
+	token int
 }
 
 // AuthorizationRequestMsg is sent when a tool requires user authorization
@@ -208,6 +218,7 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		spinner:            sp,
 		animationsDisabled: disableAnimations,
 		contextFreePercent: 100,
+		renderWrapWidth:    80,
 	}
 }
 
@@ -220,6 +231,14 @@ func (m *Model) SetFilesystem(fs fs.FileSystem, workingDir string) {
 // SetTodoClient configures the TodoActorClient for accessing todo state
 func (m *Model) SetTodoClient(client *tools.TodoActorClient) {
 	m.todoClient = client
+}
+
+func (m *Model) scheduleViewportRefresh() tea.Cmd {
+	m.viewportRefreshToken++
+	token := m.viewportRefreshToken
+	return tea.Tick(resizeViewportDebounce, func(time.Time) tea.Msg {
+		return viewportRefreshMsg{token: token}
+	})
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -930,6 +949,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, baseCmd
 
 	case tea.WindowSizeMsg:
+		widthChanged := !m.ready || msg.Width != m.width
+		heightChanged := !m.ready || msg.Height != m.height
+
 		m.width = msg.Width
 		m.height = msg.Height
 
@@ -948,11 +970,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.contentWidth = available
 
 		if !m.ready {
-			m.viewport = viewport.New(available, msg.Height-10)
+			vpHeight := msg.Height - 10
+			if vpHeight < 1 {
+				vpHeight = 1
+			}
+			m.viewport = viewport.New(available, vpHeight)
 			m.ready = true
 		} else {
 			m.viewport.Width = available
-			m.viewport.Height = msg.Height - 10
+			vpHeight := msg.Height - 10
+			if vpHeight < 1 {
+				vpHeight = 1
+			}
+			m.viewport.Height = vpHeight
 		}
 
 		textareaWidth := available - 4
@@ -964,22 +994,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.textarea.SetWidth(textareaWidth)
 
-		if m.renderer != nil {
-			wrapWidth := available - 4
-			if wrapWidth < 20 {
-				wrapWidth = available
-			}
-			if wrapWidth < 10 {
-				wrapWidth = 10
-			}
-			m.renderer, _ = glamour.NewTermRenderer(
+		wrapWidth := available - 4
+		if wrapWidth < 20 {
+			wrapWidth = available
+		}
+		if wrapWidth < 10 {
+			wrapWidth = 10
+		}
+		if wrapWidth != m.renderWrapWidth || m.renderer == nil {
+			if renderer, err := glamour.NewTermRenderer(
 				glamour.WithAutoStyle(),
 				glamour.WithWordWrap(wrapWidth),
 				glamour.WithPreservedNewLines(),
-			)
+			); err == nil {
+				m.renderer = renderer
+				m.renderWrapWidth = wrapWidth
+			}
 		}
 
-		m.updateViewport()
+		if !widthChanged && heightChanged && m.viewport.AtBottom() {
+			m.viewport.GotoBottom()
+		}
+
+		if widthChanged {
+			m.viewportDirty = true
+			if cmd := m.scheduleViewportRefresh(); cmd != nil {
+				return m, tea.Batch(baseCmd, cmd)
+			}
+		}
+
+		return m, baseCmd
+
+	case viewportRefreshMsg:
+		if msg.token != m.viewportRefreshToken {
+			return m, baseCmd
+		}
+		if m.viewportDirty {
+			m.updateViewport()
+		}
 		return m, baseCmd
 
 	case GeneratingMsg:
@@ -1462,6 +1514,7 @@ func (m *Model) updateViewport() {
 	}
 
 	m.lastUpdateHeight = len(m.messages)
+	m.viewportDirty = false
 }
 
 func (m *Model) handleSubmit(input string) tea.Cmd {

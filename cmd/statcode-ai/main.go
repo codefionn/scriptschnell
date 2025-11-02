@@ -249,7 +249,6 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 
 	// Set filesystem for filepath autocomplete
 	model.SetFilesystem(orch.GetFilesystem(), orch.GetWorkingDir())
-	model.SetTodoPath(cfg.TodoPath)
 	model.SetTodoClient(orch.GetTodoClient())
 
 	// Declare program variable first (will be assigned later)
@@ -592,6 +591,10 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	model.SetOnStop(func() error {
 		orch.Stop()
 		return nil
+	})
+
+	model.SetOnBackground(func() error {
+		return orch.BackgroundCurrentShellJob()
 	})
 
 	// Run TUI

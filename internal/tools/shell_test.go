@@ -236,3 +236,67 @@ func TestStopProgramTool_TerminatesProcess(t *testing.T) {
 		t.Errorf("expected non-zero exit code after SIGKILL, got %d", exitCode)
 	}
 }
+
+func TestShellTool_BackgroundShortcut(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-based tests require sh on non-Windows platforms")
+	}
+
+	workingDir := t.TempDir()
+	sess := session.NewSession("test", workingDir)
+	tool := NewShellTool(sess, workingDir)
+
+	backgroundChan := make(chan struct{}, 1)
+	ctx := ContextWithShellBackground(context.Background(), backgroundChan)
+
+	resultCh := make(chan interface{}, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		res, err := tool.Execute(ctx, map[string]interface{}{"command": "sleep 1"})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- res
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	backgroundChan <- struct{}{}
+
+	var result interface{}
+	select {
+	case err := <-errCh:
+		t.Fatalf("shell execute returned error: %v", err)
+	case result = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for shell execution result")
+	}
+
+	resMap, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+
+	jobID, ok := resMap["job_id"].(string)
+	if !ok || jobID == "" {
+		t.Fatalf("expected job_id string, got %v", resMap["job_id"])
+	}
+
+	job, ok := sess.GetBackgroundJob(jobID)
+	if !ok {
+		t.Fatalf("failed to locate background job %s", jobID)
+	}
+
+	select {
+	case <-job.Done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("background job %s did not complete", jobID)
+	}
+
+	if !job.Completed {
+		t.Errorf("expected job to be marked completed")
+	}
+}

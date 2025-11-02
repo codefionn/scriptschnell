@@ -130,7 +130,6 @@ Configuration files stored in `~/.config/statcode-ai/`:
 
 - **config.json**: Application settings (working_dir, cache_ttl_seconds, temperature, max_tokens)
 - **providers.json**: Provider API keys and model selections
-- **.statcode-todos.csv**: Todo list storage (configurable path)
 
 ### Entry Points
 

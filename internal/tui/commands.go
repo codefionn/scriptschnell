@@ -94,6 +94,7 @@ func (ch *CommandHandler) handleHelp() string {
 Keyboard Shortcuts:
 
 Ctrl+X            - Enter command mode
+Ctrl+B            - Background current shell job
 Ctrl+C (×2)       - Quit application
 ESC               - Stop current generation
 Shift+Enter       - Insert newline in prompt
@@ -243,6 +244,7 @@ func GetKeyMap() string {
 
 Basic:
   Enter         - Submit prompt/command
+  Ctrl+B        - Background shell job
   Ctrl+C (×2)   - Quit application
   ESC           - Stop current generation
 

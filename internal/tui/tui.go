@@ -105,6 +105,7 @@ type Model struct {
 	onSubmit            func(string) error
 	onCommand           func(string) error
 	onStop              func() error
+	onBackground        func() error
 	currentModel        string
 	lastUpdateHeight    int
 	renderer            *glamour.TermRenderer
@@ -119,7 +120,6 @@ type Model struct {
 	contextFreePercent  int
 	contextWindow       int
 	sanitizeState       ansiSanitizeState
-	todoPath            string
 	showTodoPanel       bool
 	todoClient          *tools.TodoActorClient
 }
@@ -171,7 +171,7 @@ type ProcessingStatusMsg struct {
 
 func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your prompt here... (@ for files, Shift+Enter (or Alt+Enter) for newline, Ctrl+X for commands, Ctrl+D or Ctrl+C×2 to quit)"
+	ta.Placeholder = "Type your prompt here... (@ for files, Shift+Enter (or Alt+Enter) for newline, Ctrl+X for commands, Ctrl+B to background shell, Ctrl+D or Ctrl+C×2 to quit)"
 	ta.Focus()
 	ta.Prompt = "│ "
 	ta.CharLimit = 10000
@@ -215,11 +215,6 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 func (m *Model) SetFilesystem(fs fs.FileSystem, workingDir string) {
 	m.filesystem = fs
 	m.workingDir = workingDir
-}
-
-// SetTodoPath configures the path to the todo file for optional sidebar display.
-func (m *Model) SetTodoPath(path string) {
-	m.todoPath = path
 }
 
 // SetTodoClient configures the TodoActorClient for accessing todo state
@@ -849,6 +844,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateSuggestions()
 			return m, baseCmd
 
+		case "ctrl+b":
+			if m.onBackground != nil {
+				if err := m.onBackground(); err != nil {
+					m.AddSystemMessage(fmt.Sprintf("Unable to background shell job: %v", err))
+				} else {
+					m.AddSystemMessage("Requested to run current shell command in background.")
+				}
+			}
+			return m, baseCmd
+
 		case "tab":
 			if len(m.suggestions) > 0 {
 				m.cycleSuggestion(1)
@@ -897,7 +902,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.textarea.Reset()
-			m.textarea.Placeholder = "Type your prompt here... (@ for files, Shift+Enter (or Alt+Enter) for newline, Ctrl+X for commands, Ctrl+D or Ctrl+C×2 to quit)"
+			m.textarea.Placeholder = "Type your prompt here... (@ for files, Shift+Enter (or Alt+Enter) for newline, Ctrl+X for commands, Ctrl+B to background shell, Ctrl+D or Ctrl+C×2 to quit)"
 			m.sanitizeState = ansiSanitizeState{}
 			m.suggestions = nil
 			m.selectedSuggIndex = 0
@@ -929,7 +934,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 		available := msg.Width
-		shouldShowTodos := msg.Width > todoPanelTriggerWidth && m.todoPath != ""
+		shouldShowTodos := msg.Width > todoPanelTriggerWidth
 		if shouldShowTodos {
 			if msg.Width-todoPanelWidth-todoPanelSpacing >= minContentWidth {
 				m.showTodoPanel = true
@@ -1111,7 +1116,7 @@ func (m *Model) View() string {
 
 	// Title
 	title := titleStyle.Render("StatCode AI - AI-Powered Coding Assistant")
-	status := statusStyle.Render(fmt.Sprintf("Model: %s | Ctrl+X: Commands | ESC: Stop | Ctrl+D/Ctrl+C×2: Quit", m.currentModel))
+	status := statusStyle.Render(fmt.Sprintf("Model: %s | Ctrl+X: Commands | Ctrl+B: Background shell | ESC: Stop | Ctrl+D/Ctrl+C×2: Quit", m.currentModel))
 
 	sb.WriteString(title)
 	sb.WriteString("\n")
@@ -1501,6 +1506,10 @@ func (m *Model) SetOverlayActive(active bool) {
 
 func (m *Model) SetOnStop(fn func() error) {
 	m.onStop = fn
+}
+
+func (m *Model) SetOnBackground(fn func() error) {
+	m.onBackground = fn
 }
 
 func (m *Model) SetContextFile(path string) {

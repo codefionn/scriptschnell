@@ -27,8 +27,8 @@
 - [ ] Unify the model/provider detection (context window size/model specific workarounds)
 - [ ] Fix auto compaction (seems to be really broken)
 - [ ] Get rid of magic literals in the codebase
-
-**Implementation Details**: See [internal/orchestrator/orchestrator.go:1069-1151](internal/orchestrator/orchestrator.go#L1069-L1151) for the `executeToolWithHeartbeat` and `executeToolWithApprovalAndHeartbeat` methods.
+- [ ] General UI improvements around tool calls
+- [ ] Todo task are not showing up in the UI
 
 ### Maybes
 

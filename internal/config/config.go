@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // SearchConfig holds configuration for web search providers
@@ -38,7 +37,6 @@ type Config struct {
 	MaxCacheEntries    int             `json:"max_cache_entries"`
 	DefaultTimeout     int             `json:"default_timeout_seconds"`
 	TempDir            string          `json:"temp_dir"`
-	TodoPath           string          `json:"todo_path"`
 	Temperature        float64         `json:"temperature"`
 	MaxTokens          int             `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
 	ProviderConfigPath string          `json:"provider_config_path"`
@@ -61,7 +59,6 @@ func DefaultConfig() *Config {
 		MaxCacheEntries:    100,
 		DefaultTimeout:     30,
 		TempDir:            filepath.Join(os.TempDir(), "statcode-ai"),
-		TodoPath:           ".statcode-todos.csv",
 		Temperature:        0.7,
 		MaxTokens:          4096,
 		ProviderConfigPath: filepath.Join(configDir, "providers.json"),
@@ -103,13 +100,6 @@ func Load(path string) (*Config, error) {
 	}
 	if config.WorkingDir == "" {
 		config.WorkingDir = "."
-	}
-	if config.TodoPath == "" {
-		config.TodoPath = ".statcode-todos.csv"
-	}
-	if strings.EqualFold(filepath.Ext(config.TodoPath), ".json") {
-		base := strings.TrimSuffix(config.TodoPath, filepath.Ext(config.TodoPath))
-		config.TodoPath = base + ".csv"
 	}
 	homeDir, _ := os.UserHomeDir()
 	configDir := filepath.Join(homeDir, ".config", "statcode-ai")

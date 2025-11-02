@@ -220,15 +220,22 @@ func (m *Manager) RefreshAllModels(ctx context.Context) {
 
 	// Refresh in background goroutine
 	go func() {
+		var wg sync.WaitGroup
 		for _, p := range providers {
 			// Skip if context is cancelled
 			if ctx.Err() != nil {
 				return
 			}
 
-			// Refresh models (errors are silently ignored in background refresh)
-			_ = m.RefreshModels(ctx, p.Name)
+			// Refresh each provider in parallel
+			wg.Add(1)
+			go func(providerName string) {
+				defer wg.Done()
+				// Refresh models (errors are silently ignored in background refresh)
+				_ = m.RefreshModels(ctx, providerName)
+			}(p.Name)
 		}
+		wg.Wait()
 	}()
 }
 

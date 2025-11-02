@@ -2,11 +2,16 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -14,6 +19,10 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/logger"
 	"github.com/statcode-ai/statcode-ai/internal/session"
 )
+
+type shellBackgroundKey struct{}
+
+const shellBackgroundMessage = "Command started in background. Use 'status_program' to stream progress, 'wait_program' to block until completion, or 'stop_program' to terminate."
 
 // ShellTool executes shell commands
 type ShellTool struct {
@@ -104,42 +113,13 @@ func (t *ShellTool) Execute(ctx context.Context, params map[string]interface{}) 
 }
 
 func (t *ShellTool) executeForeground(ctx context.Context, cmdStr, workingDir string, timeoutSecs int) (interface{}, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
-	cmd.Dir = workingDir
-
-	output, err := cmd.CombinedOutput()
-	exitCode := 0
-
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-			logger.Warn("shell: command exited with code %d", exitCode)
-		} else {
-			logger.Error("shell: failed to execute command: %v", err)
-			return nil, fmt.Errorf("failed to execute command: %w", err)
-		}
-	}
-
-	timedOut := ctx.Err() == context.DeadlineExceeded
-	if timedOut {
-		logger.Warn("shell: command timed out after %ds", timeoutSecs)
-	} else {
-		logger.Info("shell: command completed successfully (exit_code=%d, output_bytes=%d)", exitCode, len(output))
-	}
-
-	return map[string]interface{}{
-		"stdout":    string(output),
-		"exit_code": exitCode,
-		"timeout":   timedOut,
-	}, nil
+	bgChan := backgroundChanFromContext(ctx)
+	runner := newShellCommandRunner(t, cmdStr, workingDir, timeoutSecs, bgChan)
+	return runner.run(ctx)
 }
 
 func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir string) (interface{}, error) {
-	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
-	logger.Debug("shell: starting background job: %s", jobID)
+	logger.Debug("shell: starting background job (explicit request)")
 
 	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Dir = workingDir
@@ -161,28 +141,9 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 		return nil, fmt.Errorf("failed to start command: %w", err)
 	}
 
-	pid := 0
-	if cmd.Process != nil {
-		pid = cmd.Process.Pid
-	}
-	logger.Info("shell: background job started: %s (pid=%d)", jobID, pid)
-
-	job := &session.BackgroundJob{
-		ID:         jobID,
-		Command:    cmdStr,
-		WorkingDir: workingDir,
-		StartTime:  time.Now(),
-		Completed:  false,
-		Stdout:     make([]string, 0),
-		Stderr:     make([]string, 0),
-		Type:       "shell",
-		Done:       make(chan struct{}),
-	}
-
-	job.Process = cmd.Process
-	job.PID = pid
-
-	t.session.AddBackgroundJob(job)
+	startedAt := time.Now()
+	job, jobID := registerShellBackgroundJob(t.session, cmd, cmdStr, workingDir, startedAt)
+	logger.Info("shell: background job started: %s (pid=%d)", jobID, job.PID)
 
 	// Read output in goroutines
 	go func() {
@@ -220,7 +181,7 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 	return map[string]interface{}{
 		"job_id":  jobID,
 		"pid":     job.PID,
-		"message": "Command started in background. Use 'status_program' to stream progress, 'wait_program' to block until completion, or 'stop_program' to terminate.",
+		"message": shellBackgroundMessage,
 	}, nil
 }
 
@@ -278,6 +239,7 @@ func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]inter
 				"type":           job.Type,
 				"stop_requested": job.StopRequested,
 				"last_signal":    job.LastSignal,
+				"open_ports":     collectOpenPorts(ctx, job.PID),
 			}
 		}
 		return map[string]interface{}{
@@ -291,7 +253,7 @@ func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]inter
 		return nil, fmt.Errorf("job not found: %s", jobID)
 	}
 
-	return buildJobSnapshot(job, lastNLines), nil
+	return buildJobSnapshot(ctx, job, lastNLines), nil
 }
 
 // WaitProgramTool blocks until a background job finishes and returns its output
@@ -368,12 +330,12 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 		}
 	}
 
-	result := buildJobSnapshot(job, lastNLines)
+	result := buildJobSnapshot(ctx, job, lastNLines)
 	result["waited"] = true
 	return result, nil
 }
 
-func buildJobSnapshot(job *session.BackgroundJob, lastNLines int) map[string]interface{} {
+func buildJobSnapshot(ctx context.Context, job *session.BackgroundJob, lastNLines int) map[string]interface{} {
 	computeStart := func(length int) int {
 		if lastNLines <= 0 || length <= lastNLines {
 			return 0
@@ -393,7 +355,7 @@ func buildJobSnapshot(job *session.BackgroundJob, lastNLines int) map[string]int
 	stdout := strings.Join(job.Stdout[stdoutStart:], "\n")
 	stderr := strings.Join(job.Stderr[stderrStart:], "\n")
 
-	return map[string]interface{}{
+	snapshot := map[string]interface{}{
 		"job_id":         job.ID,
 		"command":        job.Command,
 		"completed":      job.Completed,
@@ -407,6 +369,170 @@ func buildJobSnapshot(job *session.BackgroundJob, lastNLines int) map[string]int
 		"stdout":         stdout,
 		"stderr":         stderr,
 	}
+
+	snapshot["open_ports"] = collectOpenPorts(ctx, job.PID)
+
+	return snapshot
+}
+
+func collectOpenPorts(ctx context.Context, pid int) []string {
+	if pid <= 0 || runtime.GOOS == "windows" {
+		return nil
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cmdCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, "lsof", "-Pan", "-p", strconv.Itoa(pid), "-i")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		if cmdCtx.Err() == context.DeadlineExceeded {
+			logger.Debug("status_program: timed out collecting open ports for pid=%d", pid)
+		} else if !errors.Is(err, context.Canceled) && !errors.Is(err, exec.ErrNotFound) {
+			logger.Debug("status_program: failed to collect open ports for pid=%d: %v", pid, err)
+		}
+		return nil
+	}
+
+	ports := parsePortsFromLsof(stdout.Bytes())
+	if len(ports) == 0 {
+		return nil
+	}
+	return ports
+}
+
+func parsePortsFromLsof(data []byte) []string {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	nameColumn := -1
+	seen := make(map[string]struct{})
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if nameColumn == -1 {
+			nameColumn = strings.Index(line, "NAME")
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if nameColumn >= len(line) {
+			continue
+		}
+		nameField := strings.TrimSpace(line[nameColumn:])
+		if nameField == "" {
+			continue
+		}
+		extractPortsFromName(nameField, seen)
+	}
+
+	if len(seen) == 0 {
+		return nil
+	}
+
+	ports := make([]string, 0, len(seen))
+	for value := range seen {
+		ports = append(ports, value)
+	}
+	sort.Strings(ports)
+	return ports
+}
+
+func extractPortsFromName(name string, seen map[string]struct{}) {
+	for _, token := range strings.Fields(name) {
+		if strings.HasPrefix(token, "TCP") || strings.HasPrefix(token, "UDP") {
+			continue
+		}
+		if strings.Contains(token, "->") {
+			parts := strings.Split(token, "->")
+			if len(parts) > 0 {
+				addPortToken(parts[0], seen)
+			}
+			continue
+		}
+		addPortToken(token, seen)
+	}
+}
+
+func addPortToken(token string, seen map[string]struct{}) {
+	colonIdx := strings.LastIndex(token, ":")
+	if colonIdx == -1 {
+		return
+	}
+
+	host := strings.TrimSpace(strings.Trim(token[:colonIdx], "[]"))
+	port := strings.TrimSpace(token[colonIdx+1:])
+
+	if idx := strings.Index(port, "("); idx != -1 {
+		port = strings.TrimSpace(port[:idx])
+	}
+
+	if port == "" {
+		return
+	}
+
+	if _, err := strconv.Atoi(port); err != nil {
+		return
+	}
+
+	if host == "" {
+		host = "*"
+	}
+
+	key := fmt.Sprintf("%s:%s", host, port)
+	seen[key] = struct{}{}
+}
+
+func ContextWithShellBackground(ctx context.Context, ch chan struct{}) context.Context {
+	if ch == nil {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, shellBackgroundKey{}, ch)
+}
+
+func backgroundChanFromContext(ctx context.Context) chan struct{} {
+	if ctx == nil {
+		return nil
+	}
+	if val := ctx.Value(shellBackgroundKey{}); val != nil {
+		if ch, ok := val.(chan struct{}); ok {
+			return ch
+		}
+	}
+	return nil
+}
+
+func registerShellBackgroundJob(sess *session.Session, cmd *exec.Cmd, cmdStr, workingDir string, startedAt time.Time) (*session.BackgroundJob, string) {
+	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
+
+	job := &session.BackgroundJob{
+		ID:         jobID,
+		Command:    cmdStr,
+		WorkingDir: workingDir,
+		StartTime:  startedAt,
+		Completed:  false,
+		Stdout:     make([]string, 0),
+		Stderr:     make([]string, 0),
+		Type:       "shell",
+		Done:       make(chan struct{}),
+	}
+
+	if cmd != nil && cmd.Process != nil {
+		job.Process = cmd.Process
+		job.PID = cmd.Process.Pid
+	}
+
+	sess.AddBackgroundJob(job)
+	return job, jobID
 }
 
 // StopProgramTool sends termination signals to background processes

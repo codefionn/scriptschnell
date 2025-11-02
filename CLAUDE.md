@@ -214,7 +214,6 @@ Configuration files stored in `~/.config/statcode-ai/`:
 - **providers.json**: Provider API keys and model selections
   - Each model includes `context_window` (input) and `max_output_tokens` fetched from provider APIs or estimated based on model ID
   - For OpenRouter and cross-provider support, max output tokens are intelligently estimated based on model patterns (e.g., gpt-5: 128K, Claude 3.5: 8K)
-- **.statcode-todos.csv**: Todo list storage (configurable path)
 
 ### Logging System
 

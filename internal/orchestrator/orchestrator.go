@@ -49,6 +49,8 @@ type Orchestrator struct {
 	errorJudgeCancel     context.CancelFunc
 	toolExecutor         *tools.ToolExecutorActorClient
 	toolExecutorCancel   context.CancelFunc
+	activeShellMu        sync.Mutex
+	activeShellChan      chan struct{}
 }
 
 const (
@@ -1133,6 +1135,11 @@ func (o *Orchestrator) Close() error {
 }
 
 func (o *Orchestrator) executeTool(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
+	ctx, cleanup := o.prepareShellExecutionContext(ctx, toolCall, toolName)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
 	if o.toolExecutor != nil {
 		var cb func(string) error
 		if statusCallback != nil {
@@ -1145,6 +1152,11 @@ func (o *Orchestrator) executeTool(ctx context.Context, toolCall *tools.ToolCall
 }
 
 func (o *Orchestrator) executeToolWithApproval(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
+	ctx, cleanup := o.prepareShellExecutionContext(ctx, toolCall, toolName)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
 	if o.toolExecutor != nil {
 		var cb func(string) error
 		if statusCallback != nil {
@@ -1154,6 +1166,55 @@ func (o *Orchestrator) executeToolWithApproval(ctx context.Context, toolCall *to
 	}
 	// Fallback to direct execution if tool executor is unavailable
 	return o.toolRegistry.ExecuteWithApproval(ctx, toolCall), nil
+}
+
+func (o *Orchestrator) prepareShellExecutionContext(ctx context.Context, toolCall *tools.ToolCall, toolName string) (context.Context, func()) {
+	if toolName != "shell" || toolCall == nil {
+		return ctx, nil
+	}
+
+	if tools.GetBoolParam(toolCall.Parameters, "background", false) {
+		return ctx, nil
+	}
+
+	ch := make(chan struct{}, 1)
+	o.setActiveShellChannel(ch)
+	newCtx := tools.ContextWithShellBackground(ctx, ch)
+	return newCtx, func() {
+		o.clearActiveShellChannel(ch)
+	}
+}
+
+func (o *Orchestrator) setActiveShellChannel(ch chan struct{}) {
+	o.activeShellMu.Lock()
+	o.activeShellChan = ch
+	o.activeShellMu.Unlock()
+}
+
+func (o *Orchestrator) clearActiveShellChannel(ch chan struct{}) {
+	o.activeShellMu.Lock()
+	if o.activeShellChan == ch {
+		o.activeShellChan = nil
+	}
+	o.activeShellMu.Unlock()
+}
+
+// BackgroundCurrentShellJob requests that the currently running foreground shell command continue in the background.
+func (o *Orchestrator) BackgroundCurrentShellJob() error {
+	o.activeShellMu.Lock()
+	ch := o.activeShellChan
+	o.activeShellMu.Unlock()
+
+	if ch == nil {
+		return fmt.Errorf("no active foreground shell command to background")
+	}
+
+	select {
+	case ch <- struct{}{}:
+		return nil
+	default:
+		return fmt.Errorf("shell command is already transitioning to background")
+	}
 }
 
 func (o *Orchestrator) GetCurrentModel() string {

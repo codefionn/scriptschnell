@@ -29,6 +29,7 @@
 - [ ] Get rid of magic literals in the codebase
 - [ ] General UI improvements around tool calls
 - [ ] Todo task are not showing up in the UI
+- [ ] On configured web search, add text to the system prompt for more up-to-date results
 
 ### Maybes
 

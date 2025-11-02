@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	todoPanelTriggerWidth = 200
+	todoPanelTriggerWidth = 80
 	todoPanelWidth        = 36
 	todoPanelSpacing      = 2
 	minContentWidth       = 80

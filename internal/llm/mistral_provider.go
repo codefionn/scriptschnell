@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // MistralProvider implements the Provider interface for Mistral AI
@@ -81,13 +80,16 @@ func (p *MistralProvider) ListModels(ctx context.Context) ([]*ModelInfo, error) 
 			continue
 		}
 
+		family := DetectModelFamily(m.ID)
+		contextWindow := DetectContextWindow(m.ID, family)
+
 		info := &ModelInfo{
 			ID:                  m.ID,
-			Name:                formatMistralModelName(m.ID),
+			Name:                FormatModelDisplayName(m.ID, family),
 			Provider:            "mistral",
-			Description:         getMistralModelDescription(m.ID),
-			ContextWindow:       getMistralContextWindow(m.ID),
-			MaxOutputTokens:     getMistralMaxOutputTokens(m.ID),
+			Description:         GetModelDescription(m.ID, family),
+			ContextWindow:       contextWindow,
+			MaxOutputTokens:     DetectMaxOutputTokens(m.ID, family, contextWindow),
 			SupportsToolCalling: m.Capabilities.FunctionCalling,
 			SupportsStreaming:   true,
 			OwnedBy:             m.OwnedBy,
@@ -229,137 +231,6 @@ func (p *MistralProvider) getFallbackModels() []*ModelInfo {
 			Capabilities:        []string{"function-calling"},
 		},
 	}
-}
-
-// Helper functions for Mistral model metadata
-
-func formatMistralModelName(id string) string {
-	// Handle special cases
-	nameMap := map[string]string{
-		"mistral-large-latest":  "Mistral Large",
-		"mistral-medium-latest": "Mistral Medium",
-		"mistral-small-latest":  "Mistral Small",
-		"codestral-latest":      "Codestral",
-		"pixtral-12b-latest":    "Pixtral 12B",
-		"open-mistral-nemo":     "Mistral Nemo",
-		"open-mistral-7b":       "Mistral 7B",
-		"open-mixtral-8x7b":     "Mixtral 8x7B",
-		"open-mixtral-8x22b":    "Mixtral 8x22B",
-	}
-
-	if name, ok := nameMap[id]; ok {
-		return name
-	}
-
-	// Generate name from ID
-	parts := strings.Split(id, "-")
-	formatted := make([]string, 0, len(parts))
-
-	for _, part := range parts {
-		if part == "latest" || part == "open" {
-			continue
-		}
-		if len(part) > 0 {
-			formatted = append(formatted, strings.ToUpper(part[:1])+part[1:])
-		}
-	}
-
-	name := strings.Join(formatted, " ")
-	if name == "" {
-		return id
-	}
-	return name
-}
-
-func getMistralModelDescription(id string) string {
-	descriptions := map[string]string{
-		"mistral-large-latest":  "Top-tier reasoning for complex tasks",
-		"mistral-medium-latest": "Balanced performance for most tasks",
-		"mistral-small-latest":  "Cost-efficient reasoning for simpler tasks",
-		"codestral-latest":      "Code generation and completion specialist",
-		"pixtral-12b-latest":    "Multimodal model with vision capabilities",
-		"open-mistral-nemo":     "Apache 2.0 licensed, efficient and powerful",
-		"open-mistral-7b":       "Apache 2.0 licensed, fast and efficient",
-		"open-mixtral-8x7b":     "Apache 2.0 licensed, Mixture-of-Experts architecture",
-		"open-mixtral-8x22b":    "Apache 2.0 licensed, large Mixture-of-Experts model",
-	}
-
-	if desc, ok := descriptions[id]; ok {
-		return desc
-	}
-
-	// Default descriptions based on model family
-	if strings.Contains(id, "large") {
-		return "Large reasoning model for complex tasks"
-	}
-	if strings.Contains(id, "medium") {
-		return "Medium model for balanced performance"
-	}
-	if strings.Contains(id, "small") {
-		return "Small model for cost efficiency"
-	}
-	if strings.Contains(id, "codestral") {
-		return "Code-specialized model"
-	}
-	if strings.Contains(id, "pixtral") {
-		return "Multimodal model with vision"
-	}
-	if strings.Contains(id, "mixtral") {
-		return "Mixture-of-Experts model"
-	}
-
-	return "Mistral language model"
-}
-
-func getMistralContextWindow(id string) int {
-	// Exact matches
-	contextWindows := map[string]int{
-		"mistral-large-latest":  131072, // 128k
-		"mistral-medium-latest": 32768,
-		"mistral-small-latest":  32768,
-		"codestral-latest":      32768,
-		"pixtral-12b-latest":    131072, // 128k
-		"open-mistral-nemo":     131072, // 128k
-		"open-mistral-7b":       32768,
-		"open-mixtral-8x7b":     32768,
-		"open-mixtral-8x22b":    65536,
-	}
-
-	if window, ok := contextWindows[id]; ok {
-		return window
-	}
-
-	// Pattern matching
-	if strings.Contains(id, "large") || strings.Contains(id, "pixtral") || strings.Contains(id, "nemo") {
-		return 131072
-	}
-	if strings.Contains(id, "8x22b") {
-		return 65536
-	}
-
-	return 32768 // Default
-}
-
-func getMistralMaxOutputTokens(id string) int {
-	// Most Mistral models have 8K max output
-	// Some specific models may have different limits
-	maxOutputMap := map[string]int{
-		"mistral-large-latest":  8192,
-		"mistral-medium-latest": 8192,
-		"mistral-small-latest":  8192,
-		"codestral-latest":      8192,
-		"pixtral-12b-latest":    8192,
-		"open-mistral-nemo":     8192,
-		"open-mistral-7b":       8192,
-		"open-mixtral-8x7b":     8192,
-		"open-mixtral-8x22b":    8192,
-	}
-
-	if maxOutput, ok := maxOutputMap[id]; ok {
-		return maxOutput
-	}
-
-	return 8192 // Default for all Mistral models
 }
 
 func (p *MistralProvider) CreateClient(modelID string) (Client, error) {

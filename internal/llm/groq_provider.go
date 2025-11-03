@@ -82,17 +82,31 @@ func (p *GroqProvider) ListModels(ctx context.Context) ([]*ModelInfo, error) {
 			continue
 		}
 
+		family := DetectModelFamily(m.ID)
+
+		// Get context window from API or detect
+		contextWindow := m.ContextWindow
+		if contextWindow == 0 {
+			contextWindow = DetectContextWindow(m.ID, family)
+		}
+
+		// Get max output tokens from API or detect
+		maxOutputTokens := m.MaxCompletionTokens
+		if maxOutputTokens == 0 {
+			maxOutputTokens = DetectMaxOutputTokens(m.ID, family, contextWindow)
+		}
+
 		info := &ModelInfo{
 			ID:                  m.ID,
-			Name:                groqDisplayName(m.ID),
+			Name:                FormatModelDisplayName(m.ID, family),
 			Provider:            "groq",
-			Description:         groqModelDescription(m.ID),
-			ContextWindow:       groqContextWindow(m),
-			MaxOutputTokens:     groqMaxOutputTokens(m),
-			SupportsToolCalling: groqSupportsToolCalling(m.ID),
+			Description:         GetModelDescription(m.ID, family),
+			ContextWindow:       contextWindow,
+			MaxOutputTokens:     maxOutputTokens,
+			SupportsToolCalling: SupportsToolCalling(m.ID, family),
 			SupportsStreaming:   true,
 			OwnedBy:             groqOwnedBy(m),
-			Capabilities:        groqCapabilities(m),
+			Capabilities:        groqCapabilities(m, contextWindow),
 		}
 
 		models = append(models, info)
@@ -160,131 +174,8 @@ func shouldIncludeGroqModel(m groqModel) bool {
 	return true
 }
 
-// groqDisplayName converts a Groq model ID into a user-friendly display name.
-func groqDisplayName(id string) string {
-	displayNames := map[string]string{
-		"llama-3.3-70b-versatile": "LLaMA 3.3 70B Versatile",
-		"llama-3.1-8b-instant":    "LLaMA 3.1 8B Instant",
-		"llama3-8b-8192":          "LLaMA 3 8B",
-		"llama3-70b-8192":         "LLaMA 3 70B",
-		"mixtral-8x7b-32768":      "Mixtral 8x7B",
-		"mixtral-8x22b-32768":     "Mixtral 8x22B",
-		"gemma2-9b-it":            "Gemma 2 9B Instruct",
-		"gemma2-27b-it":           "Gemma 2 27B Instruct",
-		"groq-llama3-8b":          "Groq LLaMA 3 8B",
-		"groq-llama3-70b":         "Groq LLaMA 3 70B",
-	}
-
-	if name, ok := displayNames[id]; ok {
-		return name
-	}
-
-	parts := strings.FieldsFunc(id, func(r rune) bool {
-		return r == '-' || r == '_' || r == '.'
-	})
-
-	for i, part := range parts {
-		if len(part) == 0 {
-			continue
-		}
-
-		lower := strings.ToLower(part)
-		if lower == "llama" {
-			parts[i] = "LLaMA"
-			continue
-		}
-		if lower == "groq" {
-			parts[i] = "Groq"
-			continue
-		}
-
-		parts[i] = strings.ToUpper(part[:1]) + part[1:]
-	}
-
-	if len(parts) == 0 {
-		return id
-	}
-
-	return strings.Join(parts, " ")
-}
-
-// groqModelDescription provides human-friendly descriptions for Groq models.
-func groqModelDescription(id string) string {
-	descriptions := map[string]string{
-		"llama-3.3-70b-versatile": "Balanced flagship model for reasoning, coding, and chat.",
-		"llama-3.1-8b-instant":    "Fast 8B parameter model optimized for realtime tasks.",
-		"llama3-8b-8192":          "General-purpose 8B model with 8K context window.",
-		"llama3-70b-8192":         "70B parameter model offering stronger reasoning.",
-		"mixtral-8x7b-32768":      "Mixture-of-Experts model with 32K context.",
-		"mixtral-8x22b-32768":     "Large Mixture-of-Experts model for complex reasoning.",
-		"gemma2-9b-it":            "Google Gemma 2 9B instruction-tuned model.",
-		"gemma2-27b-it":           "Google Gemma 2 27B instruction-tuned model.",
-		"groq-llama3-8b":          "Groq-optimized LLaMA 3 8B model for low latency.",
-		"groq-llama3-70b":         "Groq-optimized LLaMA 3 70B model for high accuracy.",
-	}
-
-	if desc, ok := descriptions[id]; ok {
-		return desc
-	}
-
-	if strings.Contains(strings.ToLower(id), "mixtral") {
-		return "Mixtral model hosted by Groq."
-	}
-	if strings.Contains(strings.ToLower(id), "gemma") {
-		return "Gemma model hosted by Groq."
-	}
-	if strings.Contains(strings.ToLower(id), "qwen") {
-		return "Qwen model hosted by Groq."
-	}
-
-	return "Groq language model"
-}
-
-// groqContextWindow returns the context window for a Groq model, falling back to reasonable defaults.
-func groqContextWindow(m groqModel) int {
-	if m.ContextWindow > 0 {
-		return m.ContextWindow
-	}
-
-	switch {
-	case strings.Contains(m.ID, "32768"):
-		return 32768
-	case strings.Contains(m.ID, "8192"):
-		return 8192
-	case strings.Contains(strings.ToLower(m.ID), "70b"):
-		return 32768
-	}
-	return 8192
-}
-
-// groqMaxOutputTokens estimates the maximum output tokens for a Groq model.
-func groqMaxOutputTokens(m groqModel) int {
-	if m.MaxCompletionTokens > 0 {
-		return m.MaxCompletionTokens
-	}
-
-	// For most hosted models, Groq mirrors the upstream max output token limits (typically 4K-8K).
-	ctx := groqContextWindow(m)
-	if ctx >= 32768 {
-		return 8192
-	}
-	if ctx >= 8192 {
-		return 8192
-	}
-	return ctx
-}
-
-// groqSupportsToolCalling makes a best-effort guess about tool-calling support.
-func groqSupportsToolCalling(id string) bool {
-	lower := strings.ToLower(id)
-	if strings.Contains(lower, "whisper") || strings.Contains(lower, "audio") || strings.Contains(lower, "tts") || strings.Contains(lower, "speech") {
-		return false
-	}
-	return true
-}
-
 // groqCapabilities assembles a list of capability strings for the model.
-func groqCapabilities(m groqModel) []string {
+func groqCapabilities(m groqModel, contextWindow int) []string {
 	caps := []string{}
 	if m.Active != nil && *m.Active {
 		caps = append(caps, "active")
@@ -315,56 +206,38 @@ func groqOwnedBy(m groqModel) string {
 
 // groqFallbackModels provides a static list of models in case the API is unavailable.
 func groqFallbackModels() []*ModelInfo {
-	return []*ModelInfo{
-		{
-			ID:                  "llama-3.3-70b-versatile",
-			Name:                groqDisplayName("llama-3.3-70b-versatile"),
-			Provider:            "groq",
-			Description:         groqModelDescription("llama-3.3-70b-versatile"),
-			ContextWindow:       131072,
-			MaxOutputTokens:     8192,
-			SupportsToolCalling: true,
-			SupportsStreaming:   true,
-			OwnedBy:             "meta",
-			Capabilities:        []string{"active", "context:131072"},
-		},
-		{
-			ID:                  "llama-3.1-8b-instant",
-			Name:                groqDisplayName("llama-3.1-8b-instant"),
-			Provider:            "groq",
-			Description:         groqModelDescription("llama-3.1-8b-instant"),
-			ContextWindow:       8192,
-			MaxOutputTokens:     8192,
-			SupportsToolCalling: true,
-			SupportsStreaming:   true,
-			OwnedBy:             "meta",
-			Capabilities:        []string{"active", "context:8192"},
-		},
-		{
-			ID:                  "mixtral-8x7b-32768",
-			Name:                groqDisplayName("mixtral-8x7b-32768"),
-			Provider:            "groq",
-			Description:         groqModelDescription("mixtral-8x7b-32768"),
-			ContextWindow:       32768,
-			MaxOutputTokens:     8192,
-			SupportsToolCalling: true,
-			SupportsStreaming:   true,
-			OwnedBy:             "mistralai",
-			Capabilities:        []string{"active", "context:32768"},
-		},
-		{
-			ID:                  "gemma2-9b-it",
-			Name:                groqDisplayName("gemma2-9b-it"),
-			Provider:            "groq",
-			Description:         groqModelDescription("gemma2-9b-it"),
-			ContextWindow:       8192,
-			MaxOutputTokens:     8192,
-			SupportsToolCalling: true,
-			SupportsStreaming:   true,
-			OwnedBy:             "google",
-			Capabilities:        []string{"active", "context:8192"},
-		},
+	models := []struct {
+		id      string
+		owner   string
+		context int
+	}{
+		{"llama-3.3-70b-versatile", "meta", 131072},
+		{"llama-3.1-8b-instant", "meta", 8192},
+		{"mixtral-8x7b-32768", "mistralai", 32768},
+		{"gemma2-9b-it", "google", 8192},
 	}
+
+	result := make([]*ModelInfo, 0, len(models))
+	for _, m := range models {
+		family := DetectModelFamily(m.id)
+		contextWindow := m.context
+		maxOutputTokens := DetectMaxOutputTokens(m.id, family, contextWindow)
+
+		result = append(result, &ModelInfo{
+			ID:                  m.id,
+			Name:                FormatModelDisplayName(m.id, family),
+			Provider:            "groq",
+			Description:         GetModelDescription(m.id, family),
+			ContextWindow:       contextWindow,
+			MaxOutputTokens:     maxOutputTokens,
+			SupportsToolCalling: SupportsToolCalling(m.id, family),
+			SupportsStreaming:   true,
+			OwnedBy:             m.owner,
+			Capabilities:        []string{"active", fmt.Sprintf("context:%d", contextWindow)},
+		})
+	}
+
+	return result
 }
 
 // NewGroqClient creates a Groq client backed by the LangChain OpenAI-compatible implementation.

@@ -95,15 +95,32 @@ func (p *OpenRouterProvider) ListModels(ctx context.Context) ([]*ModelInfo, erro
 			}
 		}
 
+		// Get context window from API or detect
 		contextWindow := openRouterContextWindow(model)
-		maxOutputTokens := estimateMaxOutputTokens(model.ID, contextWindow)
-		if maxOutputTokens == 0 && model.TopProvider.MaxCompletionTokens != nil {
+		if contextWindow == 0 {
+			family := DetectModelFamily(model.ID)
+			contextWindow = DetectContextWindow(model.ID, family)
+		}
+
+		// Get max output tokens from API, otherwise detect
+		family := DetectModelFamily(model.ID)
+		maxOutputTokens := 0
+		if model.TopProvider.MaxCompletionTokens != nil {
 			maxOutputTokens = int(*model.TopProvider.MaxCompletionTokens)
+		}
+		if maxOutputTokens == 0 {
+			maxOutputTokens = DetectMaxOutputTokens(model.ID, family, contextWindow)
+		}
+
+		// Use name from API if available
+		displayName := model.Name
+		if displayName == "" {
+			displayName = FormatModelDisplayName(model.ID, family)
 		}
 
 		info := &ModelInfo{
 			ID:                  model.ID,
-			Name:                openRouterDisplayName(model.ID, model.Name),
+			Name:                displayName,
 			Provider:            "openrouter",
 			Description:         model.Description,
 			ContextWindow:       contextWindow,
@@ -149,13 +166,6 @@ func (p *OpenRouterProvider) ValidateAPIKey(ctx context.Context) error {
 	return nil
 }
 
-func openRouterDisplayName(id, name string) string {
-	if strings.TrimSpace(name) != "" {
-		return name
-	}
-	return id
-}
-
 func openRouterContextWindow(model openRouterModel) int {
 	if model.ContextLength != nil {
 		return int(*model.ContextLength)
@@ -191,105 +201,4 @@ func openRouterSupportsStreaming(params []string) bool {
 		}
 	}
 	return false
-}
-
-// estimateMaxOutputTokens estimates max output tokens based on model ID and context window
-// This handles models from various providers (OpenAI, Anthropic, Google, etc.) on OpenRouter
-func estimateMaxOutputTokens(modelID string, contextWindow int) int {
-	idLower := strings.ToLower(modelID)
-
-	// OpenAI models
-	if strings.Contains(idLower, "chatgpt-5") {
-		return 128000 // ChatGPT-5 variant
-	}
-	if strings.Contains(idLower, "gpt-5") {
-		if strings.Contains(idLower, "preview") && !strings.Contains(idLower, "mini") && !strings.Contains(idLower, "nano") {
-			return 272000 // GPT-5 preview
-		}
-		return 128000 // GPT-5, GPT-5-mini, GPT-5-nano, GPT-5-codex
-	}
-	if strings.Contains(idLower, "o3") {
-		return 100000
-	}
-	if strings.Contains(idLower, "o1-preview") {
-		return 32768
-	}
-	if strings.Contains(idLower, "o1-mini") {
-		return 65536
-	}
-	if strings.Contains(idLower, "o1") {
-		return 100000
-	}
-	if strings.Contains(idLower, "gpt-4o-mini") {
-		return 16384
-	}
-	if strings.Contains(idLower, "gpt-4o") {
-		return 16384
-	}
-	if strings.Contains(idLower, "gpt-4") {
-		if contextWindow >= 32000 {
-			return 8192 // gpt-4-32k
-		}
-		if contextWindow >= 100000 {
-			return 4096 // gpt-4-turbo
-		}
-		return 8192 // gpt-4
-	}
-	if strings.Contains(idLower, "gpt-3.5") {
-		return 4096
-	}
-
-	// Anthropic Claude models
-	if strings.Contains(idLower, "claude-4") {
-		if strings.Contains(idLower, "sonnet") && contextWindow >= 1000000 {
-			return 16384 // Claude 4.5 Sonnet with 1M context
-		}
-		return 8192 // Claude 4.x models
-	}
-	if strings.Contains(idLower, "claude-3-5") || strings.Contains(idLower, "claude-3.5") {
-		return 8192
-	}
-	if strings.Contains(idLower, "claude-3") || strings.Contains(idLower, "claude-2") {
-		return 4096
-	}
-	if strings.Contains(idLower, "claude") {
-		return 4096
-	}
-
-	// Google Gemini models
-	if strings.Contains(idLower, "gemini") {
-		if strings.Contains(idLower, "flash") {
-			return 8192
-		}
-		if strings.Contains(idLower, "pro") {
-			return 8192
-		}
-		return 4096
-	}
-
-	// Meta Llama models
-	if strings.Contains(idLower, "llama") {
-		if contextWindow >= 100000 {
-			return 4096
-		}
-		return 2048
-	}
-
-	// Mistral models
-	if strings.Contains(idLower, "mistral") || strings.Contains(idLower, "mixtral") {
-		return 4096
-	}
-
-	// Default: use a conservative estimate based on context window
-	// Typically max output is much smaller than context window
-	if contextWindow >= 200000 {
-		return 8192
-	}
-	if contextWindow >= 100000 {
-		return 4096
-	}
-	if contextWindow >= 32000 {
-		return 4096
-	}
-	return 2048
 }

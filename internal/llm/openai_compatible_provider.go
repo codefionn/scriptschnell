@@ -89,14 +89,17 @@ func (p *OpenAICompatibleProvider) ListModels(ctx context.Context) ([]*ModelInfo
 			continue
 		}
 
+		family := DetectModelFamily(m.ID)
+		contextWindow := DetectContextWindow(m.ID, family)
+
 		info := &ModelInfo{
 			ID:                  m.ID,
-			Name:                formatOpenAICompatibleModelName(m.ID),
+			Name:                FormatModelDisplayName(m.ID, family),
 			Provider:            "openai-compatible",
-			Description:         getOpenAICompatibleModelDescription(m.ID),
-			ContextWindow:       estimateOpenAICompatibleContextWindow(m.ID),
-			MaxOutputTokens:     estimateOpenAICompatibleMaxOutputTokens(m.ID),
-			SupportsToolCalling: true, // Most modern models support this
+			Description:         GetModelDescription(m.ID, family),
+			ContextWindow:       contextWindow,
+			MaxOutputTokens:     DetectMaxOutputTokens(m.ID, family, contextWindow),
+			SupportsToolCalling: SupportsToolCalling(m.ID, family),
 			SupportsStreaming:   true,
 			OwnedBy:             m.OwnedBy,
 		}
@@ -140,186 +143,4 @@ func (p *OpenAICompatibleProvider) ValidateAPIKey(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// Helper functions
-
-func formatOpenAICompatibleModelName(id string) string {
-	// Clean up common patterns in model IDs
-	name := strings.ReplaceAll(id, "-", " ")
-	name = strings.ReplaceAll(name, "_", " ")
-
-	// Capitalize first letter of each word
-	parts := strings.Fields(name)
-	formatted := make([]string, len(parts))
-	for i, part := range parts {
-		if len(part) > 0 {
-			formatted[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
-		}
-	}
-
-	result := strings.Join(formatted, " ")
-	if result == "" {
-		return id
-	}
-	return result
-}
-
-func getOpenAICompatibleModelDescription(id string) string {
-	idLower := strings.ToLower(id)
-
-	// Detect common model families
-	if strings.Contains(idLower, "llama") {
-		if strings.Contains(idLower, "3.3") {
-			return "Meta Llama 3.3 - Advanced reasoning and instruction following"
-		}
-		if strings.Contains(idLower, "3.2") {
-			return "Meta Llama 3.2 - Efficient multilingual model"
-		}
-		if strings.Contains(idLower, "3.1") {
-			return "Meta Llama 3.1 - Enhanced capabilities"
-		}
-		if strings.Contains(idLower, "3") {
-			return "Meta Llama 3 - High-performance open model"
-		}
-		return "Meta Llama - Open-source language model"
-	}
-
-	if strings.Contains(idLower, "mistral") {
-		if strings.Contains(idLower, "large") {
-			return "Mistral Large - Top-tier reasoning"
-		}
-		if strings.Contains(idLower, "medium") {
-			return "Mistral Medium - Balanced performance"
-		}
-		if strings.Contains(idLower, "small") {
-			return "Mistral Small - Efficient model"
-		}
-		return "Mistral - Efficient language model"
-	}
-
-	if strings.Contains(idLower, "mixtral") {
-		return "Mixtral - Mixture-of-Experts architecture"
-	}
-
-	if strings.Contains(idLower, "qwen") {
-		return "Qwen - Alibaba's multilingual model"
-	}
-
-	if strings.Contains(idLower, "gemma") {
-		return "Gemma - Google's open model"
-	}
-
-	if strings.Contains(idLower, "phi") {
-		return "Phi - Microsoft's small language model"
-	}
-
-	if strings.Contains(idLower, "deepseek") {
-		return "DeepSeek - Advanced reasoning model"
-	}
-
-	if strings.Contains(idLower, "code") {
-		return "Code-specialized model"
-	}
-
-	if strings.Contains(idLower, "chat") {
-		return "Chat-optimized model"
-	}
-
-	if strings.Contains(idLower, "instruct") {
-		return "Instruction-following model"
-	}
-
-	return "OpenAI-compatible language model"
-}
-
-func estimateOpenAICompatibleContextWindow(id string) int {
-	idLower := strings.ToLower(id)
-
-	// Check for explicit context window indicators
-	if strings.Contains(idLower, "128k") {
-		return 131072
-	}
-	if strings.Contains(idLower, "64k") {
-		return 65536
-	}
-	if strings.Contains(idLower, "32k") {
-		return 32768
-	}
-	if strings.Contains(idLower, "16k") {
-		return 16384
-	}
-	if strings.Contains(idLower, "8k") {
-		return 8192
-	}
-	if strings.Contains(idLower, "4k") {
-		return 4096
-	}
-
-	// Estimate based on model family
-	if strings.Contains(idLower, "llama-3.3") || strings.Contains(idLower, "llama-3.2") {
-		return 131072 // 128k
-	}
-	if strings.Contains(idLower, "llama-3.1") {
-		return 131072 // 128k
-	}
-	if strings.Contains(idLower, "llama-3") {
-		return 8192
-	}
-	if strings.Contains(idLower, "llama-2") {
-		return 4096
-	}
-
-	if strings.Contains(idLower, "mistral") {
-		if strings.Contains(idLower, "large") {
-			return 131072 // 128k
-		}
-		return 32768
-	}
-
-	if strings.Contains(idLower, "mixtral") {
-		if strings.Contains(idLower, "8x22b") {
-			return 65536
-		}
-		return 32768
-	}
-
-	if strings.Contains(idLower, "qwen") {
-		if strings.Contains(idLower, "2.5") {
-			return 131072
-		}
-		return 32768
-	}
-
-	if strings.Contains(idLower, "deepseek") {
-		return 65536
-	}
-
-	// Default conservative estimate
-	return 8192
-}
-
-func estimateOpenAICompatibleMaxOutputTokens(id string) int {
-	idLower := strings.ToLower(id)
-
-	// Most models can output up to 4k-8k tokens
-	// Adjust based on known model families
-	if strings.Contains(idLower, "deepseek") {
-		return 8192
-	}
-
-	if strings.Contains(idLower, "qwen-2.5") {
-		return 8192
-	}
-
-	if strings.Contains(idLower, "mistral-large") {
-		return 8192
-	}
-
-	if strings.Contains(idLower, "llama-3.3") || strings.Contains(idLower, "llama-3.2") || strings.Contains(idLower, "llama-3.1") {
-		return 8192
-	}
-
-	// Default
-	return 4096
 }

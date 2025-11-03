@@ -77,14 +77,23 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error
 			continue
 		}
 
+		family := DetectModelFamily(m.ID)
+		contextWindow := DetectContextWindow(m.ID, family)
+
+		// Use display name from API if available
+		displayName := m.DisplayName
+		if displayName == "" {
+			displayName = FormatModelDisplayName(m.ID, family)
+		}
+
 		info := &ModelInfo{
 			ID:                  m.ID,
-			Name:                getClaudeDisplayName(m.ID, m.DisplayName),
+			Name:                displayName,
 			Provider:            "anthropic",
-			Description:         getClaudeDescription(m.ID),
-			ContextWindow:       getClaudeContextWindow(m.ID),
-			MaxOutputTokens:     getClaudeMaxOutputTokens(m.ID),
-			SupportsToolCalling: true, // All Claude models support tool calling
+			Description:         GetModelDescription(m.ID, family),
+			ContextWindow:       contextWindow,
+			MaxOutputTokens:     DetectMaxOutputTokens(m.ID, family, contextWindow),
+			SupportsToolCalling: SupportsToolCalling(m.ID, family),
 			SupportsStreaming:   true,
 			OwnedBy:             "anthropic",
 			CreatedAt:           m.CreatedAt,
@@ -204,107 +213,6 @@ func (p *AnthropicProvider) getFallbackModels() []*ModelInfo {
 			Capabilities:        []string{"vision", "tool-use"},
 		},
 	}
-}
-
-// Helper functions for Claude model metadata
-
-func getClaudeDisplayName(id, displayName string) string {
-	if displayName != "" {
-		return displayName
-	}
-	// Generate display name from ID
-	if strings.Contains(id, "claude-4-5-sonnet") {
-		return "Claude 4.5 Sonnet"
-	}
-	if strings.Contains(id, "claude-4-5-haiku") {
-		return "Claude 4.5 Haiku"
-	}
-	if strings.Contains(id, "claude-4-1-opus") {
-		return "Claude 4.1 Opus"
-	}
-	if strings.Contains(id, "claude-3-5-sonnet-20241022") {
-		return "Claude 3.5 Sonnet (New)"
-	}
-	if strings.Contains(id, "claude-3-5-sonnet") {
-		return "Claude 3.5 Sonnet"
-	}
-	if strings.Contains(id, "claude-3-opus") {
-		return "Claude 3 Opus"
-	}
-	if strings.Contains(id, "claude-3-sonnet") {
-		return "Claude 3 Sonnet"
-	}
-	if strings.Contains(id, "claude-3-haiku") {
-		return "Claude 3 Haiku"
-	}
-	return id
-}
-
-func getClaudeDescription(id string) string {
-	if strings.Contains(id, "claude-4-5-sonnet") {
-		return "Latest Claude model with extended context"
-	}
-	if strings.Contains(id, "claude-4-5-haiku") {
-		return "Fast Claude 4 model"
-	}
-	if strings.Contains(id, "claude-4-1-opus") {
-		return "Most powerful Claude 4 model"
-	}
-	if strings.Contains(id, "claude-3-5-sonnet") {
-		return "Intelligent model for complex tasks"
-	}
-	if strings.Contains(id, "claude-3-opus") {
-		return "Most powerful model for highly complex tasks"
-	}
-	if strings.Contains(id, "claude-3-sonnet") {
-		return "Balanced model for scaled deployments"
-	}
-	if strings.Contains(id, "claude-3-haiku") {
-		return "Fastest model for quick and accurate responses"
-	}
-	return "Claude language model"
-}
-
-func getClaudeContextWindow(id string) int {
-	// Claude 4 series
-	if strings.Contains(id, "claude-4-5-sonnet") {
-		return 1000000 // 1M context
-	}
-	if strings.Contains(id, "claude-4") {
-		return 200000 // Claude 4.x default
-	}
-	// Claude 3 series all have 200K context
-	if strings.Contains(id, "claude-3") {
-		return 200000
-	}
-	// Claude 2 series
-	if strings.Contains(id, "claude-2") {
-		return 200000
-	}
-	return 200000 // Default
-}
-
-func getClaudeMaxOutputTokens(id string) int {
-	// Claude 4 series
-	if strings.Contains(id, "claude-4-5-sonnet") {
-		return 16384 // 16K output for 4.5 Sonnet
-	}
-	if strings.Contains(id, "claude-4-5-haiku") || strings.Contains(id, "claude-4-1-opus") {
-		return 8192
-	}
-	// Claude 3.5 Sonnet
-	if strings.Contains(id, "claude-3-5-sonnet") || strings.Contains(id, "claude-3.5-sonnet") {
-		return 8192
-	}
-	// Claude 3 series
-	if strings.Contains(id, "claude-3") {
-		return 4096
-	}
-	// Claude 2 series
-	if strings.Contains(id, "claude-2") {
-		return 4096
-	}
-	return 4096 // Default
 }
 
 func (p *AnthropicProvider) CreateClient(modelID string) (Client, error) {

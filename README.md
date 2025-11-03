@@ -31,6 +31,7 @@
 - [ ] Todo task are not showing up in the UI
 - [ ] On configured web search, add text to the system prompt for more up-to-date results
 - [ ] Speed up startup time
+- [ ] Support user configured mcp's with auto-selecting only relevant ones
 
 ### Maybes
 

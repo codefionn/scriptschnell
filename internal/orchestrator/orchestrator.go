@@ -806,7 +806,7 @@ func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, session
 		return
 	}
 
-	if totalTokens*100/contextWindow < 80 {
+	if totalTokens*100/contextWindow < 90 {
 		return
 	}
 
@@ -851,6 +851,10 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 		return
 	}
 
+	contextWindow := o.getContextWindow(modelID)
+	_, perMessageTokens, _ := estimateContextTokens(modelID, "", messages)
+	latestUserPrompt := findLatestUserPrompt(o.session.GetMessages())
+
 	summaryPrompt := buildSummaryPrompt(messages)
 	summary := ""
 
@@ -875,6 +879,10 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 	}
 
 	summaryContent := fmt.Sprintf("Summary of earlier context (auto-compacted):\n%s", summary)
+	userSection := buildUserCompactionSection(messages, perMessageTokens, contextWindow, latestUserPrompt)
+	if userSection != "" {
+		summaryContent = fmt.Sprintf("%s\n\n%s", summaryContent, userSection)
+	}
 
 	if !o.session.CompactWithSummary(messages, summaryContent) {
 		// Session head changed before compaction could apply
@@ -964,6 +972,97 @@ func selectCompactionPrefix(perMessageTokens []int, totalTokens int) int {
 	}
 
 	return len(perMessageTokens)
+}
+
+func buildUserCompactionSection(messages []*session.Message, perMessageTokens []int, contextWindow int, latestUserPrompt string) string {
+	trimmedLatest := strings.TrimSpace(latestUserPrompt)
+	userPrompts := make([]string, 0)
+
+	userTokens := 0
+	totalTokens := 0
+	tokenSliceMatches := len(perMessageTokens) == len(messages)
+
+	for i, msg := range messages {
+		token := 1
+		if tokenSliceMatches {
+			token = perMessageTokens[i]
+			if token <= 0 {
+				token = 1
+			}
+		}
+		totalTokens += token
+
+		if strings.EqualFold(msg.Role, "user") {
+			content := strings.TrimSpace(msg.Content)
+			if content != "" {
+				userPrompts = append(userPrompts, content)
+				userTokens += token
+			}
+		}
+	}
+
+	if len(userPrompts) == 0 && trimmedLatest == "" {
+		return ""
+	}
+
+	windowTokens := contextWindow
+	if windowTokens <= 0 {
+		windowTokens = totalTokens
+	}
+	if windowTokens <= 0 {
+		windowTokens = 1
+	}
+
+	userPercent := (userTokens * 100) / windowTokens
+
+	var sb strings.Builder
+	if len(userPrompts) > 0 {
+		sb.WriteString("User prompt compaction:\n")
+		if userPercent < 5 {
+			sb.WriteString("Older prompts (<5% of context) unified verbatim:\n")
+			sb.WriteString(strings.Join(userPrompts, "\n---\n"))
+		} else {
+			sb.WriteString("Older prompts (>=5% of context) condensed summary:\n")
+			sb.WriteString(compactUserPrompts(userPrompts))
+		}
+		if trimmedLatest != "" {
+			sb.WriteString("\n\n")
+		}
+	}
+
+	if trimmedLatest != "" {
+		sb.WriteString("Latest user prompt (preserve and continue):\n")
+		sb.WriteString(trimmedLatest)
+		sb.WriteString("\nContinue to implement this.")
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
+func compactUserPrompts(prompts []string) string {
+	if len(prompts) == 0 {
+		return ""
+	}
+
+	if len(prompts) == 1 {
+		return condenseContent(prompts[0], 400)
+	}
+
+	var sb strings.Builder
+	for i, prompt := range prompts {
+		sb.WriteString(fmt.Sprintf("- #%d: %s\n", i+1, condenseContent(prompt, 200)))
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
+func findLatestUserPrompt(messages []*session.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(messages[i].Role, "user") {
+			return strings.TrimSpace(messages[i].Content)
+		}
+	}
+	return ""
 }
 
 func buildSummaryPrompt(messages []*session.Message) string {

@@ -1,5 +1,7 @@
 # StatCode AI
 
+> This project is actively in intial development. Use at your own risk!
+
 **statcode-ai** is a TUI that generates code from prompts using LLMs.
 
 ## Features
@@ -32,6 +34,8 @@
 - [ ] On configured web search, add text to the system prompt for more up-to-date results
 - [ ] Speed up startup time
 - [ ] Support user configured mcp's with auto-selecting only relevant ones
+- [ ] Only cache directory listings in working directory
+- [ ] Implement persistent authorization on a per-project basis
 
 ### Maybes
 

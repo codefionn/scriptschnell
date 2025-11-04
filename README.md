@@ -37,6 +37,13 @@
 - [ ] Only cache directory listings in working directory
 - [ ] Implement persistent authorization on a per-project basis
 - [ ] Unify tui command programming
+- [ ] Filter models by provider in models menu
+- [ ] 
+
+## Goals
+
+- Universal codebase LLM editing experience (cli, tui, code editor, web browser)
+- Compatible with many LLM providers
 
 ### Maybes
 

@@ -34,8 +34,9 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 	}
 
 	// Check for text loops in recent assistant messages
-	if hasLoopInRecentMessages(messages) {
-		reason := "STOP - detected repetitive text pattern in recent messages, continuing would likely produce more loops"
+	hasLoop, loopInfo := checkMessagesForLoops(messages, 10, "assistant")
+	if hasLoop {
+		reason := fmt.Sprintf("STOP - detected repetitive text pattern in recent messages: %s", loopInfo)
 		logger.Info("Auto-continue blocked: %s", reason)
 		return false, reason
 	}
@@ -208,43 +209,67 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 	return sb.String()
 }
 
-// hasLoopInRecentMessages checks if recent assistant messages contain repetitive text patterns
-func hasLoopInRecentMessages(messages []*session.Message) bool {
+// checkMessagesForLoops checks if recent messages contain repetitive text patterns
+// Parameters:
+//   - messages: All session messages to analyze
+//   - maxMessages: Maximum number of recent messages to check (0 = check all)
+//   - roleFilter: Filter by role (e.g., "assistant", "user", "tool"), empty string = all roles
+//
+// Returns:
+//   - hasLoop: true if a loop was detected
+//   - loopInfo: description of the detected loop (pattern summary and count)
+func checkMessagesForLoops(messages []*session.Message, maxMessages int, roleFilter string) (bool, string) {
 	if len(messages) == 0 {
-		return false
+		return false, ""
 	}
 
 	// Create a temporary loop detector for this check
 	tempDetector := NewLoopDetector()
 
-	// Collect recent assistant messages (last 10)
-	assistantMessages := make([]string, 0, 10)
-	for i := len(messages) - 1; i >= 0 && len(assistantMessages) < 10; i-- {
-		if strings.EqualFold(messages[i].Role, "assistant") {
-			content := strings.TrimSpace(messages[i].Content)
-			if content != "" {
-				assistantMessages = append(assistantMessages, content)
-			}
+	// Collect recent messages matching the role filter
+	limit := maxMessages
+	if limit <= 0 {
+		limit = len(messages)
+	}
+
+	matchedMessages := make([]string, 0, limit)
+	for i := len(messages) - 1; i >= 0 && len(matchedMessages) < limit; i-- {
+		msg := messages[i]
+
+		// Apply role filter if specified
+		if roleFilter != "" && !strings.EqualFold(msg.Role, roleFilter) {
+			continue
+		}
+
+		content := strings.TrimSpace(msg.Content)
+		if content != "" {
+			matchedMessages = append(matchedMessages, content)
 		}
 	}
 
-	if len(assistantMessages) == 0 {
-		return false
+	if len(matchedMessages) == 0 {
+		return false, ""
 	}
 
 	// Reverse to process in chronological order
-	for i, j := 0, len(assistantMessages)-1; i < j; i, j = i+1, j-1 {
-		assistantMessages[i], assistantMessages[j] = assistantMessages[j], assistantMessages[i]
+	for i, j := 0, len(matchedMessages)-1; i < j; i, j = i+1, j-1 {
+		matchedMessages[i], matchedMessages[j] = matchedMessages[j], matchedMessages[i]
 	}
 
 	// Analyze each message for loops
-	for _, content := range assistantMessages {
-		isLoop, _, _ := tempDetector.AddText(content)
+	for _, content := range matchedMessages {
+		isLoop, pattern, count := tempDetector.AddText(content)
 		if isLoop {
-			logger.Debug("Loop detected in recent assistant messages")
-			return true
+			// Create a summary of the loop
+			patternSummary := pattern
+			if len(patternSummary) > 80 {
+				patternSummary = patternSummary[:80] + "..."
+			}
+			loopInfo := fmt.Sprintf("pattern repeated %d times: %s", count, patternSummary)
+			logger.Debug("Loop detected in recent %s messages: %s", roleFilter, loopInfo)
+			return true, loopInfo
 		}
 	}
 
-	return false
+	return false, ""
 }

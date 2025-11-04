@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 )
 
@@ -32,18 +34,22 @@ type systemPromptData struct {
 	Tools          []string
 	IsCLIMode      bool
 	OS             string
+	CurrentDate    string
+	HasWebSearch   bool
 }
 
 // PromptBuilder builds system prompts for the LLM
 type PromptBuilder struct {
 	fs         fs.FileSystem
 	workingDir string
+	config     *config.Config
 }
 
-func NewPromptBuilder(filesystem fs.FileSystem, workingDir string) *PromptBuilder {
+func NewPromptBuilder(filesystem fs.FileSystem, workingDir string, cfg *config.Config) *PromptBuilder {
 	return &PromptBuilder{
 		fs:         filesystem,
 		workingDir: workingDir,
+		config:     cfg,
 	}
 }
 
@@ -54,14 +60,26 @@ func (pb *PromptBuilder) BuildSystemPrompt(ctx context.Context, modelName string
 		files = nil
 	}
 
+	// Check if web search is configured
+	hasWebSearch := pb.config != nil && pb.config.Search.Provider != ""
+
+	// Build tools list
+	tools := make([]string, len(defaultToolDescriptions))
+	copy(tools, defaultToolDescriptions)
+	if hasWebSearch {
+		tools = append(tools, "web_search: Search the web for up-to-date information using configured search provider.")
+	}
+
 	data := systemPromptData{
 		WorkingDir:     pb.workingDir,
 		Files:          files,
 		ProjectContext: pb.projectSpecificContext(ctx),
 		ModelSpecific:  pb.modelSpecificPrompt(modelName),
-		Tools:          defaultToolDescriptions,
+		Tools:          tools,
 		IsCLIMode:      cliMode,
 		OS:             runtime.GOOS,
+		CurrentDate:    time.Now().Format("2006-01-02"),
+		HasWebSearch:   hasWebSearch,
 	}
 
 	var buf bytes.Buffer

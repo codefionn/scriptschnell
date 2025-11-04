@@ -339,7 +339,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 
 	// Build system prompt
 	modelID := o.providerMgr.GetOrchestrationModel()
-	promptBuilder := llm.NewPromptBuilder(o.fs, o.workingDir)
+	promptBuilder := llm.NewPromptBuilder(o.fs, o.workingDir, o.config)
 	systemPrompt, err := promptBuilder.BuildSystemPrompt(ctx, modelID, o.cliMode)
 	if err != nil {
 		return fmt.Errorf("failed to build system prompt: %w", err)

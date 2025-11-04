@@ -38,7 +38,6 @@
 - [ ] Implement persistent authorization on a per-project basis
 - [ ] Unify tui command programming
 - [ ] Filter models by provider in models menu
-- [ ] 
 
 ## Goals
 

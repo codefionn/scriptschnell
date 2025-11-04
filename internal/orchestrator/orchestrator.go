@@ -51,6 +51,7 @@ type Orchestrator struct {
 	toolExecutorCancel   context.CancelFunc
 	activeShellMu        sync.Mutex
 	activeShellChan      chan struct{}
+	loopDetector         *LoopDetector
 }
 
 const (
@@ -76,15 +77,16 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 
 	// Create orchestrator (without authorization actor yet)
 	orch := &Orchestrator{
-		fs:          filesystem,
-		session:     sess,
-		providerMgr: providerMgr,
-		config:      cfg,
-		workingDir:  cfg.WorkingDir,
-		ctx:         ctx,
-		cancel:      cancel,
-		actorSystem: actor.NewSystem(),
-		cliMode:     cliMode,
+		fs:           filesystem,
+		session:      sess,
+		providerMgr:  providerMgr,
+		config:       cfg,
+		workingDir:   cfg.WorkingDir,
+		ctx:          ctx,
+		cancel:       cancel,
+		actorSystem:  actor.NewSystem(),
+		cliMode:      cliMode,
+		loopDetector: NewLoopDetector(),
 	}
 
 	// Initialize clients first so we have summarize client for authorization actor
@@ -331,6 +333,10 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 		Content: prompt,
 	})
 
+	// Reset loop detector for new prompt
+	o.loopDetector.Reset()
+	logger.Debug("Loop detector reset for new prompt")
+
 	// Build system prompt
 	modelID := o.providerMgr.GetOrchestrationModel()
 	promptBuilder := llm.NewPromptBuilder(o.fs, o.workingDir)
@@ -426,6 +432,24 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 		} else if len(response.ToolCalls) > 0 && response.Content == "" {
 			// Log when we have tool calls but no content - this is normal but worth tracking
 			logger.Debug("Response contains %d tool calls with no text content", len(response.ToolCalls))
+		}
+
+		// Check for text loops in the response
+		if response.Content != "" {
+			isLoop, pattern, count := o.loopDetector.AddText(response.Content)
+			if isLoop {
+				logger.Warn("Text loop detected at iteration %d: pattern repeated %d times", iteration, count)
+				if streamCallback != nil {
+					// Show a truncated version of the pattern to the user
+					displayPattern := pattern
+					if len(displayPattern) > 100 {
+						displayPattern = displayPattern[:100] + "..."
+					}
+					_ = streamCallback(fmt.Sprintf("\n\n🔁 Loop detected! The LLM is repeating the same text pattern %d times.\nPattern: %s\nStopping generation to prevent infinite loop.\n", count, displayPattern))
+				}
+				logger.Debug("Breaking out of loop due to text repetition (iteration %d)", iteration)
+				break
+			}
 		}
 
 		// Check if response was truncated due to token limits

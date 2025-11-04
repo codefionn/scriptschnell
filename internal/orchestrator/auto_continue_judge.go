@@ -33,6 +33,14 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 		return false, ""
 	}
 
+	// Check for text loops in recent assistant messages
+	hasLoop, loopInfo := checkMessagesForLoops(messages, 10, "assistant")
+	if hasLoop {
+		reason := fmt.Sprintf("STOP - detected repetitive text pattern in recent messages: %s", loopInfo)
+		logger.Info("Auto-continue blocked: %s", reason)
+		return false, reason
+	}
+
 	userPrompts := collectRecentUserPrompts(messages, 10)
 	if len(userPrompts) == 0 {
 		logger.Debug("Auto-continue skipped: no user prompts found")
@@ -149,7 +157,12 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 	var sb strings.Builder
 	sb.WriteString("You are an auto-continue judge. Decide whether the assistant should keep generating its reply.\n")
 	sb.WriteString("Respond with exactly one word: CONTINUE or STOP.\n")
-	sb.WriteString("Choose CONTINUE when the assistant response appears incomplete, truncated, or when unresolved tasks remain. Choose STOP when the response is complete or further continuation is unnecessary.\n\n")
+	sb.WriteString("Choose CONTINUE when the assistant response appears incomplete, truncated, or when unresolved tasks remain.\n")
+	sb.WriteString("Choose STOP when:\n")
+	sb.WriteString("- The response is complete or further continuation is unnecessary\n")
+	sb.WriteString("- The assistant is repeating the same text or patterns\n")
+	sb.WriteString("- The conversation appears to be stuck in a loop\n")
+	sb.WriteString("- The assistant is generating repetitive tool calls without making progress\n\n")
 
 	trimmedSystemPrompt := strings.TrimSpace(systemPrompt)
 	if trimmedSystemPrompt == "" {
@@ -194,4 +207,69 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 
 	sb.WriteString("\nReply with exactly one word: CONTINUE or STOP.")
 	return sb.String()
+}
+
+// checkMessagesForLoops checks if recent messages contain repetitive text patterns
+// Parameters:
+//   - messages: All session messages to analyze
+//   - maxMessages: Maximum number of recent messages to check (0 = check all)
+//   - roleFilter: Filter by role (e.g., "assistant", "user", "tool"), empty string = all roles
+//
+// Returns:
+//   - hasLoop: true if a loop was detected
+//   - loopInfo: description of the detected loop (pattern summary and count)
+func checkMessagesForLoops(messages []*session.Message, maxMessages int, roleFilter string) (bool, string) {
+	if len(messages) == 0 {
+		return false, ""
+	}
+
+	// Create a temporary loop detector for this check
+	tempDetector := NewLoopDetector()
+
+	// Collect recent messages matching the role filter
+	limit := maxMessages
+	if limit <= 0 {
+		limit = len(messages)
+	}
+
+	matchedMessages := make([]string, 0, limit)
+	for i := len(messages) - 1; i >= 0 && len(matchedMessages) < limit; i-- {
+		msg := messages[i]
+
+		// Apply role filter if specified
+		if roleFilter != "" && !strings.EqualFold(msg.Role, roleFilter) {
+			continue
+		}
+
+		content := strings.TrimSpace(msg.Content)
+		if content != "" {
+			matchedMessages = append(matchedMessages, content)
+		}
+	}
+
+	if len(matchedMessages) == 0 {
+		return false, ""
+	}
+
+	// Reverse to process in chronological order
+	for i, j := 0, len(matchedMessages)-1; i < j; i, j = i+1, j-1 {
+		matchedMessages[i], matchedMessages[j] = matchedMessages[j], matchedMessages[i]
+	}
+
+	// Analyze each message for loops
+	for _, content := range matchedMessages {
+		isLoop, pattern, count := tempDetector.AddText(content)
+		if isLoop {
+			// Create a summary of the loop
+			patternSummary := pattern
+			if len(patternSummary) > 80 {
+				patternSummary = patternSummary[:80] + "..."
+			}
+			loopInfo := fmt.Sprintf("pattern repeated %d times: %s", count, patternSummary)
+			logger.Debug("Loop detected in recent %s messages: %s", roleFilter, loopInfo)
+			return true, loopInfo
+		}
+	}
+
+	return false, ""
 }

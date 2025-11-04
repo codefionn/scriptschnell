@@ -36,6 +36,7 @@
 - [ ] Support user configured mcp's with auto-selecting only relevant ones
 - [ ] Only cache directory listings in working directory
 - [ ] Implement persistent authorization on a per-project basis
+- [ ] Unify tui command programming
 
 ### Maybes
 

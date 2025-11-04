@@ -33,6 +33,13 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 		return false, ""
 	}
 
+	// Check for text loops in recent assistant messages
+	if hasLoopInRecentMessages(messages) {
+		reason := "STOP - detected repetitive text pattern in recent messages, continuing would likely produce more loops"
+		logger.Info("Auto-continue blocked: %s", reason)
+		return false, reason
+	}
+
 	userPrompts := collectRecentUserPrompts(messages, 10)
 	if len(userPrompts) == 0 {
 		logger.Debug("Auto-continue skipped: no user prompts found")
@@ -149,7 +156,12 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 	var sb strings.Builder
 	sb.WriteString("You are an auto-continue judge. Decide whether the assistant should keep generating its reply.\n")
 	sb.WriteString("Respond with exactly one word: CONTINUE or STOP.\n")
-	sb.WriteString("Choose CONTINUE when the assistant response appears incomplete, truncated, or when unresolved tasks remain. Choose STOP when the response is complete or further continuation is unnecessary.\n\n")
+	sb.WriteString("Choose CONTINUE when the assistant response appears incomplete, truncated, or when unresolved tasks remain.\n")
+	sb.WriteString("Choose STOP when:\n")
+	sb.WriteString("- The response is complete or further continuation is unnecessary\n")
+	sb.WriteString("- The assistant is repeating the same text or patterns\n")
+	sb.WriteString("- The conversation appears to be stuck in a loop\n")
+	sb.WriteString("- The assistant is generating repetitive tool calls without making progress\n\n")
 
 	trimmedSystemPrompt := strings.TrimSpace(systemPrompt)
 	if trimmedSystemPrompt == "" {
@@ -194,4 +206,45 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 
 	sb.WriteString("\nReply with exactly one word: CONTINUE or STOP.")
 	return sb.String()
+}
+
+// hasLoopInRecentMessages checks if recent assistant messages contain repetitive text patterns
+func hasLoopInRecentMessages(messages []*session.Message) bool {
+	if len(messages) == 0 {
+		return false
+	}
+
+	// Create a temporary loop detector for this check
+	tempDetector := NewLoopDetector()
+
+	// Collect recent assistant messages (last 10)
+	assistantMessages := make([]string, 0, 10)
+	for i := len(messages) - 1; i >= 0 && len(assistantMessages) < 10; i-- {
+		if strings.EqualFold(messages[i].Role, "assistant") {
+			content := strings.TrimSpace(messages[i].Content)
+			if content != "" {
+				assistantMessages = append(assistantMessages, content)
+			}
+		}
+	}
+
+	if len(assistantMessages) == 0 {
+		return false
+	}
+
+	// Reverse to process in chronological order
+	for i, j := 0, len(assistantMessages)-1; i < j; i, j = i+1, j-1 {
+		assistantMessages[i], assistantMessages[j] = assistantMessages[j], assistantMessages[i]
+	}
+
+	// Analyze each message for loops
+	for _, content := range assistantMessages {
+		isLoop, _, _ := tempDetector.AddText(content)
+		if isLoop {
+			logger.Debug("Loop detected in recent assistant messages")
+			return true
+		}
+	}
+
+	return false
 }

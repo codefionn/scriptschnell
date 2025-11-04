@@ -243,7 +243,7 @@ func (m *Model) scheduleViewportRefresh() tea.Cmd {
 
 func (m *Model) Init() tea.Cmd {
 	m.spinnerActive = true
-	return tea.Batch(textarea.Blink, m.spinner.Tick)
+	return tea.Batch(textarea.Blink, func() tea.Msg { return m.spinner.Tick() })
 }
 
 type ansiSeqMode int

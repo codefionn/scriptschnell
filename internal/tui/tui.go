@@ -242,7 +242,8 @@ func (m *Model) scheduleViewportRefresh() tea.Cmd {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return textarea.Blink
+	m.spinnerActive = true
+	return tea.Batch(textarea.Blink, m.spinner.Tick)
 }
 
 type ansiSeqMode int
@@ -1161,7 +1162,14 @@ func isKeyMsg(msg tea.Msg) bool {
 
 func (m *Model) View() string {
 	if !m.ready {
-		return "\n  Initializing..."
+		asciiArt := ` ____  _        _    ____          _              _    ___
+/ ___|| |_ __ _| |_ / ___|___   __| | ___        / \  |_ _|
+\___ \| __/ _` + "`" + ` | __| |   / _ \ / _` + "`" + ` |/ _ \_____ / _ \  | |
+ ___) | || (_| | |_| |__| (_) | (_| |  __/_____/ ___ \ | |
+|____/ \__\__,_|\__|\____\___/ \__,_|\___|    /_/   \_\___|
+`
+		loadingText := fmt.Sprintf("\n%s %s", m.spinner.View(), "Loading...")
+		return "\n\n" + asciiArt + loadingText
 	}
 
 	var sb strings.Builder

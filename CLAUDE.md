@@ -143,10 +143,9 @@ Available tools:
        - Reads domain string from WASM memory
        - Calls authorization actor for LLM-based safety analysis
        - Returns 1 (authorized) or 0 (denied) to WASM code
-    3. **WASI Socket Layer** ([internal/wasi/network.go](internal/wasi/network.go)): Defensive fallback for WASI P1 sockets
-       - Overrides `sock_open` and `sock_connect` WASI functions
-       - Blocks all socket operations (returns EPROTONOSUPPORT)
-       - Prevents any network access that bypasses HTTP layer
+    3. **Host Sandbox Layer**: WASI Preview 1 execution provides no socket APIs, so any attempt
+       - TinyGo builds target `wasip1`, which lacks outbound network primitives
+       - Additional host checks ensure HTTP calls go through authorization layer
   - Domain authorization enforced before any HTTP request
   - Controlled filesystem access only to files previously read via read_file tool
   - **Note**: Go net/http in WASM doesn't use WASI sockets directly - authorization happens at HTTP layer

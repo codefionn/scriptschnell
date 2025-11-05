@@ -39,6 +39,7 @@
 - [ ] Unify tui command programming
 - [ ] Filter models by provider in models menu
 - [ ] Fix models menu (weird scrolling behavior, layout issues)
+- [ ] On configuring the first provider, choose a default model
 
 ## Goals
 

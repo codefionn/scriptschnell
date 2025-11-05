@@ -11,6 +11,88 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 )
 
+type commandHelpEntry struct {
+	Usage       string
+	Description string
+}
+
+type commandDefinition struct {
+	Name               string
+	Description        string
+	Suggestions        []string
+	PlaceholderExample string
+	HelpEntries        []commandHelpEntry
+	Handler            func(*CommandHandler, []string) (MenuResult, error)
+}
+
+func getDefaultCommandDefinitions() []commandDefinition {
+	return []commandDefinition{
+		{
+			Name:               "/help",
+			Description:        "Show this help message",
+			Suggestions:        []string{"/help"},
+			PlaceholderExample: "/help",
+			Handler:            (*CommandHandler).handleHelpCommand,
+		},
+		{
+			Name:        "/settings",
+			Description: "Open main settings menu (providers, models, search)",
+			Suggestions: []string{"/settings"},
+			Handler:     (*CommandHandler).handleSettings,
+		},
+		{
+			Name:               "/models",
+			Description:        "Interactive model selector (orchestration) and refresh utilities",
+			Suggestions:        []string{"/models", "/models refresh"},
+			PlaceholderExample: "/models",
+			HelpEntries: []commandHelpEntry{
+				{
+					Usage:       "/models",
+					Description: "Interactive model selector (orchestration)",
+				},
+				{
+					Usage:       "/models refresh",
+					Description: "Fetch latest models from provider APIs",
+				},
+			},
+			Handler: (*CommandHandler).handleModels,
+		},
+		{
+			Name:               "/provider",
+			Description:        "Interactive provider management",
+			Suggestions:        []string{"/provider"},
+			PlaceholderExample: "/provider",
+			Handler:            (*CommandHandler).handleProvider,
+		},
+		{
+			Name:               "/init",
+			Description:        "Initialize/update AGENTS.md with codebase summary",
+			Suggestions:        []string{"/init"},
+			PlaceholderExample: "/init",
+			Handler:            (*CommandHandler).handleInit,
+		},
+		{
+			Name:        "/clear",
+			Description: "Clear conversation and start a new session",
+			Suggestions: []string{"/clear"},
+			Handler:     (*CommandHandler).handleClear,
+		},
+		{
+			Name:               "/quit",
+			Description:        "Quit the application",
+			Suggestions:        []string{"/quit"},
+			PlaceholderExample: "/quit",
+			Handler:            (*CommandHandler).handleQuitCommand,
+		},
+		{
+			Name:        "/mcp",
+			Description: "Manage custom MCP servers (/mcp help for subcommands)",
+			Suggestions: []string{"/mcp"},
+			Handler:     (*CommandHandler).handleMCP,
+		},
+	}
+}
+
 // CommandHandler handles TUI commands
 type CommandHandler struct {
 	providerMgr     *provider.Manager
@@ -20,14 +102,25 @@ type CommandHandler struct {
 	streamCallback  func(string) error
 	statusCallback  func(string) error
 	contextCallback ContextUsageCallback
+	commands        map[string]commandDefinition
 }
 
 func NewCommandHandler(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, orchestrator *Orchestrator) *CommandHandler {
-	return &CommandHandler{
+	handler := &CommandHandler{
 		config:       cfg,
 		providerMgr:  providerMgr,
 		orchestrator: orchestrator,
 		ctx:          ctx,
+	}
+	handler.initCommands()
+	return handler
+}
+
+func (ch *CommandHandler) initCommands() {
+	definitions := getDefaultCommandDefinitions()
+	ch.commands = make(map[string]commandDefinition, len(definitions))
+	for _, def := range definitions {
+		ch.commands[def.Name] = def
 	}
 }
 
@@ -56,49 +149,45 @@ func (ch *CommandHandler) HandleCommand(command string) (MenuResult, error) {
 	parts := strings.Fields(command)
 	cmd := parts[0]
 
-	switch cmd {
-	case "/help":
-		return NewMenuResult(ch.handleHelp()), nil
-
-	case "/settings":
-		return ch.handleSettings()
-
-	case "/models":
-		return ch.handleModels(parts[1:])
-
-	case "/provider":
-		return ch.handleProvider(parts[1:])
-
-	case "/init":
-		return ch.handleInit()
-
-	case "/quit":
-		return MenuResult{}, ErrQuitRequested
-
-	case "/clear":
-		return ch.handleClear()
-
-	case "/mcp":
-		return ch.handleMCP(parts[1:])
-
-	default:
+	definition, ok := ch.commands[cmd]
+	if !ok {
 		return MenuResult{}, fmt.Errorf("unknown command: %s. Type /help for available commands", cmd)
 	}
+
+	if definition.Handler == nil {
+		return MenuResult{}, fmt.Errorf("command %s is not implemented", cmd)
+	}
+
+	return definition.Handler(ch, parts[1:])
 }
 
-func (ch *CommandHandler) handleHelp() string {
-	help := `Available Commands:
+func (ch *CommandHandler) handleHelpCommand(_ []string) (MenuResult, error) {
+	return NewMenuResult(ch.buildHelpMessage()), nil
+}
 
-/help             - Show this help message
-/settings         - Open main settings menu (providers, models, search)
-/models           - Interactive model selector (orchestration)
-/models refresh   - Fetch latest models from provider APIs
-/provider         - Interactive provider management
-/init             - Initialize/update AGENTS.md with codebase summary
-/clear            - Clear conversation and start a new session
-/quit             - Quit the application
-/mcp              - Manage custom MCP servers (/mcp help for subcommands)
+func (ch *CommandHandler) buildHelpMessage() string {
+	entries := commandHelpEntries()
+	maxWidth := 0
+	for _, entry := range entries {
+		if len(entry.Usage) > maxWidth {
+			maxWidth = len(entry.Usage)
+		}
+	}
 
+	var sb strings.Builder
+	sb.WriteString("Available Commands:\n\n")
+	for _, entry := range entries {
+		sb.WriteString(fmt.Sprintf("%-*s - %s\n", maxWidth, entry.Usage, entry.Description))
+	}
+	sb.WriteString(helpFooter)
+	return sb.String()
+}
+
+func (ch *CommandHandler) handleQuitCommand(_ []string) (MenuResult, error) {
+	return MenuResult{}, ErrQuitRequested
+}
+
+const helpFooter = `
 Keyboard Shortcuts:
 
 Ctrl+X            - Enter command mode
@@ -119,7 +208,67 @@ Model Information:
 - Orchestration: Used for main conversation and tool calls
 - Summarize: Used for file summarization tasks
 `
-	return help
+
+func commandHelpEntries() []commandHelpEntry {
+	definitions := getDefaultCommandDefinitions()
+	entries := make([]commandHelpEntry, 0, len(definitions))
+	for _, def := range definitions {
+		if len(def.HelpEntries) > 0 {
+			entries = append(entries, def.HelpEntries...)
+			continue
+		}
+		entries = append(entries, commandHelpEntry{
+			Usage:       def.Name,
+			Description: def.Description,
+		})
+	}
+	return entries
+}
+
+func availableCommandSuggestions() []string {
+	definitions := getDefaultCommandDefinitions()
+	suggestions := make([]string, 0, len(definitions))
+	seen := make(map[string]struct{})
+	for _, def := range definitions {
+		entries := def.Suggestions
+		if len(entries) == 0 {
+			entries = []string{def.Name}
+		}
+		for _, entry := range entries {
+			if _, ok := seen[entry]; ok {
+				continue
+			}
+			suggestions = append(suggestions, entry)
+			seen[entry] = struct{}{}
+		}
+	}
+	return suggestions
+}
+
+func commandPlaceholderExamples() []string {
+	definitions := getDefaultCommandDefinitions()
+	examples := make([]string, 0, len(definitions))
+	seen := make(map[string]struct{})
+	for _, def := range definitions {
+		example := def.PlaceholderExample
+		if example == "" {
+			continue
+		}
+		if _, ok := seen[example]; ok {
+			continue
+		}
+		examples = append(examples, example)
+		seen[example] = struct{}{}
+	}
+	return examples
+}
+
+func commandModePlaceholder() string {
+	examples := commandPlaceholderExamples()
+	if len(examples) == 0 {
+		return "Enter command:"
+	}
+	return fmt.Sprintf("Enter command: %s", strings.Join(examples, ", "))
 }
 
 func (ch *CommandHandler) handleMCP(args []string) (MenuResult, error) {
@@ -568,7 +717,7 @@ func splitKeyValue(input string, sep rune) (string, string, error) {
 	return key, val, nil
 }
 
-func (ch *CommandHandler) handleSettings() (MenuResult, error) {
+func (ch *CommandHandler) handleSettings(_ []string) (MenuResult, error) {
 	return NewSettingsMenuResult(), nil
 }
 
@@ -638,7 +787,7 @@ func (ch *CommandHandler) handleProvider(args []string) (MenuResult, error) {
 	}
 }
 
-func (ch *CommandHandler) handleInit() (MenuResult, error) {
+func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
 	// Check if orchestration model is configured
 	orchModelID := ch.providerMgr.GetOrchestrationModel()
 	if orchModelID == "" {
@@ -683,7 +832,7 @@ func (ch *CommandHandler) handleInit() (MenuResult, error) {
 	return NewMenuResult("Analyzing codebase to generate AGENTS.md..."), nil
 }
 
-func (ch *CommandHandler) handleClear() (MenuResult, error) {
+func (ch *CommandHandler) handleClear(_ []string) (MenuResult, error) {
 	// Clear the session in the orchestrator
 	if err := ch.orchestrator.ClearSession(); err != nil {
 		return MenuResult{}, fmt.Errorf("failed to clear session: %w", err)

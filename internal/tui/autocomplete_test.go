@@ -11,6 +11,7 @@ import (
 )
 
 func TestGetCommandSuggestions(t *testing.T) {
+	totalCommands := len(availableCommandSuggestions())
 	tests := []struct {
 		name     string
 		input    string
@@ -20,13 +21,13 @@ func TestGetCommandSuggestions(t *testing.T) {
 		{
 			name:     "empty input shows all commands",
 			input:    "",
-			expected: len(commandList), // total number of commands
+			expected: totalCommands, // total number of commands
 			contains: []string{"/help", "/models", "/provider", "/init", "/clear", "/quit"},
 		},
 		{
 			name:     "slash only shows all commands",
 			input:    "/",
-			expected: len(commandList),
+			expected: totalCommands,
 			contains: []string{"/help", "/models", "/provider", "/init", "/clear", "/quit"},
 		},
 		{

@@ -70,6 +70,25 @@ func (o *Orchestrator) filterToolSpecs(specs []toolSpec) ([]toolSpec, error) {
 			result = append(result, spec)
 			continue
 		}
+
+		// For MCP tools, check if their server is selected
+		if spec.isMCP {
+			serverName := o.lookupServerBySanitizedKey(spec.mcpKey)
+			if serverName == "" {
+				serverName = spec.mcpKey
+			}
+			serverNameLower := strings.ToLower(serverName)
+			mcpKeyLower := strings.ToLower(spec.mcpKey)
+
+			if includeAll || selectedMap[serverNameLower] || selectedMap[mcpKeyLower] {
+				result = append(result, spec)
+			} else {
+				logger.Debug("MCP tool %s disabled (server %s not selected)", spec.template.Name(), serverName)
+			}
+			continue
+		}
+
+		// For built-in tools, check individual tool name
 		name := strings.ToLower(spec.template.Name())
 		if includeAll || selectedMap[name] {
 			result = append(result, spec)
@@ -95,7 +114,10 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 
 	const descriptionLimit = 600
 
-	var candidateBuilder strings.Builder
+	var builtinBuilder strings.Builder
+	var mcpBuilder strings.Builder
+
+	// First pass: collect built-in tools and populate MCP summaries
 	for _, spec := range optional {
 		if spec.isMCP {
 			serverName := o.lookupServerBySanitizedKey(spec.mcpKey)
@@ -117,11 +139,12 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 			continue
 		}
 		desc := truncateForPrompt(spec.template.Description(), descriptionLimit)
-		candidateBuilder.WriteString(fmt.Sprintf("- %s: %s\n", spec.template.Name(), desc))
+		builtinBuilder.WriteString(fmt.Sprintf("- %s: %s\n", spec.template.Name(), desc))
 	}
 
+	// Second pass: format MCP summaries
 	if len(mcpSummaries) > 0 {
-		candidateBuilder.WriteString("\nYou should consider the following MCP servers:\n")
+		mcpBuilder.WriteString("\nYou should consider the following MCP servers:\n")
 		keys := make([]string, 0, len(mcpSummaries))
 		for key := range mcpSummaries {
 			keys = append(keys, key)
@@ -129,19 +152,20 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 		sort.Strings(keys)
 		for _, key := range keys {
 			summary := mcpSummaries[key]
-			candidateBuilder.WriteString(fmt.Sprintf("- %s provides:\n", summary.displayName))
+			mcpBuilder.WriteString(fmt.Sprintf("- %s provides:\n", summary.displayName))
 			sort.Strings(summary.entries)
 			for _, entry := range summary.entries {
-				candidateBuilder.WriteString(fmt.Sprintf("  • %s\n", truncateForPrompt(entry, descriptionLimit)))
+				mcpBuilder.WriteString(fmt.Sprintf("  • %s\n", truncateForPrompt(entry, descriptionLimit)))
 			}
 		}
 	}
 
-	systemPrompt := `You help choose which optional tools should remain available for an AI coding assistant.
-- Only select from the provided tool names.
-- Respond with a JSON array of tool names to enable (e.g., ["web_search", "mcp_weather_get_forecast"]).
-- Return ["*"] only if every optional tool is clearly required for the user's current context; do not use ["*"] as a default answer.
-- Return [] when no optional tools are relevant.
+	systemPrompt := `You help choose which optional tools and MCP servers should remain available for an AI coding assistant.
+- For built-in tools, select individual tool names (e.g., "web_search").
+- For MCP servers, select the server name to enable ALL tools from that server (e.g., "mcp-server-name").
+- Respond with a JSON array of tool/server names to enable (e.g., ["web_search", "mcp-rust-docs"]).
+- Return ["*"] only if every optional tool and server is clearly required for the user's current context; do not use ["*"] as a default answer.
+- Return [] when no optional tools or servers are relevant.
 - Output must be valid JSON only—no explanations, no surrounding text.`
 
 	var promptBuilder strings.Builder
@@ -158,9 +182,12 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 		promptBuilder.WriteString("\n")
 	}
 	promptBuilder.WriteString("\n</current directory entries>\n")
-	promptBuilder.WriteString("\nOptional tools to consider:\n")
-	promptBuilder.WriteString(candidateBuilder.String())
-	promptBuilder.WriteString("\nReturn a JSON array of the tool names that should remain enabled.")
+	promptBuilder.WriteString("\nOptional built-in tools to consider:\n")
+	promptBuilder.WriteString(builtinBuilder.String())
+	promptBuilder.WriteString(mcpBuilder.String())
+	promptBuilder.WriteString("\nReturn a JSON array with:\n")
+	promptBuilder.WriteString("- Individual built-in tool names that should be enabled\n")
+	promptBuilder.WriteString("- MCP server names (to enable all tools from that server)")
 
 	req := &llm.CompletionRequest{
 		Messages: []*llm.Message{

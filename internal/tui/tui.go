@@ -426,21 +426,9 @@ func sanitizePromptInput(input string, state *ansiSanitizeState) string {
 	return b.String()
 }
 
-// commandList contains all available slash commands for autocomplete.
-var commandList = []string{
-	"/help",
-	"/settings",
-	"/models",
-	"/models refresh",
-	"/mcp",
-	"/provider",
-	"/init",
-	"/clear",
-	"/quit",
-}
-
 // getCommandSuggestions returns matching command suggestions based on input
 func getCommandSuggestions(input string) []string {
+	commandList := availableCommandSuggestions()
 	if input == "" || input == "/" {
 		return commandList
 	}
@@ -874,7 +862,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+x":
 			m.commandMode = true
-			m.textarea.Placeholder = "Enter command: /models, /provider, /init, /quit, /help"
+			m.textarea.Placeholder = commandModePlaceholder()
 			m.updateSuggestions()
 			return m, baseCmd
 

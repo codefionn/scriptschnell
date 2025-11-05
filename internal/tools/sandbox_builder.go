@@ -11,7 +11,6 @@ import (
 
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 	"github.com/statcode-ai/statcode-ai/internal/session"
-	"github.com/statcode-ai/statcode-ai/internal/wasi"
 )
 
 // SandboxBuilder provides a fluent interface for building and executing sandboxed Go code.
@@ -147,7 +146,7 @@ func NewSandboxBuilder() *SandboxBuilder {
 //   - func main() entry point
 //
 // The code will be compiled to WebAssembly using TinyGo and executed in an
-// isolated wasmtime runtime with controlled access to filesystem and network.
+// isolated wazero runtime with controlled access to filesystem and network.
 //
 // Validation:
 //   - Code cannot be empty (will set builder error)
@@ -832,25 +831,17 @@ func (s *stubAuthorizer) Authorize(ctx context.Context, toolName string, params 
 	}, nil
 }
 
-// wasiAuthorizerAdapter adapts tools.Authorizer to wasi.Authorizer
+// wasiAuthorizerAdapter adapts tools.Authorizer for use by WASI host functions.
 type wasiAuthorizerAdapter struct {
 	authorizer Authorizer
 }
 
-func (a *wasiAuthorizerAdapter) Authorize(ctx context.Context, toolName string, params map[string]interface{}) (*wasi.AuthorizationDecision, error) {
+func (a *wasiAuthorizerAdapter) Authorize(ctx context.Context, toolName string, params map[string]interface{}) (*AuthorizationDecision, error) {
 	decision, err := a.authorizer.Authorize(ctx, toolName, params)
 	if err != nil {
 		return nil, err
 	}
-	if decision == nil {
-		return nil, nil
-	}
-	// Convert tools.AuthorizationDecision to wasi.AuthorizationDecision
-	return &wasi.AuthorizationDecision{
-		Allowed:           decision.Allowed,
-		Reason:            decision.Reason,
-		RequiresUserInput: decision.RequiresUserInput,
-	}, nil
+	return decision, nil
 }
 
 // containsDangerousOps performs a lightweight scan for APIs that should never

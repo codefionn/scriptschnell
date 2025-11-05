@@ -1,6 +1,6 @@
 FROM golang:1.25-bookworm AS builder
 
-# Install dependencies including CGO requirements for wasmtime
+# Install build dependencies
 RUN apt-get update && apt-get install -y git gcc libc6-dev && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -14,8 +14,7 @@ RUN go mod download
 COPY ./internal ./internal
 COPY ./cmd ./cmd
 
-# Build statcode-ai with CGO enabled (required for wasmtime)
-ENV CGO_ENABLED=1
+# Build statcode-ai
 RUN go build -o statcode-ai ./cmd/statcode-ai
 
 # Final stage - use Go image since statcode-ai will build Go programs

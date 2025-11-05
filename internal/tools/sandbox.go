@@ -375,16 +375,15 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 	}
 
 	// WASM execution (maximum isolation, controlled network access)
-	// Using WASI P1 target because wasmtime-go v28 Component Model API is not yet available
-	// Once Component Model support is added to wasmtime-go, we can switch to wasip2
+	// Using WASI P1 target because wazero currently exposes mature Preview1 support.
+	// Once Preview2 networking APIs stabilize in wazero we can switch to wasip2.
 	wasmFile := filepath.Join(sandboxDir, "main.wasm")
 
 	// TinyGo build command
 	// TinyGo handles dependencies automatically and doesn't need go.mod
 	// Note: Using wasip1 for now. wasip2 would enable HTTP but requires Component Model
-	// support which wasmtime-go doesn't expose yet. We use wasmtime CLI for Components
-	// but this prevents us from doing authorization checks programmatically.
-	// TODO: Switch to wasip2 once wasmtime-go adds Component Model support
+	// support that we can't currently provide via wazero host functions.
+	// TODO: Switch to wasip2 once wazero's Preview2 support meets our requirements
 	args := []string{"build", "-o", wasmFile, "-target=wasip1"}
 
 	// Include scheduler to support basic goroutines (timers, channels, etc.)
@@ -627,9 +626,7 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 
 	// Set memory in host state after instantiation
 	if memory := modInstance.Memory(); memory != nil {
-		// Note: wazero's Memory interface is different from wasmtime
-		// We'll need to update host_state.go to work with wazero's API
-		// For now, just note that memory is available
+		// TODO: wire up host_state helpers for wazero's memory API if needed.
 		_ = memory
 	}
 

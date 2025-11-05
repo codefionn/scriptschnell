@@ -133,7 +133,7 @@ Available tools:
     - Cache persists across sessions for faster compilation
     - Download progress shown in TUI status bar
   - Compiles to WASI P2 target using TinyGo (Component Model support)
-  - Uses wasmtime-go v28 runtime for WASM execution
+  - Uses wazero runtime for WASM execution
   - **HTTP Authorization System** - Multi-layered network interception:
     1. **Code Injection Layer** ([internal/wasi/code_wrapper.go](internal/wasi/code_wrapper.go)): Wraps user code with authorization checks before compilation
        - Injects custom `http.RoundTripper` that intercepts all HTTP requests

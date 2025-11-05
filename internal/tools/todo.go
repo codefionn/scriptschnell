@@ -36,7 +36,7 @@ func (t *TodoTool) Name() string {
 }
 
 func (t *TodoTool) Description() string {
-	return "Manage todo items with hierarchical sub-todos (session only, not persisted to disk). Supports reading, writing, checking/unchecking todos, and adding sub-todos to parent tasks."
+	return "Manage todo items with hierarchical sub-todos. Supports reading, writing, checking/unchecking todos, and adding sub-todos to parent tasks."
 }
 
 func (t *TodoTool) Parameters() map[string]interface{} {

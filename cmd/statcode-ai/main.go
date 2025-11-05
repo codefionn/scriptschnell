@@ -245,7 +245,11 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	defer orch.Close()
 
 	// Create TUI model
-	model := tui.New(orch.GetCurrentModel(), orch.GetContextFile(), cfg.DisableAnimations)
+	model := tui.New(orch.GetCurrentModel(), orch.GetExtendedContextFile(), cfg.DisableAnimations)
+	model.SetConfig(cfg)
+	model.SetActiveMCPProvider(func() []string {
+		return orch.GetActiveMCPServers()
+	})
 
 	// Set filesystem for filepath autocomplete
 	model.SetFilesystem(orch.GetFilesystem(), orch.GetWorkingDir())
@@ -263,7 +267,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	}
 
 	// Create command handler with streaming support
-	cmdHandler := tui.NewCommandHandler(ctx, providerMgr, orch)
+	cmdHandler := tui.NewCommandHandler(ctx, cfg, providerMgr, orch)
 	cmdHandler.SetStreamCallback(streamCallback)
 	cmdHandler.SetStatusCallback(func(status string) error {
 		// Send processing status updates
@@ -312,7 +316,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 
 	// Set up callbacks
 	model.SetOnSubmit(func(input string) error {
-		model.SetContextFile(orch.GetContextFile())
+		model.SetContextFile(orch.GetExtendedContextFile())
 		// Process prompt in a goroutine and send chunks via tea.Cmd
 		go func() {
 			err := orch.ProcessPrompt(ctx, input, func(chunk string) error {
@@ -482,7 +486,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					if err != nil {
 						return err
 					}
-					model.SetContextFile(orch.GetContextFile())
+					model.SetContextFile(orch.GetExtendedContextFile())
 					return nil
 
 				case tui.MenuTypeProvider:
@@ -499,7 +503,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 						return err
 					}
 					model.AddSystemMessage("Provider menu closed")
-					model.SetContextFile(orch.GetContextFile())
+					model.SetContextFile(orch.GetExtendedContextFile())
 					return nil
 
 				case tui.MenuTypeSearch:
@@ -526,7 +530,57 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					} else {
 						model.AddSystemMessage("Search settings closed")
 					}
-					model.SetContextFile(orch.GetContextFile())
+					model.SetContextFile(orch.GetExtendedContextFile())
+					return nil
+
+				case tui.MenuTypeMCP:
+					var mcpResult string
+					err := runOverlayMenu(func() error {
+						persist := func(serverName string, validate bool) (string, error) {
+							if err := cfg.Save(config.GetConfigPath()); err != nil {
+								return "", err
+							}
+							errList := orch.RefreshMCPTools()
+							if len(errList) > 0 {
+								messages := make([]string, 0, len(errList))
+								for _, e := range errList {
+									if e != nil {
+										messages = append(messages, e.Error())
+									}
+								}
+								if len(messages) > 0 {
+									return "", fmt.Errorf("some MCP tools failed to initialize: %s", strings.Join(messages, "; "))
+								}
+							}
+							if validate && serverName != "" {
+								if err := orch.TestMCPServer(serverName); err != nil {
+									return "", fmt.Errorf("validation failed for '%s': %w", serverName, err)
+								}
+								return fmt.Sprintf("MCP server '%s' validated successfully", serverName), nil
+							}
+							return "", nil
+						}
+
+						menu := tui.NewMCPMenu(cfg, 0, 0, persist)
+						subProgram := tea.NewProgram(menu, tea.WithAltScreen())
+						finalModel, err := subProgram.Run()
+						if err != nil {
+							return fmt.Errorf("menu error: %w", err)
+						}
+						if m, ok := finalModel.(*tui.MCPMenuModel); ok {
+							mcpResult = m.GetResult()
+						}
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+					if mcpResult != "" {
+						model.AddSystemMessage(mcpResult)
+					} else {
+						model.AddSystemMessage("MCP configuration closed")
+					}
+					model.SetContextFile(orch.GetExtendedContextFile())
 					return nil
 
 				case tui.MenuTypeSettings:
@@ -583,7 +637,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 		if err := orch.UpdateModels(); err != nil {
 			return fmt.Errorf("failed to refresh orchestrator models: %w", err)
 		}
-		model.SetContextFile(orch.GetContextFile())
+		model.SetContextFile(orch.GetExtendedContextFile())
 
 		return nil
 	})

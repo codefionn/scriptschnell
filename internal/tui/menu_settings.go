@@ -24,6 +24,7 @@ const (
 	actionConfigureProviders settingsMainAction = iota
 	actionConfigureModels
 	actionConfigureSearch
+	actionConfigureMCP
 )
 
 type settingsMainItem struct {
@@ -92,6 +93,11 @@ func NewSettingsMainMenu(cfg *config.Config, providerMgr *provider.Manager, widt
 			description: "Set up web search provider (Exa, Google PSE, Perplexity)",
 			action:      actionConfigureSearch,
 		},
+		settingsMainItem{
+			title:       "Configure MCP Servers",
+			description: "Manage custom Model Context Protocol servers (add, enable/disable, remove)",
+			action:      actionConfigureMCP,
+		},
 	}
 
 	l := list.New(items, settingsMainItemDelegate{}, width, height-4)
@@ -141,6 +147,10 @@ func (m SettingsMainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case actionConfigureSearch:
 				m.result = NewSearchMenuResult()
+				m.quitting = true
+				return m, tea.Quit
+			case actionConfigureMCP:
+				m.result = NewMCPMenuResult()
 				m.quitting = true
 				return m, tea.Quit
 			}

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // Tool represents an LLM tool
@@ -47,6 +48,15 @@ func NewRegistry(authorizer Authorizer) *Registry {
 // Register adds a tool to the registry
 func (r *Registry) Register(tool Tool) {
 	r.tools[tool.Name()] = tool
+}
+
+// RemoveByPrefix unregisters tools whose names share the provided prefix.
+func (r *Registry) RemoveByPrefix(prefix string) {
+	for name := range r.tools {
+		if strings.HasPrefix(name, prefix) {
+			delete(r.tools, name)
+		}
+	}
 }
 
 // Get retrieves a tool by name

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 	"github.com/statcode-ai/statcode-ai/internal/tools"
 )
@@ -128,6 +130,8 @@ type Model struct {
 	todoClient           *tools.TodoActorClient
 	viewportDirty        bool
 	viewportRefreshToken int
+	config               *config.Config
+	activeMCPProvider    func() []string
 }
 
 // ErrMsg is an error message type
@@ -231,6 +235,16 @@ func (m *Model) SetFilesystem(fs fs.FileSystem, workingDir string) {
 // SetTodoClient configures the TodoActorClient for accessing todo state
 func (m *Model) SetTodoClient(client *tools.TodoActorClient) {
 	m.todoClient = client
+}
+
+// SetConfig stores the application configuration for UI elements that need it.
+func (m *Model) SetConfig(cfg *config.Config) {
+	m.config = cfg
+}
+
+// SetActiveMCPProvider registers a callback that supplies currently active MCP servers.
+func (m *Model) SetActiveMCPProvider(provider func() []string) {
+	m.activeMCPProvider = provider
 }
 
 func (m *Model) scheduleViewportRefresh() tea.Cmd {
@@ -418,6 +432,7 @@ var commandList = []string{
 	"/settings",
 	"/models",
 	"/models refresh",
+	"/mcp",
 	"/provider",
 	"/init",
 	"/clear",
@@ -1367,6 +1382,27 @@ func (m *Model) renderTodoPanel() string {
 		content.WriteString(todoEmptyStyle.Render("No todo items yet."))
 	default:
 		m.renderTodoTree(&content, todoList.Items, "", 0)
+	}
+
+	content.WriteString("\n")
+	content.WriteString(todoTitleStyle.Render("MCP Servers"))
+	content.WriteString("\n")
+
+	var names []string
+	if m.activeMCPProvider != nil {
+		names = m.activeMCPProvider()
+	}
+
+	if len(names) == 0 {
+		content.WriteString(todoEmptyStyle.Render("No MCP servers selected."))
+		content.WriteString("\n")
+		return todoPanelStyle.Render(strings.TrimRight(content.String(), "\n"))
+	}
+
+	sort.Strings(names)
+	for _, name := range names {
+		content.WriteString(todoItemStyle.Render(fmt.Sprintf("• %s", name)))
+		content.WriteString("\n")
 	}
 
 	return todoPanelStyle.Render(strings.TrimRight(content.String(), "\n"))

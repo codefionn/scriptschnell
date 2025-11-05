@@ -26,6 +26,16 @@ func (m ToolExecutionMsg) Type() string {
 	return "ToolExecutionMsg"
 }
 
+// ToolExecutorUpdateRegistryMsg updates the registry used by the executor.
+type ToolExecutorUpdateRegistryMsg struct {
+	Registry *Registry
+}
+
+// Type implements actor.Message.
+func (m ToolExecutorUpdateRegistryMsg) Type() string {
+	return "ToolExecutorUpdateRegistryMsg"
+}
+
 // ToolExecutorActor serializes tool execution through the actor system.
 type ToolExecutorActor struct {
 	id               string
@@ -65,6 +75,12 @@ func (a *ToolExecutorActor) Receive(ctx context.Context, msg actor.Message) erro
 			return fmt.Errorf("tool execution message missing call or response channel")
 		}
 		go a.executeTool(ctx, m)
+		return nil
+	case ToolExecutorUpdateRegistryMsg:
+		if m.Registry == nil {
+			return fmt.Errorf("tool executor received nil registry update")
+		}
+		a.registry = m.Registry
 		return nil
 	default:
 		return fmt.Errorf("tool executor received unknown message type: %T", msg)
@@ -163,6 +179,14 @@ func (c *ToolExecutorActorClient) Execute(ctx context.Context, call *ToolCall, t
 // ExecuteWithApproval runs the tool call with prior approval.
 func (c *ToolExecutorActorClient) ExecuteWithApproval(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error) (*ToolResult, error) {
 	return c.execute(ctx, call, toolName, statusCallback, true)
+}
+
+// SetRegistry updates the executor's registry.
+func (c *ToolExecutorActorClient) SetRegistry(reg *Registry) error {
+	if reg == nil {
+		return fmt.Errorf("registry must not be nil")
+	}
+	return c.actorRef.Send(ToolExecutorUpdateRegistryMsg{Registry: reg})
 }
 
 func (c *ToolExecutorActorClient) execute(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error, approved bool) (*ToolResult, error) {

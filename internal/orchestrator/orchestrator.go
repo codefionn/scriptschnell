@@ -14,6 +14,7 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 	"github.com/statcode-ai/statcode-ai/internal/llm"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/statcode-ai/internal/mcp"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 	"github.com/statcode-ai/statcode-ai/internal/session"
 	"github.com/statcode-ai/statcode-ai/internal/tools"
@@ -52,6 +53,10 @@ type Orchestrator struct {
 	activeShellMu        sync.Mutex
 	activeShellChan      chan struct{}
 	loopDetector         *LoopDetector
+	mcpManager           *mcp.Manager
+	toolSelectionDirty   bool
+	activeMCPServers     []string
+	activeMCPMu          sync.RWMutex
 }
 
 const (
@@ -88,6 +93,7 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 		cliMode:      cliMode,
 		loopDetector: NewLoopDetector(),
 	}
+	orch.mcpManager = mcp.NewManager(cfg, cfg.WorkingDir, providerMgr)
 
 	// Initialize clients first so we have summarize client for authorization actor
 	if err := orch.initializeClients(); err != nil {
@@ -160,7 +166,13 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 	orch.errorJudgeCancel = errorJudgeCancel
 
 	// Register tools
-	orch.registerTools()
+	if toolErrs := orch.rebuildTools(false); len(toolErrs) > 0 {
+		for _, terr := range toolErrs {
+			if terr != nil {
+				logger.Warn("Tool registration warning: %v", terr)
+			}
+		}
+	}
 
 	// Set up tool executor actor
 	toolExecutorCtx, toolExecutorCancel := context.WithCancel(context.Background())
@@ -220,45 +232,244 @@ func (o *Orchestrator) getSummarizeModelID() string {
 	return modelID
 }
 
-func (o *Orchestrator) registerTools() {
-	o.toolRegistry = tools.NewRegistry(o.authorizer)
+type toolSpec struct {
+	template tools.Tool
+	critical bool
+	factory  func(reg *tools.Registry) tools.Tool
+	isMCP    bool
+	mcpKey   string
+}
 
-	// Register read file tool
-	o.toolRegistry.Register(o.chooseReadFileTool())
+func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
+	var errs []error
 
-	// Register file creation tool
-	o.toolRegistry.Register(tools.NewCreateFileTool(o.fs, o.session))
-
-	// Register diff tool variant based on active model
-	if o.shouldUseSimpleDiffTool() {
-		o.toolRegistry.Register(tools.NewWriteFileSimpleDiffTool(o.fs, o.session))
-	} else {
-		o.toolRegistry.Register(tools.NewWriteFileDiffTool(o.fs, o.session))
+	specs := make([]toolSpec, 0, 16)
+	addSpec := func(template tools.Tool, critical bool, factory func(reg *tools.Registry) tools.Tool, isMCP bool, mcpKey string) {
+		if template == nil || factory == nil {
+			return
+		}
+		specs = append(specs, toolSpec{
+			template: template,
+			critical: critical,
+			factory:  factory,
+			isMCP:    isMCP,
+			mcpKey:   mcpKey,
+		})
 	}
 
-	// Register search files tool
-	o.toolRegistry.Register(tools.NewSearchFilesTool(o.fs))
+	// Core filesystem tools
+	addSpec(
+		o.chooseReadFileTool(),
+		true,
+		func(_ *tools.Registry) tools.Tool { return o.chooseReadFileTool() },
+		false,
+		"",
+	)
+	addSpec(
+		tools.NewCreateFileTool(o.fs, o.session),
+		true,
+		func(_ *tools.Registry) tools.Tool { return tools.NewCreateFileTool(o.fs, o.session) },
+		false,
+		"",
+	)
+	if o.shouldUseSimpleDiffTool() {
+		addSpec(
+			tools.NewWriteFileSimpleDiffTool(o.fs, o.session),
+			true,
+			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileSimpleDiffTool(o.fs, o.session) },
+			false,
+			"",
+		)
+	} else {
+		addSpec(
+			tools.NewWriteFileDiffTool(o.fs, o.session),
+			true,
+			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileDiffTool(o.fs, o.session) },
+			false,
+			"",
+		)
+	}
 
-	// Register web search tool
-	o.toolRegistry.Register(tools.NewWebSearchTool(o.config))
+	// Discovery / search tools
+	addSpec(
+		tools.NewSearchFilesTool(o.fs),
+		false,
+		func(_ *tools.Registry) tools.Tool { return tools.NewSearchFilesTool(o.fs) },
+		false,
+		"",
+	)
+	addSpec(
+		tools.NewWebSearchTool(o.config),
+		false,
+		func(_ *tools.Registry) tools.Tool { return tools.NewWebSearchTool(o.config) },
+		false,
+		"",
+	)
 
-	// Register todo tool
-	o.toolRegistry.Register(tools.NewTodoTool(o.todoClient))
+	// Task management
+	addSpec(
+		tools.NewTodoTool(o.todoClient),
+		false,
+		func(_ *tools.Registry) tools.Tool { return tools.NewTodoTool(o.todoClient) },
+		false,
+		"",
+	)
 
-	// Register shell tool
-	o.toolRegistry.Register(tools.NewShellTool(o.session, o.workingDir))
+	// Shell tooling
+	addSpec(
+		tools.NewShellTool(o.session, o.workingDir),
+		true,
+		func(_ *tools.Registry) tools.Tool { return tools.NewShellTool(o.session, o.workingDir) },
+		false,
+		"",
+	)
+	addSpec(
+		tools.NewStatusProgramTool(o.session),
+		true,
+		func(_ *tools.Registry) tools.Tool { return tools.NewStatusProgramTool(o.session) },
+		false,
+		"",
+	)
+	addSpec(
+		tools.NewWaitProgramTool(o.session),
+		true,
+		func(_ *tools.Registry) tools.Tool { return tools.NewWaitProgramTool(o.session) },
+		false,
+		"",
+	)
+	addSpec(
+		tools.NewStopProgramTool(o.session),
+		true,
+		func(_ *tools.Registry) tools.Tool { return tools.NewStopProgramTool(o.session) },
+		false,
+		"",
+	)
 
-	// Register status and wait tools
-	o.toolRegistry.Register(tools.NewStatusProgramTool(o.session))
-	o.toolRegistry.Register(tools.NewWaitProgramTool(o.session))
+	// Sandbox tool with TinyGo status forwarding
+	sandboxTemplate := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
+	o.configureSandboxTool(sandboxTemplate)
+	addSpec(
+		sandboxTemplate,
+		true,
+		func(_ *tools.Registry) tools.Tool {
+			instance := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
+			o.configureSandboxTool(instance)
+			return instance
+		},
+		false,
+		"",
+	)
 
-	// Register stop program tool
-	o.toolRegistry.Register(tools.NewStopProgramTool(o.session))
+	// Parallel execution
+	addSpec(
+		tools.NewParallelTool(nil),
+		false,
+		func(reg *tools.Registry) tools.Tool { return tools.NewParallelTool(reg) },
+		false,
+		"",
+	)
 
-	// Register sandbox tool with filesystem and session for controlled access
-	sandboxTool := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
+	// Summarization-related tools
+	if o.summarizeClient != nil {
+		addSpec(
+			tools.NewSummarizeFileTool(o.fs, o.session, o.summarizeClient),
+			false,
+			func(_ *tools.Registry) tools.Tool {
+				return tools.NewSummarizeFileTool(o.fs, o.session, o.summarizeClient)
+			},
+			false,
+			"",
+		)
+		addSpec(
+			tools.NewToolSummarizeTool(nil, o.summarizeClient),
+			false,
+			func(reg *tools.Registry) tools.Tool { return tools.NewToolSummarizeTool(reg, o.summarizeClient) },
+			false,
+			"",
+		)
+	}
 
-	// Set up TinyGo status callback to use the current status callback during ProcessPrompt
+	// MCP-derived tools
+	if o.mcpManager != nil {
+		mcpTools, mcpErrs := o.mcpManager.BuildTools()
+		for _, err := range mcpErrs {
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
+		for _, tool := range mcpTools {
+			t := tool
+			mcpKey := extractMCPSanitizedServer(t.Name())
+			addSpec(
+				t,
+				false,
+				func(_ *tools.Registry) tools.Tool { return t },
+				true,
+				mcpKey,
+			)
+		}
+	}
+
+	filteredSpecs := specs
+	if applyFilter {
+		var filterErr error
+		filteredSpecs, filterErr = o.filterToolSpecs(specs)
+		if filterErr != nil {
+			errs = append(errs, filterErr)
+		}
+	} else {
+		o.toolSelectionDirty = true
+		o.setActiveMCPServers(nil)
+	}
+
+	registry := tools.NewRegistry(o.authorizer)
+	o.toolRegistry = registry
+
+	var activeMCPSanitized []string
+	seenMCP := make(map[string]struct{})
+
+	for _, spec := range filteredSpecs {
+		toolInstance := spec.factory(registry)
+		if toolInstance == nil {
+			continue
+		}
+		registry.Register(toolInstance)
+
+		if applyFilter && spec.isMCP && spec.mcpKey != "" {
+			if _, exists := seenMCP[spec.mcpKey]; !exists {
+				activeMCPSanitized = append(activeMCPSanitized, spec.mcpKey)
+				seenMCP[spec.mcpKey] = struct{}{}
+			}
+		}
+	}
+
+	if o.toolExecutor != nil {
+		if err := o.toolExecutor.SetRegistry(registry); err != nil {
+			logger.Warn("Failed to update tool executor registry: %v", err)
+		}
+	}
+
+	if applyFilter {
+		o.setActiveMCPServers(o.resolveMCPServerNames(activeMCPSanitized))
+		o.toolSelectionDirty = false
+	}
+
+	return errs
+}
+
+func (o *Orchestrator) chooseReadFileTool() tools.Tool {
+	return tools.NewReadFileNumberedTool(o.fs, o.session)
+}
+
+func (o *Orchestrator) shouldUseSimpleDiffTool() bool {
+	return true
+}
+
+func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
+	if sandboxTool == nil {
+		return
+	}
+	sandboxTool.SetSummarizeClient(o.summarizeClient)
 	if sandboxTool.GetTinyGoManager() != nil {
 		sandboxTool.GetTinyGoManager().SetStatusCallback(func(status string) {
 			o.statusCbMu.Lock()
@@ -272,30 +483,132 @@ func (o *Orchestrator) registerTools() {
 			}
 		})
 	}
-
-	o.toolRegistry.Register(sandboxTool)
-
-	// Register parallel execution tool
-	o.toolRegistry.Register(tools.NewParallelTool(o.toolRegistry))
-
-	// Register summarize file tool (if summarize client is available)
-	if o.summarizeClient != nil {
-		o.toolRegistry.Register(tools.NewSummarizeFileTool(o.fs, o.session, o.summarizeClient))
-	}
-
-	// Register tool summarize (meta-tool that wraps other tools with summarization)
-	// NOTE: Register this last so it has access to all other tools
-	if o.summarizeClient != nil {
-		o.toolRegistry.Register(tools.NewToolSummarizeTool(o.toolRegistry, o.summarizeClient))
-	}
 }
 
-func (o *Orchestrator) chooseReadFileTool() tools.Tool {
-	return tools.NewReadFileNumberedTool(o.fs, o.session)
+// RefreshMCPTools rebuilds and registers tools derived from MCP server configuration.
+func (o *Orchestrator) RefreshMCPTools() []error {
+	return o.rebuildTools(false)
 }
 
-func (o *Orchestrator) shouldUseSimpleDiffTool() bool {
-	return true
+// TestMCPServer attempts to build tools for a specific MCP server to validate configuration.
+func (o *Orchestrator) TestMCPServer(serverName string) error {
+	if o.mcpManager == nil {
+		return fmt.Errorf("mcp manager not initialized")
+	}
+	server, ok := o.config.MCP.Servers[serverName]
+	if !ok {
+		return fmt.Errorf("mcp server not found: %s", serverName)
+	}
+
+	tmpCfg := *o.config
+	tmpCfg.MCP.Servers = map[string]*config.MCPServerConfig{
+		serverName: server,
+	}
+
+	manager := mcp.NewManager(&tmpCfg, o.workingDir, o.providerMgr)
+	tools, errs := manager.BuildTools()
+	if len(errs) > 0 {
+		messages := make([]string, 0, len(errs))
+		for _, err := range errs {
+			if err != nil {
+				messages = append(messages, err.Error())
+			}
+		}
+		if len(messages) > 0 {
+			return fmt.Errorf("%s", strings.Join(messages, "; "))
+		}
+	}
+	if len(tools) == 0 {
+		return fmt.Errorf("no tools produced for MCP server: %s", serverName)
+	}
+	return nil
+}
+
+func (o *Orchestrator) setActiveMCPServers(servers []string) {
+	o.activeMCPMu.Lock()
+	defer o.activeMCPMu.Unlock()
+	if servers == nil {
+		o.activeMCPServers = nil
+		return
+	}
+	o.activeMCPServers = append([]string(nil), servers...)
+}
+
+func (o *Orchestrator) resolveMCPServerNames(keys []string) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	resolved := make([]string, 0, len(keys))
+	seen := make(map[string]struct{})
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		name := o.lookupServerBySanitizedKey(key)
+		if name == "" {
+			name = key
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		resolved = append(resolved, name)
+		seen[name] = struct{}{}
+	}
+	return resolved
+}
+
+func (o *Orchestrator) lookupServerBySanitizedKey(key string) string {
+	if o.config == nil {
+		return ""
+	}
+	for name := range o.config.MCP.Servers {
+		if sanitizeMCPIdentifier(name) == key {
+			return name
+		}
+	}
+	return ""
+}
+
+func (o *Orchestrator) GetActiveMCPServers() []string {
+	o.activeMCPMu.RLock()
+	defer o.activeMCPMu.RUnlock()
+	if len(o.activeMCPServers) == 0 {
+		return nil
+	}
+	return append([]string(nil), o.activeMCPServers...)
+}
+
+func extractMCPSanitizedServer(name string) string {
+	if !strings.HasPrefix(name, "mcp_") {
+		return ""
+	}
+	parts := strings.SplitN(name, "_", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[1]
+}
+
+func sanitizeMCPIdentifier(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevUnderscore = false
+		default:
+			if !prevUnderscore {
+				b.WriteByte('_')
+				prevUnderscore = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // StatusCallback is called to update the UI with processing status
@@ -347,6 +660,22 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 
 	// Broadcast initial context usage after recording the user message
 	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
+
+	if o.toolSelectionDirty {
+		if errs := o.rebuildTools(true); len(errs) > 0 {
+			for _, err := range errs {
+				if err != nil {
+					logger.Warn("Tool selection refresh warning: %v", err)
+					if msg := err.Error(); strings.Contains(msg, "unexpected response format") {
+						val, ok := err.(interface{ Response() string })
+						if ok && val.Response() != "" {
+							logger.Warn("Tool selection summarizer response: %s", val.Response())
+						}
+					}
+				}
+			}
+		}
+	}
 
 	// Tool execution loop
 	maxIterations := 256 // Prevent infinite loops
@@ -1364,6 +1693,26 @@ func (o *Orchestrator) GetContextFile() string {
 		return ""
 	}
 	return llm.AgentsFileName
+}
+
+// GetExtendedContextFile returns the standard context file if present, otherwise falls back to README variants.
+func (o *Orchestrator) GetExtendedContextFile() string {
+	if path := o.GetContextFile(); path != "" {
+		return path
+	}
+
+	candidates := []string{"README.md", "README.txt", "README"}
+	for _, candidate := range candidates {
+		exists, err := o.fs.Exists(o.ctx, candidate)
+		if err != nil {
+			logger.Debug("extended context check failed for %s: %v", candidate, err)
+			continue
+		}
+		if exists {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func (o *Orchestrator) GetInitPrompt() string {

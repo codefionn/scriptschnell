@@ -1,6 +1,6 @@
 # StatCode AI
 
-> This project is actively in intial development. Use at your own risk!
+> This project is actively in initial development. Use at your own risk!
 
 **statcode-ai** is a TUI that generates code from prompts using LLMs.
 
@@ -33,11 +33,12 @@
 - [ ] Todo task are not showing up in the UI
 - [ ] On configured web search, add text to the system prompt for more up-to-date results
 - [ ] Speed up startup time
-- [ ] Support user configured mcp's with auto-selecting only relevant ones
+- [x] Support user configured mcp's with auto-selecting only relevant ones
 - [ ] Only cache directory listings in working directory
 - [ ] Implement persistent authorization on a per-project basis
 - [ ] Unify tui command programming
 - [ ] Filter models by provider in models menu
+- [ ] Fix models menu (weird scrolling behavior, layout issues)
 
 ## Goals
 
@@ -61,13 +62,22 @@ flowchart TD
     orchestrator -->|Completion requests| orchLLM[Orchestration Model Client]
     orchLLM -->|Assistant text + tool calls| orchestrator
     orchestrator -->|Dispatch tool call| registry[Tool Registry]
-    registry --> tools["Tool Actors<br/>(read_file, write_file_diff, shell, sandbox, ...)"]
+    registry --> tools["Tool Actors<br/>(read_file, write_file_diff, shell, sandbox, MCP, ...)"]
     tools -->|Tool outputs| orchestrator
     orchestrator -->|Record message| session
     orchestrator -->|Stream status| ui[TUI / CLI Output]
 
+    orchestrator -->|Configured servers| mcpMgr[MCP Manager]
+    mcpMgr --> mcpSources["External MCP Servers<br/>(command, openapi, openai)"]
+    mcpMgr -->|Register tools| registry
+
+    orchestrator -->|Optional tool selection| toolFilter[Optional Tool Filter]
+    toolFilter -->|Summarization request| summarizer[(Summarization Model)]
+    summarizer -->|Relevant tools| toolFilter
+    toolFilter -->|Enable subset| registry
+
     orchestrator -->|Token usage check| autoCompact{Over context limit?}
-    autoCompact -->|Summarize earlier messages| summarizer[(Summarization Model)]
+    autoCompact -->|Summarize earlier messages| summarizer
     summarizer -->|Summary message| session
 
     orchestrator -->|Truncated or empty reply| autoContinue{Auto-continue Judge}

@@ -14,6 +14,8 @@ const (
 	MenuTypeSearch
 	// MenuTypeSettings indicates the main settings menu
 	MenuTypeSettings
+	// MenuTypeMCP indicates the MCP configuration menu
+	MenuTypeMCP
 	// MenuTypeClearSession indicates the session should be cleared
 	MenuTypeClearSession
 )
@@ -65,6 +67,13 @@ func NewModelsMenuResult(role ModelRole) MenuResult {
 func NewSearchMenuResult() MenuResult {
 	return MenuResult{
 		Type: MenuTypeSearch,
+	}
+}
+
+// NewMCPMenuResult creates a MenuResult for the MCP configuration menu
+func NewMCPMenuResult() MenuResult {
+	return MenuResult{
+		Type: MenuTypeMCP,
 	}
 }
 

@@ -399,6 +399,11 @@ func (m ProviderMenuModel) addProvider(providerType, providerLabel, apiKey strin
 			return ErrMsg(fmt.Errorf("failed to add provider: %w", err))
 		}
 
+		// Auto-configure default model if this is the first provider
+		if err := m.providerMgr.ConfigureDefaultModelForProvider(ptype); err != nil {
+			return ErrMsg(fmt.Errorf("failed to configure default model: %w", err))
+		}
+
 		// Get the number of models fetched
 		p, ok := m.providerMgr.GetProvider(ptype)
 		modelCount := 0
@@ -428,6 +433,11 @@ func (m ProviderMenuModel) addProviderWithURL(providerType, providerLabel, apiKe
 		// Add provider with base URL and fetch models from API
 		if err := m.providerMgr.AddProviderWithAPIListingAndBaseURL(ctx, ptype, apiKey, baseURL); err != nil {
 			return ErrMsg(fmt.Errorf("failed to add provider: %w", err))
+		}
+
+		// Auto-configure default model if this is the first provider
+		if err := m.providerMgr.ConfigureDefaultModelForProvider(ptype); err != nil {
+			return ErrMsg(fmt.Errorf("failed to configure default model: %w", err))
 		}
 
 		// Get the number of models fetched

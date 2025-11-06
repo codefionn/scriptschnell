@@ -493,3 +493,66 @@ func (m *Manager) rebuildMatcher() {
 
 	m.matcher = ahocorasick.NewStringMatcher(terms)
 }
+
+// PreferredModels contains the list of preferred models for each provider, ordered by preference
+var PreferredModels = map[string][]string{
+	"anthropic": {"claude-4-5-sonnet-20250514", "claude-sonnet-4.5", "claude-3-5-sonnet-20241022"},
+	"openai":    {"gpt-5-codex", "gpt-5", "gpt-5-chat-latest", "gpt-4o"},
+	"google":    {"models/gemini-2.5-pro", "models/gemini-2.0-pro-exp"},
+	"mistral":   {"codestral-latest"},
+	"openrouter": {
+		"anthropic/claude-3.5-sonnet",
+		"meta-llama/llama-3.1-70b-instruct",
+		"openrouter/auto",
+	},
+	"cerebras": {"qwen-3-coder-480b"},
+	"groq":     {"llama-3.3-70b-versatile", "mixtral-8x7b-32768"},
+}
+
+// ChooseDefaultModel chooses the best default model for a provider based on preferred models list
+func (m *Manager) ChooseDefaultModel(providerName string, preferred []string) (string, error) {
+	p, ok := m.GetProvider(providerName)
+	if !ok || p == nil || len(p.Models) == 0 {
+		return "", fmt.Errorf("no models available for provider %s", providerName)
+	}
+
+	if len(preferred) > 0 {
+		for _, candidate := range preferred {
+			for _, model := range p.Models {
+				if strings.EqualFold(model.ID, candidate) {
+					return model.ID, nil
+				}
+			}
+		}
+	}
+
+	return p.Models[0].ID, nil
+}
+
+// ConfigureDefaultModelForProvider automatically selects and configures default models
+// for a provider if no orchestration model is currently configured
+func (m *Manager) ConfigureDefaultModelForProvider(providerName string) error {
+	// Only auto-configure if no orchestration model is set
+	if m.GetOrchestrationModel() != "" {
+		return nil // Already configured, nothing to do
+	}
+
+	// Get preferred models for this provider
+	preferred := PreferredModels[providerName]
+
+	// Choose the best model
+	modelName, err := m.ChooseDefaultModel(providerName, preferred)
+	if err != nil {
+		return err
+	}
+
+	// Set both orchestration and summarization models
+	if err := m.SetOrchestrationModel(modelName); err != nil {
+		return fmt.Errorf("failed to set orchestration model: %w", err)
+	}
+	if err := m.SetSummarizeModel(modelName); err != nil {
+		return fmt.Errorf("failed to set summarization model: %w", err)
+	}
+
+	return nil
+}

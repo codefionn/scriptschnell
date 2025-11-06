@@ -194,20 +194,6 @@ func autoConfigureFromEnvironment(providerMgr *provider.Manager) error {
 		"groq",
 	}
 
-	preferredModels := map[string][]string{
-		"anthropic": {"claude-4-5-sonnet-20250514", "claude-sonnet-4.5", "claude-3-5-sonnet-20241022"},
-		"openai":    {"gpt-5-codex", "gpt-5", "gpt-5-chat-latest", "gpt-4o"},
-		"google":    {"models/gemini-2.5-pro", "models/gemini-2.0-pro-exp"},
-		"mistral":   {"codestral-latest"},
-		"openrouter": {
-			"anthropic/claude-3.5-sonnet",
-			"meta-llama/llama-3.1-70b-instruct",
-			"openrouter/auto",
-		},
-		"cerebras": {"qwen-3-coder-480b"},
-		"groq":     {"llama-3.3-70b-versatile", "mixtral-8x7b-32768"},
-	}
-
 	ctx := context.Background()
 
 	for _, providerName := range candidates {
@@ -220,7 +206,8 @@ func autoConfigureFromEnvironment(providerMgr *provider.Manager) error {
 			return fmt.Errorf("failed to add provider %s: %w", providerName, err)
 		}
 
-		modelName, err := chooseDefaultModel(providerMgr, providerName, preferredModels[providerName])
+		// Use shared function to choose and configure default model
+		modelName, err := providerMgr.ChooseDefaultModel(providerName, provider.PreferredModels[providerName])
 		if err != nil {
 			return err
 		}
@@ -255,25 +242,6 @@ func autoConfigureFromEnvironment(providerMgr *provider.Manager) error {
 	sort.Strings(hints)
 
 	return fmt.Errorf("no API key found in environment (%s)", strings.Join(hints, ", "))
-}
-
-func chooseDefaultModel(providerMgr *provider.Manager, providerName string, preferred []string) (string, error) {
-	p, ok := providerMgr.GetProvider(providerName)
-	if !ok || p == nil || len(p.Models) == 0 {
-		return "", fmt.Errorf("no models available for provider %s", providerName)
-	}
-
-	if len(preferred) > 0 {
-		for _, candidate := range preferred {
-			for _, model := range p.Models {
-				if strings.EqualFold(model.ID, candidate) {
-					return model.ID, nil
-				}
-			}
-		}
-	}
-
-	return p.Models[0].ID, nil
 }
 
 // getAPIKeyForProvider retrieves the API key for a given provider from environment

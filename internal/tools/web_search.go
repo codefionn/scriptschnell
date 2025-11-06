@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/statcode-ai/statcode-ai/internal/config"
-	"github.com/statcode-ai/statcode-ai/internal/llm"
+	"github.com/statcode-ai/statcode-ai/internal/search"
 )
 
 // WebSearchTool performs web searches using configured search providers
@@ -75,14 +75,14 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 	}
 
 	// Create the appropriate search provider
-	var provider llm.SearchProvider
+	var provider search.SearchProvider
 	switch t.cfg.Search.Provider {
 	case "exa":
-		provider = llm.NewExaSearchProvider(t.cfg.Search.Exa)
+		provider = search.NewExaSearchProvider(t.cfg.Search.Exa)
 	case "google_pse":
-		provider = llm.NewGooglePSEProvider(t.cfg.Search.GooglePSE)
+		provider = search.NewGooglePSEProvider(t.cfg.Search.GooglePSE)
 	case "perplexity":
-		provider = llm.NewPerplexitySearchProvider(t.cfg.Search.Perplexity)
+		provider = search.NewPerplexitySearchProvider(t.cfg.Search.Perplexity)
 	default:
 		return "", fmt.Errorf("unsupported search provider: %s", t.cfg.Search.Provider)
 	}
@@ -102,7 +102,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 	return formatSearchResults(response), nil
 }
 
-func formatSearchResults(response *llm.SearchResponse) string {
+func formatSearchResults(response *search.SearchResponse) string {
 	if len(response.Results) == 0 {
 		return fmt.Sprintf("No results found for query: %s", response.Query)
 	}

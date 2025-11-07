@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -99,6 +100,30 @@ func getTinyGoCacheDir() (string, error) {
 	return baseDir, nil
 }
 
+// checkTinyGoInPATH checks if tinygo is available in the system PATH
+func (m *TinyGoManager) checkTinyGoInPATH() (string, error) {
+	// Try to find tinygo in PATH
+	path, err := exec.LookPath("tinygo")
+	if err != nil {
+		// tinygo not found in PATH
+		return "", err
+	}
+	
+	// Verify the found binary is working by checking its version
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	cmd := exec.CommandContext(ctx, path, "version")
+	output, err := cmd.Output()
+	if err != nil {
+		m.logger.Warn("Found tinygo in PATH at %s but version check failed: %v", path, err)
+		return "", fmt.Errorf("tinygo binary found but not working properly")
+	}
+	
+	m.logger.Debug("Using system tinygo at %s, version: %s", path, strings.TrimSpace(string(output)))
+	return path, nil
+}
+
 // GetTinyGoBinary returns the path to the TinyGo binary, downloading it if necessary
 func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 	m.mu.Lock()
@@ -108,6 +133,15 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 		m.logger = logger.Global().WithPrefix("tinygo")
 	}
 
+	// First, check if tinygo is available in PATH
+	if systemTinyGo, err := m.checkTinyGoInPATH(); err == nil {
+		m.logger.Info("Using system TinyGo from PATH: %s", systemTinyGo)
+		return systemTinyGo, nil
+	} else {
+		m.logger.Debug("TinyGo not found in PATH, will use bundled version: %v", err)
+	}
+
+	// Check if TinyGo is already cached
 	// Check if TinyGo is already cached
 	tinyGoPath := filepath.Join(m.cacheDir, tinyGoVersion, "bin", "tinygo")
 	if runtime.GOOS == "windows" {

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"os/exec"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -146,6 +147,32 @@ func TestTinyGoManager_Download(t *testing.T) {
 	}
 
 	t.Log("Successfully verified cached TinyGo binary")
+}
+
+// TestTinyGoManager_CheckPATH tests the PATH detection functionality
+func TestTinyGoManager_CheckPATH(t *testing.T) {
+	mgr, err := NewTinyGoManager()
+	if err != nil {
+		t.Fatalf("Failed to create TinyGo manager: %v", err)
+	}
+
+	// Test checking for tinygo in PATH
+	path, err := mgr.checkTinyGoInPATH()
+	
+	// The result depends on whether tinygo is installed in the system
+	if err != nil {
+		t.Logf("TinyGo not found in PATH (expected if not installed): %v", err)
+	} else {
+		t.Logf("Found TinyGo in PATH at: %s", path)
+		
+		// Verify we can execute it
+		cmd := exec.Command(path, "version")
+		output, err := cmd.Output()
+		if err != nil {
+			t.Errorf("Found tinygo but failed to execute: %v", err)
+		}
+		t.Logf("TinyGo version: %s", string(output))
+	}
 }
 
 // Helper function

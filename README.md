@@ -103,6 +103,5 @@ Supported providers:
 - Ollama
 - OpenAI-compatible
 
-Recommended are `Cerebras` with `qwen-3-coder-480b` model (it will be interesting
-how `zai-glm-4.6` performs) for the orchestration model and `gpt-5-nano` for the
+Recommended are `Cerebras` with `zai-glm-4.6` for the orchestration model and `gpt-5-nano` for the
 summarization model.

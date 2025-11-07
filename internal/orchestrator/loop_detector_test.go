@@ -28,7 +28,7 @@ func TestLoopDetector_SimpleLoop(t *testing.T) {
 	for i := 0; i < 11; i++ {
 		isLoop, pattern, count := ld.AddText("This is a repeated sentence.")
 
-		if i < 10 {
+		if i < 9 {
 			if isLoop {
 				t.Errorf("Iteration %d: Expected no loop yet", i)
 			}
@@ -36,8 +36,8 @@ func TestLoopDetector_SimpleLoop(t *testing.T) {
 			if !isLoop {
 				t.Errorf("Iteration %d: Expected loop to be detected", i)
 			}
-			if count != 11 {
-				t.Errorf("Expected count=11, got %d", count)
+			if count < 10 {
+				t.Errorf("Expected count>=10, got %d", count)
 			}
 			if !strings.Contains(pattern, "This is a repeated sentence") {
 				t.Errorf("Expected pattern to contain the repeated sentence, got: %s", pattern)
@@ -56,7 +56,7 @@ func TestLoopDetector_NGramLoop(t *testing.T) {
 	for i := 0; i < 11; i++ {
 		isLoop, detectedPattern, count := ld.AddText(pattern1)
 
-		if i < 10 {
+		if i < 9 {
 			if isLoop {
 				t.Errorf("Iteration %d: Expected no loop yet", i)
 			}
@@ -64,8 +64,8 @@ func TestLoopDetector_NGramLoop(t *testing.T) {
 			if !isLoop {
 				t.Errorf("Iteration %d: Expected loop to be detected", i)
 			}
-			if count < 11 {
-				t.Errorf("Expected count>=11, got %d", count)
+			if count < 10 {
+				t.Errorf("Expected count>=10, got %d", count)
 			}
 			t.Logf("Detected pattern: %s (count=%d)", detectedPattern, count)
 		}

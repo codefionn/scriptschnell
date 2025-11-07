@@ -35,6 +35,7 @@ func TestCheckMessagesForLoops_WithSimpleLoop(t *testing.T) {
 		})
 	}
 
+
 	hasLoop, info := checkMessagesForLoops(messages, 10, "assistant")
 	if !hasLoop {
 		t.Errorf("Expected loop to be detected for repetitive messages")
@@ -174,7 +175,7 @@ func TestCheckMessagesForLoops_AllRoles(t *testing.T) {
 	messages := []*session.Message{}
 
 	// Add repetitive messages from different roles
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 11; i++ {
 		messages = append(messages, &session.Message{
 			Role:    "user",
 			Content: "Same user message.",
@@ -186,7 +187,7 @@ func TestCheckMessagesForLoops_AllRoles(t *testing.T) {
 	}
 
 	// With roleFilter="", should detect loop across all roles
-	hasLoop, _ := checkMessagesForLoops(messages, 20, "")
+	hasLoop, _ := checkMessagesForLoops(messages, 25, "")
 	if !hasLoop {
 		t.Errorf("Expected loop to be detected across all roles")
 	}

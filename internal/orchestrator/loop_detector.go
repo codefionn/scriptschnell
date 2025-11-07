@@ -118,7 +118,7 @@ func (ld *LoopDetector) checkForLoops() (bool, string, int) {
 			ld.patternCounts[pattern]++
 
 			// Check if this pattern exceeded threshold
-			if ld.patternCounts[pattern] > loopThreshold {
+			if ld.patternCounts[pattern] >= loopThreshold {
 				logger.Warn("Loop detected: %d-gram pattern repeated %d times", n, ld.patternCounts[pattern])
 				return true, pattern, ld.patternCounts[pattern]
 			}

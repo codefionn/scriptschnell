@@ -505,7 +505,7 @@ var PreferredModels = map[string][]string{
 		"meta-llama/llama-3.1-70b-instruct",
 		"openrouter/auto",
 	},
-	"cerebras": {"qwen-3-coder-480b"},
+	"cerebras": {"zai-glm-4.6"},
 	"groq":     {"llama-3.3-70b-versatile", "mixtral-8x7b-32768"},
 }
 

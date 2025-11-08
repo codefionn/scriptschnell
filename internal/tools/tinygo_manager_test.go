@@ -1,9 +1,22 @@
 package tools
 
+// TinyGo Manager Tests
+//
+// This file contains tests for the TinyGo manager functionality:
+// 1. Unit tests: Fast tests that verify URL generation, cache directory logic, etc.
+// 2. Integration tests: Slow tests that actually download TinyGo (~50MB)
+//
+// Integration tests require:
+// - Network access to download TinyGo from GitHub releases
+// - Disk space for the cached TinyGo binary
+//
+// To run only fast unit tests (default): go test ./internal/tools
+// To run integration tests: go test -run Integration ./internal/tools -integration
+
 import (
 	"context"
-	"os/exec"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -91,10 +104,10 @@ func TestTinyGoManager_BinaryPath(t *testing.T) {
 }
 
 // TestTinyGoManager_Download tests the actual download (integration test)
-// This test is skipped by default as it downloads ~50MB
-func TestTinyGoManager_Download(t *testing.T) {
+// This test is skipped by default as it downloads ~50MB and takes several minutes
+func TestIntegration_TinyGoManager_Download(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping download test in short mode")
+		t.Skip("Skipping TinyGo download integration test - run with: go test -run Integration ./internal/tools -short=false")
 	}
 
 	// Create a temporary cache directory for testing
@@ -158,13 +171,13 @@ func TestTinyGoManager_CheckPATH(t *testing.T) {
 
 	// Test checking for tinygo in PATH
 	path, err := mgr.checkTinyGoInPATH()
-	
+
 	// The result depends on whether tinygo is installed in the system
 	if err != nil {
 		t.Logf("TinyGo not found in PATH (expected if not installed): %v", err)
 	} else {
 		t.Logf("Found TinyGo in PATH at: %s", path)
-		
+
 		// Verify we can execute it
 		cmd := exec.Command(path, "version")
 		output, err := cmd.Output()

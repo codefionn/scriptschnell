@@ -8,8 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build the binary
 go build -o statcode-ai ./cmd/statcode-ai
 
-# Run tests
-go test ./...
+# Run simple tests
+go test ./... -short
 
 # Run in TUI mode
 ./statcode-ai

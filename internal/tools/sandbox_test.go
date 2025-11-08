@@ -1,11 +1,40 @@
+// WASM Integration Tests
+//
+// This file contains two types of tests:
+// 1. Unit tests: Fast tests that verify tool configuration and validation (no WASM execution)
+// 2. Integration tests: Slow tests that compile and execute actual WebAssembly code
+//
+// Integration tests require:
+// - TinyGo download (~50MB) on first run 
+// - Go compilation to WebAssembly
+// - WASM runtime execution in wazero
+//
+// To run only fast unit tests (default): go test ./internal/tools
+// To run integration tests: go test -run Integration ./internal/tools -integration
+// To run all tests: go test ./internal/tools -integration
+
 package tools
 
 import (
+	"flag"
 	"context"
 	"strings"
 	"testing"
 	"time"
 )
+
+// Integration tests flag - only run WASM execution tests when explicitly requested
+// These tests are slow because they:
+// 1. Download TinyGo (~50MB) on first run
+// 2. Compile Go code to WebAssembly 
+// 3. Execute WASM in a sandboxed runtime
+// Usage: go test -run Integration ./internal/tools -integration
+var runIntegrationTests = flag.Bool("integration", false, "Run WASM integration tests (requires explicit flag)")
+
+func init() {
+	testing.Init()
+	flag.Parse()
+}
 
 func TestSandboxTool_Name(t *testing.T) {
 	tool := NewSandboxTool("/tmp", "/tmp")
@@ -65,7 +94,11 @@ func TestSandboxTool_Parameters(t *testing.T) {
 	}
 }
 
-func TestSandboxTool_Execute_SimpleCode(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_SimpleCode(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tempDir := t.TempDir()
 	tool := NewSandboxTool("/tmp", tempDir)
 
@@ -123,7 +156,11 @@ func main() {
 	}
 }
 
-func TestSandboxTool_Execute_WithMath(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_WithMath(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tempDir := t.TempDir()
 	tool := NewSandboxTool("/tmp", tempDir)
 
@@ -158,7 +195,11 @@ func main() {
 	}
 }
 
-func TestSandboxTool_Execute_CompilationError(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_CompilationError(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tempDir := t.TempDir()
 	tool := NewSandboxTool("/tmp", tempDir)
 
@@ -194,7 +235,11 @@ func main() {
 	}
 }
 
-func TestSandboxTool_Execute_RuntimeError(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_RuntimeError(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tempDir := t.TempDir()
 	tool := NewSandboxTool("/tmp", tempDir)
 
@@ -233,7 +278,11 @@ func main() {
 	// (WASM handles runtime errors differently than native Go)
 }
 
-func TestSandboxTool_Execute_Timeout(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_Timeout(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	t.Skip("Timeout handling needs investigation - context deadline may not propagate correctly to go run")
 
 	tempDir := t.TempDir()
@@ -280,7 +329,11 @@ func main() {
 	}
 }
 
-func TestSandboxTool_Execute_EmptyCode(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_EmptyCode(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tempDir := t.TempDir()
 	tool := NewSandboxTool("/tmp", tempDir)
 
@@ -298,7 +351,11 @@ func TestSandboxTool_Execute_EmptyCode(t *testing.T) {
 	}
 }
 
-func TestSandboxTool_Execute_TimeoutMax(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_TimeoutMax(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tempDir := t.TempDir()
 	tool := NewSandboxTool("/tmp", tempDir)
 
@@ -336,7 +393,11 @@ func main() {
 	}
 }
 
-func TestSandboxTool_Execute_SandboxIsolation(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_SandboxIsolation(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tempDir := t.TempDir()
 	tool := NewSandboxTool("/tmp", tempDir)
 
@@ -451,7 +512,11 @@ func TestContainsDangerousOps(t *testing.T) {
 	}
 }
 
-func TestSandboxTool_Execute_Fetch(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_Fetch(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tool := NewSandboxTool("/tmp", "/tmp")
 
 	// Test Fetch function with httpbin.org (a testing service)
@@ -509,7 +574,11 @@ func main() {
 	}
 }
 
-func TestSandboxTool_Execute_Shell(t *testing.T) {
+func TestIntegration_SandboxTool_Execute_Shell(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+	
 	tool := NewSandboxTool("/tmp", "/tmp")
 
 	// Test Shell function with simple commands

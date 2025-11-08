@@ -91,11 +91,17 @@ func (p *CerebrasProvider) ListModels(ctx context.Context) ([]*ModelInfo, error)
 			Description:         getCerebrasDescription(m.ID),
 			ContextWindow:       getCerebrasContextWindow(m.ID),
 			MaxOutputTokens:     getCerebrasMaxOutputTokens(m.ID),
+			SupportsStreaming:   true,
 			SupportsToolCalling: cerebrasSupportsToolCalling(m.ID),
 		})
 	}
 
 	return models, nil
+}
+
+// CreateClient creates a new client for the specified Cerebras model.
+func (p *CerebrasProvider) CreateClient(modelID string) (Client, error) {
+	return NewCerebrasClient(p.apiKey, modelID)
 }
 
 // getFallbackModels returns a curated list of Cerebras models as a fallback.
@@ -120,6 +126,7 @@ func (p *CerebrasProvider) getFallbackModels() []*ModelInfo {
 			Description:         getCerebrasDescription(id),
 			ContextWindow:       getCerebrasContextWindow(id),
 			MaxOutputTokens:     getCerebrasMaxOutputTokens(id),
+			SupportsStreaming:   true,
 			SupportsToolCalling: cerebrasSupportsToolCalling(id),
 		})
 	}
@@ -227,11 +234,6 @@ func cerebrasSupportsToolCalling(id string) bool {
 	return true // Default: assume support
 }
 
-// CreateClient creates a new client for the specified Cerebras model.
-func (p *CerebrasProvider) CreateClient(modelID string) (Client, error) {
-	return NewCerebrasClient(p.apiKey, modelID)
-}
-
 // ValidateAPIKey validates the Cerebras API key by attempting to list models.
 func (p *CerebrasProvider) ValidateAPIKey(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.cerebras.ai/v1/models", nil)
@@ -258,22 +260,6 @@ func (p *CerebrasProvider) ValidateAPIKey(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// NewCerebrasClient creates a new Cerebras client for the specified model.
-// Cerebras uses an OpenAI-compatible API, so we create a langchaingo OpenAI client
-// with the Cerebras base URL.
-func NewCerebrasClient(apiKey, modelID string) (Client, error) {
-	if apiKey == "" {
-		return nil, fmt.Errorf("API key is required")
-	}
-	if modelID == "" {
-		return nil, fmt.Errorf("model ID is required")
-	}
-
-	// Use the langchaingo OpenAI client with Cerebras base URL
-	// This is the same pattern used by OpenRouter and Mistral providers
-	return NewCerebrasLangChainClient(apiKey, modelID)
 }
 
 // GetCerebrasModelInfo returns detailed information about a specific Cerebras model.

@@ -76,51 +76,6 @@ func NewAnthropicClient(apiKey, modelName string) (*LangChainClient, error) {
 	}, nil
 }
 
-// NewOpenRouterClient creates an OpenRouter client using the OpenAI-compatible API
-func NewOpenRouterClient(apiKey, modelName string) (*LangChainClient, error) {
-	trimmedModel := strings.TrimSpace(modelName)
-	if trimmedModel == "" {
-		trimmedModel = "openai/gpt-4o-mini"
-	}
-
-	llm, err := llmopenai.New(
-		llmopenai.WithToken(apiKey),
-		llmopenai.WithModel(trimmedModel),
-		llmopenai.WithBaseURL("https://openrouter.ai/api/v1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create OpenRouter client: %w", err)
-	}
-
-	return &LangChainClient{
-		llm:       llm,
-		modelName: trimmedModel,
-		provider:  "openrouter",
-	}, nil
-}
-
-// NewCerebrasLangChainClient creates a Cerebras client using the OpenAI-compatible API
-func NewCerebrasLangChainClient(apiKey, modelName string) (*LangChainClient, error) {
-	if modelName == "" {
-		modelName = "llama3.1-8b"
-	}
-
-	llm, err := llmopenai.New(
-		llmopenai.WithToken(apiKey),
-		llmopenai.WithModel(modelName),
-		llmopenai.WithBaseURL("https://api.cerebras.ai/v1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Cerebras client: %w", err)
-	}
-
-	return &LangChainClient{
-		llm:       llm,
-		modelName: modelName,
-		provider:  "cerebras",
-	}, nil
-}
-
 // NewOpenAICompatibleClient creates a client for any OpenAI-compatible API
 // This supports local LLMs (LM Studio, LocalAI, etc.) and custom deployments
 func NewOpenAICompatibleClient(apiKey, baseURL, modelName string) (*LangChainClient, error) {

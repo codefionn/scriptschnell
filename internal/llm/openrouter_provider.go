@@ -142,11 +142,15 @@ func (p *OpenRouterProvider) CreateClient(modelID string) (Client, error) {
 }
 
 func (p *OpenRouterProvider) ValidateAPIKey(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://openrouter.ai/api/v1/auth/key", nil)
+	url := fmt.Sprintf("%s/key", strings.TrimRight(openRouterAPIBaseURL, "/"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HTTP-Referer", openRouterReferer)
+	req.Header.Set("X-Title", openRouterAppTitle)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -161,6 +165,19 @@ func (p *OpenRouterProvider) ValidateAPIKey(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("API error %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var keyResp struct {
+		Data struct {
+			Label string `json:"label"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&keyResp); err != nil {
+		return fmt.Errorf("failed to decode API key response: %w", err)
+	}
+
+	if strings.TrimSpace(keyResp.Data.Label) == "" {
+		return fmt.Errorf("invalid API key")
 	}
 
 	return nil

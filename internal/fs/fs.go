@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/statcode-ai/statcode-ai/internal/logger"
 )
 
 // FileInfo represents file metadata
@@ -62,7 +62,7 @@ type dirCacheEntry struct {
 func NewCachedFS(baseDir string, cacheTTL time.Duration, maxEntries int) *CachedFS {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Printf("Warning: failed to create file watcher: %v", err)
+		logger.Global().Warn("failed to create file watcher: %v", err)
 	}
 
 	cfs := &CachedFS{
@@ -110,7 +110,7 @@ func (cfs *CachedFS) watchFiles() {
 			if !ok {
 				return
 			}
-			log.Printf("Filesystem watcher error: %v", err)
+			logger.Global().Error("filesystem watcher error: %v", err)
 		}
 	}
 }
@@ -202,7 +202,7 @@ func (cfs *CachedFS) WriteFile(ctx context.Context, path string, data []byte) er
 	// Watch the parent directory if not already watched
 	if cfs.watcher != nil {
 		if err := cfs.watcher.Add(filepath.Dir(absPath)); err != nil {
-			log.Printf("CachedFS: failed to add watcher for %s: %v", absPath, err)
+			logger.Global().Warn("CachedFS: failed to add watcher for %s: %v", absPath, err)
 		}
 	}
 
@@ -243,12 +243,32 @@ func (cfs *CachedFS) ListDir(ctx context.Context, path string) ([]*FileInfo, err
 		return nil, err
 	}
 
+	// Parse all .gitignore files from baseDir to current directory
+	matchers := cfs.loadGitignoreChain(absPath)
+
 	result := make([]*FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
+
+		// Skip .git directory
+		if entry.Name() == ".git" {
+			continue
+		}
+
+		// Calculate relative path from baseDir for gitignore matching
+		relPath, err := filepath.Rel(cfs.baseDir, filepath.Join(absPath, entry.Name()))
+		if err != nil {
+			relPath = entry.Name()
+		}
+
+		// Check if file should be ignored by any gitignore in the chain
+		if cfs.isIgnored(relPath, entry.IsDir(), matchers) {
+			continue
+		}
+
 		result = append(result, &FileInfo{
 			Path:    filepath.Join(path, entry.Name()),
 			Size:    info.Size(),
@@ -281,11 +301,62 @@ func (cfs *CachedFS) ListDir(ctx context.Context, path string) ([]*FileInfo, err
 	// Watch this directory for changes
 	if cfs.watcher != nil {
 		if err := cfs.watcher.Add(absPath); err != nil {
-			log.Printf("CachedFS: failed to add watcher for %s: %v", absPath, err)
+			logger.Global().Warn("CachedFS: failed to add watcher for %s: %v", absPath, err)
 		}
 	}
 
 	return result, nil
+}
+
+// loadGitignoreChain loads all .gitignore files from baseDir to the given directory
+func (cfs *CachedFS) loadGitignoreChain(dir string) []*gitignoreMatcher {
+	var matchers []*gitignoreMatcher
+
+	// Walk up from baseDir to dir, collecting .gitignore files
+	currentDir := cfs.baseDir
+	for {
+		gitignorePath := filepath.Join(currentDir, ".gitignore")
+		matcher, err := parseGitignore(gitignorePath)
+		if err == nil && matcher != nil {
+			matchers = append(matchers, matcher)
+		}
+
+		// If we've reached the target directory, stop
+		if currentDir == dir {
+			break
+		}
+
+		// Move to next subdirectory towards dir
+		relPath, err := filepath.Rel(currentDir, dir)
+		if err != nil || relPath == "." {
+			break
+		}
+
+		// Get the first component of the relative path
+		parts := strings.Split(relPath, string(filepath.Separator))
+		if len(parts) == 0 {
+			break
+		}
+
+		currentDir = filepath.Join(currentDir, parts[0])
+
+		// Safety check: don't go outside baseDir
+		if !strings.HasPrefix(currentDir, cfs.baseDir) {
+			break
+		}
+	}
+
+	return matchers
+}
+
+// isIgnored checks if a path is ignored by any of the gitignore matchers
+func (cfs *CachedFS) isIgnored(relPath string, isDir bool, matchers []*gitignoreMatcher) bool {
+	for _, matcher := range matchers {
+		if matcher.matches(relPath, isDir) {
+			return true
+		}
+	}
+	return false
 }
 
 func (cfs *CachedFS) Exists(ctx context.Context, path string) (bool, error) {
@@ -429,6 +500,9 @@ func (mfs *MockFS) ListDir(ctx context.Context, path string) ([]*FileInfo, error
 		return nil, os.ErrNotExist
 	}
 
+	// Load gitignore chain
+	matchers := mfs.loadGitignoreChain(path)
+
 	var entries []*FileInfo
 	var pathPrefix string
 	if path != "." {
@@ -461,6 +535,17 @@ func (mfs *MockFS) ListDir(ctx context.Context, path string) ([]*FileInfo, error
 			}
 			if !seen[subdirPath] {
 				seen[subdirPath] = true
+
+				// Skip .git directory
+				if subdir == ".git" {
+					continue
+				}
+
+				// Check gitignore
+				if mfs.isIgnored(subdirPath, true, matchers) {
+					continue
+				}
+
 				entries = append(entries, &FileInfo{
 					Path:    subdirPath,
 					Size:    0,
@@ -472,6 +557,12 @@ func (mfs *MockFS) ListDir(ctx context.Context, path string) ([]*FileInfo, error
 			// Direct file in this directory
 			if !seen[filePath] {
 				seen[filePath] = true
+
+				// Check gitignore
+				if mfs.isIgnored(filePath, false, matchers) {
+					continue
+				}
+
 				entries = append(entries, &FileInfo{
 					Path:    filePath,
 					Size:    int64(len(mfs.files[filePath])),
@@ -483,6 +574,54 @@ func (mfs *MockFS) ListDir(ctx context.Context, path string) ([]*FileInfo, error
 	}
 
 	return entries, nil
+}
+
+// loadGitignoreChain loads all .gitignore files from root to the given directory
+func (mfs *MockFS) loadGitignoreChain(dir string) []*gitignoreMatcher {
+	var matchers []*gitignoreMatcher
+
+	// Walk from root (.) to dir, collecting .gitignore files
+	currentDir := "."
+
+	// Add root .gitignore if exists
+	gitignorePath := ".gitignore"
+	if data, ok := mfs.files[gitignorePath]; ok {
+		matcher, err := parseGitignoreFromBytes(data)
+		if err == nil && matcher != nil {
+			matchers = append(matchers, matcher)
+		}
+	}
+
+	// If we're not at root, walk subdirectories
+	if dir != "." && dir != "" {
+		parts := strings.Split(dir, string(filepath.Separator))
+		for i := range parts {
+			currentDir = strings.Join(parts[:i+1], string(filepath.Separator))
+			gitignorePath = filepath.Join(currentDir, ".gitignore")
+
+			if data, ok := mfs.files[gitignorePath]; ok {
+				matcher, err := parseGitignoreFromBytes(data)
+				if err == nil && matcher != nil {
+					matchers = append(matchers, matcher)
+				}
+			}
+		}
+	}
+
+	return matchers
+}
+
+// isIgnored checks if a path is ignored by any of the gitignore matchers
+func (mfs *MockFS) isIgnored(path string, isDir bool, matchers []*gitignoreMatcher) bool {
+	// Normalize path
+	relPath := strings.TrimPrefix(path, "./")
+
+	for _, matcher := range matchers {
+		if matcher.matches(relPath, isDir) {
+			return true
+		}
+	}
+	return false
 }
 
 func (mfs *MockFS) Exists(ctx context.Context, path string) (bool, error) {

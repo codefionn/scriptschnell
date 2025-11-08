@@ -115,12 +115,12 @@ func (pb *PromptBuilder) modelSpecificPrompt(modelName string) string {
 		baseName = baseName[idx+1:]
 	}
 
+	modelFamily := DetectModelFamily(modelName)
+
 	switch {
-	case strings.HasPrefix(baseName, "gpt-") || strings.HasPrefix(baseName, "gpt"):
-		return "- You are interacting with an OpenAI GPT-series model. Prefer the `go_sandbox` tool to execute or test Go code before falling back to shell commands. If the sandbox cannot handle the task, explain the limitation and propose a safer alternative.\n" +
-			"- Use the `write_file_diff` tool for file updates. Provide `---`/`+++` headers and +/- lines; `@@` hunk markers are optional for GPT models.\n"
-	case strings.HasPrefix(baseName, "claude-"):
-		return "- You are interacting with an Anthropic Claude model. Prefer the `go_sandbox` tool to execute or test Go code before using shell commands. When the sandbox is insufficient, justify any other tool usage.\n"
+	case modelFamily == FamilyZaiGLM:
+		return `Always use the todo tool calls to track progress and plan ahead.
+`
 	default:
 		return ""
 	}

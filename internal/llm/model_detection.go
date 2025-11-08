@@ -44,6 +44,7 @@ const (
 	FamilyPhi
 	FamilyDeepSeek
 	FamilyCommand
+	FamilyZaiGLM
 )
 
 // Model identifier constants for pattern matching
@@ -121,6 +122,7 @@ const (
 	ModelIDPhi             = "phi"
 	ModelIDDeepSeek        = "deepseek"
 	ModelIDCommand         = "command"
+	ModelIDZaiGLM          = "zai-glm"
 
 	// Size indicators
 	ModelID128K            = "128k"
@@ -249,6 +251,9 @@ func DetectModelFamily(modelID string) ModelFamily {
 	}
 	if strings.Contains(id, ModelIDCommand) {
 		return FamilyCommand
+	}
+	if strings.Contains(id, ModelIDZaiGLM) {
+		return FamilyZaiGLM
 	}
 
 	return FamilyUnknown
@@ -419,6 +424,8 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 		return 64000
 	case FamilyCommand:
 		return 128000
+	case FamilyZaiGLM:
+		return 131072
 	}
 
 	// Default fallback
@@ -497,6 +504,8 @@ func DetectMaxOutputTokens(modelID string, family ModelFamily, contextWindow int
 		return 8192
 	case FamilyCommand:
 		return 4096
+	case FamilyZaiGLM:
+		return 8192
 	}
 
 	// Conservative fallback based on context window
@@ -539,6 +548,8 @@ func SupportsToolCalling(modelID string, family ModelFamily) bool {
 	case FamilyMistralLarge, FamilyMistralMedium, FamilyMistralSmall:
 		return true
 	case FamilyCommand:
+		return true
+	case FamilyZaiGLM:
 		return true
 	}
 
@@ -677,6 +688,8 @@ func GetModelDescription(modelID string, family ModelFamily) string {
 
 	case FamilyCommand:
 		return "Cohere's command model for text generation"
+	case FamilyZaiGLM:
+		return "Zhipu AI's GLM model for text generation"
 	}
 
 	return "Language model"

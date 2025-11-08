@@ -11,7 +11,6 @@ import (
 	"github.com/openai/openai-go/responses"
 	"github.com/openai/openai-go/shared"
 	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/anthropic"
 	llmopenai "github.com/tmc/langchaingo/llms/openai"
 )
 
@@ -52,27 +51,6 @@ func NewOpenAIClient(apiKey, modelName string) (*LangChainClient, error) {
 		llm:       llm,
 		modelName: modelName,
 		provider:  "openai",
-	}, nil
-}
-
-// NewAnthropicClient creates an Anthropic client
-func NewAnthropicClient(apiKey, modelName string) (*LangChainClient, error) {
-	if modelName == "" {
-		modelName = "claude-3-5-sonnet-20241022"
-	}
-
-	llm, err := anthropic.New(
-		anthropic.WithToken(apiKey),
-		anthropic.WithModel(modelName),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Anthropic client: %w", err)
-	}
-
-	return &LangChainClient{
-		llm:       llm,
-		modelName: modelName,
-		provider:  "anthropic",
 	}, nil
 }
 

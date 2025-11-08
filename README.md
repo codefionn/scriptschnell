@@ -43,6 +43,7 @@
 - [ ] Fix mistral model performance
 - [ ] Use token usage response from provider if available
 - [ ] Output credit usage per session
+- [ ] Weird kimi k2 context window problems
 
 ## Goals
 

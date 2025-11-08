@@ -123,6 +123,7 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 
 	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Dir = workingDir
+	configureProcessGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -143,6 +144,7 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 
 	startedAt := time.Now()
 	job, jobID := registerShellBackgroundJob(t.session, cmd, cmdStr, workingDir, startedAt)
+	job.ProcessGroupID = getProcessGroupID(cmd)
 	logger.Info("shell: background job started: %s (pid=%d)", jobID, job.PID)
 
 	// Read output in goroutines
@@ -236,6 +238,7 @@ func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]inter
 				"exit_code":      job.ExitCode,
 				"runtime":        time.Since(job.StartTime).String(),
 				"pid":            job.PID,
+				"process_group":  job.ProcessGroupID,
 				"type":           job.Type,
 				"stop_requested": job.StopRequested,
 				"last_signal":    job.LastSignal,
@@ -362,6 +365,7 @@ func buildJobSnapshot(ctx context.Context, job *session.BackgroundJob, lastNLine
 		"exit_code":      job.ExitCode,
 		"runtime":        time.Since(job.StartTime).String(),
 		"pid":            job.PID,
+		"process_group":  job.ProcessGroupID,
 		"type":           job.Type,
 		"stop_requested": job.StopRequested,
 		"last_signal":    job.LastSignal,
@@ -535,6 +539,48 @@ func registerShellBackgroundJob(sess *session.Session, cmd *exec.Cmd, cmdStr, wo
 	return job, jobID
 }
 
+func sendSignalToBackgroundJob(job *session.BackgroundJob, sig syscall.Signal, signalName string) error {
+	var groupErr error
+
+	if job.ProcessGroupID > 0 {
+		if err := signalProcessGroup(job.ProcessGroupID, sig); err == nil || isIgnorableSignalError(err) {
+			if err == nil {
+				return nil
+			}
+		} else {
+			groupErr = fmt.Errorf("failed to signal process group %d: %w", job.ProcessGroupID, err)
+		}
+	}
+
+	if job.Process != nil {
+		var err error
+		if signalName == "SIGKILL" {
+			err = job.Process.Kill()
+		} else {
+			err = job.Process.Signal(sig)
+		}
+		if err == nil || isIgnorableSignalError(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to signal process %d: %w", job.PID, err)
+	}
+
+	if job.CancelFunc != nil {
+		job.CancelFunc()
+		return nil
+	}
+
+	if groupErr != nil {
+		return groupErr
+	}
+
+	return fmt.Errorf("no active process to signal for job %s", job.ID)
+}
+
+func isIgnorableSignalError(err error) bool {
+	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
+}
+
 // StopProgramTool sends termination signals to background processes
 type StopProgramTool struct {
 	session *session.Session
@@ -605,21 +651,9 @@ func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interfa
 		}, nil
 	}
 
-	var err error
-	if job.Process != nil {
-		if signalName == "SIGKILL" {
-			err = job.Process.Kill()
-		} else {
-			err = job.Process.Signal(sig)
-		}
-		if err != nil && !errors.Is(err, os.ErrProcessDone) {
-			logger.Error("stop_program: failed to send %s to job %s (pid=%d): %v", signalName, job.ID, job.PID, err)
-			return nil, fmt.Errorf("failed to send %s: %w", signalName, err)
-		}
-	} else if job.CancelFunc != nil {
-		job.CancelFunc()
-	} else {
-		return nil, fmt.Errorf("no active process to signal for job %s", job.ID)
+	if err := sendSignalToBackgroundJob(job, sig, signalName); err != nil {
+		logger.Error("stop_program: failed to send %s to job %s (pid=%d, pgid=%d): %v", signalName, job.ID, job.PID, job.ProcessGroupID, err)
+		return nil, err
 	}
 
 	job.StopRequested = true

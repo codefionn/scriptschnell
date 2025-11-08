@@ -188,6 +188,14 @@ func TestStopProgramTool_TerminatesProcess(t *testing.T) {
 	}
 	jobID := resMap["job_id"].(string)
 
+	job, ok := sess.GetBackgroundJob(jobID)
+	if !ok {
+		t.Fatalf("background job not found: %s", jobID)
+	}
+	if job.ProcessGroupID == 0 {
+		t.Fatalf("expected non-zero process group id for job %s", jobID)
+	}
+
 	// Give the sleep process a brief moment to start
 	time.Sleep(100 * time.Millisecond)
 
@@ -234,6 +242,81 @@ func TestStopProgramTool_TerminatesProcess(t *testing.T) {
 	}
 	if exitCode == 0 {
 		t.Errorf("expected non-zero exit code after SIGKILL, got %d", exitCode)
+	}
+}
+
+func TestStopProgramTool_TerminatesProcessGroup(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("process-group signalling is not available on Windows")
+	}
+
+	workingDir := t.TempDir()
+	sess := session.NewSession("test", workingDir)
+	shellTool := NewShellTool(sess, workingDir)
+	stopTool := NewStopProgramTool(sess)
+	waitTool := NewWaitProgramTool(sess)
+
+	ctx := context.Background()
+
+	res, err := shellTool.Execute(ctx, map[string]interface{}{
+		"command":    "sh -c 'sleep 30'",
+		"background": true,
+	})
+	if err != nil {
+		t.Fatalf("shell execute failed: %v", err)
+	}
+
+	resMap, ok := res.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", res)
+	}
+	jobID := resMap["job_id"].(string)
+
+	time.Sleep(100 * time.Millisecond)
+
+	stopRes, err := stopTool.Execute(ctx, map[string]interface{}{
+		"job_id": jobID,
+	})
+	if err != nil {
+		t.Fatalf("stop_program failed: %v", err)
+	}
+
+	stopMap, ok := stopRes.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected stop map, got %T", stopRes)
+	}
+	if stopMap["signal"] != "SIGTERM" {
+		t.Errorf("expected default SIGTERM signal, got %v", stopMap["signal"])
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	waitRes, err := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
+	if err != nil {
+		t.Fatalf("wait_program after stop failed: %v", err)
+	}
+
+	waitMap, ok := waitRes.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected wait map, got %T", waitRes)
+	}
+	if waitMap["completed"] != true {
+		t.Errorf("expected completed true after stop, got %v", waitMap["completed"])
+	}
+	if waitMap["stop_requested"] != true {
+		t.Errorf("expected stop_requested true, got %v", waitMap["stop_requested"])
+	}
+	if waitMap["last_signal"] != "SIGTERM" {
+		t.Errorf("expected last_signal SIGTERM, got %v", waitMap["last_signal"])
+	}
+	exitCode, ok := waitMap["exit_code"].(int)
+	if !ok {
+		t.Fatalf("expected exit_code int, got %T", waitMap["exit_code"])
+	}
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit code after SIGTERM, got %d", exitCode)
 	}
 }
 

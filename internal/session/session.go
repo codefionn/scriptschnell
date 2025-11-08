@@ -35,21 +35,22 @@ type Session struct {
 
 // BackgroundJob represents a running background process
 type BackgroundJob struct {
-	ID            string
-	Command       string
-	WorkingDir    string
-	StartTime     time.Time
-	Completed     bool
-	ExitCode      int
-	Stdout        []string
-	Stderr        []string
-	Process       *os.Process
-	PID           int
-	Type          string
-	CancelFunc    context.CancelFunc
-	StopRequested bool
-	LastSignal    string
-	Done          chan struct{}
+	ID             string
+	Command        string
+	WorkingDir     string
+	StartTime      time.Time
+	Completed      bool
+	ExitCode       int
+	Stdout         []string
+	Stderr         []string
+	Process        *os.Process
+	PID            int
+	ProcessGroupID int
+	Type           string
+	CancelFunc     context.CancelFunc
+	StopRequested  bool
+	LastSignal     string
+	Done           chan struct{}
 }
 
 // NewSession creates a new session

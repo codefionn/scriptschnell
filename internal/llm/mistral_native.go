@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 const (
@@ -211,6 +214,7 @@ func (c *MistralClient) buildChatRequest(req *CompletionRequest, stream bool) (*
 	}
 	if len(req.Tools) > 0 {
 		payload.Tools = convertMistralTools(req.Tools)
+		payload.ParallelToolCall = true
 	}
 
 	return payload, nil
@@ -278,12 +282,13 @@ func (c *MistralClient) convertMessages(req *CompletionRequest) []mistralChatMes
 }
 
 type mistralChatRequest struct {
-	Model       string               `json:"model"`
-	Messages    []mistralChatMessage `json:"messages"`
-	Temperature *float64             `json:"temperature,omitempty"`
-	MaxTokens   int                  `json:"max_tokens,omitempty"`
-	Tools       []mistralTool        `json:"tools,omitempty"`
-	Stream      bool                 `json:"stream,omitempty"`
+	Model            string               `json:"model"`
+	Messages         []mistralChatMessage `json:"messages"`
+	Temperature      *float64             `json:"temperature,omitempty"`
+	MaxTokens        int                  `json:"max_tokens,omitempty"`
+	Tools            []mistralTool        `json:"tools,omitempty"`
+	ParallelToolCall bool                 `json:"parallel_tool_calls,omitempty"`
+	Stream           bool                 `json:"stream,omitempty"`
 }
 
 type mistralChatMessage struct {
@@ -406,8 +411,12 @@ func convertMistralToolCalls(toolCalls []map[string]interface{}) []mistralToolCa
 			callType = "function"
 		}
 
+		// Normalize the tool call ID to meet Mistral's requirements
+		originalID := toString(call["id"])
+		normalizedID := normalizeMistralToolCallID(originalID)
+
 		result = append(result, mistralToolCall{
-			ID:   toString(call["id"]),
+			ID:   normalizedID,
 			Type: callType,
 			Function: &mistralFunctionCall{
 				Name:      name,
@@ -417,6 +426,41 @@ func convertMistralToolCalls(toolCalls []map[string]interface{}) []mistralToolCa
 	}
 
 	return result
+}
+
+// normalizeMistralToolCallID ensures tool call IDs meet Mistral's requirements:
+// - Alphanumeric only
+// - Maximum 9 characters
+// Uses xxhash for fast hashing of long IDs
+func normalizeMistralToolCallID(id string) string {
+	if id == "" {
+		// Generate a random-looking ID from current timestamp hash
+		id = "call_null"
+	}
+
+	// Remove non-alphanumeric characters
+	var alphanumeric strings.Builder
+	for _, ch := range id {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			alphanumeric.WriteRune(ch)
+		}
+	}
+	cleaned := alphanumeric.String()
+
+	// If the cleaned ID is empty or too long, hash it
+	if cleaned == "" || len(cleaned) > 9 {
+		// Use xxhash for fast hashing
+		hash := xxhash.Sum64String(id)
+		// Convert to base36 (0-9, a-z) for alphanumeric output
+		hashStr := strconv.FormatUint(hash, 36)
+		// Take first 9 characters
+		if len(hashStr) > 9 {
+			return hashStr[:9]
+		}
+		return hashStr
+	}
+
+	return cleaned
 }
 
 func mistralConvertToolCallsToGeneric(message *mistralChatResponseMessage) []map[string]interface{} {

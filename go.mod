@@ -3,6 +3,7 @@ module github.com/statcode-ai/statcode-ai
 go 1.25.1
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.17.0
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
@@ -15,7 +16,6 @@ require (
 	github.com/sourcegraph/go-diff v0.7.0
 	github.com/tetratelabs/wazero v1.9.0
 	github.com/tmc/langchaingo v0.1.14
-	github.com/ulikunitz/xz v0.5.15
 	google.golang.org/genai v1.32.0
 )
 
@@ -27,6 +27,7 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect
 	github.com/charmbracelet/x/ansi v0.10.2 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
@@ -64,7 +65,7 @@ require (
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
-	github.com/tidwall/gjson v1.17.1 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect

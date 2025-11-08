@@ -412,10 +412,43 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 
 	filteredSpecs := specs
 	if applyFilter {
-		var filterErr error
-		filteredSpecs, filterErr = o.filterToolSpecs(specs)
+		var (
+			filterErr error
+			mcpSpecs  []toolSpec
+		)
+		for _, spec := range specs {
+			if spec.isMCP {
+				mcpSpecs = append(mcpSpecs, spec)
+			}
+		}
+
+		filteredMCP := mcpSpecs
+		if len(mcpSpecs) > 0 {
+			filteredMCP, filterErr = o.filterToolSpecs(mcpSpecs)
+		}
 		if filterErr != nil {
 			errs = append(errs, filterErr)
+		}
+
+		if len(mcpSpecs) > 0 {
+			filterMap := make(map[tools.Tool]struct{}, len(filteredMCP))
+			for i := range filteredMCP {
+				filterMap[filteredMCP[i].template] = struct{}{}
+			}
+
+			filteredSpecs = make([]toolSpec, 0, len(specs))
+			for _, spec := range specs {
+				if spec.isMCP {
+					if _, ok := filterMap[spec.template]; ok {
+						filteredSpecs = append(filteredSpecs, spec)
+					}
+					continue
+				}
+				filteredSpecs = append(filteredSpecs, spec)
+			}
+		} else {
+			// No external MCP tools configured; nothing to filter.
+			filteredSpecs = specs
 		}
 	} else {
 		o.toolSelectionDirty = true

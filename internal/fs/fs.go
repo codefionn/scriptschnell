@@ -34,6 +34,8 @@ type FileSystem interface {
 	Stat(ctx context.Context, path string) (*FileInfo, error)
 	// ListDir lists directory contents
 	ListDir(ctx context.Context, path string) ([]*FileInfo, error)
+	// ListDirFiltered lists directory contents, filtering out gitignored files
+	ListDirFiltered(ctx context.Context, path string) ([]*FileInfo, error)
 	// Exists checks if a file exists
 	Exists(ctx context.Context, path string) (bool, error)
 	// Delete removes a file
@@ -243,32 +245,12 @@ func (cfs *CachedFS) ListDir(ctx context.Context, path string) ([]*FileInfo, err
 		return nil, err
 	}
 
-	// Parse all .gitignore files from baseDir to current directory
-	matchers := cfs.loadGitignoreChain(absPath)
-
 	result := make([]*FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-
-		// Skip .git directory
-		if entry.Name() == ".git" {
-			continue
-		}
-
-		// Calculate relative path from baseDir for gitignore matching
-		relPath, err := filepath.Rel(cfs.baseDir, filepath.Join(absPath, entry.Name()))
-		if err != nil {
-			relPath = entry.Name()
-		}
-
-		// Check if file should be ignored by any gitignore in the chain
-		if cfs.isIgnored(relPath, entry.IsDir(), matchers) {
-			continue
-		}
-
 		result = append(result, &FileInfo{
 			Path:    filepath.Join(path, entry.Name()),
 			Size:    info.Size(),
@@ -306,6 +288,99 @@ func (cfs *CachedFS) ListDir(ctx context.Context, path string) ([]*FileInfo, err
 	}
 
 	return result, nil
+}
+
+// ListDirFiltered lists directory contents, filtering out gitignored files and .git directory
+func (cfs *CachedFS) ListDirFiltered(ctx context.Context, path string) ([]*FileInfo, error) {
+	absPath := cfs.absPath(path)
+
+	// Check cache first
+	cfs.cacheMu.RLock()
+	if entry, ok := cfs.dirCache[absPath]; ok {
+		if time.Since(entry.timestamp) < cfs.cacheTTL {
+			cfs.cacheMu.RUnlock()
+			// Apply filtering to cached results
+			return cfs.filterEntries(absPath, entry.entries), nil
+		}
+	}
+	cfs.cacheMu.RUnlock()
+
+	// Read from disk
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse all .gitignore files from baseDir to current directory
+	matchers := cfs.loadGitignoreChain(absPath)
+
+	result := make([]*FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		// Skip .git directory
+		if entry.Name() == ".git" {
+			continue
+		}
+
+		// Calculate relative path from baseDir for gitignore matching
+		relPath, err := filepath.Rel(cfs.baseDir, filepath.Join(absPath, entry.Name()))
+		if err != nil {
+			relPath = entry.Name()
+		}
+
+		// Check if file should be ignored by any gitignore in the chain
+		if cfs.isIgnored(relPath, entry.IsDir(), matchers) {
+			continue
+		}
+
+		result = append(result, &FileInfo{
+			Path:    filepath.Join(path, entry.Name()),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			IsDir:   entry.IsDir(),
+		})
+	}
+
+	// Watch this directory for changes
+	if cfs.watcher != nil {
+		if err := cfs.watcher.Add(absPath); err != nil {
+			logger.Global().Warn("CachedFS: failed to add watcher for %s: %v", absPath, err)
+		}
+	}
+
+	return result, nil
+}
+
+// filterEntries filters a list of FileInfo entries based on gitignore rules
+func (cfs *CachedFS) filterEntries(absPath string, entries []*FileInfo) []*FileInfo {
+	matchers := cfs.loadGitignoreChain(absPath)
+	result := make([]*FileInfo, 0, len(entries))
+
+	for _, entry := range entries {
+		// Skip .git directory
+		if filepath.Base(entry.Path) == ".git" {
+			continue
+		}
+
+		// Calculate relative path from baseDir for gitignore matching
+		relPath, err := filepath.Rel(cfs.baseDir, filepath.Join(absPath, filepath.Base(entry.Path)))
+		if err != nil {
+			relPath = filepath.Base(entry.Path)
+		}
+
+		// Check if file should be ignored
+		if cfs.isIgnored(relPath, entry.IsDir, matchers) {
+			continue
+		}
+
+		result = append(result, entry)
+	}
+
+	return result
 }
 
 // loadGitignoreChain loads all .gitignore files from baseDir to the given directory
@@ -487,6 +562,77 @@ func (mfs *MockFS) Stat(ctx context.Context, path string) (*FileInfo, error) {
 }
 
 func (mfs *MockFS) ListDir(ctx context.Context, path string) ([]*FileInfo, error) {
+	mfs.mu.RLock()
+	defer mfs.mu.RUnlock()
+
+	// Normalize path
+	if path == "" {
+		path = "."
+	}
+
+	// Check if directory exists
+	if !mfs.dirs[path] {
+		return nil, os.ErrNotExist
+	}
+
+	var entries []*FileInfo
+	var pathPrefix string
+	if path != "." {
+		pathPrefix = path + "/"
+	}
+
+	// Find all files and directories that are direct children
+	seen := make(map[string]bool)
+
+	// Add files
+	for filePath := range mfs.files {
+		// Skip if not in this directory
+		if pathPrefix != "" && !strings.HasPrefix(filePath, pathPrefix) {
+			continue
+		}
+
+		// Get relative path
+		rel := filePath
+		if pathPrefix != "" {
+			rel = strings.TrimPrefix(filePath, pathPrefix)
+		}
+
+		// If it contains a slash, it's in a subdirectory
+		if strings.Contains(rel, "/") {
+			// Add the subdirectory
+			subdir := strings.Split(rel, "/")[0]
+			subdirPath := filepath.Join(path, subdir)
+			if path == "." {
+				subdirPath = subdir
+			}
+			if !seen[subdirPath] {
+				seen[subdirPath] = true
+				entries = append(entries, &FileInfo{
+					Path:    subdirPath,
+					Size:    0,
+					ModTime: time.Now(),
+					IsDir:   true,
+				})
+			}
+		} else {
+			// Direct file in this directory
+			if !seen[filePath] {
+				seen[filePath] = true
+				entries = append(entries, &FileInfo{
+					Path:    filePath,
+					Size:    int64(len(mfs.files[filePath])),
+					ModTime: time.Now(),
+					IsDir:   false,
+				})
+			}
+		}
+	}
+
+	return entries, nil
+}
+
+// ListDirFiltered lists directory contents, filtering out gitignored files and .git directory
+func (mfs *MockFS) ListDirFiltered(ctx context.Context, path string) ([]*FileInfo, error) {
 	mfs.mu.RLock()
 	defer mfs.mu.RUnlock()
 

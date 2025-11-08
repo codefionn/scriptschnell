@@ -7,14 +7,26 @@ import (
 	"strings"
 )
 
+type llmAuthorizationRecord struct {
+	Kind   string
+	Target string
+	Reason string
+}
+
 // judgeDomainWithLLM delegates domain authorization decisions to the summarize client.
 func (a *AuthorizationActor) judgeDomainWithLLM(ctx context.Context, displayDomain string) (*AuthorizationDecision, error) {
 	if a.summarizeClient == nil {
-		return &AuthorizationDecision{
+		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Domain %s requires authorization for network access", displayDomain),
 			RequiresUserInput: true,
-		}, nil
+		}
+		a.recordLLMDecision(false, llmAuthorizationRecord{
+			Kind:   "domain",
+			Target: displayDomain,
+			Reason: decision.Reason,
+		})
+		return decision, nil
 	}
 
 	prompt := fmt.Sprintf(`You are a security analyzer for network domain access. Analyze the following domain and determine if it is safe or should require user approval.
@@ -46,13 +58,23 @@ For example:
 - If domain is well-known and widely used, provide a wildcard pattern (e.g., "*.googleapis.com")
 - If uncertain or potentially unsafe, set prefix to empty string`, displayDomain)
 
+	if history := a.formatLLMDecisionHistory(); history != "" {
+		prompt = fmt.Sprintf("%s\n\nRecent authorization outcomes to use as reference:\n%s", prompt, history)
+	}
+
 	response, err := a.summarizeClient.Complete(ctx, prompt)
 	if err != nil {
-		return &AuthorizationDecision{
+		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Domain %s requires authorization (LLM analysis failed)", displayDomain),
 			RequiresUserInput: true,
-		}, nil
+		}
+		a.recordLLMDecision(false, llmAuthorizationRecord{
+			Kind:   "domain",
+			Target: displayDomain,
+			Reason: decision.Reason,
+		})
+		return decision, nil
 	}
 
 	var result struct {
@@ -62,15 +84,31 @@ For example:
 	}
 
 	if err := json.Unmarshal([]byte(cleanLLMJSONResponse(response)), &result); err != nil {
-		return &AuthorizationDecision{
+		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Domain %s requires authorization (failed to parse LLM response)", displayDomain),
 			RequiresUserInput: true,
-		}, nil
+		}
+		a.recordLLMDecision(false, llmAuthorizationRecord{
+			Kind:   "domain",
+			Target: displayDomain,
+			Reason: decision.Reason,
+		})
+		return decision, nil
 	}
 
 	if result.Safe {
-		return &AuthorizationDecision{Allowed: true}, nil
+		decision := &AuthorizationDecision{Allowed: true}
+		recordReason := result.Reason
+		if recordReason == "" {
+			recordReason = fmt.Sprintf("LLM judged %s safe", displayDomain)
+		}
+		a.recordLLMDecision(true, llmAuthorizationRecord{
+			Kind:   "domain",
+			Target: displayDomain,
+			Reason: recordReason,
+		})
+		return decision, nil
 	}
 
 	reason := result.Reason
@@ -78,21 +116,33 @@ For example:
 		reason = fmt.Sprintf("Domain %s requires authorization for network access", displayDomain)
 	}
 
-	return &AuthorizationDecision{
+	decision := &AuthorizationDecision{
 		Allowed:           false,
 		Reason:            reason,
 		RequiresUserInput: true,
-	}, nil
+	}
+	a.recordLLMDecision(false, llmAuthorizationRecord{
+		Kind:   "domain",
+		Target: displayDomain,
+		Reason: reason,
+	})
+	return decision, nil
 }
 
 // judgeShellCommandWithLLM delegates shell command authorization to the summarize client.
 func (a *AuthorizationActor) judgeShellCommandWithLLM(ctx context.Context, command string) (*AuthorizationDecision, error) {
 	if a.summarizeClient == nil {
-		return &AuthorizationDecision{
+		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Command requires authorization: %s", command),
 			RequiresUserInput: true,
-		}, nil
+		}
+		a.recordLLMDecision(false, llmAuthorizationRecord{
+			Kind:   "shell",
+			Target: command,
+			Reason: decision.Reason,
+		})
+		return decision, nil
 	}
 
 	prompt := fmt.Sprintf(`You are a security analyzer for shell commands. Analyze the following command and determine if it is potentially harmful or should require user approval.
@@ -125,13 +175,23 @@ If the command has arguments specific to this invocation, provide a more general
 Only provide a prefix if the command is harmless or commonly used in development.
 If uncertain or potentially harmful, set prefix to empty string.`, command)
 
+	if history := a.formatLLMDecisionHistory(); history != "" {
+		prompt = fmt.Sprintf("%s\n\nRecent authorization outcomes to use as reference:\n%s", prompt, history)
+	}
+
 	response, err := a.summarizeClient.Complete(ctx, prompt)
 	if err != nil {
-		return &AuthorizationDecision{
+		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Command requires authorization (LLM analysis failed): %s", command),
 			RequiresUserInput: true,
-		}, nil
+		}
+		a.recordLLMDecision(false, llmAuthorizationRecord{
+			Kind:   "shell",
+			Target: command,
+			Reason: decision.Reason,
+		})
+		return decision, nil
 	}
 
 	var result struct {
@@ -142,17 +202,33 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 
 	cleaned := cleanLLMJSONResponse(response)
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
-		return &AuthorizationDecision{
+		decision := &AuthorizationDecision{
 			Allowed:                false,
 			Reason:                 fmt.Sprintf("Command requires authorization (failed to parse LLM response): %s", command),
 			RequiresUserInput:      true,
 			SuggestedCommandPrefix: "",
-		}, nil
+		}
+		a.recordLLMDecision(false, llmAuthorizationRecord{
+			Kind:   "shell",
+			Target: command,
+			Reason: decision.Reason,
+		})
+		return decision, nil
 	}
 
 	suggestedPrefix := strings.TrimSpace(result.Prefix)
 	if result.Harmless {
-		return &AuthorizationDecision{Allowed: true, SuggestedCommandPrefix: suggestedPrefix}, nil
+		decision := &AuthorizationDecision{Allowed: true, SuggestedCommandPrefix: suggestedPrefix}
+		recordReason := result.Reason
+		if recordReason == "" {
+			recordReason = fmt.Sprintf("LLM judged %s harmless", command)
+		}
+		a.recordLLMDecision(true, llmAuthorizationRecord{
+			Kind:   "shell",
+			Target: command,
+			Reason: recordReason,
+		})
+		return decision, nil
 	}
 
 	reason := result.Reason
@@ -164,12 +240,18 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 		reason = fmt.Sprintf("%s\nApproving will also allow future commands starting with %q to run without additional prompts in this project.", reason, suggestedPrefix)
 	}
 
-	return &AuthorizationDecision{
+	decision := &AuthorizationDecision{
 		Allowed:                false,
 		Reason:                 reason,
 		RequiresUserInput:      true,
 		SuggestedCommandPrefix: suggestedPrefix,
-	}, nil
+	}
+	a.recordLLMDecision(false, llmAuthorizationRecord{
+		Kind:   "shell",
+		Target: command,
+		Reason: reason,
+	})
+	return decision, nil
 }
 
 func cleanLLMJSONResponse(response string) string {
@@ -178,4 +260,51 @@ func cleanLLMJSONResponse(response string) string {
 	cleaned = strings.TrimPrefix(cleaned, "```")
 	cleaned = strings.TrimSuffix(cleaned, "```")
 	return strings.TrimSpace(cleaned)
+}
+
+func (a *AuthorizationActor) recordLLMDecision(success bool, record llmAuthorizationRecord) {
+	if a == nil {
+		return
+	}
+	if success {
+		a.lastLLMSuccesses = appendLLMRecord(a.lastLLMSuccesses, record)
+		return
+	}
+	a.lastLLMDeclines = appendLLMRecord(a.lastLLMDeclines, record)
+}
+
+func appendLLMRecord(records []llmAuthorizationRecord, record llmAuthorizationRecord) []llmAuthorizationRecord {
+	records = append(records, record)
+	if len(records) > 10 {
+		records = records[len(records)-10:]
+	}
+	return records
+}
+
+func (a *AuthorizationActor) formatLLMDecisionHistory() string {
+	if a == nil {
+		return ""
+	}
+	if len(a.lastLLMSuccesses) == 0 && len(a.lastLLMDeclines) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	if len(a.lastLLMSuccesses) > 0 {
+		sb.WriteString("Successful authorizations:\n")
+		for i := len(a.lastLLMSuccesses) - 1; i >= 0; i-- {
+			record := a.lastLLMSuccesses[i]
+			sb.WriteString(fmt.Sprintf("- [%s] %s — %s\n", record.Kind, record.Target, record.Reason))
+		}
+	}
+
+	if len(a.lastLLMDeclines) > 0 {
+		sb.WriteString("Declined authorizations:\n")
+		for i := len(a.lastLLMDeclines) - 1; i >= 0; i-- {
+			record := a.lastLLMDeclines[i]
+			sb.WriteString(fmt.Sprintf("- [%s] %s — %s\n", record.Kind, record.Target, record.Reason))
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
 }

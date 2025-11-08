@@ -43,12 +43,14 @@ type AuthorizationActor struct {
 	session         *session.Session
 	summarizeClient llm.Client
 
-	options         AuthorizationOptions
-	allowedFiles    map[string]struct{}
-	allowedDirs     []string
-	allowedDomains  map[string]struct{}
-	allowedCommands []string // Prefixes of commands that are pre-authorized
-	workingDir      string
+	options          AuthorizationOptions
+	allowedFiles     map[string]struct{}
+	allowedDirs      []string
+	allowedDomains   map[string]struct{}
+	allowedCommands  []string // Prefixes of commands that are pre-authorized
+	workingDir       string
+	lastLLMSuccesses []llmAuthorizationRecord
+	lastLLMDeclines  []llmAuthorizationRecord
 }
 
 // NewAuthorizationActor constructs a new authorization actor instance.

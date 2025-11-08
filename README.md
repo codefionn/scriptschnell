@@ -15,7 +15,7 @@
 
 ## TODO
 
-- [ ] Infinite text loop detection (Gemini loves to repeat itself)
+- [x] Infinite text loop detection (Gemini loves to repeat itself)
 - [ ] Better authorization UI
 - [ ] More e2e tests using other programming languages than Go
 - [ ] Custom system prompt
@@ -30,8 +30,8 @@
 - [ ] Fix auto compaction (seems to be really broken)
 - [ ] Get rid of magic literals in the codebase
 - [ ] General UI improvements around tool calls
-- [ ] Todo task are not showing up in the UI
-- [ ] On configured web search, add text to the system prompt for more up-to-date results
+- [x] Todo task are not showing up in the UI
+- [x] On configured web search, add text to the system prompt for more up-to-date results
 - [ ] Speed up startup time
 - [x] Support user configured mcp's with auto-selecting only relevant ones
 - [ ] Only cache directory listings in working directory
@@ -40,6 +40,9 @@
 - [ ] Filter models by provider in models menu
 - [ ] Fix models menu (weird scrolling behavior, layout issues)
 - [ ] On configuring the first provider, choose a default model
+- [ ] Fix mistral model performance
+- [ ] Use token usage response from provider if available
+- [ ] Output credit usage per session
 
 ## Goals
 
@@ -103,5 +106,5 @@ Supported providers:
 - Ollama
 - OpenAI-compatible
 
-Recommended are `Cerebras` with `zai-glm-4.6` for the orchestration model and `gpt-5-nano` for the
-summarization model.
+Recommended are `Cerebras` with `zai-glm-4.6` for the orchestration model and
+`gpt-5-nano` or `gemini-2.5-flash` for the summarization model.

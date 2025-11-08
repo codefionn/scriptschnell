@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cloudflare/ahocorasick"
 	"github.com/statcode-ai/statcode-ai/internal/llm"
@@ -15,10 +16,47 @@ import (
 
 // Provider represents an LLM provider
 type Provider struct {
-	Name    string   `json:"name"`
-	APIKey  string   `json:"api_key"`
-	BaseURL string   `json:"base_url,omitempty"` // Optional custom base URL for OpenAI-compatible providers
-	Models  []*Model `json:"models"`
+	Name      string           `json:"name"`
+	APIKey    string           `json:"api_key"`
+	BaseURL   string           `json:"base_url,omitempty"` // Optional custom base URL for OpenAI-compatible providers
+	Models    []*Model         `json:"models"`
+	RateLimit *RateLimitConfig `json:"rate_limit,omitempty"`
+}
+
+// RateLimitConfig controls how quickly requests are sent to a provider.
+type RateLimitConfig struct {
+	// RequestsPerMinute enforces a ceiling on request throughput.
+	// If both fields are set, the slower effective interval wins.
+	RequestsPerMinute int `json:"requests_per_minute,omitempty"`
+	// MinIntervalMillis enforces a fixed delay between the start of each request.
+	MinIntervalMillis int `json:"min_interval_ms,omitempty"`
+	// TokensPerMinute limits how many prompt tokens (including tool output) are sent per minute.
+	TokensPerMinute int `json:"tokens_per_minute,omitempty"`
+}
+
+func (p *Provider) rateLimitInterval() time.Duration {
+	if p == nil || p.RateLimit == nil {
+		return 0
+	}
+
+	var interval time.Duration
+	if p.RateLimit.MinIntervalMillis > 0 {
+		interval = time.Duration(p.RateLimit.MinIntervalMillis) * time.Millisecond
+	}
+	if p.RateLimit.RequestsPerMinute > 0 {
+		rpmInterval := time.Minute / time.Duration(p.RateLimit.RequestsPerMinute)
+		if interval == 0 || rpmInterval > interval {
+			interval = rpmInterval
+		}
+	}
+	return interval
+}
+
+func (p *Provider) tokensPerMinute() int {
+	if p == nil || p.RateLimit == nil {
+		return 0
+	}
+	return p.RateLimit.TokensPerMinute
 }
 
 // Model represents an LLM model
@@ -296,6 +334,73 @@ func (m *Manager) ListProviders() []*Provider {
 	return providers
 }
 
+// UpdateProviderRateLimit updates or clears a provider's rate limit settings.
+func (m *Manager) UpdateProviderRateLimit(providerName string, cfg *RateLimitConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	p, ok := m.config.Providers[providerName]
+	if !ok {
+		return fmt.Errorf("provider not found: %s", providerName)
+	}
+
+	var normalized *RateLimitConfig
+	if cfg != nil {
+		if cfg.RequestsPerMinute <= 0 && cfg.MinIntervalMillis <= 0 && cfg.TokensPerMinute <= 0 {
+			normalized = nil
+		} else {
+			copyCfg := *cfg
+			if copyCfg.RequestsPerMinute < 0 {
+				copyCfg.RequestsPerMinute = 0
+			}
+			if copyCfg.MinIntervalMillis < 0 {
+				copyCfg.MinIntervalMillis = 0
+			}
+			if copyCfg.TokensPerMinute < 0 {
+				copyCfg.TokensPerMinute = 0
+			}
+			normalized = &copyCfg
+		}
+	}
+
+	p.RateLimit = normalized
+	return m.save()
+}
+
+// UpdateProviderConnection updates stored credentials/base URL for a provider.
+// Blank values leave the existing configuration untouched.
+func (m *Manager) UpdateProviderConnection(providerName, apiKey, baseURL string) error {
+	apiKey = strings.TrimSpace(apiKey)
+	baseURL = strings.TrimSpace(baseURL)
+	if apiKey == "" && baseURL == "" {
+		return nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	p, ok := m.config.Providers[providerName]
+	if !ok {
+		return fmt.Errorf("provider not found: %s", providerName)
+	}
+
+	updated := false
+	if apiKey != "" && apiKey != p.APIKey {
+		p.APIKey = apiKey
+		updated = true
+	}
+	if baseURL != "" && baseURL != p.BaseURL {
+		p.BaseURL = baseURL
+		updated = true
+	}
+
+	if !updated {
+		return nil
+	}
+
+	return m.save()
+}
+
 // SetOrchestrationModel sets the orchestration model
 func (m *Manager) SetOrchestrationModel(modelID string) error {
 	m.mu.Lock()
@@ -427,31 +532,47 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 
 	// Create client based on provider
 	apiKey := resolveAPIKey(provider.Name, provider.APIKey)
+	var (
+		client llm.Client
+		err    error
+	)
 	switch canonicalProviderName(model.Provider) {
 	case "openai":
-		return llm.NewOpenAIClient(apiKey, model.ID)
+		client, err = llm.NewOpenAIClient(apiKey, model.ID)
 	case "anthropic":
-		return llm.NewAnthropicClient(apiKey, model.ID)
+		client, err = llm.NewAnthropicClient(apiKey, model.ID)
 	case "google":
-		return llm.NewGoogleAIClient(apiKey, model.ID)
+		client, err = llm.NewGoogleAIClient(apiKey, model.ID)
 	case "openrouter":
-		return llm.NewOpenRouterClient(apiKey, model.ID)
+		client, err = llm.NewOpenRouterClient(apiKey, model.ID)
 	case "mistral":
-		return llm.NewMistralClient(apiKey, model.ID)
+		client, err = llm.NewMistralClient(apiKey, model.ID)
 	case "cerebras":
-		return llm.NewCerebrasClient(apiKey, model.ID)
+		client, err = llm.NewCerebrasClient(apiKey, model.ID)
 	case "groq":
-		return llm.NewGroqClient(apiKey, model.ID)
+		client, err = llm.NewGroqClient(apiKey, model.ID)
 	case "ollama":
-		return llm.NewOllamaClient(apiKey, model.ID)
+		client, err = llm.NewOllamaClient(apiKey, model.ID)
 	case "openai-compatible":
 		if provider.BaseURL == "" {
 			return nil, fmt.Errorf("base URL is required for openai-compatible provider")
 		}
-		return llm.NewOpenAICompatibleClient(apiKey, provider.BaseURL, model.ID)
+		client, err = llm.NewOpenAICompatibleClient(apiKey, provider.BaseURL, model.ID)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", model.Provider)
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	interval := provider.rateLimitInterval()
+	tokensPerMinute := provider.tokensPerMinute()
+	if interval > 0 || tokensPerMinute > 0 {
+		return llm.NewRateLimitedClient(client, interval, tokensPerMinute), nil
+	}
+
+	return client, nil
 }
 
 // TestConnection tests a provider's API connection

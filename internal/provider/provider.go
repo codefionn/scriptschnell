@@ -501,6 +501,7 @@ var PreferredModels = map[string][]string{
 	"google":    {"models/gemini-2.5-pro", "models/gemini-2.0-pro-exp"},
 	"mistral":   {"codestral-latest"},
 	"openrouter": {
+		"minimax/minimax-m2",
 		"anthropic/claude-3.5-sonnet",
 		"meta-llama/llama-3.1-70b-instruct",
 		"openrouter/auto",

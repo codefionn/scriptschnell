@@ -44,7 +44,7 @@ func (t *WriteFileSimpleDiffTool) Parameters() map[string]interface{} {
 			},
 			"diff": map[string]interface{}{
 				"type": "string",
-				"description": `Simplified unified diff without @@ hunk markers. Always prefix unchanged lines with a space and include +/- for new/deleted blank lines too. Here's Example:
+				"description": `Simplified unified diff without @@ hunk markers. Always prefix unchanged lines with a space and include +/- for new/deleted blank lines too. Here are some examples:
 Example file 1 (main.go):
 
 package main

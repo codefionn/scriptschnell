@@ -43,8 +43,58 @@ func (t *WriteFileDiffTool) Parameters() map[string]interface{} {
 				"description": "Path to the file to update (relative to working directory)",
 			},
 			"diff": map[string]interface{}{
-				"type":        "string",
-				"description": "Unified diff describing the desired changes; must include file headers and hunk markers.\nExample:\n--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@\n-old line\n+new line",
+				"type": "string",
+				"description": `Unified diff describing the desired changes; must include file headers and hunk markers. Here are some examples:
+Example file 1 (main.go):
+
+package main
+
+import (
+	"fmt"
+	"invalid"
+)
+
+Example update diff 1:
+
+--- a/main.go
++++ b/main.go
+@@ -2,5 +2,10 @@ package main
+
+ import (
+        "fmt"
+-       "invalid"
++  "os"
+ )
++
++func main() {
++  fmt.Println("Hello, World!")
++  os.Exit(0)
++}
+
+Example file 2 (numbers.txt):
+0
+1
+2
+3
+4
+5
+6
+7
+
+Example update diff 2:
+--- a/numbers.txt
++++ b/numbers.txt
+@@ -3,6 +3,9 @@
+ 2
+ 3
+ 4
++This is a different line.
++This is yet another line.
++This is yet another different line.
+ 5
+ 6
+ 7
+`,
 			},
 		},
 		"required": []string{"path", "diff"},

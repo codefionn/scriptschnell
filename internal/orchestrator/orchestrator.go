@@ -263,14 +263,26 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		})
 	}
 
+	modelFamily := llm.DetectModelFamily(o.providerMgr.GetOrchestrationModel())
+
 	// Core filesystem tools
-	addSpec(
-		o.chooseReadFileTool(),
-		true,
-		func(_ *tools.Registry) tools.Tool { return o.chooseReadFileTool() },
-		false,
-		"",
-	)
+	if o.shouldUseNumberedReadFileTool(modelFamily) {
+		addSpec(
+			tools.NewReadFileNumberedTool(o.fs, o.session),
+			true,
+			func(_ *tools.Registry) tools.Tool { return tools.NewReadFileNumberedTool(o.fs, o.session) },
+			false,
+			"",
+		)
+	} else {
+		addSpec(
+			tools.NewReadFileTool(o.fs, o.session),
+			true,
+			func(_ *tools.Registry) tools.Tool { return tools.NewReadFileTool(o.fs, o.session) },
+			false,
+			"",
+		)
+	}
 	addSpec(
 		tools.NewCreateFileTool(o.fs, o.session),
 		true,
@@ -278,7 +290,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		false,
 		"",
 	)
-	if o.shouldUseSimpleDiffTool() {
+	if o.shouldUseSimpleDiffTool(modelFamily) {
 		addSpec(
 			tools.NewWriteFileSimpleDiffTool(o.fs, o.session),
 			true,
@@ -496,11 +508,19 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	return errs
 }
 
-func (o *Orchestrator) chooseReadFileTool() tools.Tool {
-	return tools.NewReadFileNumberedTool(o.fs, o.session)
+func (o *Orchestrator) shouldUseNumberedReadFileTool(modelFamily llm.ModelFamily) bool {
+	if modelFamily == llm.FamilyZaiGLM {
+		return false
+	}
+
+	return true
 }
 
-func (o *Orchestrator) shouldUseSimpleDiffTool() bool {
+func (o *Orchestrator) shouldUseSimpleDiffTool(modelFamily llm.ModelFamily) bool {
+	if modelFamily == llm.FamilyZaiGLM {
+		return false
+	}
+
 	return true
 }
 
@@ -999,12 +1019,12 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 			// Format result as string
 			var toolResult string
 			var executionMetadata *tools.ExecutionMetadata
-			
+
 			if result.Error != "" {
 				toolResult = fmt.Sprintf("Error: %s", result.Error)
 			} else {
 				toolResult = fmt.Sprintf("%v", result.Result)
-				
+
 				// Extract execution metadata if present in the result
 				if resultMap, ok := result.Result.(map[string]interface{}); ok {
 					if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
@@ -1649,10 +1669,10 @@ func (o *Orchestrator) enhancedToolResultCallback(callback ToolResultCallback, t
 	if err := callback(toolName, toolID, result, errorMsg); err != nil {
 		return err
 	}
-	
+
 	// TODO: Store metadata for TUI access when we extend the callback interface
 	// This could be done via a side channel, context, or enhanced callback signature
-	
+
 	return nil
 }
 

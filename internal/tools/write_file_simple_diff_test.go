@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -151,5 +152,149 @@ func TestWriteFileSimpleDiffTool_FailsIfNotRead(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "was not read") {
 		t.Fatalf("expected unread error, got %v", err)
+	}
+}
+
+func TestApplySimpleDiffHandlesNumberedLines(t *testing.T) {
+	original := "alpha\nbeta\n\ngamma\n"
+	diff := numberedDiff([]string{
+		"--- a/file.txt",
+		"+++ b/file.txt",
+		" alpha",
+		" beta",
+		" ",
+		"+delta",
+		"+epsilon",
+		" gamma",
+	})
+
+	got, err := applySimpleDiff(original, diff)
+	if err != nil {
+		t.Fatalf("applySimpleDiff returned error: %v", err)
+	}
+
+	want := "alpha\nbeta\n\ndelta\nepsilon\ngamma\n"
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%q\n\ngot:\n%q", want, got)
+	}
+}
+
+func TestApplySimpleDiffKeepsDigitLeadingContent(t *testing.T) {
+	original := "123 apples\n456 oranges\n"
+	diff := `--- a/file.txt
++++ b/file.txt
+ 123 apples
+-456 oranges
++789 kiwis
+`
+
+	got, err := applySimpleDiff(original, diff)
+	if err != nil {
+		t.Fatalf("applySimpleDiff returned error: %v", err)
+	}
+
+	want := "123 apples\n789 kiwis\n"
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%q\n\ngot:\n%q", want, got)
+	}
+}
+
+func numberedDiff(lines []string) string {
+	var b strings.Builder
+	lineNo := 1
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+			b.WriteString(line)
+			continue
+		}
+		fmt.Fprintf(&b, "%2d %s", lineNo, line)
+		lineNo++
+	}
+	return b.String()
+}
+
+func TestApplySimpleDiffHandlesNumberedContextWithBlankLines(t *testing.T) {
+	original := "}\n\nBoth fields are optional.\n"
+	diff := `--- a/file.txt
++++ b/file.txt
+ 132 }
+ 133 
+ 134 Both fields are optional.
++## Build and Run
++- Step One
+`
+
+	got, err := applySimpleDiff(original, diff)
+	if err != nil {
+		t.Fatalf("applySimpleDiff returned error: %v", err)
+	}
+
+	want := "}\n\nBoth fields are optional.\n## Build and Run\n- Step One\n"
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%q\n\ngot:\n%q", want, got)
+	}
+}
+
+func TestApplySimpleDiffRemovesBlankLinesMarkedWithSpace(t *testing.T) {
+	original := "alpha\n\nbeta\n"
+	diff := `--- a/file.txt
++++ b/file.txt
+ alpha
+- 
+ beta
+`
+
+	got, err := applySimpleDiff(original, diff)
+	if err != nil {
+		t.Fatalf("applySimpleDiff returned error: %v", err)
+	}
+
+	want := "alpha\nbeta\n"
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%q\n\ngot:\n%q", want, got)
+	}
+}
+
+func TestApplySimpleDiffRemovesListItemMissingBulletHyphen(t *testing.T) {
+	original := "- Multiple providers supported\n- Native search\n"
+	diff := `--- a/file.txt
++++ b/file.txt
+ - Multiple providers supported
+- Native search
++## Build and Run
+`
+
+	got, err := applySimpleDiff(original, diff)
+	if err != nil {
+		t.Fatalf("applySimpleDiff returned error: %v", err)
+	}
+
+	want := "- Multiple providers supported\n## Build and Run\n"
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%q\n\ngot:\n%q", want, got)
+	}
+}
+
+func TestApplySimpleDiffStripsGlobalLineNumbers(t *testing.T) {
+	original := "alpha\nbeta\ngamma\n"
+	diff := `--- a/file.txt
++++ b/file.txt
+  10 alpha
+  11 -beta
+  12 +beta updated
+  13 gamma
+`
+
+	got, err := applySimpleDiff(original, diff)
+	if err != nil {
+		t.Fatalf("applySimpleDiff returned error: %v", err)
+	}
+
+	want := "alpha\nbeta updated\ngamma\n"
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%q\n\ngot:\n%q", want, got)
 	}
 }

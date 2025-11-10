@@ -1869,8 +1869,8 @@ func (m *Model) updateViewport() {
 		rendered.WriteString(header)
 		rendered.WriteString("\n")
 
-		// Render content with markdown for Assistant and Tool messages
-		if (msg.role == "Assistant" || msg.role == "Tool") && m.renderer != nil && msg.content != "" {
+		// Render content with markdown for Assistant messages only
+		if msg.role == "Assistant" && m.renderer != nil && msg.content != "" {
 			// Render markdown
 			if mdRendered, err := m.renderer.Render(msg.content); err == nil {
 				rendered.WriteString(strings.TrimRight(mdRendered, "\n"))

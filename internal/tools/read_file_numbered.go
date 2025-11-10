@@ -28,7 +28,7 @@ func (t *ReadFileNumberedTool) Name() string {
 }
 
 func (t *ReadFileNumberedTool) Description() string {
-	return "Read a file from the filesystem with line numbers. Supports entire file or specific line ranges (max 2000 lines). Files read during the session are tracked for diff operations."
+	return "Read a file from the filesystem (format: [padded line number][space][line]). Supports entire file or specific line ranges (max 2000 lines)."
 }
 
 func (t *ReadFileNumberedTool) Parameters() map[string]interface{} {
@@ -113,13 +113,9 @@ func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]in
 		}
 	}
 
-	content = formatLinesWithNumbers(lines, startLineNumber)
+	content = prependFormatNotice(formatLinesWithNumbers(lines, startLineNumber))
 	if truncationMessage != "" {
-		if content != "" {
-			content += "\n\n" + truncationMessage
-		} else {
-			content = truncationMessage
-		}
+		content += "\n\n" + truncationMessage
 	}
 
 	// Track file as read in session
@@ -127,13 +123,14 @@ func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]in
 		t.session.TrackFileRead(path, content)
 	}
 
-	lineCount := len(strings.Split(content, "\n"))
+	lineCount := len(lines)
 	logger.Info("read_file (numbered): successfully read %s (%d lines)", path, lineCount)
 
 	return map[string]interface{}{
 		"path":    path,
 		"content": content,
 		"lines":   lineCount,
+		"format":  "[padded line number] [line]",
 	}, nil
 }
 
@@ -159,4 +156,12 @@ func formatLinesWithNumbers(lines []string, start int) string {
 	}
 
 	return strings.Join(formatted, "\n")
+}
+
+func prependFormatNotice(content string) string {
+	const notice = "[Line format: [padded line number] [line]]"
+	if content == "" {
+		return notice
+	}
+	return notice + "\n" + content
 }

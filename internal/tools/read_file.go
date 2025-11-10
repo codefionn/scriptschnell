@@ -76,6 +76,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 
 	var content string
 	var lines []string
+	var startLine, endLine int
 
 	if fromLine > 0 && toLine > 0 {
 		// Read specific line range
@@ -88,6 +89,8 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 			return nil, fmt.Errorf("error reading file lines: %w", err)
 		}
 		content = strings.Join(lines, "\n")
+		startLine = fromLine
+		endLine = toLine
 	} else {
 		// Read entire file
 		data, err := t.fs.ReadFile(ctx, path)
@@ -106,6 +109,12 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 			}
 			content = strings.Join(lines, "\n")
 			content += fmt.Sprintf("\n\n[... file truncated, %d total lines, showing first 2000 lines. Use from_line and to_line parameters to read more]", lineCount)
+			startLine = 1
+			endLine = 2000
+		} else {
+			// Read entire file without truncation
+			startLine = 1
+			endLine = lineCount
 		}
 	}
 
@@ -115,11 +124,13 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 	}
 
 	lineCount := len(strings.Split(content, "\n"))
-	logger.Info("read_file: successfully read %s (%d lines)", path, lineCount)
+	logger.Info("read_file: successfully read %s (lines %d-%d, %d lines total)", path, startLine, endLine, lineCount)
 
 	return map[string]interface{}{
-		"path":    path,
-		"content": content,
-		"lines":   lineCount,
+		"path":       path,
+		"content":    content,
+		"lines":      lineCount,
+		"start_line": startLine,
+		"end_line":   endLine,
 	}, nil
 }

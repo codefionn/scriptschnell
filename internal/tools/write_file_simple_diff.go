@@ -31,7 +31,7 @@ func (t *WriteFileSimpleDiffTool) Name() string {
 }
 
 func (t *WriteFileSimpleDiffTool) Description() string {
-	return "Update an existing file using a diff. Include ---/+++ headers and prefix every line with +, -, or space (even for blank lines) while preserving the original whitespace."
+	return "Update an existing file using a diff. Include ---/+++ headers and prefix every line with +, -, or space (even for blank lines) while preserving the original whitespace. Do NOT prepend line numbers or other column markers—lines must appear exactly as they should exist in the file."
 }
 
 func (t *WriteFileSimpleDiffTool) Parameters() map[string]interface{} {
@@ -43,9 +43,58 @@ func (t *WriteFileSimpleDiffTool) Parameters() map[string]interface{} {
 				"description": "Path to the file to update (relative to working directory)",
 			},
 			"diff": map[string]interface{}{
-				"type":        "string",
-				"description": "Simplified unified diff without @@ hunk markers. Always prefix unchanged lines with a space and include +/- for blank lines too. Example:\nOriginal file:\n package main\n import (\n \t\"fmt\"\n )\n\nDiff:\n --- a/main.go\n +++ b/main.go\n  package main\n  import (\n -\t\"fmt\"\n +\t\"bufio\"\n +\t\"os\"\n  )",
-			},
+				"type": "string",
+				"description": `Simplified unified diff without @@ hunk markers. Always prefix unchanged lines with a space and include +/- for new/deleted blank lines too. Here's Example:
+Example file 1 (main.go):
+
+package main
+
+import (
+	"fmt"
+	"invalid"
+)
+
+Example update diff 1:
+
+--- a/main.go
++++ b/main.go
+@@ -2,5 +2,10 @@ package main
+
+ import (
+        "fmt"
+-       "invalid"
++  "os"
+ )
++
++func main() {
++  fmt.Println("Hello, World!")
++  os.Exit(0)
++}
+
+Example file 2 (numbers.txt):
+0
+1
+2
+3
+4
+5
+6
+7
+
+Example update diff 2:
+--- a/numbers.txt
++++ b/numbers.txt
+@@ -3,6 +3,9 @@
+ 2
+ 3
+ 4
++This is a different line.
++This is yet another line.
++This is yet another different line.
+ 5
+ 6
+ 7
+`},
 		},
 		"required": []string{"path", "diff"},
 	}
@@ -113,10 +162,16 @@ func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string
 func applySimpleDiff(original, diffText string) (string, error) {
 	originalLines := strings.Split(original, "\n")
 	diffLines := strings.Split(diffText, "\n")
+	stripNumbers := shouldStripGlobalLineNumbers(diffLines)
 
 	ops := make([]string, 0, len(diffLines))
 	for _, raw := range diffLines {
 		line := strings.TrimSuffix(raw, "\r")
+		if stripNumbers && shouldAttemptGlobalStrip(line) {
+			if stripped, ok := stripNumberPrefixForced(line); ok {
+				line = stripped
+			}
+		}
 		switch {
 		case strings.HasPrefix(line, "diff "):
 			continue
@@ -134,7 +189,11 @@ func applySimpleDiff(original, diffText string) (string, error) {
 		if line == "" {
 			continue
 		}
-		ops = append(ops, line)
+		normalized := normalizeDiffLine(line)
+		if normalized == "" {
+			continue
+		}
+		ops = append(ops, normalized)
 	}
 
 	result := make([]string, 0, len(originalLines))
@@ -170,8 +229,16 @@ func applySimpleDiff(original, diffText string) (string, error) {
 				result = append(result, originalLines[pos])
 				pos++
 			}
-			if pos >= len(originalLines) || originalLines[pos] != payload {
+			if pos >= len(originalLines) {
 				return "", fmt.Errorf("mismatched removal line %q", payload)
+			}
+
+			if !linesEquivalent(originalLines[pos], payload) {
+				if stripped, ok := stripLineNumberPrefix(payload); ok && linesEquivalent(originalLines[pos], stripped) {
+					payload = stripped
+				} else {
+					return "", fmt.Errorf("mismatched removal line %q", payload)
+				}
 			}
 			pos++
 		case '+':
@@ -191,15 +258,210 @@ func applySimpleDiff(original, diffText string) (string, error) {
 }
 
 func findNextLine(lines []string, start int, target string) int {
-	targetIsWhitespace := isWhitespaceOnly(target)
+	if idx := findLineMatch(lines, start, target); idx >= 0 {
+		return idx
+	}
+
+	if stripped, ok := stripLineNumberPrefix(target); ok {
+		return findLineMatch(lines, start, stripped)
+	}
+
+	return -1
+}
+
+func findLineMatch(lines []string, start int, target string) int {
 	for i := start; i < len(lines); i++ {
-		if lines[i] == target || (targetIsWhitespace && isWhitespaceOnly(lines[i])) {
+		if linesEquivalent(lines[i], target) {
 			return i
 		}
 	}
 	return -1
 }
 
+func normalizeDiffLine(line string) string {
+	if normalized, ok := stripNumberedLine(line); ok {
+		return normalized
+	}
+	return line
+}
+
+func shouldStripGlobalLineNumbers(lines []string) bool {
+	candidates := 0
+	numbered := 0
+	for _, raw := range lines {
+		line := strings.TrimSuffix(raw, "\r")
+		if !shouldAttemptGlobalStrip(line) {
+			continue
+		}
+		candidates++
+		if _, ok := stripLineNumberPrefix(line); ok {
+			numbered++
+		}
+	}
+	if candidates < 3 {
+		return false
+	}
+	return numbered*3 >= candidates*2
+}
+
+func shouldAttemptGlobalStrip(line string) bool {
+	if line == "" {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(line, "diff "):
+		return false
+	case strings.HasPrefix(line, "index "):
+		return false
+	case strings.HasPrefix(line, "--- "):
+		return false
+	case strings.HasPrefix(line, "+++ "):
+		return false
+	case strings.HasPrefix(line, "@@"):
+		return false
+	case strings.HasPrefix(line, "\\ No newline at end of file"):
+		return false
+	default:
+		return true
+	}
+}
+
+func stripNumberedLine(line string) (string, bool) {
+	if line == "" {
+		return line, false
+	}
+
+	leadingWhitespace := countLeadingWhitespace(line)
+	if leadingWhitespace == len(line) {
+		return line, false
+	}
+
+	idx := leadingWhitespace
+	// Require digits after the whitespace; otherwise it's not a numbered line.
+	for idx < len(line) && line[idx] >= '0' && line[idx] <= '9' {
+		idx++
+	}
+	if idx == leadingWhitespace {
+		return line, false
+	}
+
+	// Skip optional punctuation such as ".", ":", ")", "|"
+	if idx < len(line) && strings.ContainsRune(".:)|", rune(line[idx])) {
+		idx++
+	}
+
+	// Skip additional whitespace between the number and the content.
+	for idx < len(line) && (line[idx] == ' ' || line[idx] == '\t') {
+		idx++
+	}
+
+	rest := line[idx:]
+	if rest == "" {
+		return " ", true
+	}
+
+	// If the line originally started with a diff prefix (space/+/−) and the remaining
+	// content does not begin with +/-, assume this was a legitimate line that starts
+	// with digits and skip normalization to avoid corrupting content.
+	if leadingWhitespace > 0 && rest[0] != '+' && rest[0] != '-' {
+		return line, false
+	}
+
+	switch rest[0] {
+	case '+', '-', ' ':
+		return rest, true
+	default:
+		return " " + rest, true
+	}
+}
+
+func countLeadingWhitespace(s string) int {
+	count := 0
+	for count < len(s) && (s[count] == ' ' || s[count] == '\t') {
+		count++
+	}
+	return count
+}
+
 func isWhitespaceOnly(s string) bool {
 	return len(strings.TrimSpace(s)) == 0
+}
+
+func stripLineNumberPrefix(s string) (string, bool) {
+	i := 0
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+
+	startDigits := i
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i == startDigits {
+		return s, false
+	}
+
+	if i < len(s) && strings.ContainsRune(".:)|", rune(s[i])) {
+		i++
+	}
+
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+
+	return s[i:], true
+}
+
+func linesEquivalent(original, payload string) bool {
+	if original == payload {
+		return true
+	}
+	if isWhitespaceOnly(original) && isWhitespaceOnly(payload) {
+		return true
+	}
+	if matchesMissingBullet(original, payload) {
+		return true
+	}
+	return false
+}
+
+func matchesMissingBullet(original, payload string) bool {
+	if len(original) < 2 {
+		return false
+	}
+
+	trimStart := 0
+	for trimStart < len(original) && original[trimStart] == ' ' {
+		trimStart++
+	}
+	if trimStart >= len(original)-1 {
+		return false
+	}
+
+	b := original[trimStart]
+	if b != '-' && b != '+' && b != '*' {
+		return false
+	}
+	if original[trimStart+1] != ' ' {
+		return false
+	}
+
+	candidate := original[:trimStart] + original[trimStart+1:]
+	return candidate == payload
+}
+
+func stripNumberPrefixForced(line string) (string, bool) {
+	stripped, ok := stripLineNumberPrefix(line)
+	if !ok {
+		return line, false
+	}
+	if stripped == "" {
+		return " ", true
+	}
+	switch stripped[0] {
+	case '+', '-', ' ':
+		return stripped, true
+	default:
+		return " " + stripped, true
+	}
 }

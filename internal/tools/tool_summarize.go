@@ -35,7 +35,8 @@ This is useful when:
 
 Examples:
 - Execute read_file and summarize "what authentication method is used?"
-- Execute shell command and summarize "how many errors occurred?"
+- Execute shell command and summarize "how many errors and what errors occurred?"
+- Execute a build/lint or test tool and summarize "what failed specifically?"
 - Execute read_file and summarize "list all exported functions"
 
 The tool will:

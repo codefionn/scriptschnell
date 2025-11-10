@@ -120,6 +120,7 @@ func (pb *PromptBuilder) modelSpecificPrompt(modelName string) string {
 	switch {
 	case modelFamily == FamilyZaiGLM:
 		return `Always use the todo tool calls to track progress and plan ahead.
+Create new todos, sub-todos and check them if done successfully.
 `
 	default:
 		return ""

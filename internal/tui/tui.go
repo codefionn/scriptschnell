@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"encoding/json"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+	
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -73,6 +75,13 @@ var (
 
 	todoErrorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196"))
+
+	toolCallStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("243")). // Greyer color for tool calls
+			Bold(true)
+
+	toolResultStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245")) // Slightly lighter grey for results
 )
 
 const (
@@ -85,6 +94,10 @@ type message struct {
 	role      string
 	content   string // raw markdown content
 	timestamp string
+	toolName  string // for tool result messages
+	toolID    string // for tool result messages
+	fullResult string // stores the full tool result for potential summary replacement
+	summarized bool // indicates if this tool result has been summarized
 }
 
 type Model struct {
@@ -224,6 +237,21 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		contextFreePercent: 100,
 		renderWrapWidth:    80,
 	}
+}
+
+// addToolMessage adds a tool message with metadata for potential summary replacement
+func (m *Model) addToolMessage(toolName, toolID, content, fullResult string, summarized bool) {
+	msg := message{
+		role:       "Tool",
+		content:    content,
+		timestamp:  time.Now().Format("15:04:05"),
+		toolName:   toolName,
+		toolID:     toolID,
+		fullResult: fullResult,
+		summarized: summarized,
+	}
+	m.messages = append(m.messages, msg)
+	m.updateViewport()
 }
 
 // SetFilesystem sets the filesystem and working directory for filepath autocomplete
@@ -1039,6 +1067,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case GeneratingMsg:
 		if msg.Content != "" {
+			// If this is the first chunk of assistant content, summarize any previous tool results
+			if len(m.messages) == 0 || m.messages[len(m.messages)-1].role != "Assistant" {
+				m.summarizeLastToolResult()
+			}
 			if len(m.messages) == 0 || m.messages[len(m.messages)-1].role != "Assistant" {
 				m.addMessage("Assistant", "")
 			}
@@ -1442,25 +1474,76 @@ func (m *Model) appendToLastMessage(content string) {
 		return
 	}
 
+	// Check if the last message is an unsimplified tool result and summarize it
+	lastMsg := &m.messages[len(m.messages)-1]
+	if lastMsg.role == "Tool" && !lastMsg.summarized && lastMsg.fullResult != "" {
+		// Replace with summary
+		summary := m.generateToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
+		lastMsg.content = summary
+		lastMsg.summarized = true
+	}
+
 	m.messages[len(m.messages)-1].content += content
+}
+
+// summarizeLastToolResult summarizes the last tool result if it hasn't been summarized yet
+func (m *Model) summarizeLastToolResult() {
+	if len(m.messages) == 0 {
+		return
+	}
+
+	lastMsg := &m.messages[len(m.messages)-1]
+	if lastMsg.role == "Tool" && !lastMsg.summarized && lastMsg.fullResult != "" {
+		summary := m.generateToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
+		lastMsg.content = summary
+		lastMsg.summarized = true
+		m.updateViewport()
+	}
 }
 
 func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[string]interface{}) {
 	// Format parameters as JSON for display
-	var paramsStr string
+	var paramsBuf strings.Builder
 	if len(parameters) > 0 {
-		// Simple formatting - just show key-value pairs
-		parts := []string{}
+		// Format parameters in a more readable way
+		paramsBuf.WriteString("\n**Parameters:**\n")
 		for k, v := range parameters {
-			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+			paramsBuf.WriteString(fmt.Sprintf("  • %s: %v\n", k, v))
 		}
-		paramsStr = strings.Join(parts, ", ")
 	}
 
-	content := fmt.Sprintf("🔧 **Calling tool:** `%s`", toolName)
-	if paramsStr != "" {
-		content += fmt.Sprintf("\n   Parameters: %s", paramsStr)
+	// Create more descriptive content based on tool type
+	var content string
+	switch toolName {
+	case "read_file":
+		if path, ok := parameters["path"].(string); ok {
+			content = fmt.Sprintf("📖 **Reading file:** `%s`", path)
+		} else {
+			content = fmt.Sprintf("📖 **Reading file**")
+		}
+	case "create_file":
+		if path, ok := parameters["path"].(string); ok {
+			content = fmt.Sprintf("📝 **Creating file:** `%s`", path)
+		} else {
+			content = fmt.Sprintf("📝 **Creating file**")
+		}
+	case "write_file_diff":
+		if path, ok := parameters["path"].(string); ok {
+			content = fmt.Sprintf("✏️  **Updating file:** `%s`", path)
+		} else {
+			content = fmt.Sprintf("✏️  **Updating file**")
+		}
+	case "shell":
+		if command, ok := parameters["command"].(string); ok {
+			content = fmt.Sprintf("💻 **Executing command:** `%s`", command)
+		} else {
+			content = fmt.Sprintf("💻 **Executing command**")
+		}
+	default:
+		content = fmt.Sprintf("🔧 **Calling tool:** `%s`", toolName)
 	}
+	
+	content += paramsBuf.String()
 
 	m.addMessage("Tool", content)
 }
@@ -1468,17 +1551,293 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) {
 	var content string
 	if errorMsg != "" {
-		content = fmt.Sprintf("❌ **Tool `%s` failed:** %s", toolName, errorMsg)
+		content = fmt.Sprintf("❌ **Error:** %s", errorMsg)
+		m.addToolMessage(toolName, toolID, content, "", false)
+	} else if result == "" {
+		content = m.generateToolSummary(toolName, result, true)
+		m.addToolMessage(toolName, toolID, content, "", true)
 	} else {
-		// Truncate very long results for display
-		displayResult := result
-		if len(result) > 200 {
-			displayResult = result[:200] + "... (truncated)"
-		}
-		content = fmt.Sprintf("✓ **Tool `%s` completed**\n```\n%s\n```", toolName, displayResult)
+		// Show full result initially, mark for summary later
+		content = m.generateEnhancedToolSummary(toolName, result, false)
+		// Create the full result display
+		displayResult := m.truncateToolResult(result)
+		fullContent := fmt.Sprintf("✓ **Result:**\n```\n%s\n```", displayResult)
+		m.addToolMessage(toolName, toolID, fullContent, result, false)
 	}
+}
 
-	m.addMessage("Tool", content)
+// generateToolSummary creates a simple one-line summary for tool results
+func (m *Model) generateToolSummary(toolName, result string, noOutput bool) string {
+	if noOutput {
+		return "✓ **Executed successfully**"
+	}
+	
+	switch toolName {
+	case "read_file":
+		// Count lines in the result
+		lines := strings.Count(result, "\n") + 1
+		return fmt.Sprintf("✓ **Read %d lines**", lines)
+		
+	case "create_file":
+		// Count lines in the created content
+		lines := strings.Count(result, "\n") + 1
+		if lines == 1 {
+			return "✓ **Created file**"
+		}
+		return fmt.Sprintf("✓ **Created file with %d lines**", lines)
+		
+	case "write_file_diff":
+		// Count additions and deletions in the diff
+		additions := strings.Count(result, "\n+")
+		deletions := strings.Count(result, "\n-")
+		if additions > 0 && deletions > 0 {
+			return fmt.Sprintf("✓ **Changed: +%d/-%d lines**", additions, deletions)
+		} else if additions > 0 {
+			return fmt.Sprintf("✓ **Added %d lines**", additions)
+		} else if deletions > 0 {
+			return fmt.Sprintf("✓ **Deleted %d lines**", deletions)
+		} else {
+			return "✓ **File updated**"
+		}
+		
+	case "shell":
+		// For shell commands, just indicate successful execution
+		return "✓ **Executed successfully**"
+		
+	case "go_sandbox":
+		return "✓ **Code executed successfully**"
+		
+	default:
+		return "✓ **Completed successfully**"
+	}
+}
+
+// generateEnhancedToolSummary creates detailed summaries using execution metadata when available
+func (m *Model) generateEnhancedToolSummary(toolName, result string, noOutput bool) string {
+	if noOutput {
+		return "✓ **Executed successfully**"
+	}
+	
+	// Try to extract metadata from the result if it's in JSON/map format
+	var metadata *tools.ExecutionMetadata
+	if resultMap, err := m.parseToolResult(result); err == nil {
+		if metadataValue, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
+			if metadataObj, ok := metadataValue.(*tools.ExecutionMetadata); ok {
+				metadata = metadataObj
+			}
+		}
+	}
+	
+	// If we have enhanced metadata, use it for better summaries
+	if metadata != nil {
+		return m.generateMetadataAwareSummary(toolName, metadata)
+	}
+	
+	// Fall back to the original summary logic
+	return m.generateToolSummary(toolName, result, noOutput)
+}
+
+// parseToolResult attempts to parse a tool result string into a map
+func (m *Model) parseToolResult(result string) (map[string]interface{}, error) {
+	// Try to parse as JSON first
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &resultMap); err == nil {
+		return resultMap, nil
+	}
+	
+	// If it's not valid JSON, try to extract JSON from within the string
+	if jsonStart := strings.Index(result, "{"); jsonStart >= 0 {
+		if jsonEnd := strings.LastIndex(result, "}"); jsonEnd > jsonStart {
+			jsonStr := result[jsonStart : jsonEnd+1]
+			if err := json.Unmarshal([]byte(jsonStr), &resultMap); err == nil {
+				return resultMap, nil
+			}
+		}
+	}
+	
+	return nil, fmt.Errorf("could not parse tool result as map")
+}
+
+// generateMetadataAwareSummary creates summaries using execution metadata
+func (m *Model) generateMetadataAwareSummary(toolName string, metadata *tools.ExecutionMetadata) string {
+	switch toolName {
+	case "shell":
+		return m.generateShellSummary(metadata)
+	case "go_sandbox":
+		return m.generateSandboxSummary(metadata)
+	case "read_file":
+		return m.generateReadFileSummary(metadata)
+	case "create_file", "write_file_diff":
+		return m.generateFileOperationSummary(toolName, metadata)
+	default:
+		return m.generateGenericSummary(metadata)
+	}
+}
+
+// generateShellSummary creates detailed shell command summaries
+func (m *Model) generateShellSummary(metadata *tools.ExecutionMetadata) string {
+	if metadata.ExitCode == 0 {
+		// Successful execution
+		summary := "✓ **Command executed successfully**"
+		
+		if metadata.DurationMs > 0 {
+			summary += fmt.Sprintf(" (%.1fs)", float64(metadata.DurationMs)/1000)
+		}
+		
+		if metadata.OutputSizeBytes > 0 {
+			if metadata.OutputLineCount > 1 {
+				summary += fmt.Sprintf(" • %d lines output", metadata.OutputLineCount)
+			} else {
+				summary += " • output produced"
+			}
+		}
+		
+		if metadata.HasStderr {
+			if metadata.StderrSizeBytes > 0 {
+				summary += fmt.Sprintf(" • %d lines stderr", metadata.StderrLineCount)
+			} else {
+				summary += " • stderr output"
+			}
+		}
+		
+		return summary
+	} else {
+		// Failed execution - provide detailed error information
+		summary := "❌ **Command failed**"
+		
+		// Add exit code information
+		if metadata.ExitCode > 0 {
+			summary += fmt.Sprintf(" (exit %d)", metadata.ExitCode)
+		}
+		
+		// Add error classification if available
+		if metadata.ErrorType != "" {
+			switch metadata.ErrorType {
+			case "timeout":
+				summary += " • **timed out**"
+			case "permission":
+				summary += " • **permission denied**"
+			case "not_found":
+				summary += " • **command not found**"
+			case "syntax":
+				summary += " • **syntax error**"
+			case "network":
+				summary += " • **network error**"
+			default:
+				summary += fmt.Sprintf(" • **%s**", metadata.ErrorType)
+			}
+		}
+		
+		// Add timing information for long-running commands
+		if metadata.DurationMs > 5000 { // > 5 seconds
+			summary += fmt.Sprintf(" • after %.1fs", float64(metadata.DurationMs)/1000)
+		}
+		
+		// Add context if available
+		if metadata.ErrorContext != "" {
+			summary += fmt.Sprintf(" • `%s`", metadata.ErrorContext)
+		}
+		
+		// Add stderr hint if there's error output
+		if metadata.HasStderr && metadata.StderrSizeBytes > 0 {
+			summary += fmt.Sprintf(" • %d lines stderr", metadata.StderrLineCount)
+		}
+		
+		return summary
+	}
+}
+
+// generateSandboxSummary creates summaries for Go sandbox execution
+func (m *Model) generateSandboxSummary(metadata *tools.ExecutionMetadata) string {
+	if metadata.ExitCode == 0 {
+		summary := "✓ **Go code executed successfully**"
+		if metadata.DurationMs > 0 {
+			summary += fmt.Sprintf(" (%.1fs)", float64(metadata.DurationMs)/1000)
+		}
+		return summary
+	} else {
+		summary := "❌ **Go execution failed**"
+		if metadata.ExitCode > 0 {
+			summary += fmt.Sprintf(" (exit %d)", metadata.ExitCode)
+		}
+		if metadata.ErrorType != "" {
+			summary += fmt.Sprintf(" • %s", metadata.ErrorType)
+		}
+		return summary
+	}
+}
+
+// generateReadFileSummary creates summaries for file reading operations
+func (m *Model) generateReadFileSummary(metadata *tools.ExecutionMetadata) string {
+	summary := "✓ **File read**"
+	if metadata.OutputSizeBytes > 0 {
+		if metadata.OutputLineCount > 1 {
+			summary += fmt.Sprintf(" • %d lines", metadata.OutputLineCount)
+		}
+		summary += fmt.Sprintf(" • %d bytes", metadata.OutputSizeBytes)
+	}
+	return summary
+}
+
+// generateFileOperationSummary creates summaries for file creation/modification
+func (m *Model) generateFileOperationSummary(toolName string, metadata *tools.ExecutionMetadata) string {
+	var action string
+	switch toolName {
+	case "create_file":
+		action = "created"
+	case "write_file_diff":
+		action = "updated"
+	default:
+		action = "processed"
+	}
+	
+	summary := fmt.Sprintf("✓ **File %s**", action)
+	if metadata.OutputSizeBytes > 0 {
+		if metadata.OutputLineCount > 1 {
+			summary += fmt.Sprintf(" • %d lines", metadata.OutputLineCount)
+		}
+	}
+	return summary
+}
+
+// generateGenericSummary creates summaries for unknown tool types
+func (m *Model) generateGenericSummary(metadata *tools.ExecutionMetadata) string {
+	if metadata.ErrorType != "" {
+		return fmt.Sprintf("❌ **Failed** • %s", metadata.ErrorType)
+	}
+	return "✓ **Completed successfully**"
+}
+
+func (m *Model) truncateToolResult(result string) string {
+	// First, try to split by double newlines (paragraphs)
+	paragraphs := strings.Split(result, "\n\n")
+	if len(paragraphs) > 1 {
+		firstParagraph := strings.TrimSpace(paragraphs[0])
+		if len(firstParagraph) > 300 {
+			// If first paragraph is too long, truncate it
+			return firstParagraph[:297] + "..."
+		}
+		return firstParagraph
+	}
+	
+	// If no paragraphs, split by single newlines and take first few lines
+	lines := strings.Split(result, "\n")
+	if len(lines) > 3 {
+		// Take first 3 lines
+		firstLines := strings.Join(lines[:3], "\n")
+		if len(firstLines) > 300 {
+			return firstLines[:297] + "..."
+		}
+		return firstLines
+	}
+	
+	// If result is short, return as-is
+	if len(result) <= 300 {
+		return strings.TrimSpace(result)
+	}
+	
+	// Otherwise truncate to ~300 characters
+	return result[:297] + "..."
 }
 
 func (m *Model) updateViewport() {
@@ -1500,9 +1859,7 @@ func (m *Model) updateViewport() {
 				Foreground(lipgloss.Color("205")).
 				Bold(true)
 		} else if msg.role == "Tool" {
-			headerStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")). // Orange for tools
-				Bold(true)
+			headerStyle = toolCallStyle
 		} else {
 			headerStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("241"))

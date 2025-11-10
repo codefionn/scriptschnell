@@ -106,6 +106,9 @@ You are an interactive CLI agent specializing in software engineering tasks. You
 - Explain non-trivial shell commands before execution when possible.
 - Avoid emojis unless the user requests them.
 - Stop once tasks are complete instead of reiterating actions performed.
+
+## Caution
+- You cannot test tui programs directly by default
 `
 
 var systemPrompt = template.Must(template.New("systemPrompt").Parse(systemPromptTemplate))

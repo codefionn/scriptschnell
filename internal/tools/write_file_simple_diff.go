@@ -31,7 +31,7 @@ func (t *WriteFileSimpleDiffTool) Name() string {
 }
 
 func (t *WriteFileSimpleDiffTool) Description() string {
-	return "Update an existing file using a diff. File headers (---/+++) plus +/-/space lines are sufficient"
+	return "Update an existing file using a diff. Include ---/+++ headers and prefix every line with +, -, or space (even for blank lines) while preserving the original whitespace."
 }
 
 func (t *WriteFileSimpleDiffTool) Parameters() map[string]interface{} {
@@ -44,7 +44,7 @@ func (t *WriteFileSimpleDiffTool) Parameters() map[string]interface{} {
 			},
 			"diff": map[string]interface{}{
 				"type":        "string",
-				"description": "Simplified unified diff without @@ hunk markers. Example:\nOriginal file:\n package main\n import (\n \t\"fmt\"\n )\n\nDiff:\n --- a/main.go\n +++ b/main.go\n  package main\n  import (\n -\t\"fmt\"\n +\t\"bufio\"\n  )",
+				"description": "Simplified unified diff without @@ hunk markers. Always prefix unchanged lines with a space and include +/- for blank lines too. Example:\nOriginal file:\n package main\n import (\n \t\"fmt\"\n )\n\nDiff:\n --- a/main.go\n +++ b/main.go\n  package main\n  import (\n -\t\"fmt\"\n +\t\"bufio\"\n +\t\"os\"\n  )",
 			},
 		},
 		"required": []string{"path", "diff"},
@@ -191,10 +191,15 @@ func applySimpleDiff(original, diffText string) (string, error) {
 }
 
 func findNextLine(lines []string, start int, target string) int {
+	targetIsWhitespace := isWhitespaceOnly(target)
 	for i := start; i < len(lines); i++ {
-		if lines[i] == target {
+		if lines[i] == target || (targetIsWhitespace && isWhitespaceOnly(lines[i])) {
 			return i
 		}
 	}
 	return -1
+}
+
+func isWhitespaceOnly(s string) bool {
+	return len(strings.TrimSpace(s)) == 0
 }

@@ -317,6 +317,20 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	// Set up callbacks
 	model.SetOnSubmit(func(input string) error {
 		model.SetContextFile(orch.GetExtendedContextFile())
+		// Tool call callback
+		toolCallCallback := func(toolName, toolID string, parameters map[string]interface{}) error {
+			if program != nil {
+				program.Send(tui.ToolCallMsg{ToolName: toolName, ToolID: toolID, Parameters: parameters})
+			}
+			return nil
+		}
+		// Tool result callback
+		toolResultCallback := func(toolName, toolID, result, errorMsg string) error {
+			if program != nil {
+				program.Send(tui.ToolResultMsg{ToolName: toolName, ToolID: toolID, Result: result, Error: errorMsg})
+			}
+			return nil
+		}
 		// Process prompt in a goroutine and send chunks via tea.Cmd
 		go func() {
 			err := orch.ProcessPrompt(ctx, input, func(chunk string) error {
@@ -389,7 +403,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 				case <-ctx.Done():
 					return false, ctx.Err()
 				}
-			})
+			}, toolCallCallback, toolResultCallback)
 
 			// Send complete message or error
 			if program != nil {

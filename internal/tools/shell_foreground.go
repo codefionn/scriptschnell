@@ -184,13 +184,50 @@ func (r *shellCommandRunner) buildForegroundResult(err error, timedOut bool) (ma
 		logger.Info("shell: command completed successfully (exit_code=%d, output_bytes=%d)", exitCode, r.output.bytesWritten())
 	}
 
-	return map[string]interface{}{
+	// Build the basic result
+	result := map[string]interface{}{
 		"stdout":    r.output.combinedOutput(),
 		"exit_code": exitCode,
 		"timeout":   timedOut,
-	}, nil
+	}
+
+	// Add enhanced metadata for better summaries
+	output := r.output.combinedOutput()
+	outputBytes, outputLines := CalculateOutputStats(output)
+
+	metadata := &ExecutionMetadata{
+		StartTime:       &r.startedAt,
+		EndTime:         timePtr(time.Now()),
+		DurationMs:      time.Since(r.startedAt).Milliseconds(),
+		Command:         r.command,
+		ExitCode:        exitCode,
+		OutputSizeBytes: outputBytes,
+		OutputLineCount: outputLines,
+		WorkingDir:      r.workingDir,
+		TimeoutSeconds:  int(r.timeout.Seconds()),
+		WasTimedOut:     timedOut,
+		WasBackgrounded: false,
+		ToolType:        "shell",
+		HasStderr:       r.output.hasStderrContent(),
+	}
+
+	// Add stderr-specific stats if available
+	if stderrOutput := r.output.stderrOutput(); stderrOutput != "" {
+		stderrBytes, stderrLines := CalculateOutputStats(stderrOutput)
+		metadata.StderrSizeBytes = stderrBytes
+		metadata.StderrLineCount = stderrLines
+	}
+
+	// Store metadata in the result for the TUI to use
+	result["_execution_metadata"] = metadata
+
+	return result, nil
 }
 
+func timePtr(t time.Time) *time.Time {
+	return &t
+
+}
 func (r *shellCommandRunner) handleBackgroundCompletion(job *session.BackgroundJob) {
 	err := <-r.done
 	r.wg.Wait()
@@ -320,6 +357,21 @@ func (o *shellOutput) backgroundJob() *session.BackgroundJob {
 	return o.job
 }
 
+func (o *shellOutput) hasStderrContent() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.stderrLines) > 0 || o.stderrPending != ""
+}
+
+func (o *shellOutput) stderrOutput() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.stderrLines) == 0 {
+		return o.stderrPending
+	}
+	return strings.Join(o.stderrLines, "\n") + o.stderrPending
+
+}
 func splitLines(input string) ([]string, string) {
 	if input == "" {
 		return nil, ""

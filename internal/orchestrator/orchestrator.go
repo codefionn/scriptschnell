@@ -24,6 +24,12 @@ import (
 // It should return true if approved, false if denied
 type AuthorizationCallback func(toolName string, params map[string]interface{}, reason string) (bool, error)
 
+// ToolCallCallback is called when a tool is being executed
+type ToolCallCallback func(toolName, toolID string, parameters map[string]interface{}) error
+
+// ToolResultCallback is called when a tool execution completes
+type ToolResultCallback func(toolName, toolID, result, errorMsg string) error
+
 // Orchestrator manages the LLM interaction
 type Orchestrator struct {
 	fs                   fs.FileSystem
@@ -651,7 +657,7 @@ type StatusCallback func(status string) error
 type ContextUsageCallback func(freePercent int, contextWindow int) error
 
 // ProcessPrompt processes a user prompt
-func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamCallback func(string) error, statusCallback StatusCallback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback) error {
+func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamCallback func(string) error, statusCallback StatusCallback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback, toolCallCallback ToolCallCallback, toolResultCallback ToolResultCallback) error {
 	combinedCtx, cancel := combineContexts(ctx, o.ctx)
 	if cancel != nil {
 		defer cancel()
@@ -907,11 +913,6 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 					logger.Warn("Failed to send status update: %v", err)
 				}
 			}
-			if streamCallback != nil {
-				if err := streamCallback(fmt.Sprintf("\n🔧 Calling tool: %s\n", toolName)); err != nil {
-					logger.Warn("Failed to stream tool call notification: %v", err)
-				}
-			}
 
 			// Parse arguments
 			var args map[string]interface{}
@@ -928,6 +929,13 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 				ID:         toolID,
 				Name:       toolName,
 				Parameters: args,
+			}
+
+			// Notify UI about tool call details
+			if toolCallCallback != nil {
+				if err := toolCallCallback(toolName, toolID, args); err != nil {
+					logger.Warn("Failed to send tool call message: %v", err)
+				}
 			}
 
 			result, execErr := o.executeTool(ctx, toolCallObj, toolName, statusCallback)
@@ -990,13 +998,31 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 
 			// Format result as string
 			var toolResult string
+			var executionMetadata *tools.ExecutionMetadata
+			
 			if result.Error != "" {
 				toolResult = fmt.Sprintf("Error: %s", result.Error)
 			} else {
 				toolResult = fmt.Sprintf("%v", result.Result)
+				
+				// Extract execution metadata if present in the result
+				if resultMap, ok := result.Result.(map[string]interface{}); ok {
+					if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
+						if metadataObj, ok := metadata.(*tools.ExecutionMetadata); ok {
+							executionMetadata = metadataObj
+						}
+					}
+				}
 			}
 
 			// Add tool result to session
+			// Notify UI about tool result
+			if toolResultCallback != nil {
+				// Create enhanced callback that includes metadata
+				if err := o.enhancedToolResultCallback(toolResultCallback, toolName, toolID, toolResult, result.Error, executionMetadata); err != nil {
+					logger.Warn("Failed to send tool result message: %v", err)
+				}
+			}
 			o.session.AddMessage(&session.Message{
 				Role:     "tool",
 				Content:  toolResult,
@@ -1010,9 +1036,6 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 				truncated := toolResult
 				if len(truncated) > 200 {
 					truncated = truncated[:200] + "..."
-				}
-				if err := streamCallback(fmt.Sprintf("✓ Result: %s\n", truncated)); err != nil {
-					logger.Warn("Failed to stream tool result: %v", err)
 				}
 			}
 			logger.Debug("Tool execution complete: %s (id=%s)", toolName, toolID)
@@ -1617,6 +1640,20 @@ func (o *Orchestrator) Close() error {
 	}
 
 	return firstErr
+}
+
+// enhancedToolResultCallback forwards tool results with metadata to the UI
+func (o *Orchestrator) enhancedToolResultCallback(callback ToolResultCallback, toolName, toolID, result, errorMsg string, metadata *tools.ExecutionMetadata) error {
+	// For now, call the original callback
+	// In the future, we can extend the callback interface to include metadata
+	if err := callback(toolName, toolID, result, errorMsg); err != nil {
+		return err
+	}
+	
+	// TODO: Store metadata for TUI access when we extend the callback interface
+	// This could be done via a side channel, context, or enhanced callback signature
+	
+	return nil
 }
 
 func (o *Orchestrator) executeTool(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {

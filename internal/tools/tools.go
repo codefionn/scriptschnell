@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 )
 
 // Tool represents an LLM tool
@@ -29,6 +31,44 @@ type ToolResult struct {
 	RequiresUserInput      bool        `json:"requires_user_input,omitempty"`      // If true, user approval is needed
 	AuthReason             string      `json:"auth_reason,omitempty"`              // Reason for requiring authorization
 	SuggestedCommandPrefix string      `json:"suggested_command_prefix,omitempty"` // Suggested prefix to remember for future use
+	
+	// Enhanced execution metadata for better summaries and diagnostics
+	ExecutionMetadata *ExecutionMetadata `json:"execution_metadata,omitempty"`
+}
+
+// ExecutionMetadata captures detailed information about tool execution
+type ExecutionMetadata struct {
+	// Timing information
+	StartTime   *time.Time `json:"start_time,omitempty"`
+	EndTime     *time.Time `json:"end_time,omitempty"`
+	DurationMs  int64      `json:"duration_ms,omitempty"`
+	
+	// Command/process information (for shell, sandbox, etc.)
+	Command     string `json:"command,omitempty"`
+	ExitCode    int    `json:"exit_code,omitempty"`
+	PID         int    `json:"pid,omitempty"`
+	ProcessID   string `json:"process_id,omitempty"` // For background jobs
+	
+	// Output statistics
+	OutputSizeBytes int    `json:"output_size_bytes,omitempty"`
+	OutputLineCount  int    `json:"output_line_count,omitempty"`
+	HasStderr        bool   `json:"has_stderr,omitempty"`
+	StderrSizeBytes  int    `json:"stderr_size_bytes,omitempty"`
+	StderrLineCount  int    `json:"stderr_line_count,omitempty"`
+	
+	// Execution context
+	WorkingDir      string `json:"working_dir,omitempty"`
+	TimeoutSeconds  int    `json:"timeout_seconds,omitempty"`
+	WasTimedOut     bool   `json:"was_timed_out,omitempty"`
+	WasBackgrounded bool   `json:"was_backgrounded,omitempty"`
+	
+	// Tool-specific metadata
+	ToolType string                 `json:"tool_type,omitempty"`
+	Details  map[string]interface{} `json:"details,omitempty"`
+	
+	// Error classification
+	ErrorType    string `json:"error_type,omitempty"`    // "timeout", "permission", "not_found", "syntax", etc.
+	ErrorContext string `json:"error_context,omitempty"` // Additional context for the error
 }
 
 // Registry manages available tools
@@ -98,6 +138,112 @@ func (r *Registry) ExecuteWithApproval(ctx context.Context, call *ToolCall) *Too
 		ID:     call.ID,
 		Result: result,
 	}
+}
+
+// NewToolResultWithMetadata creates a ToolResult with execution metadata
+func NewToolResultWithMetadata(id string, result interface{}, err error, metadata *ExecutionMetadata) *ToolResult {
+	toolResult := &ToolResult{
+		ID:                id,
+		Result:            result,
+		ExecutionMetadata: metadata,
+	}
+	
+	if err != nil {
+		toolResult.Error = err.Error()
+		// Classify error type if metadata is available
+		if metadata != nil {
+			metadata.ErrorType = classifyError(err)
+			metadata.ErrorContext = extractErrorContext(err)
+		}
+	}
+	
+	return toolResult
+}
+
+// EnhanceToolResult adds metadata to an existing ToolResult
+func EnhanceToolResult(result *ToolResult, metadata *ExecutionMetadata) *ToolResult {
+	if result == nil {
+		return nil
+	}
+	result.ExecutionMetadata = metadata
+	
+	// If there's an error and no error classification yet, add it
+	if result.Error != "" && metadata != nil && metadata.ErrorType == "" {
+		metadata.ErrorType = classifyErrorString(result.Error)
+	}
+	
+	return result
+}
+
+// classifyError attempts to categorize errors for better summaries
+func classifyError(err error) string {
+	if err == nil {
+		return ""
+	}
+	
+	errStr := strings.ToLower(err.Error())
+	
+	switch {
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline"):
+		return "timeout"
+	case strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied"):
+		return "permission"
+	case strings.Contains(errStr, "not found") || strings.Contains(errStr, "no such file"):
+		return "not_found"
+	case strings.Contains(errStr, "syntax") || strings.Contains(errStr, "parse"):
+		return "syntax"
+	case strings.Contains(errStr, "network") || strings.Contains(errStr, "connection"):
+		return "network"
+	case strings.Contains(errStr, "exit status") || strings.Contains(errStr, "exit code"):
+		return "process_exit"
+	default:
+		return "unknown"
+	}
+}
+
+// classifyErrorString classifies errors from string messages
+func classifyErrorString(errStr string) string {
+	return classifyError(fmt.Errorf("%s", errStr))
+}
+
+// extractErrorContext pulls relevant context from error messages
+func extractErrorContext(err error) string {
+	if err == nil {
+		return ""
+	}
+	
+	errStr := err.Error()
+	
+	// Extract file paths from error messages
+	if idx := strings.Index(errStr, ": "); idx > 0 {
+		context := errStr[:idx]
+		// If it looks like a file path, use it as context
+		if strings.Contains(context, "/") || strings.Contains(context, "\\") {
+			return context
+		}
+	}
+	
+	// Extract command names from shell errors
+	if strings.Contains(strings.ToLower(errStr), "command") {
+		words := strings.Fields(errStr)
+		for i, word := range words {
+			if strings.ToLower(word) == "command" && i+1 < len(words) {
+				return strings.Trim(words[i+1], `"'`)
+			}
+		}
+	}
+	
+	return ""
+}
+
+// CalculateOutputStats computes statistics for output content
+func CalculateOutputStats(content string) (bytes int, lines int) {
+	if content == "" {
+		return 0, 0
+	}
+	bytes = len(content)
+	lines = strings.Count(content, "\n") + 1
+	return bytes, lines
 }
 
 // Execute executes a tool call

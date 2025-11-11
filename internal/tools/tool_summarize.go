@@ -22,7 +22,7 @@ func NewToolSummarizeTool(registry *Registry, summarizeClient llm.Client) *ToolS
 }
 
 func (t *ToolSummarizeTool) Name() string {
-	return "tool_summarize"
+	return ToolNameToolSummarize
 }
 
 func (t *ToolSummarizeTool) Description() string {

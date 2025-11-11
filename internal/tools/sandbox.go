@@ -40,7 +40,7 @@ func NewSandboxTool(workingDir, tempDir string) *SandboxTool {
 	if err != nil {
 		// Log error - TinyGo is required for WASI compilation
 		fmt.Fprintf(os.Stderr, "Error: Failed to initialize TinyGo manager: %v\n", err)
-		fmt.Fprintf(os.Stderr, "The go_sandbox tool will not be available until this is resolved.\n")
+		fmt.Fprintf(os.Stderr, "The %s tool will not be available until this is resolved.\n", ToolNameGoSandbox)
 	}
 
 	return &SandboxTool{
@@ -56,7 +56,7 @@ func NewSandboxToolWithFS(workingDir, tempDir string, filesystem fs.FileSystem, 
 	if err != nil {
 		// Log error - TinyGo is required for WASI compilation
 		fmt.Fprintf(os.Stderr, "Error: Failed to initialize TinyGo manager: %v\n", err)
-		fmt.Fprintf(os.Stderr, "The go_sandbox tool will not be available until this is resolved.\n")
+		fmt.Fprintf(os.Stderr, "The %s tool will not be available until this is resolved.\n", ToolNameGoSandbox)
 	}
 
 	return &SandboxTool{
@@ -84,7 +84,7 @@ func (t *SandboxTool) GetTinyGoManager() *TinyGoManager {
 }
 
 func (t *SandboxTool) Name() string {
-	return "go_sandbox"
+	return ToolNameGoSandbox
 }
 
 func (t *SandboxTool) Description() string {
@@ -210,7 +210,7 @@ func (t *SandboxTool) executeWithBuilder(ctx context.Context, code string, timeo
 
 func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeout int, libraries []string) (interface{}, error) {
 	if t.session == nil {
-		return nil, fmt.Errorf("background execution requires session support for go_sandbox")
+		return nil, fmt.Errorf("background execution requires session support for %s", ToolNameGoSandbox)
 	}
 
 	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
@@ -224,7 +224,7 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 		Completed:  false,
 		Stdout:     make([]string, 0),
 		Stderr:     make([]string, 0),
-		Type:       "go_sandbox",
+		Type:       ToolNameGoSandbox,
 		Done:       make(chan struct{}),
 	}
 
@@ -282,7 +282,7 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 func summarizeSandboxCommand(code string) string {
 	trimmed := strings.TrimSpace(code)
 	if trimmed == "" {
-		return "go_sandbox"
+		return ToolNameGoSandbox
 	}
 
 	line := trimmed
@@ -293,7 +293,7 @@ func summarizeSandboxCommand(code string) string {
 	if len(line) > 80 {
 		line = line[:80] + "..."
 	}
-	return fmt.Sprintf("go_sandbox: %s", line)
+	return fmt.Sprintf("%s: %s", ToolNameGoSandbox, line)
 }
 
 func splitOutputLines(text string) []string {
@@ -480,7 +480,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 
 			// Check authorization for command
 			if adapter != nil && adapter.authorizer != nil {
-				decision, err := adapter.Authorize(ctx, "shell", map[string]interface{}{
+				decision, err := adapter.Authorize(ctx, ToolNameShell, map[string]interface{}{
 					"command": command,
 				})
 				if err != nil || decision == nil || !decision.Allowed {
@@ -530,7 +530,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 
 			return int32(exitCode)
 		}).
-		Export("shell")
+		Export(ToolNameShell)
 
 	// summarize(prompt_ptr, prompt_len, text_ptr, text_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
@@ -748,7 +748,7 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 
 	// Check authorization for domain
 	if adapter != nil && adapter.authorizer != nil {
-		decision, err := adapter.Authorize(ctx, "go_sandbox_domain", map[string]interface{}{
+		decision, err := adapter.Authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{
 			"domain": parsedURL.Host,
 		})
 		if err != nil || decision == nil || !decision.Allowed {

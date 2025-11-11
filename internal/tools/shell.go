@@ -38,7 +38,7 @@ func NewShellTool(sess *session.Session, workingDir string) *ShellTool {
 }
 
 func (t *ShellTool) Name() string {
-	return "shell"
+	return ToolNameShell
 }
 
 func (t *ShellTool) Description() string {
@@ -199,7 +199,7 @@ func NewStatusProgramTool(sess *session.Session) *StatusProgramTool {
 }
 
 func (t *StatusProgramTool) Name() string {
-	return "status_program"
+	return ToolNameStatusProgram
 }
 
 func (t *StatusProgramTool) Description() string {
@@ -269,7 +269,7 @@ func NewWaitProgramTool(sess *session.Session) *WaitProgramTool {
 }
 
 func (t *WaitProgramTool) Name() string {
-	return "wait_program"
+	return ToolNameWaitProgram
 }
 
 func (t *WaitProgramTool) Description() string {
@@ -526,7 +526,7 @@ func registerShellBackgroundJob(sess *session.Session, cmd *exec.Cmd, cmdStr, wo
 		Completed:  false,
 		Stdout:     make([]string, 0),
 		Stderr:     make([]string, 0),
-		Type:       "shell",
+		Type:       ToolNameShell,
 		Done:       make(chan struct{}),
 	}
 
@@ -591,7 +591,7 @@ func NewStopProgramTool(sess *session.Session) *StopProgramTool {
 }
 
 func (t *StopProgramTool) Name() string {
-	return "stop_program"
+	return ToolNameStopProgram
 }
 
 func (t *StopProgramTool) Description() string {

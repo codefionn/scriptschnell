@@ -16,7 +16,7 @@ func NewParallelTool(registry *Registry) *ParallelTool {
 }
 
 func (t *ParallelTool) Name() string {
-	return "parallel_tools"
+	return ToolNameParallel
 }
 
 func (t *ParallelTool) Description() string {

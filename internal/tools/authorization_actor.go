@@ -357,13 +357,13 @@ func (a *AuthorizationActor) authorize(ctx context.Context, toolName string, par
 	}
 
 	switch toolName {
-	case "write_file_diff":
+	case ToolNameWriteFileDiff:
 		return a.authorizeWriteFileDiff(ctx, params)
-	case "create_file":
+	case ToolNameCreateFile:
 		return a.authorizeCreateFile(ctx, params)
-	case "go_sandbox_domain":
+	case ToolNameGoSandboxDomain:
 		return a.authorizeSandboxDomain(ctx, params)
-	case "shell":
+	case ToolNameShell:
 		return a.authorizeShell(ctx, params)
 	default:
 		return &AuthorizationDecision{Allowed: true}, nil
@@ -393,7 +393,7 @@ func (a *AuthorizationActor) authorizeWriteFileDiff(ctx context.Context, params 
 	if !exists {
 		return &AuthorizationDecision{
 			Allowed: false,
-			Reason:  fmt.Sprintf("File %s does not exist. Use the create_file tool to create new files before applying diffs.", path),
+			Reason:  fmt.Sprintf("File %s does not exist. Use the %s tool to create new files before applying diffs.", path, ToolNameCreateFile),
 		}, nil
 	}
 

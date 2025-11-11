@@ -20,7 +20,7 @@ func NewWebSearchTool(cfg *config.Config) *WebSearchTool {
 }
 
 func (t *WebSearchTool) Name() string {
-	return "web_search"
+	return ToolNameWebSearch
 }
 
 func (t *WebSearchTool) Description() string {

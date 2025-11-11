@@ -23,7 +23,7 @@ func NewCreateFileTool(filesystem fs.FileSystem, sess *session.Session) *CreateF
 }
 
 func (t *CreateFileTool) Name() string {
-	return "create_file"
+	return ToolNameCreateFile
 }
 
 func (t *CreateFileTool) Description() string {

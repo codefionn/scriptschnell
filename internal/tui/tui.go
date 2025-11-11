@@ -1515,25 +1515,25 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 	// Create more descriptive content based on tool type
 	var content string
 	switch toolName {
-	case "read_file":
+	case tools.ToolNameReadFile:
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("📖 **Reading file:** `%s`", path)
 		} else {
 			content = fmt.Sprintf("📖 **Reading file**")
 		}
-	case "create_file":
+	case tools.ToolNameCreateFile:
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("📝 **Creating file:** `%s`", path)
 		} else {
 			content = fmt.Sprintf("📝 **Creating file**")
 		}
-	case "write_file_diff":
+	case tools.ToolNameWriteFileDiff:
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("✏️  **Updating file:** `%s`", path)
 		} else {
 			content = fmt.Sprintf("✏️  **Updating file**")
 		}
-	case "shell":
+	case tools.ToolNameShell:
 		if command, ok := parameters["command"].(string); ok {
 			content = fmt.Sprintf("💻 **Executing command:** `%s`", command)
 		} else {
@@ -1573,12 +1573,12 @@ func (m *Model) generateToolSummary(toolName, result string, noOutput bool) stri
 	}
 	
 	switch toolName {
-	case "read_file":
+	case tools.ToolNameReadFile:
 		// Count lines in the result
 		lines := strings.Count(result, "\n") + 1
 		return fmt.Sprintf("✓ **Read %d lines**", lines)
 		
-	case "create_file":
+	case tools.ToolNameCreateFile:
 		// Count lines in the created content
 		lines := strings.Count(result, "\n") + 1
 		if lines == 1 {
@@ -1586,7 +1586,7 @@ func (m *Model) generateToolSummary(toolName, result string, noOutput bool) stri
 		}
 		return fmt.Sprintf("✓ **Created file with %d lines**", lines)
 		
-	case "write_file_diff":
+	case tools.ToolNameWriteFileDiff:
 		// Count additions and deletions in the diff
 		additions := strings.Count(result, "\n+")
 		deletions := strings.Count(result, "\n-")
@@ -1600,11 +1600,11 @@ func (m *Model) generateToolSummary(toolName, result string, noOutput bool) stri
 			return "✓ **File updated**"
 		}
 		
-	case "shell":
+	case tools.ToolNameShell:
 		// For shell commands, just indicate successful execution
 		return "✓ **Executed successfully**"
 		
-	case "go_sandbox":
+	case tools.ToolNameGoSandbox:
 		return "✓ **Code executed successfully**"
 		
 	default:
@@ -1661,13 +1661,13 @@ func (m *Model) parseToolResult(result string) (map[string]interface{}, error) {
 // generateMetadataAwareSummary creates summaries using execution metadata
 func (m *Model) generateMetadataAwareSummary(toolName string, metadata *tools.ExecutionMetadata) string {
 	switch toolName {
-	case "shell":
+	case tools.ToolNameShell:
 		return m.generateShellSummary(metadata)
-	case "go_sandbox":
+	case tools.ToolNameGoSandbox:
 		return m.generateSandboxSummary(metadata)
-	case "read_file":
+	case tools.ToolNameReadFile:
 		return m.generateReadFileSummary(metadata)
-	case "create_file", "write_file_diff":
+	case tools.ToolNameCreateFile, tools.ToolNameWriteFileDiff:
 		return m.generateFileOperationSummary(toolName, metadata)
 	default:
 		return m.generateGenericSummary(metadata)
@@ -1783,9 +1783,9 @@ func (m *Model) generateReadFileSummary(metadata *tools.ExecutionMetadata) strin
 func (m *Model) generateFileOperationSummary(toolName string, metadata *tools.ExecutionMetadata) string {
 	var action string
 	switch toolName {
-	case "create_file":
+	case tools.ToolNameCreateFile:
 		action = "created"
-	case "write_file_diff":
+	case tools.ToolNameWriteFileDiff:
 		action = "updated"
 	default:
 		action = "processed"

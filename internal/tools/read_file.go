@@ -24,7 +24,7 @@ func NewReadFileTool(filesystem fs.FileSystem, sess *session.Session) *ReadFileT
 }
 
 func (t *ReadFileTool) Name() string {
-	return "read_file"
+	return ToolNameReadFile
 }
 
 func (t *ReadFileTool) Description() string {

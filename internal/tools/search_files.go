@@ -22,7 +22,7 @@ func NewSearchFilesTool(filesystem fs.FileSystem) *SearchFilesTool {
 }
 
 func (t *SearchFilesTool) Name() string {
-	return "search_files"
+	return ToolNameSearchFiles
 }
 
 func (t *SearchFilesTool) Description() string {

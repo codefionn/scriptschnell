@@ -16,7 +16,7 @@ func TestAuthorizationActorAuthorizeCreateFileNewFileAllowed(t *testing.T) {
 	sess := session.NewSession("test", ".")
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
 
-	decision, err := actor.authorize(ctx, "create_file", map[string]interface{}{"path": "new.txt"})
+	decision, err := actor.authorize(ctx, ToolNameCreateFile, map[string]interface{}{"path": "new.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestAuthorizationActorAuthorizeCreateFileExistingDenied(t *testing.T) {
 		t.Fatalf("write file failed: %v", err)
 	}
 
-	decision, err := actor.authorize(ctx, "create_file", map[string]interface{}{"path": "existing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameCreateFile, map[string]interface{}{"path": "existing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffExistingNotRead(t *testing.T) {
 		t.Fatalf("write file failed: %v", err)
 	}
 
-	decision, err := actor.authorize(ctx, "write_file_diff", map[string]interface{}{"path": "existing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "existing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffMissingFileDenied(t *testing.T)
 	sess := session.NewSession("test", ".")
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
 
-	decision, err := actor.authorize(ctx, "write_file_diff", map[string]interface{}{"path": "missing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "missing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffPreauthorizedFile(t *testing.T)
 	}
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
-	decision, err := actor.authorize(ctx, "write_file_diff", map[string]interface{}{"path": "allowed.txt"})
+	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "allowed.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffPreauthorizedDir(t *testing.T) 
 	}
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
-	decision, err := actor.authorize(ctx, "write_file_diff", map[string]interface{}{"path": "outside/data.txt"})
+	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "outside/data.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffExistingReadAllowed(t *testing.
 	}
 	sess.TrackFileRead("existing.txt", "content")
 
-	decision, err := actor.authorize(ctx, "write_file_diff", map[string]interface{}{"path": "existing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "existing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAuthorizationActorAuthorizeSandboxDomainRequiresApproval(t *testing.T) 
 	sess := session.NewSession("test", ".")
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
 
-	decision, err := actor.authorize(ctx, "go_sandbox_domain", map[string]interface{}{"domain": "example.com"})
+	decision, err := actor.authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{"domain": "example.com"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestAuthorizationActorAuthorizeSandboxDomainSessionAuthorized(t *testing.T)
 	sess.AuthorizeDomain("example.com")
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
 
-	decision, err := actor.authorize(ctx, "go_sandbox_domain", map[string]interface{}{"domain": "example.com"})
+	decision, err := actor.authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{"domain": "example.com"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestAuthorizationActorAuthorizeSandboxDomainAllowedByOptions(t *testing.T) 
 	}
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
-	decision, err := actor.authorize(ctx, "go_sandbox_domain", map[string]interface{}{"domain": "example.com"})
+	decision, err := actor.authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{"domain": "example.com"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestAuthorizationActorAuthorizeSandboxDomainWildcard(t *testing.T) {
 	}
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
-	decision, err := actor.authorize(ctx, "go_sandbox_domain", map[string]interface{}{"domain": "api.example.com"})
+	decision, err := actor.authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{"domain": "api.example.com"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestAuthorizationActorAuthorizeSandboxDomainAllowAllNetwork(t *testing.T) {
 	}
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
-	decision, err := actor.authorize(ctx, "go_sandbox_domain", map[string]interface{}{"domain": "unlisted.example"})
+	decision, err := actor.authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{"domain": "unlisted.example"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestAuthorizationActorDangerouslyAllowAllBypassesChecks(t *testing.T) {
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
 	// Should allow writing without prior read
-	decision, err := actor.authorize(ctx, "write_file_diff", map[string]interface{}{"path": "existing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "existing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestAuthorizationActorDangerouslyAllowAllBypassesChecks(t *testing.T) {
 		t.Fatalf("expected dangerous allow-all to permit diff write")
 	}
 
-	decision, err = actor.authorize(ctx, "create_file", map[string]interface{}{"path": "new.txt"})
+	decision, err = actor.authorize(ctx, ToolNameCreateFile, map[string]interface{}{"path": "new.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestAuthorizationActorDangerouslyAllowAllBypassesChecks(t *testing.T) {
 	}
 
 	// Should allow network domain automatically
-	decision, err = actor.authorize(ctx, "go_sandbox_domain", map[string]interface{}{"domain": "example.com"})
+	decision, err = actor.authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{"domain": "example.com"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestAuthorizationActorClientAuthorize(t *testing.T) {
 	}()
 
 	client := NewAuthorizationActorClient(ref)
-	decision, err := client.Authorize(context.Background(), "create_file", map[string]interface{}{"path": "new.txt"})
+	decision, err := client.Authorize(context.Background(), ToolNameCreateFile, map[string]interface{}{"path": "new.txt"})
 	if err != nil {
 		t.Fatalf("client authorize returned error: %v", err)
 	}

@@ -25,7 +25,7 @@ func NewSummarizeFileTool(filesystem fs.FileSystem, sess *session.Session, summa
 }
 
 func (t *SummarizeFileTool) Name() string {
-	return "read_file_summarized"
+	return ToolNameReadFileSummarized
 }
 
 func (t *SummarizeFileTool) Description() string {

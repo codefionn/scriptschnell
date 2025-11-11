@@ -32,7 +32,7 @@ func NewTodoTool(client *TodoActorClient) *TodoTool {
 }
 
 func (t *TodoTool) Name() string {
-	return "todo"
+	return ToolNameTodo
 }
 
 func (t *TodoTool) Description() string {

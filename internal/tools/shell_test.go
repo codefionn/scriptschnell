@@ -24,7 +24,7 @@ func TestStatusProgramTool_ListAndDetail(t *testing.T) {
 		Stdout:        []string{"line1", "line2"},
 		Stderr:        []string{"err1"},
 		PID:           123,
-		Type:          "shell",
+		Type:          ToolNameShell,
 		StopRequested: true,
 		LastSignal:    "SIGTERM",
 		Done:          make(chan struct{}),

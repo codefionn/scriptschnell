@@ -133,3 +133,36 @@ If you frequently hit HTTP 429 errors, add a `rate_limit` block to a provider en
 
 Both fields are optional; the slowest effective interval wins (e.g., `requests_per_minute: 30` becomes a 2s delay, and `min_interval_ms` adds a fixed delay between requests).
 Add `tokens_per_minute` when you need to throttle large tool outputs being sent back through the LLM.
+## Build and Run
+
+### Prerequisites
+
+- Go 1.21 or later
+
+### Building
+
+```bash
+# Build the binary
+go build -o statcode-ai ./cmd/statcode-ai
+```
+
+### Running
+
+```bash
+# Run in TUI mode (interactive)
+./statcode-ai
+
+# Run in CLI mode (single-shot)
+./statcode-ai "your prompt here"
+
+# Install globally
+go install ./cmd/statcode-ai
+```
+
+### Testing
+
+```bash
+# Run simple tests
+go test ./... -short
+```
+

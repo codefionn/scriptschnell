@@ -10,8 +10,8 @@ import (
 
 func TestCreateFileTool_Name(t *testing.T) {
 	tool := NewCreateFileTool(nil, nil)
-	if tool.Name() != "create_file" {
-		t.Fatalf("expected name 'create_file', got '%s'", tool.Name())
+	if tool.Name() != ToolNameCreateFile {
+		t.Fatalf("expected name '%s', got '%s'", ToolNameCreateFile, tool.Name())
 	}
 }
 

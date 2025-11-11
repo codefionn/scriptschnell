@@ -207,7 +207,7 @@ func (r *shellCommandRunner) buildForegroundResult(err error, timedOut bool) (ma
 		TimeoutSeconds:  int(r.timeout.Seconds()),
 		WasTimedOut:     timedOut,
 		WasBackgrounded: false,
-		ToolType:        "shell",
+		ToolType:        ToolNameShell,
 		HasStderr:       r.output.hasStderrContent(),
 	}
 

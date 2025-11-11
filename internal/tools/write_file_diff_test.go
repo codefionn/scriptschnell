@@ -11,8 +11,8 @@ import (
 
 func TestWriteFileDiffTool_Name(t *testing.T) {
 	tool := NewWriteFileDiffTool(nil, nil)
-	if tool.Name() != "write_file_diff" {
-		t.Fatalf("expected name 'write_file_diff', got '%s'", tool.Name())
+	if tool.Name() != ToolNameWriteFileDiff {
+		t.Fatalf("expected name '%s', got '%s'", ToolNameWriteFileDiff, tool.Name())
 	}
 }
 

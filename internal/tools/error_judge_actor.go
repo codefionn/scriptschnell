@@ -157,7 +157,9 @@ func (a *ErrorJudgeActor) parseDecision(response string, msg *ErrorJudgeMessage)
 			decision.ShouldRetry = strings.EqualFold(value, "RETRY")
 		} else if strings.HasPrefix(line, "SLEEP_SECONDS:") {
 			value := strings.TrimSpace(strings.TrimPrefix(line, "SLEEP_SECONDS:"))
-			fmt.Sscanf(value, "%d", &decision.SleepSeconds)
+			if _, err := fmt.Sscanf(value, "%d", &decision.SleepSeconds); err != nil {
+				decision.SleepSeconds = 0
+			}
 		} else if strings.HasPrefix(line, "REASON:") {
 			decision.Reason = strings.TrimSpace(strings.TrimPrefix(line, "REASON:"))
 		}
@@ -196,8 +198,8 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 
 	// Rate limit errors - exponential backoff
 	if strings.Contains(errMsg, "rate limit") ||
-	   strings.Contains(errMsg, "429") ||
-	   strings.Contains(errMsg, "too many requests") {
+		strings.Contains(errMsg, "429") ||
+		strings.Contains(errMsg, "too many requests") {
 		sleepSeconds := calculateExponentialBackoff(msg.AttemptNumber, 5, 60)
 		return ErrorJudgeDecision{
 			ShouldRetry:  true,
@@ -208,10 +210,10 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 
 	// Temporary service errors
 	if strings.Contains(errMsg, "500") ||
-	   strings.Contains(errMsg, "503") ||
-	   strings.Contains(errMsg, "service unavailable") ||
-	   strings.Contains(errMsg, "internal server error") ||
-	   strings.Contains(errMsg, "timeout") {
+		strings.Contains(errMsg, "503") ||
+		strings.Contains(errMsg, "service unavailable") ||
+		strings.Contains(errMsg, "internal server error") ||
+		strings.Contains(errMsg, "timeout") {
 		sleepSeconds := calculateLinearBackoff(msg.AttemptNumber, 2, 10)
 		return ErrorJudgeDecision{
 			ShouldRetry:  true,
@@ -222,9 +224,9 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 
 	// Network errors
 	if strings.Contains(errMsg, "connection") ||
-	   strings.Contains(errMsg, "network") ||
-	   strings.Contains(errMsg, "dial") ||
-	   strings.Contains(errMsg, "eof") {
+		strings.Contains(errMsg, "network") ||
+		strings.Contains(errMsg, "dial") ||
+		strings.Contains(errMsg, "eof") {
 		sleepSeconds := calculateLinearBackoff(msg.AttemptNumber, 1, 5)
 		return ErrorJudgeDecision{
 			ShouldRetry:  true,
@@ -235,8 +237,8 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 
 	// Token/context limit errors - cannot fix automatically
 	if strings.Contains(errMsg, "token") ||
-	   strings.Contains(errMsg, "context length") ||
-	   strings.Contains(errMsg, "max_tokens") {
+		strings.Contains(errMsg, "context length") ||
+		strings.Contains(errMsg, "max_tokens") {
 		return ErrorJudgeDecision{
 			ShouldRetry:  false,
 			SleepSeconds: 0,
@@ -246,9 +248,9 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 
 	// Authentication errors
 	if strings.Contains(errMsg, "auth") ||
-	   strings.Contains(errMsg, "401") ||
-	   strings.Contains(errMsg, "api key") ||
-	   strings.Contains(errMsg, "unauthorized") {
+		strings.Contains(errMsg, "401") ||
+		strings.Contains(errMsg, "api key") ||
+		strings.Contains(errMsg, "unauthorized") {
 		return ErrorJudgeDecision{
 			ShouldRetry:  false,
 			SleepSeconds: 0,
@@ -258,8 +260,8 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 
 	// Invalid request errors
 	if strings.Contains(errMsg, "400") ||
-	   strings.Contains(errMsg, "bad request") ||
-	   strings.Contains(errMsg, "invalid") {
+		strings.Contains(errMsg, "bad request") ||
+		strings.Contains(errMsg, "invalid") {
 		return ErrorJudgeDecision{
 			ShouldRetry:  false,
 			SleepSeconds: 0,

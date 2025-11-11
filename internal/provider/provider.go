@@ -277,11 +277,6 @@ func (m *Manager) RefreshAllModels(ctx context.Context) {
 	}()
 }
 
-// createLLMProvider creates an LLM provider instance
-func (m *Manager) createLLMProvider(name, apiKey string) (llm.Provider, error) {
-	return m.createLLMProviderWithBaseURL(name, apiKey, "")
-}
-
 // createLLMProviderWithBaseURL creates an LLM provider instance with optional base URL
 func (m *Manager) createLLMProviderWithBaseURL(name, apiKey, baseURL string) (llm.Provider, error) {
 	normalized := canonicalProviderName(name)

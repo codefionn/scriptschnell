@@ -47,3 +47,4 @@ AGENTS.local.md
 dist/
 build/
 /.gocache
+/.golangci-cache

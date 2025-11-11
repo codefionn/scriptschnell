@@ -139,7 +139,7 @@ func TestNewOpenAICompatibleProvider(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := NewOpenAICompatibleProvider(tt.apiKey, tt.baseURL)
 			if provider == nil {
-				t.Errorf("NewOpenAICompatibleProvider returned nil")
+				t.Fatalf("NewOpenAICompatibleProvider returned nil")
 			}
 			if provider.apiKey != tt.apiKey {
 				t.Errorf("Expected apiKey %q, got %q", tt.apiKey, provider.apiKey)

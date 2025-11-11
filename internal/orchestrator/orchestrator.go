@@ -509,19 +509,11 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 }
 
 func (o *Orchestrator) shouldUseNumberedReadFileTool(modelFamily llm.ModelFamily) bool {
-	if modelFamily == llm.FamilyZaiGLM {
-		return false
-	}
-
-	return true
+	return modelFamily != llm.FamilyZaiGLM
 }
 
 func (o *Orchestrator) shouldUseSimpleDiffTool(modelFamily llm.ModelFamily) bool {
-	if modelFamily == llm.FamilyZaiGLM {
-		return false
-	}
-
-	return true
+	return modelFamily != llm.FamilyZaiGLM
 }
 
 func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
@@ -1051,13 +1043,6 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 			})
 			o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
-			// Notify UI about tool result
-			if streamCallback != nil {
-				truncated := toolResult
-				if len(truncated) > 200 {
-					truncated = truncated[:200] + "..."
-				}
-			}
 			logger.Debug("Tool execution complete: %s (id=%s)", toolName, toolID)
 		}
 

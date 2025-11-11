@@ -2,15 +2,14 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"encoding/json"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
-	
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -79,9 +78,6 @@ var (
 	toolCallStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("243")). // Greyer color for tool calls
 			Bold(true)
-
-	toolResultStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245")) // Slightly lighter grey for results
 )
 
 const (
@@ -91,13 +87,13 @@ const (
 
 // Message represents a chat message with metadata
 type message struct {
-	role      string
-	content   string // raw markdown content
-	timestamp string
-	toolName  string // for tool result messages
-	toolID    string // for tool result messages
+	role       string
+	content    string // raw markdown content
+	timestamp  string
+	toolName   string // for tool result messages
+	toolID     string // for tool result messages
 	fullResult string // stores the full tool result for potential summary replacement
-	summarized bool // indicates if this tool result has been summarized
+	summarized bool   // indicates if this tool result has been summarized
 }
 
 type Model struct {
@@ -1478,7 +1474,7 @@ func (m *Model) appendToLastMessage(content string) {
 	lastMsg := &m.messages[len(m.messages)-1]
 	if lastMsg.role == "Tool" && !lastMsg.summarized && lastMsg.fullResult != "" {
 		// Replace with summary
-		summary := m.generateToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
+		summary := m.generateEnhancedToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
 		lastMsg.content = summary
 		lastMsg.summarized = true
 	}
@@ -1494,7 +1490,7 @@ func (m *Model) summarizeLastToolResult() {
 
 	lastMsg := &m.messages[len(m.messages)-1]
 	if lastMsg.role == "Tool" && !lastMsg.summarized && lastMsg.fullResult != "" {
-		summary := m.generateToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
+		summary := m.generateEnhancedToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
 		lastMsg.content = summary
 		lastMsg.summarized = true
 		m.updateViewport()
@@ -1519,30 +1515,30 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("📖 **Reading file:** `%s`", path)
 		} else {
-			content = fmt.Sprintf("📖 **Reading file**")
+			content = "📖 **Reading file**"
 		}
 	case tools.ToolNameCreateFile:
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("📝 **Creating file:** `%s`", path)
 		} else {
-			content = fmt.Sprintf("📝 **Creating file**")
+			content = "📝 **Creating file**"
 		}
 	case tools.ToolNameWriteFileDiff:
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("✏️  **Updating file:** `%s`", path)
 		} else {
-			content = fmt.Sprintf("✏️  **Updating file**")
+			content = "✏️  **Updating file**"
 		}
 	case tools.ToolNameShell:
 		if command, ok := parameters["command"].(string); ok {
 			content = fmt.Sprintf("💻 **Executing command:** `%s`", command)
 		} else {
-			content = fmt.Sprintf("💻 **Executing command**")
+			content = "💻 **Executing command**"
 		}
 	default:
 		content = fmt.Sprintf("🔧 **Calling tool:** `%s`", toolName)
 	}
-	
+
 	content += paramsBuf.String()
 
 	m.addMessage("Tool", content)
@@ -1557,8 +1553,6 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 		content = m.generateToolSummary(toolName, result, true)
 		m.addToolMessage(toolName, toolID, content, "", true)
 	} else {
-		// Show full result initially, mark for summary later
-		content = m.generateEnhancedToolSummary(toolName, result, false)
 		// Create the full result display
 		displayResult := m.truncateToolResult(result)
 		fullContent := fmt.Sprintf("✓ **Result:**\n```\n%s\n```", displayResult)
@@ -1571,13 +1565,13 @@ func (m *Model) generateToolSummary(toolName, result string, noOutput bool) stri
 	if noOutput {
 		return "✓ **Executed successfully**"
 	}
-	
+
 	switch toolName {
 	case tools.ToolNameReadFile:
 		// Count lines in the result
 		lines := strings.Count(result, "\n") + 1
 		return fmt.Sprintf("✓ **Read %d lines**", lines)
-		
+
 	case tools.ToolNameCreateFile:
 		// Count lines in the created content
 		lines := strings.Count(result, "\n") + 1
@@ -1585,7 +1579,7 @@ func (m *Model) generateToolSummary(toolName, result string, noOutput bool) stri
 			return "✓ **Created file**"
 		}
 		return fmt.Sprintf("✓ **Created file with %d lines**", lines)
-		
+
 	case tools.ToolNameWriteFileDiff:
 		// Count additions and deletions in the diff
 		additions := strings.Count(result, "\n+")
@@ -1599,14 +1593,14 @@ func (m *Model) generateToolSummary(toolName, result string, noOutput bool) stri
 		} else {
 			return "✓ **File updated**"
 		}
-		
+
 	case tools.ToolNameShell:
 		// For shell commands, just indicate successful execution
 		return "✓ **Executed successfully**"
-		
+
 	case tools.ToolNameGoSandbox:
 		return "✓ **Code executed successfully**"
-		
+
 	default:
 		return "✓ **Completed successfully**"
 	}
@@ -1617,7 +1611,7 @@ func (m *Model) generateEnhancedToolSummary(toolName, result string, noOutput bo
 	if noOutput {
 		return "✓ **Executed successfully**"
 	}
-	
+
 	// Try to extract metadata from the result if it's in JSON/map format
 	var metadata *tools.ExecutionMetadata
 	if resultMap, err := m.parseToolResult(result); err == nil {
@@ -1627,12 +1621,12 @@ func (m *Model) generateEnhancedToolSummary(toolName, result string, noOutput bo
 			}
 		}
 	}
-	
+
 	// If we have enhanced metadata, use it for better summaries
 	if metadata != nil {
 		return m.generateMetadataAwareSummary(toolName, metadata)
 	}
-	
+
 	// Fall back to the original summary logic
 	return m.generateToolSummary(toolName, result, noOutput)
 }
@@ -1644,7 +1638,7 @@ func (m *Model) parseToolResult(result string) (map[string]interface{}, error) {
 	if err := json.Unmarshal([]byte(result), &resultMap); err == nil {
 		return resultMap, nil
 	}
-	
+
 	// If it's not valid JSON, try to extract JSON from within the string
 	if jsonStart := strings.Index(result, "{"); jsonStart >= 0 {
 		if jsonEnd := strings.LastIndex(result, "}"); jsonEnd > jsonStart {
@@ -1654,7 +1648,7 @@ func (m *Model) parseToolResult(result string) (map[string]interface{}, error) {
 			}
 		}
 	}
-	
+
 	return nil, fmt.Errorf("could not parse tool result as map")
 }
 
@@ -1679,11 +1673,11 @@ func (m *Model) generateShellSummary(metadata *tools.ExecutionMetadata) string {
 	if metadata.ExitCode == 0 {
 		// Successful execution
 		summary := "✓ **Command executed successfully**"
-		
+
 		if metadata.DurationMs > 0 {
 			summary += fmt.Sprintf(" (%.1fs)", float64(metadata.DurationMs)/1000)
 		}
-		
+
 		if metadata.OutputSizeBytes > 0 {
 			if metadata.OutputLineCount > 1 {
 				summary += fmt.Sprintf(" • %d lines output", metadata.OutputLineCount)
@@ -1691,7 +1685,7 @@ func (m *Model) generateShellSummary(metadata *tools.ExecutionMetadata) string {
 				summary += " • output produced"
 			}
 		}
-		
+
 		if metadata.HasStderr {
 			if metadata.StderrSizeBytes > 0 {
 				summary += fmt.Sprintf(" • %d lines stderr", metadata.StderrLineCount)
@@ -1699,17 +1693,17 @@ func (m *Model) generateShellSummary(metadata *tools.ExecutionMetadata) string {
 				summary += " • stderr output"
 			}
 		}
-		
+
 		return summary
 	} else {
 		// Failed execution - provide detailed error information
 		summary := "❌ **Command failed**"
-		
+
 		// Add exit code information
 		if metadata.ExitCode > 0 {
 			summary += fmt.Sprintf(" (exit %d)", metadata.ExitCode)
 		}
-		
+
 		// Add error classification if available
 		if metadata.ErrorType != "" {
 			switch metadata.ErrorType {
@@ -1727,22 +1721,22 @@ func (m *Model) generateShellSummary(metadata *tools.ExecutionMetadata) string {
 				summary += fmt.Sprintf(" • **%s**", metadata.ErrorType)
 			}
 		}
-		
+
 		// Add timing information for long-running commands
 		if metadata.DurationMs > 5000 { // > 5 seconds
 			summary += fmt.Sprintf(" • after %.1fs", float64(metadata.DurationMs)/1000)
 		}
-		
+
 		// Add context if available
 		if metadata.ErrorContext != "" {
 			summary += fmt.Sprintf(" • `%s`", metadata.ErrorContext)
 		}
-		
+
 		// Add stderr hint if there's error output
 		if metadata.HasStderr && metadata.StderrSizeBytes > 0 {
 			summary += fmt.Sprintf(" • %d lines stderr", metadata.StderrLineCount)
 		}
-		
+
 		return summary
 	}
 }
@@ -1790,7 +1784,7 @@ func (m *Model) generateFileOperationSummary(toolName string, metadata *tools.Ex
 	default:
 		action = "processed"
 	}
-	
+
 	summary := fmt.Sprintf("✓ **File %s**", action)
 	if metadata.OutputSizeBytes > 0 {
 		if metadata.OutputLineCount > 1 {
@@ -1819,7 +1813,7 @@ func (m *Model) truncateToolResult(result string) string {
 		}
 		return firstParagraph
 	}
-	
+
 	// If no paragraphs, split by single newlines and take first few lines
 	lines := strings.Split(result, "\n")
 	if len(lines) > 3 {
@@ -1830,12 +1824,12 @@ func (m *Model) truncateToolResult(result string) string {
 		}
 		return firstLines
 	}
-	
+
 	// If result is short, return as-is
 	if len(result) <= 300 {
 		return strings.TrimSpace(result)
 	}
-	
+
 	// Otherwise truncate to ~300 characters
 	return result[:297] + "..."
 }

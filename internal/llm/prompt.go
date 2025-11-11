@@ -110,11 +110,6 @@ func (pb *PromptBuilder) projectSpecificContext(ctx context.Context) string {
 }
 
 func (pb *PromptBuilder) modelSpecificPrompt(modelName string) string {
-	baseName := strings.ToLower(strings.TrimSpace(modelName))
-	if idx := strings.LastIndex(baseName, "/"); idx >= 0 {
-		baseName = baseName[idx+1:]
-	}
-
 	modelFamily := DetectModelFamily(modelName)
 
 	switch {

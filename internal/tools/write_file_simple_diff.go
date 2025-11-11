@@ -234,9 +234,7 @@ func applySimpleDiff(original, diffText string) (string, error) {
 			}
 
 			if !linesEquivalent(originalLines[pos], payload) {
-				if stripped, ok := stripLineNumberPrefix(payload); ok && linesEquivalent(originalLines[pos], stripped) {
-					payload = stripped
-				} else {
+				if stripped, ok := stripLineNumberPrefix(payload); !ok || !linesEquivalent(originalLines[pos], stripped) {
 					return "", fmt.Errorf("mismatched removal line %q", payload)
 				}
 			}

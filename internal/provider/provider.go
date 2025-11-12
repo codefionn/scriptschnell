@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudflare/ahocorasick"
+	"github.com/statcode-ai/statcode-ai/internal/actor"
 	"github.com/statcode-ai/statcode-ai/internal/llm"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
 )
@@ -79,16 +81,29 @@ type Config struct {
 
 // Manager manages LLM providers
 type Manager struct {
-	config     *Config
-	configPath string
-	matcher    *ahocorasick.Matcher
-	mu         sync.RWMutex
+	config        *Config
+	configPath    string
+	matcher       *ahocorasick.Matcher
+	cacheActorRef *actor.ActorRef
+	mu            sync.RWMutex
 }
 
 // NewManager creates a new provider manager
 func NewManager(configPath string) (*Manager, error) {
+	cacheDir, err := providerModelsCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine provider cache directory: %w", err)
+	}
+
+	cacheActor := newProviderModelsCacheActor("provider-model-cache", cacheDir)
+	cacheRef := actor.NewActorRef(cacheActor.ID(), cacheActor, 32)
+	if err := cacheRef.Start(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to start provider cache actor: %w", err)
+	}
+
 	m := &Manager{
-		configPath: configPath,
+		configPath:    configPath,
+		cacheActorRef: cacheRef,
 		config: &Config{
 			Providers: make(map[string]*Provider),
 		},
@@ -117,6 +132,28 @@ func (m *Manager) Load() error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
+	for name, provider := range config.Providers {
+		if provider == nil {
+			continue
+		}
+
+		if len(provider.Models) > 0 {
+			if err := m.saveProviderModels(name, provider.Models); err != nil {
+				logger.Warn("provider: failed to persist embedded models for %s: %v", name, err)
+			}
+			continue
+		}
+
+		models, err := m.loadProviderModels(name)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				logger.Warn("provider: failed to load cached models for %s: %v", name, err)
+			}
+			continue
+		}
+		provider.Models = models
+	}
+
 	m.mu.Lock()
 	m.config = &config
 	m.mu.Unlock()
@@ -140,7 +177,21 @@ func (m *Manager) save() error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(m.config, "", "  ")
+	configCopy := &Config{
+		Providers:          make(map[string]*Provider, len(m.config.Providers)),
+		OrchestrationModel: m.config.OrchestrationModel,
+		SummarizeModel:     m.config.SummarizeModel,
+	}
+	for name, provider := range m.config.Providers {
+		if provider == nil {
+			continue
+		}
+		clone := *provider
+		clone.Models = nil
+		configCopy.Providers[name] = &clone
+	}
+
+	data, err := json.MarshalIndent(configCopy, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -163,6 +214,10 @@ func (m *Manager) AddProviderWithBaseURL(name, apiKey, baseURL string, models []
 		APIKey:  apiKey,
 		BaseURL: baseURL,
 		Models:  models,
+	}
+
+	if err := m.saveProviderModels(name, models); err != nil {
+		return fmt.Errorf("failed to cache models for provider %s: %w", name, err)
 	}
 
 	m.rebuildMatcher()
@@ -244,10 +299,14 @@ func (m *Manager) RefreshModels(ctx context.Context, providerName string) error 
 	m.mu.Lock()
 	provider.Models = models
 	m.rebuildMatcher()
-	err = m.save()
+	cacheErr := m.saveProviderModels(providerName, models)
+	saveErr := m.save()
 	m.mu.Unlock()
 
-	return err
+	if cacheErr != nil {
+		return fmt.Errorf("failed to cache models for provider %s: %w", providerName, cacheErr)
+	}
+	return saveErr
 }
 
 // RefreshAllModels refreshes models for all configured providers in the background
@@ -690,6 +749,40 @@ func (m *Manager) rebuildMatcher() {
 	}
 
 	m.matcher = ahocorasick.NewStringMatcher(terms)
+}
+
+func (m *Manager) saveProviderModels(providerName string, models []*Model) error {
+	if m.cacheActorRef == nil {
+		return fmt.Errorf("provider cache actor is not initialized")
+	}
+
+	response := make(chan error, 1)
+	msg := providerModelsSaveMsg{
+		ProviderName: providerName,
+		Models:       models,
+		ResponseChan: response,
+	}
+	if err := m.cacheActorRef.Send(msg); err != nil {
+		return err
+	}
+	return <-response
+}
+
+func (m *Manager) loadProviderModels(providerName string) ([]*Model, error) {
+	if m.cacheActorRef == nil {
+		return nil, fmt.Errorf("provider cache actor is not initialized")
+	}
+
+	response := make(chan providerModelsLoadResponse, 1)
+	msg := providerModelsLoadMsg{
+		ProviderName: providerName,
+		ResponseChan: response,
+	}
+	if err := m.cacheActorRef.Send(msg); err != nil {
+		return nil, err
+	}
+	res := <-response
+	return res.Models, res.Err
 }
 
 // PreferredModels contains the list of preferred models for each provider, ordered by preference

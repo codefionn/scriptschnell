@@ -120,6 +120,7 @@ type Model struct {
 	onCommand            func(string) error
 	onStop               func() error
 	onBackground         func() error
+	onPromptActivity     func()
 	currentModel         string
 	lastUpdateHeight     int
 	renderer             *glamour.TermRenderer
@@ -814,9 +815,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if !(m.overlayActive && isKeyMsg(msg)) && !shouldBlockTextarea {
+		prevValue := m.textarea.Value()
 		m.textarea, tiCmd = m.textarea.Update(msg)
 		if sanitized := sanitizePromptInput(m.textarea.Value(), &m.sanitizeState); sanitized != m.textarea.Value() {
 			m.textarea.SetValue(sanitized)
+		}
+		valueChanged := m.textarea.Value() != prevValue
+		if valueChanged && m.onPromptActivity != nil {
+			m.onPromptActivity()
 		}
 		if _, ok := msg.(tea.KeyMsg); ok {
 			m.originalSuggestions = nil
@@ -1938,6 +1944,10 @@ func (m *Model) SetOnStop(fn func() error) {
 
 func (m *Model) SetOnBackground(fn func() error) {
 	m.onBackground = fn
+}
+
+func (m *Model) SetOnPromptActivity(fn func()) {
+	m.onPromptActivity = fn
 }
 
 func (m *Model) SetContextFile(path string) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudflare/ahocorasick"
 	"github.com/statcode-ai/statcode-ai/internal/llm"
+	"github.com/statcode-ai/statcode-ai/internal/logger"
 )
 
 // Provider represents an LLM provider
@@ -568,6 +569,87 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 	}
 
 	return client, nil
+}
+
+type warmupSpec struct {
+	providerName string
+	apiKey       string
+	baseURL      string
+}
+
+// collectWarmupSpecs gathers provider connection info for the provided model IDs (deduplicated by provider).
+func (m *Manager) collectWarmupSpecs(modelIDs []string) []warmupSpec {
+	if len(modelIDs) == 0 {
+		return nil
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	specs := make([]warmupSpec, 0, len(modelIDs))
+	seen := make(map[string]struct{})
+
+	for _, modelID := range modelIDs {
+		if strings.TrimSpace(modelID) == "" {
+			continue
+		}
+
+		for _, provider := range m.config.Providers {
+			if _, exists := seen[provider.Name]; exists {
+				continue
+			}
+
+			for _, model := range provider.Models {
+				if model.ID == modelID {
+					specs = append(specs, warmupSpec{
+						providerName: provider.Name,
+						apiKey:       provider.APIKey,
+						baseURL:      provider.BaseURL,
+					})
+					seen[provider.Name] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+
+	return specs
+}
+
+// WarmConnections performs lightweight authenticated requests for the given models to establish TLS connections upfront.
+// It returns two booleans: attempted indicates whether at least one provider was targeted, and success indicates whether
+// any warmup call succeeded.
+func (m *Manager) WarmConnections(ctx context.Context, modelIDs ...string) (attempted bool, success bool) {
+	specs := m.collectWarmupSpecs(modelIDs)
+	if len(specs) == 0 {
+		return false, false
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	for _, spec := range specs {
+		attempted = true
+
+		llmProvider, err := m.createLLMProviderWithBaseURL(spec.providerName, spec.apiKey, spec.baseURL)
+		if err != nil {
+			logger.Debug("WarmConnections: unable to build provider %s: %v", spec.providerName, err)
+			continue
+		}
+
+		warmCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err = llmProvider.ValidateAPIKey(warmCtx)
+		cancel()
+		if err != nil {
+			logger.Debug("WarmConnections: preconnect to %s failed: %v", spec.providerName, err)
+			continue
+		}
+
+		success = true
+	}
+
+	return attempted, success
 }
 
 // TestConnection tests a provider's API connection

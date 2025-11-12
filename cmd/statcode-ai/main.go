@@ -254,6 +254,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	// Set filesystem for filepath autocomplete
 	model.SetFilesystem(orch.GetFilesystem(), orch.GetWorkingDir())
 	model.SetTodoClient(orch.GetTodoClient())
+	model.SetOnPromptActivity(orch.TriggerPreconnect)
 
 	// Declare program variable first (will be assigned later)
 	var program *tea.Program

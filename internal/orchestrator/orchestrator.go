@@ -32,42 +32,48 @@ type ToolResultCallback func(toolName, toolID, result, errorMsg string) error
 
 // Orchestrator manages the LLM interaction
 type Orchestrator struct {
-	fs                   fs.FileSystem
-	session              *session.Session
-	providerMgr          *provider.Manager
-	toolRegistry         *tools.Registry
-	orchestrationClient  llm.Client
-	summarizeClient      llm.Client
-	config               *config.Config
-	workingDir           string
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	actorSystem          *actor.System
-	authorizer           tools.Authorizer
-	actorCancel          context.CancelFunc
-	compactionMu         sync.Mutex
-	compactionInProgress bool
-	cliMode              bool
-	todoClient           *tools.TodoActorClient
-	todoActorCancel      context.CancelFunc
-	currentStatusCb      StatusCallback
-	statusCbMu           sync.Mutex
-	errorJudge           *tools.ErrorJudgeActorClient
-	errorJudgeCancel     context.CancelFunc
-	toolExecutor         *tools.ToolExecutorActorClient
-	toolExecutorCancel   context.CancelFunc
-	activeShellMu        sync.Mutex
-	activeShellChan      chan struct{}
-	loopDetector         *LoopDetector
-	mcpManager           *mcp.Manager
-	toolSelectionDirty   bool
-	activeMCPServers     []string
-	activeMCPMu          sync.RWMutex
+	fs                    fs.FileSystem
+	session               *session.Session
+	providerMgr           *provider.Manager
+	toolRegistry          *tools.Registry
+	orchestrationClient   llm.Client
+	summarizeClient       llm.Client
+	config                *config.Config
+	workingDir            string
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	actorSystem           *actor.System
+	authorizer            tools.Authorizer
+	actorCancel           context.CancelFunc
+	compactionMu          sync.Mutex
+	compactionInProgress  bool
+	cliMode               bool
+	todoClient            *tools.TodoActorClient
+	todoActorCancel       context.CancelFunc
+	currentStatusCb       StatusCallback
+	statusCbMu            sync.Mutex
+	errorJudge            *tools.ErrorJudgeActorClient
+	errorJudgeCancel      context.CancelFunc
+	toolExecutor          *tools.ToolExecutorActorClient
+	toolExecutorCancel    context.CancelFunc
+	activeShellMu         sync.Mutex
+	activeShellChan       chan struct{}
+	loopDetector          *LoopDetector
+	mcpManager            *mcp.Manager
+	toolSelectionDirty    bool
+	activeMCPServers      []string
+	activeMCPMu           sync.RWMutex
+	preconnectMu          sync.Mutex
+	preconnectInFlight    bool
+	lastPreconnectAttempt time.Time
+	preconnectCompleted   bool
+	clientInitMu          sync.Mutex
 }
 
 const (
 	autoContinueMaxAttempts = 3
 	errorRetryMaxAttempts   = 5
+	preconnectThrottle      = 2 * time.Second
 )
 
 func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode bool) (*Orchestrator, error) {
@@ -201,6 +207,9 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 }
 
 func (o *Orchestrator) initializeClients() error {
+	o.clientInitMu.Lock()
+	defer o.clientInitMu.Unlock()
+
 	orchModelID := o.providerMgr.GetOrchestrationModel()
 	summModelID := o.providerMgr.GetSummarizeModel()
 
@@ -1758,7 +1767,57 @@ func (o *Orchestrator) GetTodoClient() *tools.TodoActorClient {
 
 // UpdateModels updates the LLM clients
 func (o *Orchestrator) UpdateModels() error {
+	o.preconnectMu.Lock()
+	o.preconnectCompleted = false
+	o.preconnectMu.Unlock()
 	return o.initializeClients()
+}
+
+// TriggerPreconnect initializes missing LLM clients and warms provider TLS connections in the background.
+// It is safe to call frequently; the work is throttled and only runs until a successful warmup completes.
+func (o *Orchestrator) TriggerPreconnect() {
+	if o == nil {
+		return
+	}
+
+	o.preconnectMu.Lock()
+	if o.preconnectCompleted {
+		o.preconnectMu.Unlock()
+		return
+	}
+	if o.preconnectInFlight {
+		o.preconnectMu.Unlock()
+		return
+	}
+	if time.Since(o.lastPreconnectAttempt) < preconnectThrottle {
+		o.preconnectMu.Unlock()
+		return
+	}
+	needClients := o.orchestrationClient == nil || o.summarizeClient == nil
+	o.preconnectInFlight = true
+	o.lastPreconnectAttempt = time.Now()
+	o.preconnectMu.Unlock()
+
+	go func() {
+		if needClients {
+			if err := o.initializeClients(); err != nil {
+				logger.Debug("LLM preconnect attempt failed: %v", err)
+			}
+		}
+		modelIDs := []string{
+			o.providerMgr.GetOrchestrationModel(),
+			o.getSummarizeModelID(),
+		}
+		attempted, warmed := o.providerMgr.WarmConnections(o.ctx, modelIDs...)
+		o.preconnectMu.Lock()
+		o.preconnectInFlight = false
+		if warmed {
+			o.preconnectCompleted = true
+		} else if !attempted && !needClients {
+			o.lastPreconnectAttempt = time.Time{}
+		}
+		o.preconnectMu.Unlock()
+	}()
 }
 
 // GetContextFile returns the context file used to prime the LLM, if available.

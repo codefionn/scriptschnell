@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 	"github.com/statcode-ai/statcode-ai/internal/tools"
+	"golang.org/x/term"
 )
 
 const (
@@ -222,7 +224,7 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		spinner.WithStyle(statusStyle.MarginLeft(0)),
 	)
 
-	return &Model{
+	m := &Model{
 		textarea:           ta,
 		viewport:           vp,
 		messages:           []message{},
@@ -234,6 +236,29 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		contextFreePercent: 100,
 		renderWrapWidth:    80,
 	}
+
+	if width, height, ok := detectTerminalSize(); ok {
+		m.applyWindowSize(width, height)
+	}
+
+	return m
+}
+
+func detectTerminalSize() (int, int, bool) {
+	candidates := []*os.File{os.Stdout, os.Stdin, os.Stderr}
+	for _, f := range candidates {
+		if f == nil {
+			continue
+		}
+		fd := int(f.Fd())
+		if !term.IsTerminal(fd) {
+			continue
+		}
+		if width, height, err := term.GetSize(fd); err == nil && width > 0 && height > 0 {
+			return width, height, true
+		}
+	}
+	return 0, 0, false
 }
 
 // addToolMessage adds a tool message with metadata for potential summary replacement
@@ -281,7 +306,95 @@ func (m *Model) scheduleViewportRefresh() tea.Cmd {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return textarea.Blink
+	initialWindowSize := func() tea.Msg {
+		fd := int(os.Stdout.Fd())
+		if !term.IsTerminal(fd) {
+			return nil
+		}
+		if width, height, err := term.GetSize(fd); err == nil && width > 0 && height > 0 {
+			return tea.WindowSizeMsg{
+				Width:  width,
+				Height: height,
+			}
+		}
+		return nil
+	}
+
+	return tea.Batch(
+		textarea.Blink,
+		initialWindowSize,
+	)
+}
+
+func (m *Model) applyWindowSize(width, height int) (bool, bool) {
+	if width <= 0 || height <= 0 {
+		return false, false
+	}
+
+	widthChanged := !m.ready || width != m.width
+	heightChanged := !m.ready || height != m.height
+
+	m.width = width
+	m.height = height
+
+	available := width
+	shouldShowTodos := width > todoPanelTriggerWidth
+	if shouldShowTodos {
+		if width-todoPanelWidth-todoPanelSpacing >= minContentWidth {
+			m.showTodoPanel = true
+			available = width - todoPanelWidth - todoPanelSpacing
+		} else {
+			m.showTodoPanel = false
+		}
+	} else {
+		m.showTodoPanel = false
+	}
+	m.contentWidth = available
+
+	vpHeight := height - 10
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	if !m.ready {
+		m.viewport = viewport.New(available, vpHeight)
+	} else {
+		m.viewport.Width = available
+		m.viewport.Height = vpHeight
+	}
+
+	textareaWidth := available - 4
+	if textareaWidth < 20 {
+		textareaWidth = available
+	}
+	if textareaWidth < 10 {
+		textareaWidth = 10
+	}
+	m.textarea.SetWidth(textareaWidth)
+
+	wrapWidth := available - 4
+	if wrapWidth < 20 {
+		wrapWidth = available
+	}
+	if wrapWidth < 10 {
+		wrapWidth = 10
+	}
+
+	if wrapWidth != m.renderWrapWidth || m.renderer == nil {
+		if renderer, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(wrapWidth),
+			glamour.WithPreservedNewLines(),
+		); err == nil {
+			m.renderer = renderer
+			m.renderWrapWidth = wrapWidth
+		}
+	}
+
+	if !m.ready {
+		m.ready = true
+	}
+
+	return widthChanged, heightChanged
 }
 
 type ansiSeqMode int
@@ -806,6 +919,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		vpCmd tea.Cmd
 	)
 
+	wasReady := m.ready
+
 	shouldBlockTextarea := false
 	if keyMsg, ok := msg.(tea.KeyMsg); ok && len(m.suggestions) > 0 {
 		switch keyMsg.Type {
@@ -982,74 +1097,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, baseCmd
 
 	case tea.WindowSizeMsg:
-		widthChanged := !m.ready || msg.Width != m.width
-		heightChanged := !m.ready || msg.Height != m.height
-
-		m.width = msg.Width
-		m.height = msg.Height
-
-		available := msg.Width
-		shouldShowTodos := msg.Width > todoPanelTriggerWidth
-		if shouldShowTodos {
-			if msg.Width-todoPanelWidth-todoPanelSpacing >= minContentWidth {
-				m.showTodoPanel = true
-				available = msg.Width - todoPanelWidth - todoPanelSpacing
-			} else {
-				m.showTodoPanel = false
-			}
-		} else {
-			m.showTodoPanel = false
-		}
-		m.contentWidth = available
-
-		if !m.ready {
-			vpHeight := msg.Height - 10
-			if vpHeight < 1 {
-				vpHeight = 1
-			}
-			m.viewport = viewport.New(available, vpHeight)
-			m.ready = true
-		} else {
-			m.viewport.Width = available
-			vpHeight := msg.Height - 10
-			if vpHeight < 1 {
-				vpHeight = 1
-			}
-			m.viewport.Height = vpHeight
-		}
-
-		textareaWidth := available - 4
-		if textareaWidth < 20 {
-			textareaWidth = available
-		}
-		if textareaWidth < 10 {
-			textareaWidth = 10
-		}
-		m.textarea.SetWidth(textareaWidth)
-
-		wrapWidth := available - 4
-		if wrapWidth < 20 {
-			wrapWidth = available
-		}
-		if wrapWidth < 10 {
-			wrapWidth = 10
-		}
-		if wrapWidth != m.renderWrapWidth || m.renderer == nil {
-			if renderer, err := glamour.NewTermRenderer(
-				glamour.WithAutoStyle(),
-				glamour.WithWordWrap(wrapWidth),
-				glamour.WithPreservedNewLines(),
-			); err == nil {
-				m.renderer = renderer
-				m.renderWrapWidth = wrapWidth
-			}
-		}
-
+		widthChanged, heightChanged := m.applyWindowSize(msg.Width, msg.Height)
 		if !widthChanged && heightChanged && m.viewport.AtBottom() {
 			m.viewport.GotoBottom()
 		}
 
-		if widthChanged {
+		if widthChanged || wasReady != m.ready {
 			m.viewportDirty = true
 			if cmd := m.scheduleViewportRefresh(); cmd != nil {
 				return m, tea.Batch(baseCmd, cmd)

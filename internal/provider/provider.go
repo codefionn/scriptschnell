@@ -15,6 +15,7 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/actor"
 	"github.com/statcode-ai/statcode-ai/internal/llm"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/statcode-ai/internal/secrets"
 )
 
 // Provider represents an LLM provider
@@ -86,10 +87,11 @@ type Manager struct {
 	matcher       *ahocorasick.Matcher
 	cacheActorRef *actor.ActorRef
 	mu            sync.RWMutex
+	password      string
 }
 
 // NewManager creates a new provider manager
-func NewManager(configPath string) (*Manager, error) {
+func NewManager(configPath, password string) (*Manager, error) {
 	cacheDir, err := providerModelsCacheDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine provider cache directory: %w", err)
@@ -107,6 +109,7 @@ func NewManager(configPath string) (*Manager, error) {
 		config: &Config{
 			Providers: make(map[string]*Provider),
 		},
+		password: password,
 	}
 
 	// Load config if exists
@@ -127,8 +130,13 @@ func (m *Manager) Load() error {
 		return err
 	}
 
+	plaintext, err := m.maybeDecrypt(data)
+	if err != nil {
+		return err
+	}
+
 	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := json.Unmarshal(plaintext, &config); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
@@ -196,7 +204,45 @@ func (m *Manager) save() error {
 		return err
 	}
 
-	return os.WriteFile(m.configPath, data, 0600) // Secure permissions for API keys
+	encrypted, err := m.encrypt(data)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(m.configPath, encrypted, 0600) // Secure permissions for API keys
+}
+
+func (m *Manager) maybeDecrypt(data []byte) ([]byte, error) {
+	payload, err := secrets.DecodePayload(data)
+	if err != nil {
+		// Legacy plaintext file; return as-is.
+		return data, nil
+	}
+
+	plaintext, err := secrets.DecryptBytes(payload, m.password)
+	if err != nil {
+		return nil, err
+	}
+	return plaintext, nil
+}
+
+func (m *Manager) encrypt(plaintext []byte) ([]byte, error) {
+	payload, err := secrets.EncryptBytes(plaintext, m.password)
+	if err != nil {
+		return nil, err
+	}
+	return secrets.EncodePayload(payload)
+}
+
+// SetPassword updates the password used to encrypt provider config and forces a re-save.
+func (m *Manager) SetPassword(password string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.password = password
+	if m.config == nil {
+		return nil
+	}
+	return m.save()
 }
 
 // AddProvider adds or updates a provider

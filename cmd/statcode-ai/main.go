@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -13,12 +15,16 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
+	"github.com/statcode-ai/statcode-ai/internal/secrets"
 	"github.com/statcode-ai/statcode-ai/internal/tui"
+	"golang.org/x/term"
 )
 
 var ErrQuitRequested = errors.New("quit requested")
 
 type stringSlice []string
+
+const maxPasswordAttempts = 3
 
 func (s *stringSlice) String() string {
 	if s == nil {
@@ -93,6 +99,11 @@ func run() (err error) {
 		cfg.LogPath = envPath
 	}
 
+	secretsPassword, err := ensureSecretsPassword(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to unlock API keys: %w", err)
+	}
+
 	// Initialize logger
 	logLevel := logger.ParseLevel(cfg.LogLevel)
 
@@ -115,7 +126,7 @@ func run() (err error) {
 	}
 
 	// Load provider manager
-	providerMgr, err := provider.NewManager(cfg.ProviderConfigPath)
+	providerMgr, err := provider.NewManager(cfg.ProviderConfigPath, secretsPassword)
 	if err != nil {
 		return fmt.Errorf("failed to initialize provider manager: %w", err)
 	}
@@ -158,6 +169,56 @@ func runCLI(cfg *config.Config, providerMgr *provider.Manager, prompt string, op
 	}()
 
 	return cliRunner.Run(context.Background(), prompt)
+}
+
+func ensureSecretsPassword(cfg *config.Config) (string, error) {
+	if cfg == nil {
+		return "", errors.New("config is nil")
+	}
+
+	if cfg.Secrets.PasswordSet {
+		for attempt := 0; attempt < maxPasswordAttempts; attempt++ {
+			pw, err := promptForPassword("Enter encryption password: ")
+			if err != nil {
+				return "", err
+			}
+			if err := cfg.ApplySecretsPassword(pw); err != nil {
+				if errors.Is(err, secrets.ErrInvalidPassword) {
+					fmt.Fprintln(os.Stderr, "Invalid password, try again.")
+					continue
+				}
+				return "", err
+			}
+			return cfg.SecretsPassword(), nil
+		}
+		return "", errors.New("too many invalid password attempts")
+	}
+
+	if err := cfg.ApplySecretsPassword(""); err != nil {
+		return "", err
+	}
+	return cfg.SecretsPassword(), nil
+}
+
+func promptForPassword(prompt string) (string, error) {
+	fd := int(os.Stdin.Fd())
+	fmt.Fprint(os.Stderr, prompt)
+
+	if term.IsTerminal(fd) {
+		bytes, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(bytes)), nil
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }
 
 func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
@@ -546,6 +607,45 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 						model.AddSystemMessage("Search settings closed")
 					}
 					model.SetContextFile(orch.GetExtendedContextFile())
+					return nil
+				case tui.MenuTypeSecrets:
+					var (
+						newPassword string
+						confirmed   bool
+					)
+					err := runOverlayMenu(func() error {
+						menu := tui.NewSecretsMenu(0, 0)
+						subProgram := tea.NewProgram(menu, tea.WithAltScreen())
+						finalModel, err := subProgram.Run()
+						if err != nil {
+							return fmt.Errorf("menu error: %w", err)
+						}
+						if m, ok := finalModel.(*tui.SecretsMenuModel); ok {
+							newPassword, confirmed = m.Result()
+						}
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+					if !confirmed {
+						model.AddSystemMessage("Password update cancelled")
+						return nil
+					}
+					if err := cfg.UpdateSecretsPassword(newPassword); err != nil {
+						return fmt.Errorf("failed to update secrets password: %w", err)
+					}
+					if err := cfg.Save(config.GetConfigPath()); err != nil {
+						return fmt.Errorf("failed to save config: %w", err)
+					}
+					if err := providerMgr.SetPassword(newPassword); err != nil {
+						return fmt.Errorf("failed to re-encrypt provider config: %w", err)
+					}
+					if newPassword == "" {
+						model.AddSystemMessage("Encryption password cleared. API keys now use the default protection (empty password).")
+					} else {
+						model.AddSystemMessage("Encryption password updated. Keep this password safe—it's required at startup.")
+					}
 					return nil
 
 				case tui.MenuTypeMCP:

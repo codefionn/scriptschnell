@@ -24,6 +24,7 @@ const (
 	actionConfigureProviders settingsMainAction = iota
 	actionConfigureModels
 	actionConfigureSearch
+	actionConfigureSecrets
 	actionConfigureMCP
 )
 
@@ -94,6 +95,11 @@ func NewSettingsMainMenu(cfg *config.Config, providerMgr *provider.Manager, widt
 			action:      actionConfigureSearch,
 		},
 		settingsMainItem{
+			title:       "Set Encryption Password",
+			description: "Protect API keys with a custom password (blank = default)",
+			action:      actionConfigureSecrets,
+		},
+		settingsMainItem{
 			title:       "Configure MCP Servers",
 			description: "Manage custom Model Context Protocol servers (add, enable/disable, remove)",
 			action:      actionConfigureMCP,
@@ -147,6 +153,10 @@ func (m SettingsMainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case actionConfigureSearch:
 				m.result = NewSearchMenuResult()
+				m.quitting = true
+				return m, tea.Quit
+			case actionConfigureSecrets:
+				m.result = NewSecretsMenuResult()
 				m.quitting = true
 				return m, tea.Quit
 			case actionConfigureMCP:

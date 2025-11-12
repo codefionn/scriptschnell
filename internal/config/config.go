@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
+
+	"github.com/statcode-ai/statcode-ai/internal/secrets"
 )
 
 // SearchConfig holds configuration for web search providers
@@ -93,6 +96,15 @@ type Config struct {
 	AuthorizedCommands map[string]bool `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
 	Search             SearchConfig    `json:"search"`                        // Web search provider configuration
 	MCP                MCPConfig       `json:"mcp,omitempty"`                 // Custom MCP server configuration
+	Secrets            SecretsSettings `json:"secrets,omitempty"`             // Encryption settings
+
+	secretsPassword string `json:"-"`
+}
+
+// SecretsSettings keeps track of password-protection state.
+type SecretsSettings struct {
+	PasswordSet bool   `json:"password_set,omitempty"`
+	Verifier    string `json:"verifier,omitempty"`
 }
 
 // DefaultConfig returns default configuration
@@ -122,6 +134,7 @@ func DefaultConfig() *Config {
 		MCP: MCPConfig{
 			Servers: make(map[string]*MCPServerConfig),
 		},
+		Secrets: SecretsSettings{},
 	}
 }
 
@@ -215,7 +228,7 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := c.marshalWithEncryptedSecrets()
 	if err != nil {
 		return err
 	}
@@ -227,4 +240,193 @@ func (c *Config) Save(path string) error {
 func GetConfigPath() string {
 	homeDir, _ := os.UserHomeDir()
 	return filepath.Join(homeDir, ".config", "statcode-ai", "config.json")
+}
+
+// ApplySecretsPassword records the active password and decrypts any encrypted fields.
+func (c *Config) ApplySecretsPassword(password string) error {
+	if err := c.decryptSensitiveFields(password); err != nil {
+		return err
+	}
+	c.secretsPassword = password
+	return nil
+}
+
+// SecretsPassword returns the active secrets password (empty string by default).
+func (c *Config) SecretsPassword() string {
+	return c.secretsPassword
+}
+
+// UpdateSecretsPassword switches the runtime password and updates the persisted flags.
+func (c *Config) UpdateSecretsPassword(password string) error {
+	if c == nil {
+		return nil
+	}
+	c.Secrets.PasswordSet = password != ""
+	c.Secrets.Verifier = ""
+	return c.ApplySecretsPassword(password)
+}
+
+func (c *Config) decryptSensitiveFields(password string) error {
+	if err := c.verifyPassword(password); err != nil {
+		return err
+	}
+
+	fields := []*string{
+		&c.Search.Exa.APIKey,
+		&c.Search.GooglePSE.APIKey,
+		&c.Search.Perplexity.APIKey,
+	}
+
+	for _, srv := range c.mcpServersInOrder() {
+		if srv.OpenAI != nil {
+			fields = append(fields, &srv.OpenAI.APIKey)
+		}
+		if srv.OpenAPI != nil {
+			fields = append(fields, &srv.OpenAPI.AuthBearerToken)
+		}
+	}
+
+	for _, field := range fields {
+		if field == nil {
+			continue
+		}
+		if err := decryptField(field, password); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
+	copyCfg := *c
+	copyCfg.Search = c.Search
+
+	var err error
+	copyCfg.Search.Exa.APIKey, err = encryptField(copyCfg.Search.Exa.APIKey, c.secretsPassword)
+	if err != nil {
+		return nil, err
+	}
+	copyCfg.Search.GooglePSE.APIKey, err = encryptField(copyCfg.Search.GooglePSE.APIKey, c.secretsPassword)
+	if err != nil {
+		return nil, err
+	}
+	copyCfg.Search.Perplexity.APIKey, err = encryptField(copyCfg.Search.Perplexity.APIKey, c.secretsPassword)
+	if err != nil {
+		return nil, err
+	}
+
+	copyCfg.MCP.Servers = c.cloneMCPServersForSave()
+
+	for _, srv := range copyCfg.MCP.Servers {
+		if srv == nil {
+			continue
+		}
+		if srv.OpenAI != nil {
+			srv.OpenAI.APIKey, err = encryptField(srv.OpenAI.APIKey, c.secretsPassword)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if srv.OpenAPI != nil {
+			srv.OpenAPI.AuthBearerToken, err = encryptField(srv.OpenAPI.AuthBearerToken, c.secretsPassword)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if copyCfg.Secrets.PasswordSet {
+		copyCfg.Secrets.Verifier, err = encryptField("statcode-ai", c.secretsPassword)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		copyCfg.Secrets.Verifier = ""
+	}
+
+	return json.MarshalIndent(&copyCfg, "", "  ")
+}
+
+func (c *Config) cloneMCPServersForSave() map[string]*MCPServerConfig {
+	if c.MCP.Servers == nil {
+		return nil
+	}
+	clone := make(map[string]*MCPServerConfig, len(c.MCP.Servers))
+	for name, srv := range c.MCP.Servers {
+		if srv == nil {
+			clone[name] = nil
+			continue
+		}
+		srvCopy := *srv
+		if srv.OpenAI != nil {
+			openAICopy := *srv.OpenAI
+			srvCopy.OpenAI = &openAICopy
+		}
+		if srv.OpenAPI != nil {
+			openAPICopy := *srv.OpenAPI
+			srvCopy.OpenAPI = &openAPICopy
+		}
+		if srv.Command != nil {
+			cmdCopy := *srv.Command
+			if len(cmdCopy.Env) > 0 {
+				envCopy := make(map[string]string, len(cmdCopy.Env))
+				for k, v := range cmdCopy.Env {
+					envCopy[k] = v
+				}
+				cmdCopy.Env = envCopy
+			}
+			if cmdCopy.Exec != nil {
+				cmdCopy.Exec = append([]string{}, cmdCopy.Exec...)
+			}
+			srvCopy.Command = &cmdCopy
+		}
+		clone[name] = &srvCopy
+	}
+	return clone
+}
+
+func (c *Config) mcpServersInOrder() []*MCPServerConfig {
+	if len(c.MCP.Servers) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(c.MCP.Servers))
+	for k := range c.MCP.Servers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	servers := make([]*MCPServerConfig, 0, len(keys))
+	for _, k := range keys {
+		servers = append(servers, c.MCP.Servers[k])
+	}
+	return servers
+}
+
+func encryptField(value, password string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	return secrets.EncryptString(value, password)
+}
+
+func decryptField(value *string, password string) error {
+	if value == nil || *value == "" {
+		return nil
+	}
+	plain, encrypted, err := secrets.DecryptString(*value, password)
+	if err != nil && encrypted {
+		return err
+	}
+	if encrypted && err == nil {
+		*value = plain
+	}
+	return nil
+}
+
+func (c *Config) verifyPassword(password string) error {
+	if !c.Secrets.PasswordSet || c.Secrets.Verifier == "" {
+		return nil
+	}
+	_, _, err := secrets.DecryptString(c.Secrets.Verifier, password)
+	return err
 }

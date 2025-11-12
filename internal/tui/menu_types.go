@@ -14,6 +14,8 @@ const (
 	MenuTypeSearch
 	// MenuTypeSettings indicates the main settings menu
 	MenuTypeSettings
+	// MenuTypeSecrets indicates the encryption/password menu
+	MenuTypeSecrets
 	// MenuTypeMCP indicates the MCP configuration menu
 	MenuTypeMCP
 	// MenuTypeClearSession indicates the session should be cleared
@@ -67,6 +69,13 @@ func NewModelsMenuResult(role ModelRole) MenuResult {
 func NewSearchMenuResult() MenuResult {
 	return MenuResult{
 		Type: MenuTypeSearch,
+	}
+}
+
+// NewSecretsMenuResult creates a MenuResult for the secrets/password menu
+func NewSecretsMenuResult() MenuResult {
+	return MenuResult{
+		Type: MenuTypeSecrets,
 	}
 }
 

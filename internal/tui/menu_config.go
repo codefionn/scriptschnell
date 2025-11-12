@@ -26,7 +26,6 @@ const (
 	actionEditGoogleKey
 	actionEditGoogleCX
 	actionEditPerplexityKey
-	actionSave
 )
 
 type settingsItem struct {
@@ -109,7 +108,6 @@ func (m *SettingsMenuModel) initLists() {
 		settingsItem{title: fmt.Sprintf("Google PSE API Key: %s", mask(m.cfg.Search.GooglePSE.APIKey)), description: "Set Google Programmable Search Engine API key", action: actionEditGoogleKey},
 		settingsItem{title: fmt.Sprintf("Google PSE CX: %s", emptyIf(m.cfg.Search.GooglePSE.CX, "(unset)")), description: "Set Google Programmable Search Engine CX (Search Engine ID)", action: actionEditGoogleCX},
 		settingsItem{title: fmt.Sprintf("Perplexity API Key: %s", mask(m.cfg.Search.Perplexity.APIKey)), description: "Set or update your Perplexity API key", action: actionEditPerplexityKey},
-		settingsItem{title: "Save", description: "Save settings to config file", action: actionSave},
 	}
 
 	l := list.New(items, settingsItemDelegate{}, m.width, m.height-4)
@@ -209,6 +207,7 @@ func (m SettingsMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
+			(&m).saveConfig()
 			m.quitting = true
 			return m, tea.Quit
 		case "enter":
@@ -257,14 +256,6 @@ func (m SettingsMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.EchoMode = textinput.EchoPassword
 				m.input.Focus()
 				return m, nil
-			case actionSave:
-				// Save configuration
-				if err := m.cfg.Save(config.GetConfigPath()); err != nil {
-					m.result = fmt.Sprintf("Failed to save: %v", err)
-				} else {
-					m.result = "✓ Settings saved"
-				}
-				return m, tea.Quit
 			}
 		}
 	}
@@ -365,4 +356,12 @@ func (m SettingsMenuModel) View() string {
 // GetResult exposes the last status message after the menu closes
 func (m SettingsMenuModel) GetResult() string {
 	return m.result
+}
+
+func (m *SettingsMenuModel) saveConfig() {
+	if err := m.cfg.Save(config.GetConfigPath()); err != nil {
+		m.result = fmt.Sprintf("Failed to save: %v", err)
+		return
+	}
+	m.result = "✓ Settings saved"
 }

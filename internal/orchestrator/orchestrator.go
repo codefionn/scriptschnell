@@ -522,7 +522,7 @@ func (o *Orchestrator) shouldUseNumberedReadFileTool(modelFamily llm.ModelFamily
 }
 
 func (o *Orchestrator) shouldUseSimpleDiffTool(modelFamily llm.ModelFamily) bool {
-	return modelFamily != llm.FamilyZaiGLM
+	return true
 }
 
 func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {

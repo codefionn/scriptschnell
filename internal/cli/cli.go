@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/statcode-ai/statcode-ai/internal/config"
+	"github.com/statcode-ai/statcode-ai/internal/htmlconv"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 	"github.com/statcode-ai/statcode-ai/internal/tui"
 )
@@ -72,6 +73,12 @@ func (c *CLI) Close() error {
 
 // Run executes a single prompt using the orchestrator
 func (c *CLI) Run(ctx context.Context, prompt string) error {
+	// Convert HTML to markdown if detected
+	if converted, wasConverted := htmlconv.ConvertIfHTML(prompt); wasConverted {
+		prompt = converted
+		fmt.Fprintln(os.Stderr, "[Detected and converted HTML to markdown]")
+	}
+
 	// Stream callback: print chunks to stdout
 	streamCallback := func(chunk string) error {
 		fmt.Print(chunk)

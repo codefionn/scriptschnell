@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/fs"
+	"github.com/statcode-ai/statcode-ai/internal/htmlconv"
 	"github.com/statcode-ai/statcode-ai/internal/tools"
 	"golang.org/x/term"
 )
@@ -932,9 +933,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !(m.overlayActive && isKeyMsg(msg)) && !shouldBlockTextarea {
 		prevValue := m.textarea.Value()
 		m.textarea, tiCmd = m.textarea.Update(msg)
-		if sanitized := sanitizePromptInput(m.textarea.Value(), &m.sanitizeState); sanitized != m.textarea.Value() {
-			m.textarea.SetValue(sanitized)
+
+		// Sanitize ANSI sequences
+		currentValue := m.textarea.Value()
+		if sanitized := sanitizePromptInput(currentValue, &m.sanitizeState); sanitized != currentValue {
+			currentValue = sanitized
+			m.textarea.SetValue(currentValue)
 		}
+
+		// Convert HTML to markdown if detected (on paste or large content changes)
+		// Only check if there's a significant amount of new content (likely a paste)
+		contentGrowth := len(currentValue) - len(prevValue)
+		if contentGrowth > 100 || (len(currentValue) > 200 && contentGrowth > 50) {
+			if converted, wasConverted := htmlconv.ConvertIfHTML(currentValue); wasConverted {
+				m.textarea.SetValue(converted)
+				currentValue = converted // Update currentValue to reflect the conversion
+				// Show conversion message with size info
+				m.AddSystemMessage(fmt.Sprintf("Converted HTML to markdown (%d → %d chars)", contentGrowth, len(converted)))
+			}
+		}
+
 		valueChanged := m.textarea.Value() != prevValue
 		if valueChanged && m.onPromptActivity != nil {
 			m.onPromptActivity()
@@ -1066,6 +1084,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			input := strings.TrimSpace(rawInput)
 			if input == "" {
 				return m, baseCmd
+			}
+
+			// Convert HTML to markdown if detected (fallback for non-paste scenarios)
+			if converted, wasConverted := htmlconv.ConvertIfHTML(input); wasConverted {
+				input = converted
+				m.AddSystemMessage("Converted HTML to markdown")
 			}
 
 			m.textarea.Reset()

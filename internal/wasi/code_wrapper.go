@@ -137,16 +137,23 @@ func Fetch(method, url, body string) (string, int) {
 }
 
 //go:wasmimport env shell
-func shellHost(cmdPtr *byte, cmdLen int32, stdoutPtr *byte, stdoutCap int32, stderrPtr *byte, stderrCap int32) int32
+func shellHost(cmdPtr *byte, cmdLen int32, stdinPtr *byte, stdinLen int32, stdoutPtr *byte, stdoutCap int32, stderrPtr *byte, stderrCap int32) int32
 
-// Shell executes a shell command using the host's shell function
+// Shell executes a shell command with stdin input using the host's shell function
 // Returns stdout, stderr, and exit code
-func Shell(command string) (stdout string, stderr string, exitCode int) {
+func Shell(command, stdin string) (stdout string, stderr string, exitCode int) {
 	// Prepare command
 	cmdBytes := []byte(command)
 	var cmdPtr *byte
 	if len(cmdBytes) > 0 {
 		cmdPtr = &cmdBytes[0]
+	}
+
+	// Prepare stdin
+	stdinBytes := []byte(stdin)
+	var stdinPtr *byte
+	if len(stdinBytes) > 0 {
+		stdinPtr = &stdinBytes[0]
 	}
 
 	// Prepare stdout buffer (max 1MB)
@@ -166,6 +173,7 @@ func Shell(command string) (stdout string, stderr string, exitCode int) {
 	// Call host shell function
 	exitCodeRaw := shellHost(
 		cmdPtr, int32(len(cmdBytes)),
+		stdinPtr, int32(len(stdinBytes)),
 		stdoutPtr, int32(len(stdoutBuffer)),
 		stderrPtr, int32(len(stderrBuffer)),
 	)
@@ -252,6 +260,217 @@ func Summarize(prompt, text string) string {
 			return fmt.Sprintf("Error: Summarization failed with status code %d", statusCode)
 		}
 		return result // Return error message from host
+	}
+
+	return result
+}
+
+//go:wasmimport env read_file
+func readFileHost(pathPtr *byte, pathLen int32, fromLine int32, toLine int32, contentPtr *byte, contentCap int32) int32
+
+// ReadFile reads a file from the filesystem
+// Parameters:
+//   - path: file path relative to working directory
+//   - fromLine: starting line number (1-indexed, 0 means read all)
+//   - toLine: ending line number (1-indexed, 0 means read all)
+// Returns file content as string. Returns error message if operation fails.
+func ReadFile(path string, fromLine, toLine int) string {
+	pathBytes := []byte(path)
+	var pathPtr *byte
+	if len(pathBytes) > 0 {
+		pathPtr = &pathBytes[0]
+	}
+
+	// Prepare content buffer (max 10MB for large files)
+	contentBuffer := make([]byte, 10*1024*1024)
+	var contentPtr *byte
+	if len(contentBuffer) > 0 {
+		contentPtr = &contentBuffer[0]
+	}
+
+	// Call host read_file function
+	statusCode := readFileHost(
+		pathPtr, int32(len(pathBytes)),
+		int32(fromLine), int32(toLine),
+		contentPtr, int32(len(contentBuffer)),
+	)
+
+	// Find actual length
+	contentLen := 0
+	for i, b := range contentBuffer {
+		if b == 0 {
+			contentLen = i
+			break
+		}
+	}
+	if contentLen == 0 && len(contentBuffer) > 0 && contentBuffer[0] != 0 {
+		contentLen = len(contentBuffer)
+	}
+
+	result := string(contentBuffer[:contentLen])
+
+	// Check status code (0 = success, negative = error)
+	if statusCode < 0 {
+		if result == "" {
+			return fmt.Sprintf("Error: Failed to read file (status %d)", statusCode)
+		}
+		return result // Error message from host
+	}
+
+	return result
+}
+
+//go:wasmimport env create_file
+func createFileHost(pathPtr *byte, pathLen int32, contentPtr *byte, contentLen int32) int32
+
+// CreateFile creates a new file with the given content
+// Returns empty string on success, error message on failure
+func CreateFile(path, content string) string {
+	pathBytes := []byte(path)
+	var pathPtr *byte
+	if len(pathBytes) > 0 {
+		pathPtr = &pathBytes[0]
+	}
+
+	contentBytes := []byte(content)
+	var contentPtr *byte
+	if len(contentBytes) > 0 {
+		contentPtr = &contentBytes[0]
+	}
+
+	// Call host create_file function
+	statusCode := createFileHost(
+		pathPtr, int32(len(pathBytes)),
+		contentPtr, int32(len(contentBytes)),
+	)
+
+	// Check status code (0 = success, negative = error)
+	if statusCode == 0 {
+		return "" // Success
+	}
+
+	return fmt.Sprintf("Error: Failed to create file (status %d)", statusCode)
+}
+
+//go:wasmimport env write_file
+func writeFileHost(pathPtr *byte, pathLen int32, operationPtr *byte, operationLen int32, lineNum int32, contentPtr *byte, contentLen int32, resultPtr *byte, resultCap int32) int32
+
+// WriteFile modifies an existing file with line-based operations
+// The file must have been read earlier in the session (read-before-write rule)
+// Operations: "insert_after", "insert_before", "update", "replace_all"
+// Returns empty string on success, error message on failure
+//
+// Examples:
+//   WriteFile("file.txt", "insert_after", 5, "new line content")  // Insert after line 5
+//   WriteFile("file.txt", "insert_before", 1, "new first line")   // Insert before line 1
+//   WriteFile("file.txt", "update", 3, "updated line 3")          // Replace line 3
+//   WriteFile("file.txt", "replace_all", 0, "entire new content") // Replace entire file
+func WriteFile(path, operation string, lineNum int, content string) string {
+	pathBytes := []byte(path)
+	var pathPtr *byte
+	if len(pathBytes) > 0 {
+		pathPtr = &pathBytes[0]
+	}
+
+	operationBytes := []byte(operation)
+	var operationPtr *byte
+	if len(operationBytes) > 0 {
+		operationPtr = &operationBytes[0]
+	}
+
+	contentBytes := []byte(content)
+	var contentPtr *byte
+	if len(contentBytes) > 0 {
+		contentPtr = &contentBytes[0]
+	}
+
+	// Prepare result buffer for error messages
+	resultBuffer := make([]byte, 1024*1024)
+	var resultPtr *byte
+	if len(resultBuffer) > 0 {
+		resultPtr = &resultBuffer[0]
+	}
+
+	// Call host write_file function
+	statusCode := writeFileHost(
+		pathPtr, int32(len(pathBytes)),
+		operationPtr, int32(len(operationBytes)),
+		int32(lineNum),
+		contentPtr, int32(len(contentBytes)),
+		resultPtr, int32(len(resultBuffer)),
+	)
+
+	// Find actual length of result
+	resultLen := 0
+	for i, b := range resultBuffer {
+		if b == 0 {
+			resultLen = i
+			break
+		}
+	}
+	if resultLen == 0 && len(resultBuffer) > 0 && resultBuffer[0] != 0 {
+		resultLen = len(resultBuffer)
+	}
+
+	result := string(resultBuffer[:resultLen])
+
+	// Check status code (0 = success, negative = error)
+	if statusCode == 0 {
+		return "" // Success
+	}
+
+	if result == "" {
+		return fmt.Sprintf("Error: Failed to write file (status %d)", statusCode)
+	}
+	return result // Error message from host
+}
+
+//go:wasmimport env list_files
+func listFilesHost(patternPtr *byte, patternLen int32, resultPtr *byte, resultCap int32) int32
+
+// ListFiles lists files matching a glob pattern
+// Respects .gitignore rules automatically
+// Returns newline-separated list of file paths
+func ListFiles(pattern string) string {
+	patternBytes := []byte(pattern)
+	var patternPtr *byte
+	if len(patternBytes) > 0 {
+		patternPtr = &patternBytes[0]
+	}
+
+	// Prepare result buffer (max 1MB)
+	resultBuffer := make([]byte, 1024*1024)
+	var resultPtr *byte
+	if len(resultBuffer) > 0 {
+		resultPtr = &resultBuffer[0]
+	}
+
+	// Call host list_files function
+	statusCode := listFilesHost(
+		patternPtr, int32(len(patternBytes)),
+		resultPtr, int32(len(resultBuffer)),
+	)
+
+	// Find actual length
+	resultLen := 0
+	for i, b := range resultBuffer {
+		if b == 0 {
+			resultLen = i
+			break
+		}
+	}
+	if resultLen == 0 && len(resultBuffer) > 0 && resultBuffer[0] != 0 {
+		resultLen = len(resultBuffer)
+	}
+
+	result := string(resultBuffer[:resultLen])
+
+	// Check status code (0 = success, negative = error)
+	if statusCode < 0 {
+		if result == "" {
+			return fmt.Sprintf("Error: Failed to list files (status %d)", statusCode)
+		}
+		return result // Error message from host
 	}
 
 	return result

@@ -90,7 +90,7 @@ func (t *SandboxTool) Name() string {
 func (t *SandboxTool) Description() string {
 	return `Execute Go code in a sandboxed WebAssembly environment. Standard library packages available. Timeout enforced.
 
-Three custom functions are automatically available in your code:
+Seven custom functions are automatically available in your code:
 
 1. Fetch(method, url, body string) (responseBody string, statusCode int)
    - Make HTTP requests (GET, POST, PUT, DELETE, etc.)
@@ -99,11 +99,13 @@ Three custom functions are automatically available in your code:
      response, status := Fetch("GET", "https://example.com", "")
      fmt.Printf("Status: %d, Body: %s\n", status, response)
 
-2. Shell(command string) (stdout string, stderr string, exitCode int)
-   - Execute shell commands
+2. Shell(command, stdin string) (stdout string, stderr string, exitCode int)
+   - Execute shell commands with optional stdin input
    - Requires command authorization
-   - Example:
-     out, err, code := Shell("ls -la")
+   - Pass empty string for stdin if not needed
+   - Examples:
+     out, err, code := Shell("ls -la", "")
+     out, err, code := Shell("grep 'pattern'", "line1\nline2\npattern here\n")
      fmt.Printf("Output: %s\nExit: %d\n", out, code)
 
 3. Summarize(prompt, text string) (summary string)
@@ -111,7 +113,42 @@ Three custom functions are automatically available in your code:
    - No authorization required
    - Example:
      summary := Summarize("Extract the main points", longText)
-     fmt.Printf("Summary: %s\n", summary)`
+     fmt.Printf("Summary: %s\n", summary)
+
+4. ReadFile(path string, fromLine, toLine int) (content string)
+   - Read file from filesystem (relative to working directory)
+   - fromLine and toLine are 1-indexed (use 0, 0 to read entire file)
+   - Automatically tracked for session (enables write operations)
+   - Example:
+     content := ReadFile("config.json", 0, 0)
+     lines := ReadFile("main.go", 10, 20) // Read lines 10-20
+
+5. CreateFile(path, content string) (errorMsg string)
+   - Create a new file with given content
+   - Returns empty string on success, error message on failure
+   - Fails if file already exists
+   - Example:
+     err := CreateFile("output.txt", "Hello, World!")
+     if err != "" { fmt.Println("Error:", err) }
+
+6. WriteFile(path, operation string, lineNum int, content string) (errorMsg string)
+   - Modify existing file with line-based operations (must be read first)
+   - Operations: "insert_after", "insert_before", "update", "replace_all"
+   - lineNum is 1-indexed (ignored for "replace_all")
+   - Enforces read-before-write safety rule
+   - Returns empty string on success, error message on failure
+   - Examples:
+     err := WriteFile("file.txt", "insert_after", 5, "new line")
+     err := WriteFile("file.txt", "update", 3, "updated line 3")
+     err := WriteFile("file.txt", "replace_all", 0, "new content")
+
+7. ListFiles(pattern string) (files string)
+   - List files matching glob pattern (e.g., "*.go", "**/*.txt")
+   - Returns newline-separated list of file paths
+   - Paths are relative to working directory
+   - Example:
+     files := ListFiles("*.go")
+     for _, f := range strings.Split(files, "\n") { fmt.Println(f) }`
 }
 
 func (t *SandboxTool) Parameters() map[string]interface{} {
@@ -124,7 +161,7 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 			},
 			"timeout": map[string]interface{}{
 				"type":        "integer",
-				"description": "Timeout in seconds (default 30, max 120)",
+				"description": "Timeout in seconds (default 30, max 3600)",
 			},
 			"libraries": map[string]interface{}{
 				"type":        "array",
@@ -150,8 +187,8 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 	}
 
 	timeout := GetIntParam(params, "timeout", 30)
-	if timeout > 120 {
-		timeout = 120
+	if timeout > 3600 {
+		timeout = 3600
 	}
 
 	// Get libraries if specified
@@ -467,9 +504,9 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 		}).
 		Export("fetch")
 
-	// shell(cmd_ptr, cmd_len, stdout_ptr, stdout_cap, stderr_ptr, stderr_cap) -> exit_code
+	// shell(cmd_ptr, cmd_len, stdin_ptr, stdin_len, stdout_ptr, stdout_cap, stderr_ptr, stderr_cap) -> exit_code
 	envBuilder.NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, m api.Module, cmdPtr, cmdLen, stdoutPtr, stdoutCap, stderrPtr, stderrCap uint32) int32 {
+		WithFunc(func(ctx context.Context, m api.Module, cmdPtr, cmdLen, stdinPtr, stdinLen, stdoutPtr, stdoutCap, stderrPtr, stderrCap uint32) int32 {
 			// Read command from WASM memory
 			memory := m.Memory()
 			cmdBytes, ok := memory.Read(cmdPtr, cmdLen)
@@ -477,6 +514,15 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 				return -1
 			}
 			command := string(cmdBytes)
+
+			// Read stdin from WASM memory (if provided)
+			var stdinData []byte
+			if stdinLen > 0 {
+				stdinData, ok = memory.Read(stdinPtr, stdinLen)
+				if !ok {
+					return -1
+				}
+			}
 
 			// Check authorization for command
 			if adapter != nil && adapter.authorizer != nil {
@@ -493,6 +539,11 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			defer cancel()
 
 			cmd := exec.CommandContext(cmdCtx, "sh", "-c", command)
+
+			// Set stdin if provided
+			if len(stdinData) > 0 {
+				cmd.Stdin = bytes.NewReader(stdinData)
+			}
 
 			// Capture stdout and stderr
 			var stdout, stderr bytes.Buffer
@@ -589,6 +640,328 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 			return 0 // Success
 		}).
 		Export("summarize")
+
+	// read_file(path_ptr, path_len, from_line, to_line, content_ptr, content_cap) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, fromLine, toLine int32, contentPtr, contentCap uint32) int32 {
+			memory := m.Memory()
+
+			// Read path from WASM memory
+			pathBytes, ok := memory.Read(pathPtr, pathLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			path := string(pathBytes)
+
+			// Check if filesystem is available
+			if t.filesystem == nil {
+				errMsg := []byte("Error: Filesystem not available")
+				if uint32(len(errMsg)) <= contentCap {
+					memory.Write(contentPtr, errMsg)
+				}
+				return -2 // Error: no filesystem
+			}
+
+			// Read file content
+			var content string
+
+			if fromLine > 0 && toLine > 0 {
+				// Read specific line range
+				lines, readErr := t.filesystem.ReadFileLines(ctx, path, int(fromLine), int(toLine))
+				if readErr != nil {
+					errMsg := []byte(fmt.Sprintf("Error: Failed to read file: %v", readErr))
+					if uint32(len(errMsg)) <= contentCap {
+						memory.Write(contentPtr, errMsg)
+					}
+					return -3 // Error: read failed
+				}
+				content = strings.Join(lines, "\n")
+			} else {
+				// Read entire file
+				data, readErr := t.filesystem.ReadFile(ctx, path)
+				if readErr != nil {
+					errMsg := []byte(fmt.Sprintf("Error: Failed to read file: %v", readErr))
+					if uint32(len(errMsg)) <= contentCap {
+						memory.Write(contentPtr, errMsg)
+					}
+					return -3 // Error: read failed
+				}
+				content = string(data)
+			}
+
+			// Track file as read in session
+			if t.session != nil {
+				t.session.TrackFileRead(path, content)
+			}
+
+			// Write content to WASM memory
+			contentBytes := []byte(content)
+			if uint32(len(contentBytes)) > contentCap {
+				contentBytes = contentBytes[:contentCap]
+			}
+			if contentCap > 0 {
+				memory.Write(contentPtr, contentBytes)
+			}
+
+			return 0 // Success
+		}).
+		Export("read_file")
+
+	// create_file(path_ptr, path_len, content_ptr, content_len) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen, contentPtr, contentLen uint32) int32 {
+			memory := m.Memory()
+
+			// Read path from WASM memory
+			pathBytes, ok := memory.Read(pathPtr, pathLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			path := string(pathBytes)
+
+			// Read content from WASM memory
+			var content string
+			if contentLen > 0 {
+				contentBytes, ok := memory.Read(contentPtr, contentLen)
+				if !ok {
+					return -1 // Error: invalid memory access
+				}
+				content = string(contentBytes)
+			}
+
+			// Check if filesystem is available
+			if t.filesystem == nil {
+				return -2 // Error: no filesystem
+			}
+
+			// Check if file already exists
+			exists, err := t.filesystem.Exists(ctx, path)
+			if err != nil {
+				return -3 // Error: check failed
+			}
+			if exists {
+				return -4 // Error: file already exists
+			}
+
+			// Write file
+			if err := t.filesystem.WriteFile(ctx, path, []byte(content)); err != nil {
+				return -5 // Error: write failed
+			}
+
+			// Track file modification in session
+			if t.session != nil {
+				t.session.TrackFileModified(path)
+				t.session.TrackFileRead(path, content)
+			}
+
+			return 0 // Success
+		}).
+		Export("create_file")
+
+	// write_file(path_ptr, path_len, operation_ptr, operation_len, line_num, content_ptr, content_len, result_ptr, result_cap) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen, operationPtr, operationLen uint32, lineNum int32, contentPtr, contentLen, resultPtr, resultCap uint32) int32 {
+			memory := m.Memory()
+
+			// Read path from WASM memory
+			pathBytes, ok := memory.Read(pathPtr, pathLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			path := string(pathBytes)
+
+			// Read operation from WASM memory
+			operationBytes, ok := memory.Read(operationPtr, operationLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			operation := string(operationBytes)
+
+			// Read content from WASM memory
+			var content string
+			if contentLen > 0 {
+				contentBytes, ok := memory.Read(contentPtr, contentLen)
+				if !ok {
+					return -1 // Error: invalid memory access
+				}
+				content = string(contentBytes)
+			}
+
+			// Check if filesystem is available
+			if t.filesystem == nil {
+				errMsg := []byte("Error: Filesystem not available")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -2 // Error: no filesystem
+			}
+
+			// Check if file exists
+			exists, err := t.filesystem.Exists(ctx, path)
+			if err != nil || !exists {
+				errMsg := []byte(fmt.Sprintf("Error: File not found: %s", path))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -3 // Error: file not found
+			}
+
+			// Check read-before-write rule
+			if t.session != nil && !t.session.WasFileRead(path) {
+				errMsg := []byte(fmt.Sprintf("Error: File %s was not read in this session", path))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -4 // Error: not read before write
+			}
+
+			// Read current file content
+			currentData, err := t.filesystem.ReadFile(ctx, path)
+			if err != nil {
+				errMsg := []byte(fmt.Sprintf("Error: Failed to read file: %v", err))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -5 // Error: read failed
+			}
+
+			// Parse file into lines
+			lines := strings.Split(string(currentData), "\n")
+
+			// Perform operation
+			var finalLines []string
+			switch operation {
+			case "replace_all":
+				// Replace entire file content
+				finalLines = strings.Split(content, "\n")
+
+			case "insert_after":
+				// Insert content after specified line (1-indexed)
+				if lineNum < 1 || int(lineNum) > len(lines) {
+					errMsg := []byte(fmt.Sprintf("Error: Line number %d out of range (1-%d)", lineNum, len(lines)))
+					if uint32(len(errMsg)) <= resultCap {
+						memory.Write(resultPtr, errMsg)
+					}
+					return -6 // Error: invalid line number
+				}
+				newLines := strings.Split(content, "\n")
+				finalLines = append(finalLines, lines[:lineNum]...)
+				finalLines = append(finalLines, newLines...)
+				finalLines = append(finalLines, lines[lineNum:]...)
+
+			case "insert_before":
+				// Insert content before specified line (1-indexed)
+				if lineNum < 1 || int(lineNum) > len(lines) {
+					errMsg := []byte(fmt.Sprintf("Error: Line number %d out of range (1-%d)", lineNum, len(lines)))
+					if uint32(len(errMsg)) <= resultCap {
+						memory.Write(resultPtr, errMsg)
+					}
+					return -6 // Error: invalid line number
+				}
+				newLines := strings.Split(content, "\n")
+				finalLines = append(finalLines, lines[:lineNum-1]...)
+				finalLines = append(finalLines, newLines...)
+				finalLines = append(finalLines, lines[lineNum-1:]...)
+
+			case "update":
+				// Replace specified line (1-indexed)
+				if lineNum < 1 || int(lineNum) > len(lines) {
+					errMsg := []byte(fmt.Sprintf("Error: Line number %d out of range (1-%d)", lineNum, len(lines)))
+					if uint32(len(errMsg)) <= resultCap {
+						memory.Write(resultPtr, errMsg)
+					}
+					return -6 // Error: invalid line number
+				}
+				finalLines = make([]string, len(lines))
+				copy(finalLines, lines)
+				finalLines[lineNum-1] = content
+
+			default:
+				errMsg := []byte(fmt.Sprintf("Error: Unknown operation: %s", operation))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -7 // Error: unknown operation
+			}
+
+			// Join lines back into content
+			finalContent := strings.Join(finalLines, "\n")
+
+			// Write file
+			if err := t.filesystem.WriteFile(ctx, path, []byte(finalContent)); err != nil {
+				errMsg := []byte(fmt.Sprintf("Error: Failed to write file: %v", err))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -8 // Error: write failed
+			}
+
+			// Track file modification in session
+			if t.session != nil {
+				t.session.TrackFileModified(path)
+				t.session.TrackFileRead(path, finalContent)
+			}
+
+			return 0 // Success
+		}).
+		Export("write_file")
+
+	// list_files(pattern_ptr, pattern_len, result_ptr, result_cap) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, patternPtr, patternLen, resultPtr, resultCap uint32) int32 {
+			memory := m.Memory()
+
+			// Read pattern from WASM memory
+			patternBytes, ok := memory.Read(patternPtr, patternLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			pattern := string(patternBytes)
+
+			// Check if filesystem is available
+			if t.filesystem == nil {
+				errMsg := []byte("Error: Filesystem not available")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -2 // Error: no filesystem
+			}
+
+			// Use filepath.Glob to match files
+			// Pattern should be relative to working directory
+			fullPattern := filepath.Join(t.workingDir, pattern)
+			matches, err := filepath.Glob(fullPattern)
+			if err != nil {
+				errMsg := []byte(fmt.Sprintf("Error: Invalid pattern: %v", err))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -3 // Error: invalid pattern
+			}
+
+			// Convert absolute paths back to relative paths
+			var relativePaths []string
+			for _, match := range matches {
+				relPath, err := filepath.Rel(t.workingDir, match)
+				if err != nil {
+					relPath = match // fallback to absolute path
+				}
+				relativePaths = append(relativePaths, relPath)
+			}
+
+			// Join files with newlines
+			result := strings.Join(relativePaths, "\n")
+			resultBytes := []byte(result)
+			if uint32(len(resultBytes)) > resultCap {
+				resultBytes = resultBytes[:resultCap]
+			}
+			if resultCap > 0 {
+				memory.Write(resultPtr, resultBytes)
+			}
+
+			return 0 // Success
+		}).
+		Export("list_files")
 
 	_, err = envBuilder.Instantiate(ctx)
 	if err != nil {

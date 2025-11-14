@@ -343,13 +343,16 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	)
 
 	// Shell tooling
-	addSpec(
-		tools.NewShellTool(o.session, o.workingDir),
-		true,
-		func(_ *tools.Registry) tools.Tool { return tools.NewShellTool(o.session, o.workingDir) },
-		false,
-		"",
-	)
+	if o.shouldUseShellTool(modelFamily) {
+		addSpec(
+			tools.NewShellTool(o.session, o.workingDir),
+			true,
+			func(_ *tools.Registry) tools.Tool { return tools.NewShellTool(o.session, o.workingDir) },
+			false,
+			"",
+		)
+	}
+
 	addSpec(
 		tools.NewStatusProgramTool(o.session),
 		true,
@@ -515,6 +518,10 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	}
 
 	return errs
+}
+
+func (o *Orchestrator) shouldUseShellTool(modelFamily llm.ModelFamily) bool {
+	return false
 }
 
 func (o *Orchestrator) shouldUseNumberedReadFileTool(modelFamily llm.ModelFamily) bool {

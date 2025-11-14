@@ -4,6 +4,8 @@
 
 **statcode-ai** is a TUI that generates code from prompts using LLMs.
 
+On first run, it will download tinygo (if not in PATH).
+
 ## Features
 
 - Multiple providers supported

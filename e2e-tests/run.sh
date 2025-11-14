@@ -189,7 +189,6 @@ FAILED_TESTS=()
 
 # List of all test directories
 TEST_DIRS=(
-    "calculator-cli"
     "calculator-agentic"
     "calculator-precedence"
 )

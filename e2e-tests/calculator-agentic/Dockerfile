@@ -1,7 +1,13 @@
+FROM tinygo/tinygo:0.39.0 AS tinygo
+
 FROM golang:1.25-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y git gcc libc6-dev && rm -rf /var/lib/apt/lists/*
+
+# Bring in tinygo toolchain
+COPY --from=tinygo /usr/local/tinygo /usr/local/tinygo
+ENV PATH="/usr/local/tinygo/bin:${PATH}"
 
 # Set working directory
 WORKDIR /app
@@ -22,6 +28,10 @@ FROM golang:1.25-bookworm
 
 # Install necessary tools
 RUN apt-get update && apt-get install -y bash ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Copy tinygo from stage to final image
+COPY --from=tinygo /usr/local/tinygo /usr/local/tinygo
+ENV PATH="/usr/local/tinygo/bin:${PATH}"
 
 # Copy statcode-ai binary from builder
 COPY --from=builder /app/statcode-ai /usr/local/bin/statcode-ai

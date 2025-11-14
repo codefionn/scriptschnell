@@ -17,6 +17,7 @@ import (
 
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 	"github.com/statcode-ai/statcode-ai/internal/llm"
+	"github.com/statcode-ai/statcode-ai/internal/logger"
 	"github.com/statcode-ai/statcode-ai/internal/session"
 	"github.com/statcode-ai/statcode-ai/internal/wasi"
 	"github.com/tetratelabs/wazero"
@@ -90,7 +91,7 @@ func (t *SandboxTool) Name() string {
 
 func (t *SandboxTool) Description() string {
 	var b strings.Builder
-	b.WriteString("Execute Go code in a sandboxed WebAssembly environment. Standard library packages available. Timeout enforced.\n")
+	b.WriteString("Execute Go code in a strongly sandboxed WebAssembly environment. Standard library packages available. Timeout enforced.\n")
 	b.WriteString("Every program **must** declare `package main`, define `func main()`, and print results (e.g., via `fmt.Println`) so the orchestrator receives the output.\n\n")
 	b.WriteString("Seven custom functions are automatically available in your code:\n\n")
 
@@ -218,6 +219,22 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("     }\n")
 	b.WriteString("     ```\n")
 
+	b.WriteString("Example Build Go Program:\n")
+	b.WriteString("package main\n")
+	b.WriteString("\n")
+	b.WriteString("import (\n")
+	b.WriteString("	\"fmt\"\n")
+	b.WriteString(")\n")
+	b.WriteString("\n")
+	b.WriteString("func main() {\n")
+	b.WriteString("  stdout, stderr, code := Shell([]string{\"go\", \"build\", \"./...\"}, \"\")\n")
+	b.WriteString("  if err == 0 {\n")
+	b.WriteString("    fmt.Println(\"Compiled successfully\")\n")
+	b.WriteString("  } else {\n")
+	b.WriteString("    fmt.Println(\"Compilation error: %d %s\", code, stdout)\n")
+	b.WriteString("  }\n")
+	b.WriteString("}\n")
+
 	return b.String()
 }
 
@@ -255,6 +272,8 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 	if code == "" {
 		return nil, fmt.Errorf("code is required")
 	}
+
+	logger.Debug("go_sandbox code:\n%s", code)
 
 	timeout := GetIntParam(params, "timeout", 30)
 	if timeout > 3600 {

@@ -211,7 +211,7 @@ run_docker_compose_with_debug() {
     local compose_file="${1:-docker-compose.yml}"
     local service_name="${2:-test-runner}"
     local log_dir="${3:-.logs}"
-
+    
     # Create log directory
     mkdir -p "$log_dir"
 

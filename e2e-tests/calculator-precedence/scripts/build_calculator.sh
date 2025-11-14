@@ -69,7 +69,12 @@ WORKFLOW GUIDANCE:
   4. Run gofmt, go test ./..., and go build -o calculator .
   5. Share the test results and any implementation notes.
 
-You have full tool access and do not need to ask for confirmation."
+You have full tool access and do not need to ask for confirmation.
+
+EXPECTED OUTPUT:
+- main.go (working implementation)
+- calculator (compiled binary, this must be done for our cicd test suite)
+- Test results showing all tests pass"
 
 # Verify tests and build succeed after AI modifications
 echo ""

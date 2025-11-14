@@ -30,6 +30,7 @@ type TinyGoManager struct {
 	mu             sync.Mutex
 	logger         *logger.Logger
 	statusCallback func(string) // Callback for status updates (e.g., to TUI)
+	cachedPath     string       // memoized binary path once resolved
 }
 
 // NewTinyGoManager creates a new TinyGo manager with platform-specific cache directory
@@ -108,18 +109,18 @@ func (m *TinyGoManager) checkTinyGoInPATH() (string, error) {
 		// tinygo not found in PATH
 		return "", err
 	}
-	
+
 	// Verify the found binary is working by checking its version
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	cmd := exec.CommandContext(ctx, path, "version")
 	output, err := cmd.Output()
 	if err != nil {
 		m.logger.Warn("Found tinygo in PATH at %s but version check failed: %v", path, err)
 		return "", fmt.Errorf("tinygo binary found but not working properly")
 	}
-	
+
 	m.logger.Debug("Using system tinygo at %s, version: %s", path, strings.TrimSpace(string(output)))
 	return path, nil
 }
@@ -133,9 +134,24 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 		m.logger = logger.Global().WithPrefix("tinygo")
 	}
 
+	// Return previously resolved path if it is still valid on disk
+	if m.cachedPath != "" {
+		if fileInfo, statErr := os.Stat(m.cachedPath); statErr == nil && !fileInfo.IsDir() {
+			if runtime.GOOS == "windows" || fileInfo.Mode()&0111 != 0 {
+				m.logger.Debug("Using memoized TinyGo path %s", m.cachedPath)
+				return m.cachedPath, nil
+			}
+			m.logger.Warn("Cached TinyGo binary at %s is no longer executable, recalculating", m.cachedPath)
+		} else {
+			m.logger.Debug("Cached TinyGo path %s became invalid: %v", m.cachedPath, statErr)
+		}
+		m.cachedPath = ""
+	}
+
 	// First, check if tinygo is available in PATH
 	if systemTinyGo, err := m.checkTinyGoInPATH(); err == nil {
 		m.logger.Info("Using system TinyGo from PATH: %s", systemTinyGo)
+		m.cachedPath = systemTinyGo
 		return systemTinyGo, nil
 	} else {
 		m.logger.Debug("TinyGo not found in PATH, will use bundled version: %v", err)
@@ -156,10 +172,12 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 				m.logger.Warn("TinyGo binary exists but is not executable, re-downloading")
 			} else {
 				m.logger.Debug("Using cached TinyGo at %s", tinyGoPath)
+				m.cachedPath = tinyGoPath
 				return tinyGoPath, nil
 			}
 		} else {
 			m.logger.Debug("Using cached TinyGo at %s", tinyGoPath)
+			m.cachedPath = tinyGoPath
 			return tinyGoPath, nil
 		}
 	}
@@ -182,6 +200,7 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 		m.updateStatus("")
 	}()
 
+	m.cachedPath = tinyGoPath
 	return tinyGoPath, nil
 }
 
@@ -421,6 +440,7 @@ func (m *TinyGoManager) CleanCache() error {
 	defer m.mu.Unlock()
 
 	m.logger.Info("Cleaning TinyGo cache at %s", m.cacheDir)
+	m.cachedPath = ""
 	return os.RemoveAll(m.cacheDir)
 }
 

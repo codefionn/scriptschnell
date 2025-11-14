@@ -77,7 +77,7 @@ DO NOT ask for permission or clarification. You have full authority to:
 
 EXPECTED OUTPUT:
 - main.go (working implementation)
-- calculator (compiled binary, this must be done for our cicd test suite)
+- calculator (compiled binary, this must be done for our cicd test suite, `go build -o calculator .`)
 - Test results showing all tests pass
 
 START NOW. Build the calculator."

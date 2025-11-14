@@ -56,6 +56,7 @@ On first run, it will download tinygo (if not in PATH).
 
 - [ ] Implement a small bash parser so bash on Windows works?
 - [ ] Support for easy containerization, e.g. devcontainer?
+- [ ] Expose external MCP servers as OpenAPI endpoints in golang sandbox?
 
 ## Agentic Workflow
 
@@ -167,4 +168,3 @@ go install ./cmd/statcode-ai
 # Run simple tests
 go test ./... -short
 ```
-

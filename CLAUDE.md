@@ -202,6 +202,8 @@ Available tools:
    - Shell commands: 30s default, 300s max
    - Sandbox execution: 30s default, 120s max
 
+6. **Sandbox Shell Helper**: When writing Go sandbox programs, call `Shell` with a command slice (e.g., `Shell([]string{"ls", "-la"}, "")`). The earlier `Shell("ls -la")` form is deprecated and will be rejected.
+
 ### Configuration
 
 Configuration files stored in `~/.config/statcode-ai/`:

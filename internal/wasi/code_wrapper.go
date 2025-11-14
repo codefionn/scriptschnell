@@ -14,6 +14,7 @@ func WrapGoCodeWithAuthorization(userCode string) string {
 	// Merge our required imports with user imports
 	mergedImports := mergeImports([]string{
 		`"bytes"`,
+		`"encoding/json"`,
 		`"fmt"`,
 		`"io"`,
 		`"net/http"`,
@@ -139,11 +140,20 @@ func Fetch(method, url, body string) (string, int) {
 //go:wasmimport env shell
 func shellHost(cmdPtr *byte, cmdLen int32, stdinPtr *byte, stdinLen int32, stdoutPtr *byte, stdoutCap int32, stderrPtr *byte, stderrCap int32) int32
 
-// Shell executes a shell command with stdin input using the host's shell function
-// Returns stdout, stderr, and exit code
-func Shell(command, stdin string) (stdout string, stderr string, exitCode int) {
-	// Prepare command
-	cmdBytes := []byte(command)
+// Shell executes a shell command with stdin input using the host's shell function.
+// The command must be provided as a slice where the first element is the binary
+// and the remaining elements are arguments. Returns stdout, stderr, and exit code.
+func Shell(command []string, stdin string) (stdout string, stderr string, exitCode int) {
+	if len(command) == 0 {
+		return "", "Error: command must include at least one argument", -1
+	}
+
+	// Serialize the command slice so the host can execute the exact argv form
+	cmdBytes, err := json.Marshal(command)
+	if err != nil {
+		return "", fmt.Sprintf("Error: failed to marshal command: %v", err), -1
+	}
+
 	var cmdPtr *byte
 	if len(cmdBytes) > 0 {
 		cmdPtr = &cmdBytes[0]

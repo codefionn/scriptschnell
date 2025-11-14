@@ -588,18 +588,18 @@ import "fmt"
 
 func main() {
 	// Test simple command
-	out, _, code := Shell("echo 'Hello from shell'")
+	out, _, code := Shell([]string{"echo", "Hello from shell"})
 	fmt.Printf("Echo output: %s\n", out)
 	fmt.Printf("Echo exit code: %d\n", code)
 
 	// Test command with stderr
-	out2, errOut2, code2 := Shell("ls /nonexistent 2>&1 || echo 'Command failed'")
+	out2, errOut2, code2 := Shell([]string{"ls", "/nonexistent"})
 	fmt.Printf("Ls output: %s\n", out2)
 	fmt.Printf("Ls stderr: %s\n", errOut2)
 	fmt.Printf("Ls exit code: %d\n", code2)
 
 	// Test pwd command
-	pwd, _, pwdCode := Shell("pwd")
+	pwd, _, pwdCode := Shell([]string{"pwd"})
 	fmt.Printf("PWD: %s\n", pwd)
 	fmt.Printf("PWD exit code: %d\n", pwdCode)
 }`

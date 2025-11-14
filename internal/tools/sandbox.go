@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -88,67 +89,136 @@ func (t *SandboxTool) Name() string {
 }
 
 func (t *SandboxTool) Description() string {
-	return `Execute Go code in a sandboxed WebAssembly environment. Standard library packages available. Timeout enforced.
+	var b strings.Builder
+	b.WriteString("Execute Go code in a sandboxed WebAssembly environment. Standard library packages available. Timeout enforced.\n")
+	b.WriteString("Every program **must** declare `package main`, define `func main()`, and print results (e.g., via `fmt.Println`) so the orchestrator receives the output.\n\n")
+	b.WriteString("Seven custom functions are automatically available in your code:\n\n")
 
-Seven custom functions are automatically available in your code:
+	b.WriteString("1. Fetch(method, url, body string) (responseBody string, statusCode int)\n")
+	b.WriteString("   - Make HTTP requests (GET, POST, PUT, DELETE, etc.)\n")
+	b.WriteString("   - Requires domain authorization\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         response, status := Fetch(\"GET\", \"https://example.com\", \"\")\n")
+	b.WriteString("         fmt.Printf(\"Status: %d, Body: %s\\n\", status, response)\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
 
-1. Fetch(method, url, body string) (responseBody string, statusCode int)
-   - Make HTTP requests (GET, POST, PUT, DELETE, etc.)
-   - Requires domain authorization
-   - Example:
-     response, status := Fetch("GET", "https://example.com", "")
-     fmt.Printf("Status: %d, Body: %s\n", status, response)
+	b.WriteString("2. Shell(command []string, stdin string) (stdout string, stderr string, exitCode int)\n")
+	b.WriteString("   - Execute shell commands with optional stdin input\n")
+	b.WriteString("   - Requires command authorization\n")
+	b.WriteString("   - Pass empty string for stdin if not needed\n")
+	b.WriteString("   - Examples:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         out, err, code := Shell([]string{\"ls\", \"-la\"}, \"\")\n")
+	b.WriteString("         fmt.Printf(\"ls output: %s, stderr: %s, exit: %d\\n\", out, err, code)\n\n")
+	b.WriteString("         out, err, code = Shell([]string{\"grep\", \"pattern\"}, \"line1\\nline2\\npattern here\\n\")\n")
+	b.WriteString("         fmt.Printf(\"grep output: %s, stderr: %s, exit: %d\\n\", out, err, code)\n\n")
+	b.WriteString("         out, err, code = Shell([]string{\"go\", \"build\", \"./cmd/statcode-ai\"}, \"\")\n")
+	b.WriteString("         fmt.Printf(\"go build output: %s, stderr: %s, exit: %d\\n\", out, err, code)\n\n")
+	b.WriteString("         _, err, code = Shell([]string{\"mkdir\", \"-p\", \"tmp/build/cache\"}, \"\")\n")
+	b.WriteString("         fmt.Printf(\"mkdir stderr: %s, exit: %d\\n\", err, code)\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
 
-2. Shell(command, stdin string) (stdout string, stderr string, exitCode int)
-   - Execute shell commands with optional stdin input
-   - Requires command authorization
-   - Pass empty string for stdin if not needed
-   - Examples:
-     out, err, code := Shell("ls -la", "")
-     out, err, code := Shell("grep 'pattern'", "line1\nline2\npattern here\n")
-     fmt.Printf("Output: %s\nExit: %d\n", out, code)
+	b.WriteString("3. Summarize(prompt, text string) (summary string)\n")
+	b.WriteString("   - Summarize text using AI (fast summarization model)\n")
+	b.WriteString("   - No authorization required\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         summary := Summarize(\"Extract the main points\", longText)\n")
+	b.WriteString("         fmt.Printf(\"Summary: %s\\n\", summary)\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
 
-3. Summarize(prompt, text string) (summary string)
-   - Summarize text using AI (fast summarization model)
-   - No authorization required
-   - Example:
-     summary := Summarize("Extract the main points", longText)
-     fmt.Printf("Summary: %s\n", summary)
+	b.WriteString("4. ReadFile(path string, fromLine, toLine int) (content string)\n")
+	b.WriteString("   - Read file from filesystem (relative to working directory)\n")
+	b.WriteString("   - fromLine and toLine are 1-indexed (use 0, 0 to read entire file)\n")
+	b.WriteString("   - Automatically tracked for session (enables write operations)\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         content := ReadFile(\"config.json\", 0, 0)\n")
+	b.WriteString("         fmt.Println(content)\n\n")
+	b.WriteString("         lines := ReadFile(\"main.go\", 10, 20)\n")
+	b.WriteString("         fmt.Println(lines)\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
 
-4. ReadFile(path string, fromLine, toLine int) (content string)
-   - Read file from filesystem (relative to working directory)
-   - fromLine and toLine are 1-indexed (use 0, 0 to read entire file)
-   - Automatically tracked for session (enables write operations)
-   - Example:
-     content := ReadFile("config.json", 0, 0)
-     lines := ReadFile("main.go", 10, 20) // Read lines 10-20
+	b.WriteString("5. CreateFile(path, content string) (errorMsg string)\n")
+	b.WriteString("   - Create a new file with given content\n")
+	b.WriteString("   - Returns empty string on success, error message on failure\n")
+	b.WriteString("   - Fails if file already exists\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         if err := CreateFile(\"output.txt\", \"Hello, World!\"); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"create error:\", err)\n")
+	b.WriteString("             return\n")
+	b.WriteString("         }\n")
+	b.WriteString("         fmt.Println(\"file created\")\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
 
-5. CreateFile(path, content string) (errorMsg string)
-   - Create a new file with given content
-   - Returns empty string on success, error message on failure
-   - Fails if file already exists
-   - Example:
-     err := CreateFile("output.txt", "Hello, World!")
-     if err != "" { fmt.Println("Error:", err) }
+	b.WriteString("6. WriteFile(path, operation string, lineNum int, content string) (errorMsg string)\n")
+	b.WriteString("   - Modify existing file with line-based operations (must be read first)\n")
+	b.WriteString("   - Operations: \"insert_after\", \"insert_before\", \"update\", \"replace_all\"\n")
+	b.WriteString("   - lineNum is 1-indexed (ignored for \"replace_all\")\n")
+	b.WriteString("   - Enforces read-before-write safety rule\n")
+	b.WriteString("   - Returns empty string on success, error message on failure\n")
+	b.WriteString("   - Examples:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         if err := WriteFile(\"file.txt\", \"insert_after\", 5, \"new line\"); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"insert error:\", err)\n")
+	b.WriteString("         }\n\n")
+	b.WriteString("         if err := WriteFile(\"file.txt\", \"update\", 3, \"updated line 3\"); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"update error:\", err)\n")
+	b.WriteString("         }\n\n")
+	b.WriteString("         if err := WriteFile(\"file.txt\", \"replace_all\", 0, \"new content\"); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"replace error:\", err)\n")
+	b.WriteString("         }\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
 
-6. WriteFile(path, operation string, lineNum int, content string) (errorMsg string)
-   - Modify existing file with line-based operations (must be read first)
-   - Operations: "insert_after", "insert_before", "update", "replace_all"
-   - lineNum is 1-indexed (ignored for "replace_all")
-   - Enforces read-before-write safety rule
-   - Returns empty string on success, error message on failure
-   - Examples:
-     err := WriteFile("file.txt", "insert_after", 5, "new line")
-     err := WriteFile("file.txt", "update", 3, "updated line 3")
-     err := WriteFile("file.txt", "replace_all", 0, "new content")
+	b.WriteString("7. ListFiles(pattern string) (files string)\n")
+	b.WriteString("   - List files matching glob pattern (e.g., \"*.go\", \"**/*.txt\")\n")
+	b.WriteString("   - Returns newline-separated list of file paths\n")
+	b.WriteString("   - Paths are relative to working directory\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import (\n")
+	b.WriteString("         \"fmt\"\n")
+	b.WriteString("         \"strings\"\n")
+	b.WriteString("     )\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         files := ListFiles(\"*.go\")\n")
+	b.WriteString("         for _, f := range strings.Split(files, \"\\n\") {\n")
+	b.WriteString("             if f == \"\" {\n")
+	b.WriteString("                 continue\n")
+	b.WriteString("             }\n")
+	b.WriteString("             fmt.Println(f)\n")
+	b.WriteString("         }\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n")
 
-7. ListFiles(pattern string) (files string)
-   - List files matching glob pattern (e.g., "*.go", "**/*.txt")
-   - Returns newline-separated list of file paths
-   - Paths are relative to working directory
-   - Example:
-     files := ListFiles("*.go")
-     for _, f := range strings.Split(files, "\n") { fmt.Println(f) }`
+	return b.String()
 }
 
 func (t *SandboxTool) Parameters() map[string]interface{} {
@@ -504,7 +574,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 		}).
 		Export("fetch")
 
-	// shell(cmd_ptr, cmd_len, stdin_ptr, stdin_len, stdout_ptr, stdout_cap, stderr_ptr, stderr_cap) -> exit_code
+	// shell(command_json_ptr, command_json_len, stdin_ptr, stdin_len, stdout_ptr, stdout_cap, stderr_ptr, stderr_cap) -> exit_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, cmdPtr, cmdLen, stdinPtr, stdinLen, stdoutPtr, stdoutCap, stderrPtr, stderrCap uint32) int32 {
 			// Read command from WASM memory
@@ -513,7 +583,14 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			if !ok {
 				return -1
 			}
-			command := string(cmdBytes)
+			var commandArgs []string
+			if err := json.Unmarshal(cmdBytes, &commandArgs); err != nil {
+				return -1
+			}
+			if len(commandArgs) == 0 {
+				return -1
+			}
+			commandDisplay := strings.Join(commandArgs, " ")
 
 			// Read stdin from WASM memory (if provided)
 			var stdinData []byte
@@ -527,7 +604,8 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			// Check authorization for command
 			if adapter != nil && adapter.authorizer != nil {
 				decision, err := adapter.Authorize(ctx, ToolNameShell, map[string]interface{}{
-					"command": command,
+					"command":      commandDisplay,
+					"command_args": commandArgs,
 				})
 				if err != nil || decision == nil || !decision.Allowed {
 					return -1 // Not authorized
@@ -538,7 +616,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 
-			cmd := exec.CommandContext(cmdCtx, "sh", "-c", command)
+			cmd := exec.CommandContext(cmdCtx, commandArgs[0], commandArgs[1:]...)
 
 			// Set stdin if provided
 			if len(stdinData) > 0 {

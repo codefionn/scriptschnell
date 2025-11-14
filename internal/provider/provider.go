@@ -834,7 +834,7 @@ func (m *Manager) loadProviderModels(providerName string) ([]*Model, error) {
 // PreferredModels contains the list of preferred models for each provider, ordered by preference
 var PreferredModels = map[string][]string{
 	"anthropic": {"claude-4-5-sonnet-20250514", "claude-sonnet-4.5", "claude-3-5-sonnet-20241022"},
-	"openai":    {"gpt-5-codex", "gpt-5", "gpt-5-chat-latest", "gpt-4o"},
+	"openai":    {"gpt-5.1-codex", "gpt-5.1", "gpt-5-codex", "gpt-5", "gpt-5-chat-latest", "gpt-4o"},
 	"google":    {"models/gemini-2.5-pro", "models/gemini-2.0-pro-exp"},
 	"mistral":   {"codestral-latest"},
 	"openrouter": {

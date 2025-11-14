@@ -143,6 +143,9 @@ display_api_keys() {
 clean_workspace() {
     local workspace_dir="${1:-workspace}"
     print_warning "Cleaning workspace for fresh start..."
+    if [ -d "$workspace_dir/../.logs/statcode-ai.log" ]; then
+        rm "$workspace_dir/../.logs/statcode-ai.log"
+    fi
     if [ -d "$workspace_dir" ]; then
         # Remove contents but keep directory so Docker bind mounts stay valid
         find "$workspace_dir" -mindepth 1 -exec rm -rf {} +

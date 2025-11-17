@@ -14,6 +14,70 @@ export YELLOW='\033[1;33m'
 export BLUE='\033[0;34m'
 export NC='\033[0m' # No Color
 
+# Select compose command (prefers Podman, falls back to Docker; overridable via COMPOSE_CMD_OVERRIDE or COMPOSE_PREFERRED=docker)
+COMPOSE_CMD=()
+ensure_compose_cmd() {
+    if [ ${#COMPOSE_CMD[@]} -gt 0 ]; then
+        return
+    fi
+
+    # Allow explicit override, e.g. COMPOSE_CMD_OVERRIDE="docker compose"
+    if [ -n "$COMPOSE_CMD_OVERRIDE" ]; then
+        # shellcheck disable=SC2206
+        COMPOSE_CMD=($COMPOSE_CMD_OVERRIDE)
+        return
+    fi
+
+    local prefer="${COMPOSE_PREFERRED:-podman}"
+    local try_podman_first=true
+    if [ "$prefer" = "docker" ]; then
+        try_podman_first=false
+    fi
+
+    detect_podman_compose() {
+        if command -v podman-compose >/dev/null 2>&1; then
+            COMPOSE_CMD=(podman-compose)
+            return 0
+        fi
+        if command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
+            COMPOSE_CMD=(podman compose)
+            return 0
+        fi
+        return 1
+    }
+
+    detect_docker_compose() {
+        if command -v docker-compose >/dev/null 2>&1; then
+            COMPOSE_CMD=(docker-compose)
+            return 0
+        fi
+        if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            COMPOSE_CMD=(docker compose)
+            return 0
+        fi
+        return 1
+    }
+
+    if $try_podman_first; then
+        detect_podman_compose || detect_docker_compose
+    else
+        detect_docker_compose || detect_podman_compose
+    fi
+
+    if [ ${#COMPOSE_CMD[@]} -eq 0 ]; then
+        print_error "No compose command found (tried podman-compose, podman compose, docker-compose, docker compose)"
+        echo "Tip: set COMPOSE_CMD_OVERRIDE=\"docker compose\" or COMPOSE_PREFERRED=docker to force Docker if Podman networking is unavailable."
+        exit 1
+    fi
+    
+    return
+}
+
+run_compose() {
+    ensure_compose_cmd
+    "${COMPOSE_CMD[@]}" "$@"
+}
+
 # Print a colored message
 # Usage: print_color COLOR "message"
 print_color() {
@@ -175,9 +239,9 @@ clean_docker() {
     local compose_file="${1:-docker-compose.yml}"
     print_warning "Cleaning Docker containers..."
     if [ -f "$compose_file" ]; then
-        docker-compose -f "$compose_file" down -v 2>/dev/null || true
+        run_compose -f "$compose_file" down -v 2>/dev/null || true
     else
-        docker-compose down -v 2>/dev/null || true
+        run_compose down -v 2>/dev/null || true
     fi
     echo ""
 }
@@ -199,9 +263,9 @@ run_docker_compose() {
     local service_name="${2:-test-runner}"
 
     if [ -f "$compose_file" ]; then
-        docker-compose -f "$compose_file" up --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose -f "$compose_file" up --build --abort-on-container-exit --exit-code-from "$service_name"
     else
-        docker-compose up --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose up --build --abort-on-container-exit --exit-code-from "$service_name"
     fi
 }
 
@@ -222,9 +286,9 @@ run_docker_compose_with_debug() {
     # Run docker compose and capture exit code
     local exit_code=0
     if [ -f "$compose_file" ]; then
-        docker-compose -f "$compose_file" up --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose -f "$compose_file" up --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
     else
-        docker-compose up --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose up --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
     fi
 
     # If test failed, display the debug log

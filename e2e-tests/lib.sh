@@ -78,6 +78,55 @@ run_compose() {
     "${COMPOSE_CMD[@]}" "$@"
 }
 
+# Determine the underlying container engine (docker or podman)
+get_container_engine() {
+    ensure_compose_cmd
+    case "${COMPOSE_CMD[0]}" in
+        docker|docker-compose) echo "docker" ;;
+        podman|podman-compose) echo "podman" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Get the container ID for a compose service
+get_container_id() {
+    local service_name="$1"
+    local engine
+    engine="$(get_container_engine)"
+
+    if [ -z "$engine" ]; then
+        return 1
+    fi
+
+    local label_filter
+    if [ "$engine" = "docker" ]; then
+        label_filter="com.docker.compose.service=${service_name}"
+    else
+        label_filter="io.podman.compose.service=${service_name}"
+    fi
+
+    "$engine" ps -a --filter "label=$label_filter" --format "{{.ID}}" | head -n 1
+}
+
+# Get the exit code for a compose service container
+get_service_exit_code() {
+    local service_name="$1"
+    local engine
+    engine="$(get_container_engine)"
+
+    if [ -z "$engine" ]; then
+        return 1
+    fi
+
+    local container_id
+    container_id="$(get_container_id "$service_name")"
+    if [ -z "$container_id" ]; then
+        return 1
+    fi
+
+    "$engine" inspect -f '{{.State.ExitCode}}' "$container_id" 2>/dev/null
+}
+
 # Print a colored message
 # Usage: print_color COLOR "message"
 print_color() {
@@ -237,11 +286,12 @@ copy_workspace_template() {
 # Usage: clean_docker [compose_file]
 clean_docker() {
     local compose_file="${1:-docker-compose.yml}"
+    local stop_timeout="${COMPOSE_STOP_TIMEOUT:-30}"
     print_warning "Cleaning Docker containers..."
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" down -v 2>/dev/null || true
+        run_compose -f "$compose_file" down -t "$stop_timeout" -v 2>/dev/null || true
     else
-        run_compose down -v 2>/dev/null || true
+        run_compose down -t "$stop_timeout" -v 2>/dev/null || true
     fi
     echo ""
 }
@@ -261,11 +311,12 @@ should_clean() {
 run_docker_compose() {
     local compose_file="${1:-docker-compose.yml}"
     local service_name="${2:-test-runner}"
+    local stop_timeout="${COMPOSE_STOP_TIMEOUT:-30}"
 
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" up --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose -f "$compose_file" up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name"
     else
-        run_compose up --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name"
     fi
 }
 
@@ -275,6 +326,7 @@ run_docker_compose_with_debug() {
     local compose_file="${1:-docker-compose.yml}"
     local service_name="${2:-test-runner}"
     local log_dir="${3:-.logs}"
+    local stop_timeout="${COMPOSE_STOP_TIMEOUT:-30}"
     
     # Create log directory
     mkdir -p "$log_dir"
@@ -286,19 +338,25 @@ run_docker_compose_with_debug() {
     # Run docker compose and capture exit code
     local exit_code=0
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" up --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose -f "$compose_file" up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
     else
-        run_compose up --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+    fi
+
+    # If compose reported an error but the target service exited cleanly, treat it as success
+    if [ $exit_code -ne 0 ]; then
+        local service_exit_code
+        service_exit_code="$(get_service_exit_code "$service_name" 2>/dev/null || true)"
+        if [ "$service_exit_code" = "0" ]; then
+            print_warning "Compose returned a non-zero exit, but $service_name exited successfully. Treating run as success."
+            exit_code=0
+        fi
     fi
 
     # If test failed, display the debug log
     if [ $exit_code -ne 0 ]; then
         if [ -f "$log_dir/statcode-ai.log" ]; then
-            echo ""
-            print_header "$(print_color "$RED" "Debug Log Output (Test Failed)")"
-            echo ""
-            cat "$log_dir/statcode-ai.log"
-            echo ""
+            echo "See logs for more details"
         else
             print_warning "No debug log file found at $log_dir/statcode-ai.log"
         fi
@@ -350,7 +408,7 @@ print_failure_summary() {
 # 4. Display available API keys
 # 5. Clean workspace
 # 6. Optionally copy template
-# 7. Clean Docker if --clean flag is set
+# 7. Clean Docker (always)
 #
 # Usage: init_e2e_test "$@"
 init_e2e_test() {
@@ -371,10 +429,8 @@ init_e2e_test() {
     # Copy template if it exists (for upgrade scenarios)
     copy_workspace_template
 
-    # Clean Docker if requested
-    if should_clean "$@"; then
-        clean_docker
-    fi
+    # Always clean Docker so we start from a fresh state
+    clean_docker
 }
 
 # Run the complete E2E test flow

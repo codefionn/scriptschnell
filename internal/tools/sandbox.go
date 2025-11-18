@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/statcode-ai/statcode-ai/internal/fs"
@@ -35,6 +36,62 @@ type SandboxTool struct {
 	authorizer      Authorizer
 	tinygoManager   *TinyGoManager
 	summarizeClient llm.Client
+}
+
+type sandboxCall struct {
+	Name   string `json:"name"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type sandboxCallTracker struct {
+	mu    sync.Mutex
+	calls []sandboxCall
+}
+
+func newSandboxCallTracker() *sandboxCallTracker {
+	return &sandboxCallTracker{
+		calls: make([]sandboxCall, 0),
+	}
+}
+
+func (t *sandboxCallTracker) record(name, detail string) {
+	if name == "" {
+		return
+	}
+
+	if detail != "" && len(detail) > 120 {
+		detail = detail[:117] + "..."
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, sandboxCall{Name: name, Detail: detail})
+}
+
+func (t *sandboxCallTracker) metadataDetails() map[string]interface{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.calls) == 0 {
+		return nil
+	}
+
+	details := make([]map[string]string, 0, len(t.calls))
+	counts := make(map[string]int)
+
+	for _, call := range t.calls {
+		entry := map[string]string{"name": call.Name}
+		if call.Detail != "" {
+			entry["detail"] = call.Detail
+		}
+		details = append(details, entry)
+		counts[call.Name]++
+	}
+
+	return map[string]interface{}{
+		"function_calls":       details,
+		"function_call_counts": counts,
+	}
 }
 
 func NewSandboxTool(workingDir, tempDir string) *SandboxTool {
@@ -478,6 +535,7 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 
 	// Store detected domains for potential pre-authorization
 	_ = detectedDomains // TODO: Could pre-authorize or warn about these
+	commandSummary := summarizeSandboxCommand(code)
 
 	// Write wrapped code to file
 	mainFile := filepath.Join(sandboxDir, "main.go")
@@ -543,11 +601,14 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 	}
 
 	// Execute using wazero
-	return t.executeWASM(execCtx, wasmBytes, sandboxDir)
+	return t.executeWASM(execCtx, wasmBytes, sandboxDir, commandSummary, timeout)
 }
 
 // executeWASM runs the WASM binary in an isolated wazero runtime with network interception
-func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandboxDir string) (interface{}, error) {
+func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandboxDir, commandSummary string, timeoutSeconds int) (interface{}, error) {
+	startTime := time.Now()
+	callTracker := newSandboxCallTracker()
+
 	// Create wazero runtime
 	r := wazero.NewRuntime(ctx)
 	defer r.Close(ctx)
@@ -589,7 +650,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	// fetch(method_ptr, method_len, url_ptr, url_len, body_ptr, body_len, response_ptr, response_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, responsePtr, responseCap uint32) uint32 {
-			return t.executeFetch(ctx, adapter, m, methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, responsePtr, responseCap)
+			return t.executeFetch(ctx, adapter, callTracker, m, methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, responsePtr, responseCap)
 		}).
 		Export("fetch")
 
@@ -630,6 +691,8 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 					return -1 // Not authorized
 				}
 			}
+
+			callTracker.record("shell", commandDisplay)
 
 			// Execute the command with timeout
 			cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -706,6 +769,8 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 				}
 				return -2 // Error: no summarization client
 			}
+
+			callTracker.record("summarize", fmt.Sprintf("prompt:%s", strings.TrimSpace(prompt)))
 
 			// Build the full summarization prompt
 			fullPrompt := fmt.Sprintf(`%s
@@ -791,6 +856,12 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				t.session.TrackFileRead(path, content)
 			}
 
+			detail := path
+			if fromLine > 0 || toLine > 0 {
+				detail = fmt.Sprintf("%s:%d-%d", path, fromLine, toLine)
+			}
+			callTracker.record("read_file", detail)
+
 			// Write content to WASM memory
 			contentBytes := []byte(content)
 			if uint32(len(contentBytes)) > contentCap {
@@ -850,6 +921,8 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				t.session.TrackFileModified(path)
 				t.session.TrackFileRead(path, content)
 			}
+
+			callTracker.record("create_file", path)
 
 			return 0 // Success
 		}).
@@ -999,6 +1072,8 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				t.session.TrackFileRead(path, finalContent)
 			}
 
+			callTracker.record("write_file", fmt.Sprintf("%s (%s at %d)", path, operation, lineNum))
+
 			return 0 // Success
 		}).
 		Export("write_file")
@@ -1056,6 +1131,8 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				memory.Write(resultPtr, resultBytes)
 			}
 
+			callTracker.record("list_files", pattern)
+
 			return 0 // Success
 		}).
 		Export("list_files")
@@ -1068,13 +1145,13 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 	// Compile the module
 	mod, err := r.CompileModule(ctx, wasmBytes)
 	if err != nil {
-		return map[string]interface{}{
+		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
 			"stderr":    fmt.Sprintf("WASM compilation failed: %v", err),
 			"exit_code": 1,
 			"timeout":   false,
 			"error":     "compilation failed",
-		}, nil
+		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, 1, "", fmt.Sprintf("WASM compilation failed: %v", err), false, callTracker)), nil
 	}
 
 	// Instantiate the module with stdout/stderr configuration
@@ -1084,13 +1161,13 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 
 	modInstance, err := r.InstantiateModule(ctx, mod, config)
 	if err != nil {
-		return map[string]interface{}{
+		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
 			"stderr":    fmt.Sprintf("WASM instantiation failed: %v", err),
 			"exit_code": 1,
 			"timeout":   false,
 			"error":     "instantiation failed",
-		}, nil
+		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, 1, "", fmt.Sprintf("WASM instantiation failed: %v", err), false, callTracker)), nil
 	}
 	defer modInstance.Close(ctx)
 
@@ -1103,13 +1180,13 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 	// Get the _start function and execute
 	startFn := modInstance.ExportedFunction("_start")
 	if startFn == nil {
-		return map[string]interface{}{
+		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
 			"stderr":    "WASM module does not export _start function",
 			"exit_code": 1,
 			"timeout":   false,
 			"error":     "no _start function",
-		}, nil
+		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, 1, "", "WASM module does not export _start function", false, callTracker)), nil
 	}
 
 	// Execute with timeout handling
@@ -1139,13 +1216,13 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 		outFile.Close()
 		errFile.Close()
 
-		return map[string]interface{}{
+		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
 			"stderr":    "Execution timeout",
 			"exit_code": -1,
 			"timeout":   true,
 			"error":     "execution timeout",
-		}, nil
+		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, -1, "", "Execution timeout", true, callTracker)), nil
 	}
 
 	// Close files before reading
@@ -1176,25 +1253,27 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 		if stderr == "" {
 			stderr = "Runtime error: " + runtimeErr.Error()
 		}
-		return map[string]interface{}{
+		metadata := t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, finalExitCode, stdout, stderr, false, callTracker)
+		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    stdout,
 			"stderr":    stderr,
 			"exit_code": finalExitCode,
 			"timeout":   false,
 			"error":     "runtime error",
-		}, nil
+		}, metadata), nil
 	}
 
-	return map[string]interface{}{
+	metadata := t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, finalExitCode, stdout, stderr, false, callTracker)
+	return attachExecutionMetadata(map[string]interface{}{
 		"stdout":    stdout,
 		"stderr":    stderr,
 		"exit_code": finalExitCode,
 		"timeout":   false,
-	}, nil
+	}, metadata), nil
 }
 
 // executeFetch performs an HTTP request from WASM with authorization
-func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerAdapter, m api.Module, methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, responsePtr, responseCap uint32) uint32 {
+func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerAdapter, tracker *sandboxCallTracker, m api.Module, methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, responsePtr, responseCap uint32) uint32 {
 	// Read method from WASM memory
 	memory := m.Memory()
 	methodBytes, ok := memory.Read(methodPtr, methodLen)
@@ -1262,6 +1341,14 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 		return 500 // Internal server error - failed to read response
 	}
 
+	if tracker != nil {
+		host := parsedURL.Host
+		if host == "" {
+			host = urlStr
+		}
+		tracker.record("fetch", fmt.Sprintf("%s %s", strings.ToUpper(method), host))
+	}
+
 	// Write response to WASM memory
 	if uint32(len(respBody)) > responseCap {
 		// Truncate if response is too large
@@ -1274,4 +1361,45 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 
 	// Return HTTP status code
 	return uint32(resp.StatusCode)
+}
+
+func (t *SandboxTool) buildSandboxMetadata(startTime time.Time, commandSummary string, timeoutSeconds int, exitCode int, stdout, stderr string, timedOut bool, tracker *sandboxCallTracker) *ExecutionMetadata {
+	endTime := time.Now()
+
+	outputBytes, outputLines := CalculateOutputStats(stdout)
+	stderrBytes, stderrLines := CalculateOutputStats(stderr)
+
+	metadata := &ExecutionMetadata{
+		StartTime:       &startTime,
+		EndTime:         &endTime,
+		DurationMs:      endTime.Sub(startTime).Milliseconds(),
+		Command:         commandSummary,
+		ExitCode:        exitCode,
+		OutputSizeBytes: outputBytes,
+		OutputLineCount: outputLines,
+		HasStderr:       stderr != "",
+		StderrSizeBytes: stderrBytes,
+		StderrLineCount: stderrLines,
+		WorkingDir:      t.workingDir,
+		TimeoutSeconds:  timeoutSeconds,
+		WasTimedOut:     timedOut,
+		WasBackgrounded: false,
+		ToolType:        ToolNameGoSandbox,
+	}
+
+	if tracker != nil {
+		if details := tracker.metadataDetails(); details != nil {
+			metadata.Details = details
+		}
+	}
+
+	return metadata
+}
+
+func attachExecutionMetadata(result map[string]interface{}, metadata *ExecutionMetadata) map[string]interface{} {
+	if metadata == nil {
+		return result
+	}
+	result["_execution_metadata"] = metadata
+	return result
 }

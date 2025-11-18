@@ -1696,17 +1696,7 @@ func (m *Model) generateEnhancedToolSummary(toolName, result string, noOutput bo
 	}
 
 	// Try to extract metadata from the result if it's in JSON/map format
-	var metadata *tools.ExecutionMetadata
-	if resultMap, err := m.parseToolResult(result); err == nil {
-		if metadataValue, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
-			if metadataObj, ok := metadataValue.(*tools.ExecutionMetadata); ok {
-				metadata = metadataObj
-			}
-		}
-	}
-
-	// If we have enhanced metadata, use it for better summaries
-	if metadata != nil {
+	if metadata := m.extractExecutionMetadata(result); metadata != nil {
 		return m.generateMetadataAwareSummary(toolName, metadata)
 	}
 
@@ -1733,6 +1723,159 @@ func (m *Model) parseToolResult(result string) (map[string]interface{}, error) {
 	}
 
 	return nil, fmt.Errorf("could not parse tool result as map")
+}
+
+func (m *Model) extractExecutionMetadata(result string) *tools.ExecutionMetadata {
+	resultMap, err := m.parseToolResult(result)
+	if err != nil {
+		return nil
+	}
+
+	metadataValue, ok := resultMap["_execution_metadata"]
+	if !ok {
+		return nil
+	}
+
+	return mapExecutionMetadata(metadataValue)
+}
+
+func mapExecutionMetadata(value interface{}) *tools.ExecutionMetadata {
+	switch v := value.(type) {
+	case *tools.ExecutionMetadata:
+		return v
+	case map[string]interface{}:
+		return mapToExecutionMetadata(v)
+	default:
+		return nil
+	}
+}
+
+func mapToExecutionMetadata(raw map[string]interface{}) *tools.ExecutionMetadata {
+	if raw == nil {
+		return nil
+	}
+
+	meta := &tools.ExecutionMetadata{}
+
+	if start := parseTimeField(raw["start_time"]); start != nil {
+		meta.StartTime = start
+	}
+	if end := parseTimeField(raw["end_time"]); end != nil {
+		meta.EndTime = end
+		if meta.StartTime != nil {
+			meta.DurationMs = end.Sub(*meta.StartTime).Milliseconds()
+		}
+	}
+
+	if v, ok := raw["duration_ms"]; ok {
+		meta.DurationMs = int64(intValue(v))
+	}
+	if v, ok := raw["command"]; ok {
+		meta.Command = fmt.Sprintf("%v", v)
+	}
+	if v, ok := raw["exit_code"]; ok {
+		meta.ExitCode = intValue(v)
+	}
+	if v, ok := raw["pid"]; ok {
+		meta.PID = intValue(v)
+	}
+	if v, ok := raw["process_id"]; ok {
+		meta.ProcessID = fmt.Sprintf("%v", v)
+	}
+	if v, ok := raw["output_size_bytes"]; ok {
+		meta.OutputSizeBytes = intValue(v)
+	}
+	if v, ok := raw["output_line_count"]; ok {
+		meta.OutputLineCount = intValue(v)
+	}
+	if v, ok := raw["has_stderr"]; ok {
+		meta.HasStderr = boolValue(v)
+	}
+	if v, ok := raw["stderr_size_bytes"]; ok {
+		meta.StderrSizeBytes = intValue(v)
+	}
+	if v, ok := raw["stderr_line_count"]; ok {
+		meta.StderrLineCount = intValue(v)
+	}
+	if v, ok := raw["working_dir"]; ok {
+		meta.WorkingDir = fmt.Sprintf("%v", v)
+	}
+	if v, ok := raw["timeout_seconds"]; ok {
+		meta.TimeoutSeconds = intValue(v)
+	}
+	if v, ok := raw["was_timed_out"]; ok {
+		meta.WasTimedOut = boolValue(v)
+	}
+	if v, ok := raw["was_backgrounded"]; ok {
+		meta.WasBackgrounded = boolValue(v)
+	}
+	if v, ok := raw["tool_type"]; ok {
+		meta.ToolType = fmt.Sprintf("%v", v)
+	}
+	if v, ok := raw["details"].(map[string]interface{}); ok {
+		meta.Details = v
+	}
+	if v, ok := raw["error_type"]; ok {
+		meta.ErrorType = fmt.Sprintf("%v", v)
+	}
+	if v, ok := raw["error_context"]; ok {
+		meta.ErrorContext = fmt.Sprintf("%v", v)
+	}
+
+	return meta
+}
+
+func parseTimeField(val interface{}) *time.Time {
+	switch v := val.(type) {
+	case nil:
+		return nil
+	case string:
+		if v == "" {
+			return nil
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			return &parsed
+		}
+		if parsed, err := time.Parse(time.RFC3339, v); err == nil {
+			return &parsed
+		}
+	case time.Time:
+		return &v
+	case *time.Time:
+		return v
+	}
+	return nil
+}
+
+func intValue(val interface{}) int {
+	switch v := val.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case int32:
+		return int(v)
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	case json.Number:
+		i, _ := v.Int64()
+		return int(i)
+	default:
+		return 0
+	}
+}
+
+func boolValue(val interface{}) bool {
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.ToLower(v) == "true"
+	default:
+		return false
+	}
 }
 
 // generateMetadataAwareSummary creates summaries using execution metadata
@@ -1826,10 +1969,15 @@ func (m *Model) generateShellSummary(metadata *tools.ExecutionMetadata) string {
 
 // generateSandboxSummary creates summaries for Go sandbox execution
 func (m *Model) generateSandboxSummary(metadata *tools.ExecutionMetadata) string {
+	callSummary := m.sandboxFunctionCallSummary(metadata)
+
 	if metadata.ExitCode == 0 {
 		summary := "✓ **Go code executed successfully**"
 		if metadata.DurationMs > 0 {
 			summary += fmt.Sprintf(" (%.1fs)", float64(metadata.DurationMs)/1000)
+		}
+		if callSummary != "" {
+			summary += " • " + callSummary
 		}
 		return summary
 	} else {
@@ -1840,8 +1988,59 @@ func (m *Model) generateSandboxSummary(metadata *tools.ExecutionMetadata) string
 		if metadata.ErrorType != "" {
 			summary += fmt.Sprintf(" • %s", metadata.ErrorType)
 		}
+		if callSummary != "" {
+			summary += " • " + callSummary
+		}
 		return summary
 	}
+}
+
+func (m *Model) sandboxFunctionCallSummary(metadata *tools.ExecutionMetadata) string {
+	if metadata == nil || metadata.Details == nil {
+		return ""
+	}
+
+	counts := make(map[string]int)
+
+	if rawCounts, ok := metadata.Details["function_call_counts"].(map[string]interface{}); ok {
+		for name, val := range rawCounts {
+			if name == "" {
+				continue
+			}
+			if count := intValue(val); count > 0 {
+				counts[name] = count
+			}
+		}
+	}
+
+	if len(counts) == 0 {
+		if rawCalls, ok := metadata.Details["function_calls"].([]interface{}); ok {
+			for _, entry := range rawCalls {
+				if callMap, ok := entry.(map[string]interface{}); ok {
+					if name, ok := callMap["name"].(string); ok && name != "" {
+						counts[name]++
+					}
+				}
+			}
+		}
+	}
+
+	if len(counts) == 0 {
+		return ""
+	}
+
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s x%d", name, counts[name]))
+	}
+
+	return "functions: " + strings.Join(parts, ", ")
 }
 
 // generateReadFileSummary creates summaries for file reading operations

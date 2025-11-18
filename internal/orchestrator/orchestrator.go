@@ -1031,8 +1031,6 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 			if result.Error != "" {
 				toolResult = fmt.Sprintf("Error: %s", result.Error)
 			} else {
-				toolResult = fmt.Sprintf("%v", result.Result)
-
 				// Extract execution metadata if present in the result
 				if resultMap, ok := result.Result.(map[string]interface{}); ok {
 					if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
@@ -1040,6 +1038,14 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 							executionMetadata = metadataObj
 						}
 					}
+
+					if jsonBytes, err := json.Marshal(resultMap); err == nil {
+						toolResult = string(jsonBytes)
+					} else {
+						toolResult = fmt.Sprintf("%v", result.Result)
+					}
+				} else {
+					toolResult = fmt.Sprintf("%v", result.Result)
 				}
 			}
 

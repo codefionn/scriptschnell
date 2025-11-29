@@ -63,12 +63,74 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 		return nil, err
 	}
 
-	msg, err := c.client.Beta.Messages.New(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic completion failed: %w", err)
+	stream := c.client.Beta.Messages.NewStreaming(ctx, params)
+	if stream == nil {
+		return nil, fmt.Errorf("anthropic stream failed: no stream returned")
+	}
+	defer stream.Close()
+
+	var (
+		contentBuilder strings.Builder
+		toolCalls      []map[string]interface{}
+		// temporary storage for the current tool call being built
+		currentToolIndex int = -1
+		currentToolJSON  strings.Builder
+		stopReason       string
+	)
+
+	for stream.Next() {
+		event := stream.Current()
+
+		switch e := event.AsAny().(type) {
+		case anthropic.BetaRawContentBlockStartEvent:
+			if e.ContentBlock.Type == "tool_use" {
+				currentToolIndex++
+				currentToolJSON.Reset()
+				toolCalls = append(toolCalls, map[string]interface{}{
+					"id":   e.ContentBlock.ID,
+					"type": "function",
+					"function": map[string]interface{}{
+						"name":      e.ContentBlock.Name,
+						"arguments": "", // will be filled by deltas
+					},
+				})
+			}
+		case anthropic.BetaRawContentBlockDeltaEvent:
+			if e.Delta.Type == "text_delta" {
+				contentBuilder.WriteString(e.Delta.Text)
+			} else if e.Delta.Type == "input_json_delta" {
+				if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
+					currentToolJSON.WriteString(e.Delta.PartialJSON)
+				}
+			}
+		case anthropic.BetaRawContentBlockStopEvent:
+			if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
+				// Finalize the current tool call arguments
+				args := currentToolJSON.String()
+				if fn, ok := toolCalls[currentToolIndex]["function"].(map[string]interface{}); ok {
+					fn["arguments"] = args
+				}
+				// We don't reset currentToolIndex here in case there are mixed blocks, 
+				// but usually tool blocks are sequential. 
+				// However, strictly speaking, we should track which block index maps to which tool call.
+				// For now, assuming standard Anthropic behavior (sequential blocks).
+			}
+		case anthropic.BetaRawMessageDeltaEvent:
+			if e.Delta.StopReason != "" {
+				stopReason = string(e.Delta.StopReason)
+			}
+		}
 	}
 
-	return buildAnthropicCompletionResponse(msg), nil
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("anthropic stream failed: %w", err)
+	}
+
+	return &CompletionResponse{
+		Content:    contentBuilder.String(),
+		ToolCalls:  toolCalls,
+		StopReason: stopReason,
+	}, nil
 }
 
 func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, callback func(chunk string) error) error {

@@ -299,7 +299,15 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		false,
 		"",
 	)
-	if o.shouldUseSimpleDiffTool(modelFamily) {
+	if o.shouldUseNonDiffUpdateTool(modelFamily) {
+		addSpec(
+			tools.NewWriteFileJSONTool(o.fs, o.session),
+			true,
+			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileJSONTool(o.fs, o.session) },
+			false,
+			"",
+		)
+	} else if o.shouldUseSimpleDiffTool(modelFamily) {
 		addSpec(
 			tools.NewWriteFileSimpleDiffTool(o.fs, o.session),
 			true,
@@ -528,8 +536,12 @@ func (o *Orchestrator) shouldUseNumberedReadFileTool(modelFamily llm.ModelFamily
 	return modelFamily != llm.FamilyZaiGLM
 }
 
+func (o *Orchestrator) shouldUseNonDiffUpdateTool(modelFamily llm.ModelFamily) bool {
+	return false
+}
+
 func (o *Orchestrator) shouldUseSimpleDiffTool(modelFamily llm.ModelFamily) bool {
-	return true
+	return !o.shouldUseNonDiffUpdateTool(modelFamily)
 }
 
 func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {

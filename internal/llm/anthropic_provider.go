@@ -44,8 +44,8 @@ type anthropicModelData struct {
 }
 
 func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error) {
-	// Use Anthropic's /v1/models API endpoint
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.anthropic.com/v1/models", nil)
+	// Use Anthropic's /v1/models API endpoint (beta to access latest models)
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.anthropic.com/v1/models?beta=true", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -114,38 +114,38 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error
 func (p *AnthropicProvider) getFallbackModels() []*ModelInfo {
 	// Fallback hardcoded list in case API fails or returns nothing
 	return []*ModelInfo{
-		// Claude 4 Series
+		// Claude 4/5 Series
 		{
-			ID:                  "claude-4-5-sonnet-20250514",
-			Name:                "Claude 4.5 Sonnet",
+			ID:                  "claude-opus-4-5",
+			Name:                "Claude Opus 4.5",
 			Provider:            "anthropic",
-			Description:         "Latest Claude model with extended context",
+			Description:         "Premium Claude model with top-tier reasoning",
 			ContextWindow:       1000000,
-			MaxOutputTokens:     16384,
+			MaxOutputTokens:     64000,
 			SupportsToolCalling: true,
 			SupportsStreaming:   true,
 			OwnedBy:             "anthropic",
 			Capabilities:        []string{"vision", "tool-use", "extended-context"},
 		},
 		{
-			ID:                  "claude-4-5-haiku-20250514",
-			Name:                "Claude 4.5 Haiku",
+			ID:                  "claude-sonnet-4-5",
+			Name:                "Claude Sonnet 4.5",
 			Provider:            "anthropic",
-			Description:         "Fast Claude 4 model",
+			Description:         "Balanced Claude 4.5 model",
 			ContextWindow:       200000,
-			MaxOutputTokens:     8192,
+			MaxOutputTokens:     64000,
 			SupportsToolCalling: true,
 			SupportsStreaming:   true,
 			OwnedBy:             "anthropic",
 			Capabilities:        []string{"vision", "tool-use"},
 		},
 		{
-			ID:                  "claude-4-1-opus-20250514",
-			Name:                "Claude 4.1 Opus",
+			ID:                  "claude-haiku-4-5",
+			Name:                "Claude Haiku 4.5",
 			Provider:            "anthropic",
-			Description:         "Most powerful Claude 4 model",
+			Description:         "Fast Claude 4.5 model",
 			ContextWindow:       200000,
-			MaxOutputTokens:     8192,
+			MaxOutputTokens:     64000,
 			SupportsToolCalling: true,
 			SupportsStreaming:   true,
 			OwnedBy:             "anthropic",
@@ -153,10 +153,10 @@ func (p *AnthropicProvider) getFallbackModels() []*ModelInfo {
 		},
 		// Claude 3 Series
 		{
-			ID:                  "claude-3-5-sonnet-20241022",
-			Name:                "Claude 3.5 Sonnet (New)",
+			ID:                  "claude-3-7-sonnet-latest",
+			Name:                "Claude 3.7 Sonnet",
 			Provider:            "anthropic",
-			Description:         "Most intelligent Claude model with improved coding and analysis",
+			Description:         "High-performance model with extended thinking",
 			ContextWindow:       200000,
 			MaxOutputTokens:     8192,
 			SupportsToolCalling: true,
@@ -165,10 +165,10 @@ func (p *AnthropicProvider) getFallbackModels() []*ModelInfo {
 			Capabilities:        []string{"vision", "tool-use", "extended-thinking"},
 		},
 		{
-			ID:                  "claude-3-5-sonnet-20240620",
-			Name:                "Claude 3.5 Sonnet",
+			ID:                  "claude-3-5-haiku-latest",
+			Name:                "Claude 3.5 Haiku",
 			Provider:            "anthropic",
-			Description:         "Intelligent model for complex tasks",
+			Description:         "Fast Claude 3.5 model",
 			ContextWindow:       200000,
 			MaxOutputTokens:     8192,
 			SupportsToolCalling: true,
@@ -221,7 +221,7 @@ func (p *AnthropicProvider) CreateClient(modelID string) (Client, error) {
 
 func (p *AnthropicProvider) ValidateAPIKey(ctx context.Context) error {
 	// Create a test client and make a minimal request
-	client, err := p.CreateClient("claude-3-haiku-20240307")
+	client, err := p.CreateClient("claude-3-5-haiku-latest")
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}

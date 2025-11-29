@@ -251,21 +251,55 @@ display_api_keys() {
     echo ""
 }
 
+# Clean logs directory
+# Usage: clean_logs [logs_dir]
+clean_logs() {
+    local logs_dir="${1:-.logs}"
+
+    # Create logs directory if it doesn't exist
+    mkdir -p "$logs_dir"
+
+    # Clean all log files
+    if [ -d "$logs_dir" ]; then
+        find "$logs_dir" -type f -name "*.log" -delete 2>/dev/null || {
+            # Fallback with sudo if needed
+            sudo find "$logs_dir" -type f -name "*.log" -delete 2>/dev/null || true
+        }
+    fi
+}
+
 # Clean workspace directory
 # Usage: clean_workspace [workspace_dir]
 clean_workspace() {
     local workspace_dir="${1:-workspace}"
     print_warning "Cleaning workspace for fresh start..."
-    if [ -d "$workspace_dir/../.logs/statcode-ai.log" ]; then
-        rm "$workspace_dir/../.logs/statcode-ai.log"
-    fi
+
+    # Clean logs directory
+    clean_logs "$workspace_dir/../.logs"
+
     if [ -d "$workspace_dir" ]; then
         # Remove contents but keep directory so Docker bind mounts stay valid
-        find "$workspace_dir" -mindepth 1 -exec rm -rf {} +
+        # Use -delete instead of -exec for better performance and reliability
+        # The '2>/dev/null || true' ensures we continue even if some files are locked
+        find "$workspace_dir" -mindepth 1 -delete 2>/dev/null || {
+            # Fallback: try with sudo if regular delete fails (permission issues from Docker)
+            print_warning "Some files require elevated permissions to delete..."
+            sudo find "$workspace_dir" -mindepth 1 -delete 2>/dev/null || true
+        }
     else
         mkdir -p "$workspace_dir"
     fi
+
+    # Ensure workspace directory exists
     mkdir -p "$workspace_dir"
+
+    # Verify workspace is actually clean
+    local remaining_files
+    remaining_files=$(find "$workspace_dir" -mindepth 1 2>/dev/null | wc -l)
+    if [ "$remaining_files" -gt 0 ]; then
+        print_warning "Warning: $remaining_files files/directories remain in workspace"
+    fi
+
     echo ""
 }
 
@@ -286,12 +320,11 @@ copy_workspace_template() {
 # Usage: clean_docker [compose_file]
 clean_docker() {
     local compose_file="${1:-docker-compose.yml}"
-    local stop_timeout="${COMPOSE_STOP_TIMEOUT:-30}"
     print_warning "Cleaning Docker containers..."
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" down -t "$stop_timeout" -v 2>/dev/null || true
+        run_compose -f "$compose_file" down -t 5 -v 2>/dev/null || true
     else
-        run_compose down -t "$stop_timeout" -v 2>/dev/null || true
+        run_compose down -t 5 -v 2>/dev/null || true
     fi
     echo ""
 }
@@ -311,12 +344,11 @@ should_clean() {
 run_docker_compose() {
     local compose_file="${1:-docker-compose.yml}"
     local service_name="${2:-test-runner}"
-    local stop_timeout="${COMPOSE_STOP_TIMEOUT:-30}"
 
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose -f "$compose_file" up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name"
     else
-        run_compose up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name"
     fi
 }
 
@@ -326,7 +358,6 @@ run_docker_compose_with_debug() {
     local compose_file="${1:-docker-compose.yml}"
     local service_name="${2:-test-runner}"
     local log_dir="${3:-.logs}"
-    local stop_timeout="${COMPOSE_STOP_TIMEOUT:-30}"
     
     # Create log directory
     mkdir -p "$log_dir"
@@ -338,9 +369,9 @@ run_docker_compose_with_debug() {
     # Run docker compose and capture exit code
     local exit_code=0
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose -f "$compose_file" up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
     else
-        run_compose up -t "$stop_timeout" --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
     fi
 
     # If compose reported an error but the target service exited cleanly, treat it as success
@@ -423,14 +454,14 @@ init_e2e_test() {
     load_env_file
     display_api_keys
 
+    # Always clean Docker so we start from a fresh state
+    clean_docker
+
     # Clean workspace
     clean_workspace
 
     # Copy template if it exists (for upgrade scenarios)
     copy_workspace_template
-
-    # Always clean Docker so we start from a fresh state
-    clean_docker
 }
 
 # Run the complete E2E test flow

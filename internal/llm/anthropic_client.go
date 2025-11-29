@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultAnthropicModel     = "claude-3-5-sonnet-20241022"
+	defaultAnthropicModel     = "claude-3-5-haiku-latest"
 	defaultAnthropicMaxTokens = 1024
 )
 
@@ -63,7 +63,7 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 		return nil, err
 	}
 
-	msg, err := c.client.Messages.New(ctx, params)
+	msg, err := c.client.Beta.Messages.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic completion failed: %w", err)
 	}
@@ -77,7 +77,7 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, ca
 		return err
 	}
 
-	stream := c.client.Messages.NewStreaming(ctx, params)
+	stream := c.client.Beta.Messages.NewStreaming(ctx, params)
 	if stream == nil {
 		return fmt.Errorf("anthropic stream failed: no stream returned")
 	}
@@ -86,17 +86,16 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, ca
 	for stream.Next() {
 		event := stream.Current()
 
-		deltaEvent, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent)
+		deltaEvent, ok := event.AsAny().(anthropic.BetaRawContentBlockDeltaEvent)
 		if !ok {
 			continue
 		}
 
-		textDelta, ok := deltaEvent.Delta.AsAny().(anthropic.TextDelta)
-		if !ok {
+		if deltaEvent.Delta.Type != "text_delta" {
 			continue
 		}
 
-		text := textDelta.Text
+		text := deltaEvent.Delta.Text
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
@@ -113,17 +112,17 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, ca
 	return nil
 }
 
-func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.MessageNewParams, error) {
+func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.BetaMessageNewParams, error) {
 	if req == nil {
-		return anthropic.MessageNewParams{}, fmt.Errorf("anthropic completion request cannot be nil")
+		return anthropic.BetaMessageNewParams{}, fmt.Errorf("anthropic completion request cannot be nil")
 	}
 
 	systemBlocks, chatMessages, err := convertMessagesToAnthropic(req.SystemPrompt, req.Messages)
 	if err != nil {
-		return anthropic.MessageNewParams{}, err
+		return anthropic.BetaMessageNewParams{}, err
 	}
 	if len(chatMessages) == 0 {
-		return anthropic.MessageNewParams{}, fmt.Errorf("anthropic completion requires at least one user or assistant message")
+		return anthropic.BetaMessageNewParams{}, fmt.Errorf("anthropic completion requires at least one user or assistant message")
 	}
 
 	maxTokens := req.MaxTokens
@@ -131,7 +130,7 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 		maxTokens = defaultAnthropicMaxTokens
 	}
 
-	params := anthropic.MessageNewParams{
+	params := anthropic.BetaMessageNewParams{
 		Model:     anthropic.Model(c.model),
 		MaxTokens: int64(maxTokens),
 		Messages:  chatMessages,
@@ -151,7 +150,7 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 	return params, nil
 }
 
-func buildAnthropicCompletionResponse(msg *anthropic.Message) *CompletionResponse {
+func buildAnthropicCompletionResponse(msg *anthropic.BetaMessage) *CompletionResponse {
 	if msg == nil {
 		return &CompletionResponse{}
 	}
@@ -170,13 +169,13 @@ func buildAnthropicCompletionResponse(msg *anthropic.Message) *CompletionRespons
 	}
 }
 
-func convertMessagesToAnthropic(systemPrompt string, messages []*Message) ([]anthropic.TextBlockParam, []anthropic.MessageParam, error) {
-	systemBlocks := make([]anthropic.TextBlockParam, 0, 1)
+func convertMessagesToAnthropic(systemPrompt string, messages []*Message) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {
+	systemBlocks := make([]anthropic.BetaTextBlockParam, 0, 1)
 	if sys := strings.TrimSpace(systemPrompt); sys != "" {
-		systemBlocks = append(systemBlocks, anthropic.TextBlockParam{Text: sys})
+		systemBlocks = append(systemBlocks, anthropic.BetaTextBlockParam{Text: sys})
 	}
 
-	chatMessages := make([]anthropic.MessageParam, 0, len(messages))
+	chatMessages := make([]anthropic.BetaMessageParam, 0, len(messages))
 	for idx, msg := range messages {
 		if msg == nil {
 			continue
@@ -186,7 +185,7 @@ func convertMessagesToAnthropic(systemPrompt string, messages []*Message) ([]ant
 		switch role {
 		case "system":
 			if text := strings.TrimSpace(msg.Content); text != "" {
-				systemBlocks = append(systemBlocks, anthropic.TextBlockParam{Text: text})
+				systemBlocks = append(systemBlocks, anthropic.BetaTextBlockParam{Text: text})
 			}
 			continue
 		case "assistant":
@@ -197,8 +196,8 @@ func convertMessagesToAnthropic(systemPrompt string, messages []*Message) ([]ant
 			if len(blocks) == 0 {
 				continue
 			}
-			chatMessages = append(chatMessages, anthropic.MessageParam{
-				Role:    anthropic.MessageParamRoleAssistant,
+			chatMessages = append(chatMessages, anthropic.BetaMessageParam{
+				Role:    anthropic.BetaMessageParamRoleAssistant,
 				Content: blocks,
 			})
 		case "tool":
@@ -214,8 +213,8 @@ func convertMessagesToAnthropic(systemPrompt string, messages []*Message) ([]ant
 			if len(blocks) == 0 {
 				continue
 			}
-			chatMessages = append(chatMessages, anthropic.MessageParam{
-				Role:    anthropic.MessageParamRoleUser,
+			chatMessages = append(chatMessages, anthropic.BetaMessageParam{
+				Role:    anthropic.BetaMessageParamRoleUser,
 				Content: blocks,
 			})
 		}
@@ -224,11 +223,11 @@ func convertMessagesToAnthropic(systemPrompt string, messages []*Message) ([]ant
 	return systemBlocks, chatMessages, nil
 }
 
-func buildAnthropicAssistantBlocks(msg *Message) ([]anthropic.ContentBlockParamUnion, error) {
-	blocks := make([]anthropic.ContentBlockParamUnion, 0, 1+len(msg.ToolCalls))
+func buildAnthropicAssistantBlocks(msg *Message) ([]anthropic.BetaContentBlockParamUnion, error) {
+	blocks := make([]anthropic.BetaContentBlockParamUnion, 0, 1+len(msg.ToolCalls))
 
 	if msg.Content != "" {
-		blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+		blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Content))
 	}
 
 	toolBlocks, err := convertAnthropicToolUses(msg.ToolCalls)
@@ -240,12 +239,12 @@ func buildAnthropicAssistantBlocks(msg *Message) ([]anthropic.ContentBlockParamU
 	return blocks, nil
 }
 
-func convertAnthropicToolUses(toolCalls []map[string]interface{}) ([]anthropic.ContentBlockParamUnion, error) {
+func convertAnthropicToolUses(toolCalls []map[string]interface{}) ([]anthropic.BetaContentBlockParamUnion, error) {
 	if len(toolCalls) == 0 {
 		return nil, nil
 	}
 
-	result := make([]anthropic.ContentBlockParamUnion, 0, len(toolCalls))
+	result := make([]anthropic.BetaContentBlockParamUnion, 0, len(toolCalls))
 	for idx, call := range toolCalls {
 		if call == nil {
 			continue
@@ -267,45 +266,56 @@ func convertAnthropicToolUses(toolCalls []map[string]interface{}) ([]anthropic.C
 		}
 
 		input := parseToolArguments(function["arguments"])
-		result = append(result, anthropic.NewToolUseBlock(callID, input, name))
+		result = append(result, anthropic.NewBetaToolUseBlock(callID, input, name))
 	}
 
 	return result, nil
 }
 
-func buildAnthropicToolMessage(msg *Message) (anthropic.MessageParam, error) {
+func buildAnthropicToolMessage(msg *Message) (anthropic.BetaMessageParam, error) {
 	toolID := strings.TrimSpace(msg.ToolID)
 	if toolID == "" {
 		// Fall back to sending the result as plain user text if no tool reference exists.
 		if msg.Content == "" {
-			return anthropic.MessageParam{}, nil
+			return anthropic.BetaMessageParam{}, nil
 		}
-		return anthropic.MessageParam{
-			Role:    anthropic.MessageParamRoleUser,
-			Content: []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(msg.Content)},
+		return anthropic.BetaMessageParam{
+			Role:    anthropic.BetaMessageParamRoleUser,
+			Content: []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(msg.Content)},
 		}, nil
 	}
 
-	block := anthropic.NewToolResultBlock(toolID, msg.Content, false)
-	return anthropic.MessageParam{
-		Role:    anthropic.MessageParamRoleUser,
-		Content: []anthropic.ContentBlockParamUnion{block},
+	toolResult := anthropic.BetaToolResultBlockParam{
+		ToolUseID: toolID,
+	}
+	if msg.Content != "" {
+		textBlock := anthropic.BetaTextBlockParam{Text: msg.Content}
+		toolResult.Content = []anthropic.BetaToolResultBlockParamContentUnion{
+			{OfText: &textBlock},
+		}
+	}
+
+	return anthropic.BetaMessageParam{
+		Role: anthropic.BetaMessageParamRoleUser,
+		Content: []anthropic.BetaContentBlockParamUnion{
+			{OfToolResult: &toolResult},
+		},
 	}, nil
 }
 
-func buildAnthropicTextBlocks(content string) []anthropic.ContentBlockParamUnion {
+func buildAnthropicTextBlocks(content string) []anthropic.BetaContentBlockParamUnion {
 	if content == "" {
 		return nil
 	}
-	return []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(content)}
+	return []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(content)}
 }
 
-func convertAnthropicTools(tools []map[string]interface{}) []anthropic.ToolUnionParam {
+func convertAnthropicTools(tools []map[string]interface{}) []anthropic.BetaToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}
 
-	result := make([]anthropic.ToolUnionParam, 0, len(tools))
+	result := make([]anthropic.BetaToolUnionParam, 0, len(tools))
 	for _, raw := range tools {
 		if raw == nil {
 			continue
@@ -321,7 +331,7 @@ func convertAnthropicTools(tools []map[string]interface{}) []anthropic.ToolUnion
 			continue
 		}
 
-		schema := anthropic.ToolInputSchemaParam{
+		schema := anthropic.BetaToolInputSchemaParam{
 			Type: constant.Object("object"),
 		}
 
@@ -340,17 +350,17 @@ func convertAnthropicTools(tools []map[string]interface{}) []anthropic.ToolUnion
 			}
 		}
 
-		tool := &anthropic.ToolParam{
+		tool := &anthropic.BetaToolParam{
 			Name:        name,
 			InputSchema: schema,
-			Type:        anthropic.ToolTypeCustom,
+			Type:        anthropic.BetaToolTypeCustom,
 		}
 
 		if desc := strings.TrimSpace(toString(function["description"])); desc != "" {
 			tool.Description = anthropic.String(desc)
 		}
 
-		result = append(result, anthropic.ToolUnionParam{OfTool: tool})
+		result = append(result, anthropic.BetaToolUnionParam{OfTool: tool})
 	}
 
 	if len(result) == 0 {
@@ -359,7 +369,7 @@ func convertAnthropicTools(tools []map[string]interface{}) []anthropic.ToolUnion
 	return result
 }
 
-func collectAnthropicText(blocks []anthropic.ContentBlockUnion) string {
+func collectAnthropicText(blocks []anthropic.BetaContentBlockUnion) string {
 	if len(blocks) == 0 {
 		return ""
 	}
@@ -377,7 +387,7 @@ func collectAnthropicText(blocks []anthropic.ContentBlockUnion) string {
 	return sb.String()
 }
 
-func convertAnthropicToolCalls(blocks []anthropic.ContentBlockUnion) []map[string]interface{} {
+func convertAnthropicToolCalls(blocks []anthropic.BetaContentBlockUnion) []map[string]interface{} {
 	if len(blocks) == 0 {
 		return nil
 	}

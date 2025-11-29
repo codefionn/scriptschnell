@@ -8,6 +8,7 @@ services:
     build:
       context: ../..
       dockerfile: e2e-tests/calculator-agentic/Dockerfile
+    stop_grace_period: 30s
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -33,6 +34,7 @@ services:
 
   test-runner:
     image: golang:1.25-bookworm
+    stop_grace_period: 30s
     depends_on:
       statcode-ai:
         condition: service_completed_successfully

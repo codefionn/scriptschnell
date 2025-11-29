@@ -300,9 +300,9 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		)
 	} else if o.shouldUseSimpleDiffTool(modelFamily) {
 		addSpec(
-			tools.NewWriteFileSimpleDiffTool(o.fs, o.session),
+			tools.NewWriteFileReplaceTool(o.fs, o.session),
 			true,
-			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileSimpleDiffTool(o.fs, o.session) },
+			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileReplaceTool(o.fs, o.session) },
 			false,
 			"",
 		)

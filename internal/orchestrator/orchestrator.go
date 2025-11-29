@@ -275,23 +275,14 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	modelFamily := llm.DetectModelFamily(o.providerMgr.GetOrchestrationModel())
 
 	// Core filesystem tools
-	if o.shouldUseNumberedReadFileTool(modelFamily) {
-		addSpec(
-			tools.NewReadFileNumberedTool(o.fs, o.session),
-			true,
-			func(_ *tools.Registry) tools.Tool { return tools.NewReadFileNumberedTool(o.fs, o.session) },
-			false,
-			"",
-		)
-	} else {
-		addSpec(
-			tools.NewReadFileTool(o.fs, o.session),
-			true,
-			func(_ *tools.Registry) tools.Tool { return tools.NewReadFileTool(o.fs, o.session) },
-			false,
-			"",
-		)
-	}
+	readFileTool := o.getReadFileTool(modelFamily, o.session)
+	addSpec(
+		readFileTool,
+		true,
+		func(_ *tools.Registry) tools.Tool { return o.getReadFileTool(modelFamily, o.session) },
+		false,
+		"",
+	)
 	addSpec(
 		tools.NewCreateFileTool(o.fs, o.session),
 		true,
@@ -337,6 +328,13 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		tools.NewSearchFileContentTool(o.fs),
 		false,
 		func(_ *tools.Registry) tools.Tool { return tools.NewSearchFileContentTool(o.fs) },
+		false,
+		"",
+	)
+	addSpec(
+		tools.NewCodebaseInvestigatorTool(NewCodebaseInvestigatorAgent(o)),
+		false,
+		func(_ *tools.Registry) tools.Tool { return tools.NewCodebaseInvestigatorTool(NewCodebaseInvestigatorAgent(o)) },
 		false,
 		"",
 	)
@@ -533,6 +531,13 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	}
 
 	return errs
+}
+
+func (o *Orchestrator) getReadFileTool(modelFamily llm.ModelFamily, sess *session.Session) tools.Tool {
+	if o.shouldUseNumberedReadFileTool(modelFamily) {
+		return tools.NewReadFileNumberedTool(o.fs, sess)
+	}
+	return tools.NewReadFileTool(o.fs, sess)
 }
 
 func (o *Orchestrator) shouldUseShellTool(modelFamily llm.ModelFamily) bool {
@@ -937,154 +942,9 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 
 		// Execute each tool call
 		logger.Debug("Executing %d tool calls from iteration %d", len(response.ToolCalls), iteration)
-		for _, toolCall := range response.ToolCalls {
-			toolID, _ := toolCall["id"].(string)
-			toolType, _ := toolCall["type"].(string)
-
-			if toolType != "function" {
-				continue
-			}
-
-			function, ok := toolCall["function"].(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			toolName, _ := function["name"].(string)
-			argsJSON, _ := function["arguments"].(string)
-			logger.Debug("Executing tool: %s (id=%s)", toolName, toolID)
-
-			// Notify UI about tool call
-			if statusCallback != nil {
-				if err := statusCallback(fmt.Sprintf("Calling tool: %s", toolName)); err != nil {
-					logger.Warn("Failed to send status update: %v", err)
-				}
-			}
-
-			// Parse arguments
-			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-				o.session.AddMessage(&session.Message{
-					Role:    "tool",
-					Content: fmt.Sprintf("Error parsing tool arguments: %v", err),
-					ToolID:  toolID,
-				})
-				continue
-			}
-
-			toolCallObj := &tools.ToolCall{
-				ID:         toolID,
-				Name:       toolName,
-				Parameters: args,
-			}
-
-			// Notify UI about tool call details
-			if toolCallCallback != nil {
-				if err := toolCallCallback(toolName, toolID, args); err != nil {
-					logger.Warn("Failed to send tool call message: %v", err)
-				}
-			}
-
-			result, execErr := o.executeTool(ctx, toolCallObj, toolName, statusCallback)
-			if execErr != nil {
-				result = &tools.ToolResult{
-					ID:    toolID,
-					Error: execErr.Error(),
-				}
-			}
-
-			// Check if authorization is required
-			if result.RequiresUserInput {
-				// Ask user for approval
-				approved := false
-				if authCallback != nil {
-					var err error
-					suggestedPrefix := result.SuggestedCommandPrefix
-					approved, err = authCallback(toolName, args, result.AuthReason)
-					if err != nil {
-						result = &tools.ToolResult{
-							ID:    toolID,
-							Error: fmt.Sprintf("Authorization error: %v", err),
-						}
-					} else if approved {
-						if suggestedPrefix != "" {
-							o.session.AuthorizeCommand(suggestedPrefix)
-							logger.Info("Authorized command prefix for session: %q", suggestedPrefix)
-							if o.config != nil && !o.config.IsCommandAuthorized(suggestedPrefix) {
-								o.config.AuthorizeCommand(suggestedPrefix)
-								if err := o.config.Save(config.GetConfigPath()); err != nil {
-									logger.Warn("Failed to persist authorized command prefix %q: %v", suggestedPrefix, err)
-								} else {
-									logger.Info("Persisted authorized command prefix %q to config", suggestedPrefix)
-								}
-							}
-						}
-
-						result, execErr = o.executeToolWithApproval(ctx, toolCallObj, toolName, statusCallback)
-						if execErr != nil {
-							result = &tools.ToolResult{
-								ID:    toolID,
-								Error: execErr.Error(),
-							}
-						}
-					} else {
-						// User denied
-						result = &tools.ToolResult{
-							ID:    toolID,
-							Error: "Operation denied by user",
-						}
-					}
-				} else {
-					// No callback provided, deny by default
-					result = &tools.ToolResult{
-						ID:    toolID,
-						Error: "Authorization required but no approval mechanism available",
-					}
-				}
-			}
-
-			// Format result as string
-			var toolResult string
-			var executionMetadata *tools.ExecutionMetadata
-
-			if result.Error != "" {
-				toolResult = fmt.Sprintf("Error: %s", result.Error)
-			} else {
-				// Extract execution metadata if present in the result
-				if resultMap, ok := result.Result.(map[string]interface{}); ok {
-					if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
-						if metadataObj, ok := metadata.(*tools.ExecutionMetadata); ok {
-							executionMetadata = metadataObj
-						}
-					}
-
-					if jsonBytes, err := json.Marshal(resultMap); err == nil {
-						toolResult = string(jsonBytes)
-					} else {
-						toolResult = fmt.Sprintf("%v", result.Result)
-					}
-				} else {
-					toolResult = fmt.Sprintf("%v", result.Result)
-				}
-			}
-
-			// Add tool result to session
-			// Notify UI about tool result
-			if toolResultCallback != nil {
-				// Create enhanced callback that includes metadata
-				if err := o.enhancedToolResultCallback(toolResultCallback, toolName, toolID, toolResult, result.Error, executionMetadata); err != nil {
-					logger.Warn("Failed to send tool result message: %v", err)
-				}
-			}
-			o.session.AddMessage(&session.Message{
-				Role:     "tool",
-				Content:  toolResult,
-				ToolID:   toolID,
-				ToolName: toolName,
-			})
-			o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
-
-			logger.Debug("Tool execution complete: %s (id=%s)", toolName, toolID)
+		
+		if err := o.processToolCalls(ctx, response.ToolCalls, o, o.session, statusCallback, authCallback, toolCallCallback, toolResultCallback); err != nil {
+			logger.Warn("Error processing tool calls: %v", err)
 		}
 
 		// Log that we're continuing the loop to get LLM's analysis of tool results
@@ -1105,6 +965,170 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 	}
 
 	logger.Debug("ProcessPrompt completed")
+	return nil
+}
+
+type toolExecutor interface {
+	Execute(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error)
+	ExecuteWithApproval(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error)
+}
+
+func (o *Orchestrator) processToolCalls(
+	ctx context.Context,
+	toolCalls []map[string]interface{},
+	executor toolExecutor,
+	sess *session.Session,
+	statusCb StatusCallback,
+	authCb AuthorizationCallback,
+	toolCallCb ToolCallCallback,
+	toolResultCb ToolResultCallback,
+) error {
+	for _, toolCall := range toolCalls {
+		toolID, _ := toolCall["id"].(string)
+		toolType, _ := toolCall["type"].(string)
+
+		if toolType != "function" {
+			continue
+		}
+
+		function, ok := toolCall["function"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		toolName, _ := function["name"].(string)
+		argsJSON, _ := function["arguments"].(string)
+		logger.Debug("Executing tool: %s (id=%s)", toolName, toolID)
+
+		// Notify UI about tool call
+		if statusCb != nil {
+			if err := statusCb(fmt.Sprintf("Calling tool: %s", toolName)); err != nil {
+				logger.Warn("Failed to send status update: %v", err)
+			}
+		}
+
+		// Parse arguments
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			sess.AddMessage(&session.Message{
+				Role:    "tool",
+				Content: fmt.Sprintf("Error parsing tool arguments: %v", err),
+				ToolID:  toolID,
+			})
+			continue
+		}
+
+		toolCallObj := &tools.ToolCall{
+			ID:         toolID,
+			Name:       toolName,
+			Parameters: args,
+		}
+
+		// Notify UI about tool call details
+		if toolCallCb != nil {
+			if err := toolCallCb(toolName, toolID, args); err != nil {
+				logger.Warn("Failed to send tool call message: %v", err)
+			}
+		}
+
+		result, execErr := executor.Execute(ctx, toolCallObj, toolName, statusCb)
+		if execErr != nil {
+			result = &tools.ToolResult{
+				ID:    toolID,
+				Error: execErr.Error(),
+			}
+		}
+
+		// Check if authorization is required
+		if result.RequiresUserInput {
+			// Ask user for approval
+			approved := false
+			if authCb != nil {
+				var err error
+				suggestedPrefix := result.SuggestedCommandPrefix
+				approved, err = authCb(toolName, args, result.AuthReason)
+				if err != nil {
+					result = &tools.ToolResult{
+						ID:    toolID,
+						Error: fmt.Sprintf("Authorization error: %v", err),
+					}
+				} else if approved {
+					if suggestedPrefix != "" {
+						sess.AuthorizeCommand(suggestedPrefix)
+						logger.Info("Authorized command prefix for session: %q", suggestedPrefix)
+						if o.config != nil && !o.config.IsCommandAuthorized(suggestedPrefix) {
+							o.config.AuthorizeCommand(suggestedPrefix)
+							if err := o.config.Save(config.GetConfigPath()); err != nil {
+								logger.Warn("Failed to persist authorized command prefix %q: %v", suggestedPrefix, err)
+							} else {
+								logger.Info("Persisted authorized command prefix %q to config", suggestedPrefix)
+							}
+						}
+					}
+
+					result, execErr = executor.ExecuteWithApproval(ctx, toolCallObj, toolName, statusCb)
+					if execErr != nil {
+						result = &tools.ToolResult{
+							ID:    toolID,
+							Error: execErr.Error(),
+						}
+					}
+				} else {
+					// User denied
+					result = &tools.ToolResult{
+						ID:    toolID,
+						Error: "Operation denied by user",
+					}
+				}
+			} else {
+				// No callback provided, deny by default
+				result = &tools.ToolResult{
+					ID:    toolID,
+					Error: "Authorization required but no approval mechanism available",
+				}
+			}
+		}
+
+		// Format result as string
+		var toolResult string
+		var executionMetadata *tools.ExecutionMetadata
+
+		if result.Error != "" {
+			toolResult = fmt.Sprintf("Error: %s", result.Error)
+		} else {
+			// Extract execution metadata if present in the result
+			if resultMap, ok := result.Result.(map[string]interface{}); ok {
+				if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
+					if metadataObj, ok := metadata.(*tools.ExecutionMetadata); ok {
+						executionMetadata = metadataObj
+					}
+				}
+
+				if jsonBytes, err := json.Marshal(resultMap); err == nil {
+					toolResult = string(jsonBytes)
+				} else {
+					toolResult = fmt.Sprintf("%v", result.Result)
+				}
+			} else {
+				toolResult = fmt.Sprintf("%v", result.Result)
+			}
+		}
+
+		// Add tool result to session
+		// Notify UI about tool result
+		if toolResultCb != nil {
+			// Create enhanced callback that includes metadata
+			if err := o.enhancedToolResultCallback(toolResultCb, toolName, toolID, toolResult, result.Error, executionMetadata); err != nil {
+				logger.Warn("Failed to send tool result message: %v", err)
+			}
+		}
+		sess.AddMessage(&session.Message{
+			Role:     "tool",
+			Content:  toolResult,
+			ToolID:   toolID,
+			ToolName: toolName,
+		})
+	}
 	return nil
 }
 
@@ -1702,7 +1726,7 @@ func (o *Orchestrator) enhancedToolResultCallback(callback ToolResultCallback, t
 	return nil
 }
 
-func (o *Orchestrator) executeTool(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
+func (o *Orchestrator) Execute(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
 	ctx, cleanup := o.prepareShellExecutionContext(ctx, toolCall, toolName)
 	if cleanup != nil {
 		defer cleanup()
@@ -1719,7 +1743,7 @@ func (o *Orchestrator) executeTool(ctx context.Context, toolCall *tools.ToolCall
 	return o.toolRegistry.Execute(ctx, toolCall), nil
 }
 
-func (o *Orchestrator) executeToolWithApproval(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
+func (o *Orchestrator) ExecuteWithApproval(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
 	ctx, cleanup := o.prepareShellExecutionContext(ctx, toolCall, toolName)
 	if cleanup != nil {
 		defer cleanup()

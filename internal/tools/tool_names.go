@@ -18,4 +18,5 @@ const (
 	ToolNameTodo               = "todo"
 	ToolNameSearchFiles        = "search_files"
 	ToolNameSearchFileContent  = "search_file_content"
+	ToolNameCodebaseInvestigator = "codebase_investigator"
 )

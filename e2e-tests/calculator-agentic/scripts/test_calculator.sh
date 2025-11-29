@@ -15,6 +15,27 @@ if [ ! -d "$WORKSPACE_DIR" ]; then
     exit 1
 fi
 
+# Wait for build to complete (signaled by build_calculator.sh)
+echo "Waiting for calculator build to complete..."
+timeout=600 # Wait up to 10 minutes
+start_time=$(date +%s)
+while [ ! -f "${WORKSPACE_DIR}/.build_done" ]; do
+    if [ -f "${WORKSPACE_DIR}/.build_failed" ]; then
+        echo "ERROR: Build failed (detected .build_failed signal)."
+        exit 1
+    fi
+
+    sleep 2
+    current_time=$(date +%s)
+    elapsed=$((current_time - start_time))
+    if [ $elapsed -ge $timeout ]; then
+        echo "ERROR: Timed out waiting for calculator build to complete."
+        exit 1
+    fi
+done
+
+echo "Build signal received."
+
 # Check if calculator binary exists – build it if missing
 if [ ! -f "$CALCULATOR_BIN" ]; then
     echo "Calculator binary missing – attempting to build it now..."

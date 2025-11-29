@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Signal failure if script errors out
+trap 'touch /workspace/.build_failed' ERR
+
 echo "=========================================="
 echo "Building Calculator CLI with statcode-ai"
 echo "=========================================="
@@ -98,3 +101,6 @@ fi
 echo "=========================================="
 echo "Calculator CLI built successfully!"
 echo "=========================================="
+
+# Signal completion to test-runner
+touch /workspace/.build_done

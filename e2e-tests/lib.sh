@@ -28,7 +28,7 @@ ensure_compose_cmd() {
         return
     fi
 
-    local prefer="${COMPOSE_PREFERRED:-podman}"
+    local prefer="${COMPOSE_PREFERRED:-docker}"
     local try_podman_first=true
     if [ "$prefer" = "docker" ]; then
         try_podman_first=false

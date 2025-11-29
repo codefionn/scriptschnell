@@ -269,7 +269,7 @@ func (c *MistralClient) convertMessages(req *CompletionRequest) []mistralChatMes
 			}
 		case "tool":
 			apiMsg.ToolCallID = msg.ToolID
-			apiMsg.Name = msg.ToolName
+			apiMsg.Name = sanitizeMistralToolName(msg.ToolName)
 			apiMsg.Content = msg.Content
 		default:
 			apiMsg.Content = msg.Content
@@ -404,6 +404,7 @@ func convertMistralToolCalls(toolCalls []map[string]interface{}) []mistralToolCa
 
 		fnData, _ := call["function"].(map[string]interface{})
 		name, _ := fnData["name"].(string)
+		name = sanitizeMistralToolName(name)
 		args := stringifyArguments(fnData["arguments"])
 
 		callType := toString(call["type"])
@@ -537,4 +538,28 @@ func toString(value interface{}) string {
 		}
 		return string(bytes)
 	}
+}
+
+func sanitizeMistralToolName(name string) string {
+	// Mistral requires tool names to match ^[a-zA-Z0-9_-]+$
+	// Sometimes the model hallucinates and puts JSON args in the name (e.g. {"action":...}todo)
+	if idx := strings.LastIndex(name, "}"); idx != -1 && idx < len(name)-1 {
+		suffix := strings.TrimSpace(name[idx+1:])
+		if suffix != "" {
+			name = suffix
+		}
+	}
+
+	// Remove invalid characters
+	var builder strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			builder.WriteRune(r)
+		}
+	}
+	cleaned := builder.String()
+	if cleaned == "" {
+		return "unknown_tool"
+	}
+	return cleaned
 }

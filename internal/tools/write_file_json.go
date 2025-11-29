@@ -83,12 +83,12 @@ type fileOperation struct {
 func (t *WriteFileJSONTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return &ToolResult{Error: fmt.Sprintf("path is required")}
+		return &ToolResult{Error: "path is required"}
 	}
 
 	operationsParam, ok := params["operations"]
 	if !ok {
-		return &ToolResult{Error: fmt.Sprintf("operations is required")}
+		return &ToolResult{Error: "operations is required"}
 	}
 
 	// Re-marshal and unmarshal to decode into the struct. This is a common Go trick for map[string]interface{}
@@ -110,13 +110,13 @@ func (t *WriteFileJSONTool) Execute(ctx context.Context, params map[string]inter
 	}
 
 	if len(operations) == 0 {
-		return &ToolResult{Error: fmt.Sprintf("operations cannot be empty")}
+		return &ToolResult{Error: "operations cannot be empty"}
 	}
 
 	logger.Debug("write_file_json: path=%s", path)
 
 	if t.fs == nil {
-		return &ToolResult{Error: fmt.Sprintf("file system is not configured")}
+		return &ToolResult{Error: "file system is not configured"}
 	}
 
 	exists, err := t.fs.Exists(ctx, path)

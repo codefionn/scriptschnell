@@ -2,12 +2,17 @@ package tools
 
 import (
 	"context"
-	"fmt"
 )
 
 // Investigator defines the interface for the codebase investigation agent.
 type Investigator interface {
 	Investigate(ctx context.Context, objective string) (string, error)
+}
+
+// InvestigatorWithCallback is an extended investigator interface that supports status callbacks
+type InvestigatorWithCallback interface {
+	Investigator
+	InvestigateWithCallback(ctx context.Context, objective string, statusCb func(string) error) (string, error)
 }
 
 // CodebaseInvestigatorTool exposes the investigation agent as a tool.
@@ -45,7 +50,7 @@ func (t *CodebaseInvestigatorTool) Parameters() map[string]interface{} {
 func (t *CodebaseInvestigatorTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	objective := GetStringParam(params, "objective", "")
 	if objective == "" {
-		return &ToolResult{Error: fmt.Sprintf("objective is required")}
+		return &ToolResult{Error: "objective is required"}
 	}
 
 	result, err := t.investigator.Investigate(ctx, objective)

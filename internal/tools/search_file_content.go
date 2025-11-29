@@ -75,6 +75,17 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 	matchCount := 0
 	fileCount := 0
 
+	// Start with header
+	results.WriteString("## Content Search Results\n\n")
+	results.WriteString(fmt.Sprintf("**Pattern:** `%s`\n", pattern))
+	if globPattern != "" {
+		results.WriteString(fmt.Sprintf("**File Filter:** `%s`\n", globPattern))
+	}
+	if searchPath != "." {
+		results.WriteString(fmt.Sprintf("**Search Path:** `%s`\n", searchPath))
+	}
+	results.WriteString(fmt.Sprintf("**Context Lines:** %d\n\n", contextLines))
+
 	err = t.walkDir(ctx, searchPath, func(path string, info *fs.FileInfo) error {
 		if info.IsDir {
 			return nil
@@ -157,7 +168,10 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 		}
 		sort.Ints(sortedLines)
 
-		results.WriteString(fmt.Sprintf("%s:\n", path))
+		// Write file header with markdown formatting
+		results.WriteString(fmt.Sprintf("### `%s`\n\n", path))
+		results.WriteString(fmt.Sprintf("*%d match(es)*\n\n", len(matchedLineIndices)))
+		results.WriteString("```\n")
 
 		lastIdx := -1
 		for _, idx := range sortedLines {
@@ -173,7 +187,7 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 			results.WriteString(fmt.Sprintf("%*d: %s\n", padding, lineNum, lines[idx]))
 			lastIdx = idx
 		}
-		results.WriteString("\n") // Empty line after file matches
+		results.WriteString("```\n\n")
 
 		return nil
 	})
@@ -183,7 +197,11 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 	}
 
 	if matchCount == 0 {
-		return &ToolResult{Result: "No matches found."}
+		results.WriteString("*No matches found.*\n")
+	} else {
+		// Add summary at the end
+		results.WriteString("---\n\n")
+		results.WriteString(fmt.Sprintf("**Summary:** Found %d match(es) in %d file(s)\n", matchCount, fileCount))
 	}
 
 	return &ToolResult{Result: results.String()}

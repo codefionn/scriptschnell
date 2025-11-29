@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/statcode-ai/statcode-ai/internal/llm"
@@ -21,6 +23,28 @@ func NewCodebaseInvestigatorAgent(orch *Orchestrator) *CodebaseInvestigatorAgent
 }
 
 func (a *CodebaseInvestigatorAgent) Investigate(ctx context.Context, objective string) (string, error) {
+	return a.InvestigateWithCallback(ctx, objective, nil)
+}
+
+func (a *CodebaseInvestigatorAgent) InvestigateWithCallback(ctx context.Context, objective string, statusCb StatusCallback) (string, error) {
+	// If no status callback provided, try to get it from the orchestrator's current context
+	if statusCb == nil {
+		a.orch.statusCbMu.Lock()
+		statusCb = a.orch.currentStatusCb
+		a.orch.statusCbMu.Unlock()
+	}
+
+	// Get stream callback for sending progress messages to the chat
+	var streamCb func(string) error
+	a.orch.streamCbMu.Lock()
+	streamCb = a.orch.currentStreamCb
+	a.orch.streamCbMu.Unlock()
+
+	// Send initial progress message to chat
+	if streamCb != nil {
+		streamCb(fmt.Sprintf("\n\n🔍 **Investigating codebase**: %s\n\n", objective))
+	}
+
 	// Create a new session for the investigation
 	investigationSession := session.NewSession("investigation", a.orch.workingDir)
 	investigationSession.AddMessage(&session.Message{
@@ -41,13 +65,21 @@ func (a *CodebaseInvestigatorAgent) Investigate(ctx context.Context, objective s
 	registry.Register(tools.NewSearchFilesTool(a.orch.fs))
 	registry.Register(tools.NewSearchFileContentTool(a.orch.fs))
 
+	// Parallel execution tool (allows the investigator to speed up by running multiple tools concurrently)
+	registry.Register(tools.NewParallelTool(registry))
+
 	// System prompt for investigator
 	systemPrompt := `You are a Codebase Investigator agent.
 Your goal is to explore the codebase to answer the user's objective.
 You have access to tools to search and read files.
 You should systematically explore relevant files.
+
+Use the parallel_tool to execute multiple tools (e.g. multiple search_files, search_file_content, read_file) concurrently.
+
 When you have found the answer or gathered enough information, provide a comprehensive summary wrapped in <answer> tags.
 If you cannot find the answer, explain what you checked and why you failed, also wrapped in <answer> tags.
+
+Also for really relevant files, provide the file path and code location (e.g. function name and line numbers) where the information was found.
 Example:
 <answer>
 The requested logic is found in internal/module/file.go function DoWork().
@@ -96,7 +128,32 @@ The requested logic is found in internal/module/file.go function DoWork().
 
 		if len(resp.ToolCalls) == 0 {
 			// No tools called, this is the final answer
+			if streamCb != nil {
+				streamCb("✓ Investigation complete\n\n")
+			}
 			return extractAnswer(resp.Content), nil
+		}
+
+		// Send progress update for tool calls with details
+		if streamCb != nil && len(resp.ToolCalls) > 0 {
+			for _, tc := range resp.ToolCalls {
+				if fn, ok := tc["function"].(map[string]interface{}); ok {
+					toolName, _ := fn["name"].(string)
+					argsJSON, _ := fn["arguments"].(string)
+
+					// Parse arguments to extract relevant details
+					var args map[string]interface{}
+					if argsJSON != "" {
+						json.Unmarshal([]byte(argsJSON), &args)
+					}
+
+					// Format tool call message based on tool type
+					msg := formatToolCallMessage(toolName, args)
+					if msg != "" {
+						streamCb(msg)
+					}
+				}
+			}
 		}
 
 		// Execute tools using extracted logic
@@ -104,9 +161,8 @@ The requested logic is found in internal/module/file.go function DoWork().
 		executor := &registryExecutor{registry: registry}
 
 		// Use the extracted processToolCalls method
-		// We pass nil for callbacks as we don't want to spam the main UI with sub-agent tool calls,
-		// or maybe we do? For now, keep it silent or log only.
-		err = a.orch.processToolCalls(ctx, resp.ToolCalls, executor, investigationSession, nil, nil, nil, nil)
+		// Pass the status callback to show live progress in the UI
+		err = a.orch.processToolCalls(ctx, resp.ToolCalls, executor, investigationSession, statusCb, nil, nil, nil)
 		if err != nil {
 			return "", fmt.Errorf("tool execution failed: %w", err)
 		}
@@ -125,6 +181,86 @@ func (e *registryExecutor) Execute(ctx context.Context, call *tools.ToolCall, to
 
 func (e *registryExecutor) ExecuteWithApproval(ctx context.Context, call *tools.ToolCall, toolName string, statusCb StatusCallback) (*tools.ToolResult, error) {
 	return e.registry.ExecuteWithApproval(ctx, call), nil
+}
+
+func formatToolCallMessage(toolName string, args map[string]interface{}) string {
+	switch toolName {
+	case "read_file":
+		if path, ok := args["path"].(string); ok {
+			// Show just the filename if it's a long path
+			filename := filepath.Base(path)
+			if filename != path && len(path) > 40 {
+				return fmt.Sprintf("→ **read_file**: %s\n", filename)
+			}
+			return fmt.Sprintf("→ **read_file**: %s\n", path)
+		}
+		return "→ **read_file**\n"
+
+	case "search_files":
+		if pattern, ok := args["pattern"].(string); ok {
+			return fmt.Sprintf("→ **search_files**: `%s`\n", pattern)
+		}
+		return "→ **search_files**\n"
+
+	case "search_file_content":
+		if pattern, ok := args["pattern"].(string); ok {
+			// Show directory context if provided
+			if dir, ok := args["directory"].(string); ok && dir != "" && dir != "." {
+				return fmt.Sprintf("→ **search_file_content**: `%s` in %s\n", pattern, dir)
+			}
+			return fmt.Sprintf("→ **search_file_content**: `%s`\n", pattern)
+		}
+		return "→ **search_file_content**\n"
+
+	case "parallel_tools":
+		// Extract the list of tool calls being executed in parallel
+		if toolCalls, ok := args["tool_calls"].([]interface{}); ok {
+			var toolNames []string
+			for _, tc := range toolCalls {
+				if callMap, ok := tc.(map[string]interface{}); ok {
+					if name, ok := callMap["name"].(string); ok {
+						// Try to get additional details for each parallel tool
+						var details string
+						if params, ok := callMap["parameters"].(map[string]interface{}); ok {
+							details = extractToolDetails(name, params)
+						}
+						if details != "" {
+							toolNames = append(toolNames, fmt.Sprintf("%s(%s)", name, details))
+						} else {
+							toolNames = append(toolNames, name)
+						}
+					}
+				}
+			}
+			if len(toolNames) > 0 {
+				return fmt.Sprintf("→ **parallel_tools** [%d]: %s\n", len(toolNames), strings.Join(toolNames, ", "))
+			}
+		}
+		return "→ **parallel_tools**\n"
+
+	default:
+		// Generic fallback for unknown tools
+		return fmt.Sprintf("→ **%s**\n", toolName)
+	}
+}
+
+// extractToolDetails extracts concise details from tool parameters
+func extractToolDetails(toolName string, params map[string]interface{}) string {
+	switch toolName {
+	case "read_file":
+		if path, ok := params["path"].(string); ok {
+			return filepath.Base(path)
+		}
+	case "search_files":
+		if pattern, ok := params["pattern"].(string); ok {
+			return pattern
+		}
+	case "search_file_content":
+		if pattern, ok := params["pattern"].(string); ok {
+			return pattern
+		}
+	}
+	return ""
 }
 
 func extractAnswer(content string) string {

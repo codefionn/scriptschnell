@@ -20,7 +20,14 @@ func (t *ParallelTool) Name() string {
 }
 
 func (t *ParallelTool) Description() string {
-	return "Execute multiple tools concurrently and collect their results."
+	return `Execute multiple tools concurrently for faster operation. Use cases:
+- Read multiple files at once (parallel read_file calls)
+- Search multiple patterns simultaneously (parallel search_file_content with different patterns)
+- Search across different directories (parallel search_file_content with different directory parameters)
+- Mix operations (combine read_file and search operations in one parallel call)
+- Edit multiple files at once
+- Investigate different parts of the codebase simultaneously with codebase investigator
+Each tool runs independently and results are collected when all complete.`
 }
 
 func (t *ParallelTool) Parameters() map[string]interface{} {
@@ -29,7 +36,7 @@ func (t *ParallelTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"tool_calls": map[string]interface{}{
 				"type":        "array",
-				"description": "List of tool invocations to execute in parallel.",
+				"description": "List of tool invocations to execute in parallel. Example: [{\"name\": \"read_file\", \"parameters\": {\"path\": \"file1.go\"}}, {\"name\": \"read_file\", \"parameters\": {\"path\": \"file2.go\"}}]",
 				"items": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{

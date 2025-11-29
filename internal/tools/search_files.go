@@ -88,19 +88,35 @@ func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interfa
 		return &ToolResult{Error: fmt.Sprintf("search failed: %v", err)}
 	}
 
-	result := map[string]interface{}{
-		"pattern":     pattern,
-		"matches":     matches,
-		"count":       len(matches),
-		"max_results": maxResults,
-		"has_more":    len(matches) >= maxResults,
-	}
+	// Format as markdown
+	var result strings.Builder
 
+	// Header
+	result.WriteString("## Search Results\n\n")
+	result.WriteString(fmt.Sprintf("**Pattern:** `%s`\n", pattern))
 	if contentRegex != "" {
-		result["content_regex"] = contentRegex
+		result.WriteString(fmt.Sprintf("**Content Filter:** `%s`\n", contentRegex))
+	}
+	if basePath != "." {
+		result.WriteString(fmt.Sprintf("**Base Path:** `%s`\n", basePath))
+	}
+	result.WriteString(fmt.Sprintf("**Found:** %d file(s)", len(matches)))
+	if len(matches) >= maxResults {
+		result.WriteString(fmt.Sprintf(" (limited to %d results)", maxResults))
+	}
+	result.WriteString("\n\n")
+
+	// Results
+	if len(matches) == 0 {
+		result.WriteString("*No files found matching the criteria.*\n")
+	} else {
+		result.WriteString("### Matching Files\n\n")
+		for _, match := range matches {
+			result.WriteString(fmt.Sprintf("- `%s`\n", match))
+		}
 	}
 
-	return &ToolResult{Result: result}
+	return &ToolResult{Result: result.String()}
 }
 
 func (t *SearchFilesTool) searchFiles(ctx context.Context, basePath, pattern string, contentRe *regexp.Regexp, maxResults int) ([]string, error) {

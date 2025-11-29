@@ -52,6 +52,8 @@ type Orchestrator struct {
 	todoActorCancel       context.CancelFunc
 	currentStatusCb       StatusCallback
 	statusCbMu            sync.Mutex
+	currentStreamCb       func(string) error
+	streamCbMu            sync.Mutex
 	errorJudge            *tools.ErrorJudgeActorClient
 	errorJudgeCancel      context.CancelFunc
 	toolExecutor          *tools.ToolExecutorActorClient
@@ -731,6 +733,17 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 		o.statusCbMu.Lock()
 		o.currentStatusCb = nil
 		o.statusCbMu.Unlock()
+	}()
+
+	// Store stream callback for use by sub-agents (e.g., codebase investigator)
+	o.streamCbMu.Lock()
+	o.currentStreamCb = streamCallback
+	o.streamCbMu.Unlock()
+
+	defer func() {
+		o.streamCbMu.Lock()
+		o.currentStreamCb = nil
+		o.streamCbMu.Unlock()
 	}()
 
 	// Add user message

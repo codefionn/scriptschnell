@@ -17,6 +17,7 @@ const (
 	FamilyGPT35
 	// Anthropic families
 	FamilyClaude45
+	FamilyClaude41
 	FamilyClaude4
 	FamilyClaude35
 	FamilyClaude3
@@ -75,6 +76,10 @@ const (
 	// Anthropic model identifiers
 	ModelIDClaude45    = "claude-4-5"
 	ModelIDClaude45Alt = "claude-4.5"
+	ModelIDClaude45Sonnet = "claude-sonnet-4.5"
+	ModelIDClaude45Opus  = "claude-opus-4.5"
+	ModelIDClaude41    = "claude-4-1"
+	ModelIDClaude41Alt = "claude-4.1"
 	ModelIDClaude4     = "claude-4"
 	ModelIDClaude35    = "claude-3-5"
 	ModelIDClaude35Alt = "claude-3.5"
@@ -172,8 +177,11 @@ func DetectModelFamily(modelID string) ModelFamily {
 	}
 
 	// Anthropic families
-	if containsAny(id, ModelIDClaude45, ModelIDClaude45Alt) {
+	if containsAny(id, ModelIDClaude45, ModelIDClaude45Alt, ModelIDClaude45Sonnet, ModelIDClaude45Opus) || (strings.Contains(id, "claude") && containsAny(id, "4-5", "4.5")) {
 		return FamilyClaude45
+	}
+	if containsAny(id, ModelIDClaude41, ModelIDClaude41Alt) || (strings.Contains(id, "claude") && containsAny(id, "4-1", "4.1")) {
+		return FamilyClaude41
 	}
 	if strings.Contains(id, ModelIDClaude4) {
 		return FamilyClaude4
@@ -366,7 +374,12 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 
 	// Anthropic families
 	case FamilyClaude45:
-		return 1000000
+		if strings.Contains(normalizeModelID(modelID), "sonnet") {
+			return 1000000
+		}
+		return 200000
+	case FamilyClaude41:
+		return 200000
 	case FamilyClaude4:
 		return 200000
 	case FamilyClaude35:
@@ -459,6 +472,8 @@ func DetectMaxOutputTokens(modelID string, family ModelFamily, contextWindow int
 	// Anthropic families
 	case FamilyClaude45:
 		return 64000
+	case FamilyClaude41:
+		return 32000
 	case FamilyClaude4:
 		return 8192
 	case FamilyClaude35:
@@ -538,7 +553,7 @@ func SupportsToolCalling(modelID string, family ModelFamily) bool {
 	switch family {
 	case FamilyGPT5, FamilyO3, FamilyGPT4o, FamilyGPT4, FamilyGPT35:
 		return true
-	case FamilyClaude45, FamilyClaude4, FamilyClaude35, FamilyClaude3:
+	case FamilyClaude45, FamilyClaude41, FamilyClaude4, FamilyClaude35, FamilyClaude3:
 		return true
 	case FamilyGemini2, FamilyGemini15, FamilyGemini1:
 		return true
@@ -564,10 +579,18 @@ func FormatModelDisplayName(modelID string, family ModelFamily) string {
 		if strings.Contains(normalizeModelID(id), "sonnet") {
 			return "Claude 4.5 Sonnet"
 		}
+		if strings.Contains(normalizeModelID(id), "haiku") {
+			return "Claude 4.5 Haiku"
+		}
 		if strings.Contains(normalizeModelID(id), "opus") {
 			return "Claude 4.5 Opus"
 		}
 		return "Claude 4.5"
+	case FamilyClaude41:
+		if strings.Contains(normalizeModelID(id), "opus") {
+			return "Claude 4.1 Opus"
+		}
+		return "Claude 4.1"
 	case FamilyClaude4:
 		return "Claude 4"
 	case FamilyClaude35:
@@ -635,9 +658,20 @@ func GetModelDescription(modelID string, family ModelFamily) string {
 
 	case FamilyClaude45:
 		if strings.Contains(id, "sonnet") {
-			return "Most intelligent Claude model with extended context"
+			return "Our most intelligent model for complex agents and coding"
+		}
+		if strings.Contains(id, "haiku") {
+			return "Our fastest model with near frontier intelligence"
+		}
+		if strings.Contains(id, "opus") {
+			return "Premium model combining max intelligence with practical performance"
 		}
 		return "Advanced Claude 4.5 model"
+	case FamilyClaude41:
+		if strings.Contains(id, "opus") {
+			return "Exceptional model for specialized reasoning tasks"
+		}
+		return "Advanced Claude 4.1 model"
 	case FamilyClaude4:
 		return "High-performance Claude 4 model"
 	case FamilyClaude35:

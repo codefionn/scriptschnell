@@ -199,8 +199,7 @@ Available tools:
    - Use `from_line` and `to_line` parameters to read specific ranges
 
 5. **Timeouts**:
-   - Shell commands: 30s default, 300s max
-   - Sandbox execution: 30s default, 120s max
+   - Sandbox execution: 30s default, 600s max
 
 6. **Sandbox Shell Helper**: When writing Go sandbox programs, call `Shell` with a command slice (e.g., `Shell([]string{"ls", "-la"}, "")`). The earlier `Shell("ls -la")` form is deprecated and will be rejected.
 

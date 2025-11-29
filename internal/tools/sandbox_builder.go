@@ -289,6 +289,8 @@ func (b *SandboxBuilder) AddLibraries(libraries ...string) *SandboxBuilder {
 	return b
 }
 
+const MaxTimeoutSeconds = 600
+
 // SetTimeout sets the execution timeout in seconds.
 //
 // The timeout applies to the total execution time including:
@@ -308,7 +310,7 @@ func (b *SandboxBuilder) AddLibraries(libraries ...string) *SandboxBuilder {
 // Recommended Values:
 //   - Simple scripts: 5-10 seconds
 //   - I/O operations: 30-60 seconds
-//   - Complex computations: 60-120 seconds
+//   - Complex computations: 60-600 seconds
 //
 // Example - Quick timeout for tests:
 //
@@ -316,7 +318,7 @@ func (b *SandboxBuilder) AddLibraries(libraries ...string) *SandboxBuilder {
 //
 // Example - Long timeout for complex operations:
 //
-//	builder.SetTimeout(120) // 2 minutes (maximum)
+//	builder.SetTimeout(600) // 6 minutes (maximum)
 //
 // Example - Handling timeout results:
 //
@@ -338,8 +340,8 @@ func (b *SandboxBuilder) SetTimeout(seconds int) *SandboxBuilder {
 		b.err = fmt.Errorf("timeout must be positive")
 		return b
 	}
-	if seconds > 120 {
-		b.err = fmt.Errorf("timeout cannot exceed 120 seconds")
+	if seconds > MaxTimeoutSeconds {
+		b.err = fmt.Errorf("timeout cannot exceed %d seconds", MaxTimeoutSeconds)
 		return b
 	}
 	b.timeout = seconds

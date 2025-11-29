@@ -305,7 +305,7 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 			},
 			"timeout": map[string]interface{}{
 				"type":        "integer",
-				"description": "Timeout in seconds (default 30, max 3600)",
+				"description": "Timeout in seconds (default 30, max 6000)",
 			},
 			"libraries": map[string]interface{}{
 				"type":        "array",
@@ -333,8 +333,8 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 	logger.Debug("go_sandbox code:\n%s", code)
 
 	timeout := GetIntParam(params, "timeout", 30)
-	if timeout > 3600 {
-		timeout = 3600
+	if timeout > 6000 {
+		timeout = 6000
 	}
 
 	// Get libraries if specified

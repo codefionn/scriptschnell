@@ -346,9 +346,9 @@ run_docker_compose() {
     local service_name="${2:-test-runner}"
 
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose -f "$compose_file" up -t 600 --build --abort-on-container-exit --exit-code-from "$service_name"
     else
-        run_compose up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name"
+        run_compose up -t 600 --build --abort-on-container-exit --exit-code-from "$service_name"
     fi
 }
 
@@ -369,9 +369,9 @@ run_docker_compose_with_debug() {
     # Run docker compose and capture exit code
     local exit_code=0
     if [ -f "$compose_file" ]; then
-        run_compose -f "$compose_file" up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose -f "$compose_file" up -t 600 --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
     else
-        run_compose up -t 360 --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
+        run_compose up -t 600 --build --abort-on-container-exit --exit-code-from "$service_name" || exit_code=$?
     fi
 
     # If compose reported an error but the target service exited cleanly, treat it as success

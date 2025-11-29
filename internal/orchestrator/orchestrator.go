@@ -334,6 +334,13 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		"",
 	)
 	addSpec(
+		tools.NewSearchFileContentTool(o.fs),
+		false,
+		func(_ *tools.Registry) tools.Tool { return tools.NewSearchFileContentTool(o.fs) },
+		false,
+		"",
+	)
+	addSpec(
 		tools.NewWebSearchTool(o.config),
 		false,
 		func(_ *tools.Registry) tools.Tool { return tools.NewWebSearchTool(o.config) },

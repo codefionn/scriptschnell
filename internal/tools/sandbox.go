@@ -292,6 +292,22 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("  }\n")
 	b.WriteString("}\n")
 
+	b.WriteString("8. GrepFile(pattern, path, glob string, context int) (content string)\n")
+	b.WriteString("   - Search for a regex pattern in files, returning matches with line numbers and context.\n")
+	b.WriteString("   - `pattern`: Regex pattern to search for.\n")
+	b.WriteString("   - `path`: Directory or file to search in (default: '.').\n")
+	b.WriteString("   - `glob`: Glob pattern to filter file names (e.g., '*.go', '**/*.js').\n")
+	b.WriteString("   - `context`: Number of context lines to show around the match (default: 2).\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         results := GrepFile(\"func main\", \".\", \"*.go\", 1)\n")
+	b.WriteString("         fmt.Println(results)\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n")
+
 	return b.String()
 }
 

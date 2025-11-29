@@ -42,11 +42,15 @@ func (t *CodebaseInvestigatorTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *CodebaseInvestigatorTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *CodebaseInvestigatorTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	objective := GetStringParam(params, "objective", "")
 	if objective == "" {
-		return nil, fmt.Errorf("objective is required")
+		return &ToolResult{Error: fmt.Sprintf("objective is required")}
 	}
 
-	return t.investigator.Investigate(ctx, objective)
+	result, err := t.investigator.Investigate(ctx, objective)
+	if err != nil {
+		return &ToolResult{Error: err.Error()}
+	}
+	return &ToolResult{Result: result}
 }

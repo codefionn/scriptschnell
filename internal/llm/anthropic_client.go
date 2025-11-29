@@ -110,8 +110,8 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 				if fn, ok := toolCalls[currentToolIndex]["function"].(map[string]interface{}); ok {
 					fn["arguments"] = args
 				}
-				// We don't reset currentToolIndex here in case there are mixed blocks, 
-				// but usually tool blocks are sequential. 
+				// We don't reset currentToolIndex here in case there are mixed blocks,
+				// but usually tool blocks are sequential.
 				// However, strictly speaking, we should track which block index maps to which tool call.
 				// For now, assuming standard Anthropic behavior (sequential blocks).
 			}

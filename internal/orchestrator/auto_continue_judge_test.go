@@ -35,7 +35,6 @@ func TestCheckMessagesForLoops_WithSimpleLoop(t *testing.T) {
 		})
 	}
 
-
 	hasLoop, info := checkMessagesForLoops(messages, 10, "assistant")
 	if !hasLoop {
 		t.Errorf("Expected loop to be detected for repetitive messages")

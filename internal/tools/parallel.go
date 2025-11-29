@@ -51,26 +51,28 @@ func (t *ParallelTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *ParallelTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *ParallelTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	if t.registry == nil {
-		return nil, fmt.Errorf("parallel tool registry is not configured")
+		return &ToolResult{Error: fmt.Sprintf("parallel tool registry is not configured")}
 	}
 
 	rawCalls, ok := params["tool_calls"]
 	if !ok {
-		return nil, fmt.Errorf("tool_calls is required")
+		return &ToolResult{Error: fmt.Sprintf("tool_calls is required")}
 	}
 
 	callSlice, ok := rawCalls.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("tool_calls must be an array")
+		return &ToolResult{Error: fmt.Sprintf("tool_calls must be an array")}
 	}
 
 	if len(callSlice) == 0 {
-		return map[string]interface{}{
-			"results":     []map[string]interface{}{},
-			"duration_ms": int64(0),
-		}, nil
+		return &ToolResult{
+			Result: map[string]interface{}{
+				"results":     []map[string]interface{}{},
+				"duration_ms": int64(0),
+			},
+		}
 	}
 
 	type callSpec struct {
@@ -83,19 +85,19 @@ func (t *ParallelTool) Execute(ctx context.Context, params map[string]interface{
 	for i, raw := range callSlice {
 		callMap, ok := raw.(map[string]interface{})
 		if !ok {
-			return nil, fmt.Errorf("tool_calls[%d] must be an object", i)
+			return &ToolResult{Error: fmt.Sprintf("tool_calls[%d] must be an object", i)}
 		}
 
 		nameVal, ok := callMap["name"].(string)
 		if !ok || nameVal == "" {
-			return nil, fmt.Errorf("tool_calls[%d].name must be a non-empty string", i)
+			return &ToolResult{Error: fmt.Sprintf("tool_calls[%d].name must be a non-empty string", i)}
 		}
 
 		paramsVal := map[string]interface{}{}
 		if rawParams, exists := callMap["parameters"]; exists && rawParams != nil {
 			castParams, ok := rawParams.(map[string]interface{})
 			if !ok {
-				return nil, fmt.Errorf("tool_calls[%d].parameters must be an object", i)
+				return &ToolResult{Error: fmt.Sprintf("tool_calls[%d].parameters must be an object", i)}
 			}
 			paramsVal = castParams
 		}
@@ -158,8 +160,8 @@ func (t *ParallelTool) Execute(ctx context.Context, params map[string]interface{
 
 	elapsed := time.Since(totalStart).Milliseconds()
 
-	return map[string]interface{}{
+	return &ToolResult{Result: map[string]interface{}{
 		"results":     results,
 		"duration_ms": elapsed,
-	}, nil
+	}}
 }

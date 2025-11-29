@@ -334,7 +334,9 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(
 		tools.NewCodebaseInvestigatorTool(NewCodebaseInvestigatorAgent(o)),
 		false,
-		func(_ *tools.Registry) tools.Tool { return tools.NewCodebaseInvestigatorTool(NewCodebaseInvestigatorAgent(o)) },
+		func(_ *tools.Registry) tools.Tool {
+			return tools.NewCodebaseInvestigatorTool(NewCodebaseInvestigatorAgent(o))
+		},
 		false,
 		"",
 	)
@@ -942,7 +944,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 
 		// Execute each tool call
 		logger.Debug("Executing %d tool calls from iteration %d", len(response.ToolCalls), iteration)
-		
+
 		if err := o.processToolCalls(ctx, response.ToolCalls, o, o.session, statusCallback, authCallback, toolCallCallback, toolResultCallback); err != nil {
 			logger.Warn("Error processing tool calls: %v", err)
 		}
@@ -1089,14 +1091,16 @@ func (o *Orchestrator) processToolCalls(
 			}
 		}
 
-		// Format result as string
-		var toolResult string
+		// Format result as string for LLM and UI
+		var toolResult string // For LLM
+		var uiResult string   // For UI display
 		var executionMetadata *tools.ExecutionMetadata
 
 		if result.Error != "" {
 			toolResult = fmt.Sprintf("Error: %s", result.Error)
+			uiResult = toolResult
 		} else {
-			// Extract execution metadata if present in the result
+			// Extract execution metadata if present
 			if resultMap, ok := result.Result.(map[string]interface{}); ok {
 				if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
 					if metadataObj, ok := metadata.(*tools.ExecutionMetadata); ok {
@@ -1112,16 +1116,28 @@ func (o *Orchestrator) processToolCalls(
 			} else {
 				toolResult = fmt.Sprintf("%v", result.Result)
 			}
+
+			// Use UIResult for UI if available, otherwise use the same result as LLM
+			if result.UIResult != nil {
+				if uiStr, ok := result.UIResult.(string); ok {
+					uiResult = uiStr
+				} else {
+					uiResult = fmt.Sprintf("%v", result.UIResult)
+				}
+			} else {
+				uiResult = toolResult
+			}
 		}
 
-		// Add tool result to session
-		// Notify UI about tool result
+		// Notify UI about tool result (using UI-specific format)
 		if toolResultCb != nil {
 			// Create enhanced callback that includes metadata
-			if err := o.enhancedToolResultCallback(toolResultCb, toolName, toolID, toolResult, result.Error, executionMetadata); err != nil {
+			if err := o.enhancedToolResultCallback(toolResultCb, toolName, toolID, uiResult, result.Error, executionMetadata); err != nil {
 				logger.Warn("Failed to send tool result message: %v", err)
 			}
 		}
+
+		// Add tool result to session (using LLM format)
 		sess.AddMessage(&session.Message{
 			Role:     "tool",
 			Content:  toolResult,

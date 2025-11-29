@@ -47,10 +47,10 @@ func (t *CreateFileTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return &ToolResult{Error: "path is required"}
 	}
 
 	content, ok := params["content"].(string)
@@ -59,22 +59,22 @@ func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interfac
 	}
 
 	if t.fs == nil {
-		return nil, fmt.Errorf("file system is not configured")
+		return &ToolResult{Error: "file system is not configured"}
 	}
 
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
 		logger.Error("create_file: error checking if file exists: %v", err)
-		return nil, fmt.Errorf("error checking file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 
 	if exists {
-		return nil, fmt.Errorf("file already exists: %s (use write_file_diff to update existing files)", path)
+		return &ToolResult{Error: fmt.Sprintf("file already exists: %s (use write_file_diff to update existing files)", path)}
 	}
 
 	if err := t.fs.WriteFile(ctx, path, []byte(content)); err != nil {
 		logger.Error("create_file: error writing file: %v", err)
-		return nil, fmt.Errorf("error writing file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 	}
 
 	if t.session != nil {
@@ -85,9 +85,12 @@ func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interfac
 
 	logger.Info("create_file: created %s (%d bytes)", path, len(content))
 
-	return map[string]interface{}{
-		"path":          path,
-		"bytes_written": len(content),
-		"created":       true,
-	}, nil
+	return &ToolResult{
+		Result: map[string]interface{}{
+			"path":          path,
+			"bytes_written": len(content),
+			"created":       true,
+		},
+		UIResult: generateGitDiff(path, "", content),
+	}
 }

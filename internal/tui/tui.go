@@ -1636,10 +1636,21 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 		content = m.generateToolSummary(toolName, result, true)
 		m.addToolMessage(toolName, toolID, content, "", true)
 	} else {
-		// Create the full result display
-		displayResult := m.truncateToolResult(result)
-		fullContent := fmt.Sprintf("✓ **Result:**\n```\n%s\n```", displayResult)
-		m.addToolMessage(toolName, toolID, fullContent, result, false)
+		// Check if this is a git diff format (starts with --- and +++)
+		isGitDiff := strings.HasPrefix(result, "---") || strings.HasPrefix(result, "diff --git")
+
+		if isGitDiff {
+			// For write file operations, show a nice summary with the diff
+			summary := m.generateToolSummary(toolName, result, false)
+			displayResult := m.truncateToolResult(result)
+			fullContent := fmt.Sprintf("%s\n```diff\n%s\n```", summary, displayResult)
+			m.addToolMessage(toolName, toolID, fullContent, result, false)
+		} else {
+			// Create the full result display
+			displayResult := m.truncateToolResult(result)
+			fullContent := fmt.Sprintf("✓ **Result:**\n```\n%s\n```", displayResult)
+			m.addToolMessage(toolName, toolID, fullContent, result, false)
+		}
 	}
 }
 

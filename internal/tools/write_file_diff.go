@@ -101,50 +101,50 @@ Example update diff 2:
 	}
 }
 
-func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return &ToolResult{Error: "path is required"}
 	}
 
 	diff, ok := params["diff"].(string)
 	if !ok || diff == "" {
-		return nil, fmt.Errorf("diff is required")
+		return &ToolResult{Error: "diff is required"}
 	}
 
 	logger.Debug("write_file_diff: path=%s", path)
 
 	if t.fs == nil {
-		return nil, fmt.Errorf("file system is not configured")
+		return &ToolResult{Error: "file system is not configured"}
 	}
 
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
 		logger.Error("write_file_diff: error checking if file exists: %v", err)
-		return nil, fmt.Errorf("error checking file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 
 	if !exists {
-		return nil, fmt.Errorf("cannot apply diff to non-existent file: %s (use create_file instead)", path)
+		return &ToolResult{Error: fmt.Sprintf("cannot apply diff to non-existent file: %s (use create_file instead)", path)}
 	}
 
 	if t.session != nil && !t.session.WasFileRead(path) {
-		return nil, fmt.Errorf("file %s was not read in this session; read it before applying a diff", path)
+		return &ToolResult{Error: fmt.Sprintf("file %s was not read in this session; read it before applying a diff", path)}
 	}
 
 	currentData, err := t.fs.ReadFile(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("error reading current file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error reading current file: %v", err)}
 	}
 
 	finalContent, err := applyUnifiedDiff(string(currentData), diff)
 	if err != nil {
-		return nil, fmt.Errorf("error applying diff: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error applying diff: %v", err)}
 	}
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
 		logger.Error("write_file_diff: error writing file: %v", err)
-		return nil, fmt.Errorf("error writing file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 	}
 
 	if t.session != nil {
@@ -153,11 +153,14 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 
 	logger.Info("write_file_diff: updated %s (%d bytes)", path, len(finalContent))
 
-	return map[string]interface{}{
-		"path":          path,
-		"bytes_written": len(finalContent),
-		"updated":       true,
-	}, nil
+	return &ToolResult{
+		Result: map[string]interface{}{
+			"path":          path,
+			"bytes_written": len(finalContent),
+			"updated":       true,
+		},
+		UIResult: generateGitDiff(path, string(currentData), finalContent),
+	}
 }
 
 // applyUnifiedDiff applies a unified diff to content using github.com/sourcegraph/go-diff
@@ -219,4 +222,102 @@ func applyUnifiedDiff(original, diffText string) (string, error) {
 	}
 
 	return strings.Join(result, "\n"), nil
+}
+
+// generateGitDiff creates a unified diff in git format for UI display
+func generateGitDiff(path, original, modified string) string {
+	var diff strings.Builder
+
+	// Handle new file creation (original is empty)
+	if original == "" {
+		diff.WriteString("--- /dev/null\n")
+		diff.WriteString(fmt.Sprintf("+++ b/%s\n", path))
+		modifiedLines := strings.Split(modified, "\n")
+		diff.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(modifiedLines)))
+		for _, line := range modifiedLines {
+			diff.WriteString("+")
+			diff.WriteString(line)
+			diff.WriteString("\n")
+		}
+		return diff.String()
+	}
+
+	// Handle file deletion (modified is empty)
+	if modified == "" {
+		diff.WriteString(fmt.Sprintf("--- a/%s\n", path))
+		diff.WriteString("+++ /dev/null\n")
+		originalLines := strings.Split(original, "\n")
+		diff.WriteString(fmt.Sprintf("@@ -1,%d +0,0 @@\n", len(originalLines)))
+		for _, line := range originalLines {
+			diff.WriteString("-")
+			diff.WriteString(line)
+			diff.WriteString("\n")
+		}
+		return diff.String()
+	}
+
+	originalLines := strings.Split(original, "\n")
+	modifiedLines := strings.Split(modified, "\n")
+
+	diff.WriteString(fmt.Sprintf("--- a/%s\n", path))
+	diff.WriteString(fmt.Sprintf("+++ b/%s\n", path))
+
+	// Simple diff generation - find common prefix and suffix
+	commonPrefix := 0
+	for commonPrefix < len(originalLines) && commonPrefix < len(modifiedLines) &&
+		originalLines[commonPrefix] == modifiedLines[commonPrefix] {
+		commonPrefix++
+	}
+
+	commonSuffix := 0
+	for commonSuffix < len(originalLines)-commonPrefix && commonSuffix < len(modifiedLines)-commonPrefix &&
+		originalLines[len(originalLines)-1-commonSuffix] == modifiedLines[len(modifiedLines)-1-commonSuffix] {
+		commonSuffix++
+	}
+
+	// Generate hunk header
+	oldStart := commonPrefix + 1
+	oldCount := len(originalLines) - commonPrefix - commonSuffix
+	newStart := commonPrefix + 1
+	newCount := len(modifiedLines) - commonPrefix - commonSuffix
+
+	diff.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount))
+
+	// Add context lines before changes (up to 3 lines)
+	contextStart := commonPrefix - 3
+	if contextStart < 0 {
+		contextStart = 0
+	}
+	for i := contextStart; i < commonPrefix; i++ {
+		diff.WriteString(" ")
+		diff.WriteString(originalLines[i])
+		diff.WriteString("\n")
+	}
+
+	// Add removed lines
+	for i := commonPrefix; i < len(originalLines)-commonSuffix; i++ {
+		diff.WriteString("-")
+		diff.WriteString(originalLines[i])
+		diff.WriteString("\n")
+	}
+
+	// Add added lines
+	for i := commonPrefix; i < len(modifiedLines)-commonSuffix; i++ {
+		diff.WriteString("+")
+		diff.WriteString(modifiedLines[i])
+		diff.WriteString("\n")
+	}
+
+	// Add context lines after changes (up to 3 lines)
+	contextEnd := len(originalLines) - commonSuffix + 3
+	if contextEnd > len(originalLines) {
+		contextEnd = len(originalLines)
+	}
+	for i := len(originalLines) - commonSuffix; i < contextEnd; i++ {
+		diff.WriteString(" ")
+		diff.WriteString(originalLines[i])
+		diff.WriteString("\n")
+	}
+
+	return diff.String()
 }

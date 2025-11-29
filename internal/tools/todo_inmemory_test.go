@@ -35,58 +35,58 @@ func TestTodoTool_InMemory(t *testing.T) {
 	ctx := context.Background()
 
 	// Test adding a todo
-	result1, err := todo.Execute(ctx, map[string]interface{}{"action": "add", "text": "Test todo"})
-	if err != nil {
-		t.Fatalf("Failed to add todo: %v", err)
+	result1 := todo.Execute(ctx, map[string]interface{}{"action": "add", "text": "Test todo"})
+	if result1.Error != "" {
+		t.Fatalf("Failed to add todo: %s", result1.Error)
 	}
-	addResult := result1.(map[string]interface{})
+	addResult := result1.Result.(map[string]interface{})
 	if addResult["id"] != "todo_1" {
 		t.Errorf("Expected id 'todo_1', got %v", addResult["id"])
 	}
 
 	// Test listing todos
-	result2, err := todo.Execute(ctx, map[string]interface{}{"action": "list"})
-	if err != nil {
-		t.Fatalf("Failed to list todos: %v", err)
+	result2 := todo.Execute(ctx, map[string]interface{}{"action": "list"})
+	if result2.Error != "" {
+		t.Fatalf("Failed to list todos: %s", result2.Error)
 	}
-	listResult := result2.(map[string]interface{})
+	listResult := result2.Result.(map[string]interface{})
 	if listResult["count"] != 1 {
 		t.Errorf("Expected count 1, got %v", listResult["count"])
 	}
 
 	// Test checking a todo
-	result3, err := todo.Execute(ctx, map[string]interface{}{"action": "check", "id": "todo_1"})
-	if err != nil {
-		t.Fatalf("Failed to check todo: %v", err)
+	result3 := todo.Execute(ctx, map[string]interface{}{"action": "check", "id": "todo_1"})
+	if result3.Error != "" {
+		t.Fatalf("Failed to check todo: %s", result3.Error)
 	}
-	checkResult := result3.(map[string]interface{})
+	checkResult := result3.Result.(map[string]interface{})
 	if checkResult["id"] != "todo_1" {
 		t.Errorf("Expected id 'todo_1', got %v", checkResult["id"])
 	}
 
 	// Verify todo is checked
-	result4, err := todo.Execute(ctx, map[string]interface{}{"action": "list"})
-	if err != nil {
-		t.Fatalf("Failed to list todos after check: %v", err)
+	result4 := todo.Execute(ctx, map[string]interface{}{"action": "list"})
+	if result4.Error != "" {
+		t.Fatalf("Failed to list todos after check: %s", result4.Error)
 	}
-	listResult2 := result4.(map[string]interface{})
+	listResult2 := result4.Result.(map[string]interface{})
 	todos := listResult2["todos"].([]*TodoItem)
 	if !todos[0].Completed {
 		t.Error("Expected todo to be completed")
 	}
 
 	// Test deleting a todo
-	_, err = todo.Execute(ctx, map[string]interface{}{"action": "delete", "id": "todo_1"})
-	if err != nil {
-		t.Fatalf("Failed to delete todo: %v", err)
+	result5 := todo.Execute(ctx, map[string]interface{}{"action": "delete", "id": "todo_1"})
+	if result5.Error != "" {
+		t.Fatalf("Failed to delete todo: %s", result5.Error)
 	}
 
 	// Verify todo is deleted
-	result5, err := todo.Execute(ctx, map[string]interface{}{"action": "list"})
-	if err != nil {
-		t.Fatalf("Failed to list todos after delete: %v", err)
+	result6 := todo.Execute(ctx, map[string]interface{}{"action": "list"})
+	if result6.Error != "" {
+		t.Fatalf("Failed to list todos after delete: %s", result6.Error)
 	}
-	listResult3 := result5.(map[string]interface{})
+	listResult3 := result6.Result.(map[string]interface{})
 	if listResult3["count"] != 0 {
 		t.Errorf("Expected count 0 after delete, got %v", listResult3["count"])
 	}
@@ -96,7 +96,7 @@ func TestTodoTool_InMemoryNotPersisted(t *testing.T) {
 	// Create first instance and add a todo
 	todo1, actorSystem1, cancel1 := setupTodoToolForTest()
 	ctx := context.Background()
-	_, _ = todo1.Execute(ctx, map[string]interface{}{"action": "add", "text": "Test todo"})
+	_ = todo1.Execute(ctx, map[string]interface{}{"action": "add", "text": "Test todo"})
 
 	// Create second instance - should be empty (different actor)
 	todo2, actorSystem2, cancel2 := setupTodoToolForTest()
@@ -113,8 +113,8 @@ func TestTodoTool_InMemoryNotPersisted(t *testing.T) {
 		}
 	}()
 
-	result, _ := todo2.Execute(ctx, map[string]interface{}{"action": "list"})
-	listResult := result.(map[string]interface{})
+	result := todo2.Execute(ctx, map[string]interface{}{"action": "list"})
+	listResult := result.Result.(map[string]interface{})
 	if listResult["count"] != 0 {
 		t.Errorf("Expected new instance to have 0 todos (different actor), got %v", listResult["count"])
 	}

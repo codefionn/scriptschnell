@@ -52,10 +52,10 @@ func (t *ReadFileNumberedTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return &ToolResult{Error: fmt.Sprintf("path is required")}
 	}
 
 	fromLine := GetIntParam(params, "from_line", 0)
@@ -67,11 +67,11 @@ func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]in
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
 		logger.Error("read_file (numbered): error checking if file exists: %v", err)
-		return nil, fmt.Errorf("error checking file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 	if !exists {
 		logger.Warn("read_file (numbered): file not found: %s", path)
-		return nil, fmt.Errorf("file not found: %s", path)
+		return &ToolResult{Error: fmt.Sprintf("file not found: %s", path)}
 	}
 
 	var (
@@ -84,19 +84,19 @@ func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]in
 	if fromLine > 0 && toLine > 0 {
 		// Read specific line range
 		if toLine-fromLine+1 > 2000 {
-			return nil, fmt.Errorf("cannot read more than 2000 lines at once")
+			return &ToolResult{Error: fmt.Sprintf("cannot read more than 2000 lines at once")}
 		}
 
 		lines, err = t.fs.ReadFileLines(ctx, path, fromLine, toLine)
 		if err != nil {
-			return nil, fmt.Errorf("error reading file lines: %w", err)
+			return &ToolResult{Error: fmt.Sprintf("error reading file lines: %v", err)}
 		}
 		startLineNumber = fromLine
 	} else {
 		// Read entire file
 		data, err := t.fs.ReadFile(ctx, path)
 		if err != nil {
-			return nil, fmt.Errorf("error reading file: %w", err)
+			return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
 		}
 		rawContent := string(data)
 		totalLineCount := strings.Count(rawContent, "\n") + 1
@@ -105,7 +105,7 @@ func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]in
 			// Read only first 2000 lines
 			lines, err = t.fs.ReadFileLines(ctx, path, 1, 2000)
 			if err != nil {
-				return nil, fmt.Errorf("error reading file lines: %w", err)
+				return &ToolResult{Error: fmt.Sprintf("error reading file lines: %v", err)}
 			}
 			truncationMessage = fmt.Sprintf("[... file truncated, %d total lines, showing first 2000 lines. Use from_line and to_line parameters to read more]", totalLineCount)
 		} else {
@@ -126,12 +126,14 @@ func (t *ReadFileNumberedTool) Execute(ctx context.Context, params map[string]in
 	lineCount := len(lines)
 	logger.Info("read_file (numbered): successfully read %s (%d lines)", path, lineCount)
 
-	return map[string]interface{}{
-		"path":    path,
-		"content": content,
-		"lines":   lineCount,
-		"format":  "[padded line number] [line]",
-	}, nil
+	return &ToolResult{
+		Result: map[string]interface{}{
+			"path":    path,
+			"content": content,
+			"lines":   lineCount,
+			"format":  "[padded line number] [line]",
+		},
+	}
 }
 
 func splitPreserveLines(content string) []string {

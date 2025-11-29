@@ -70,10 +70,10 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *ShellTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *ShellTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	cmdStr := GetStringParam(params, "command", "")
 	if cmdStr == "" {
-		return nil, fmt.Errorf("command is required")
+		return &ToolResult{Error: "command is required"}
 	}
 
 	backgroundParam := GetBoolParam(params, "background", false)
@@ -85,7 +85,7 @@ func (t *ShellTool) Execute(ctx context.Context, params map[string]interface{}) 
 	}
 
 	if trimmed == "" {
-		return nil, fmt.Errorf("command is empty after processing")
+		return &ToolResult{Error: "command is empty after processing"}
 	}
 
 	cmdStr = trimmed
@@ -112,13 +112,13 @@ func (t *ShellTool) Execute(ctx context.Context, params map[string]interface{}) 
 	return t.executeForeground(ctx, cmdStr, workingDir, timeout)
 }
 
-func (t *ShellTool) executeForeground(ctx context.Context, cmdStr, workingDir string, timeoutSecs int) (interface{}, error) {
+func (t *ShellTool) executeForeground(ctx context.Context, cmdStr, workingDir string, timeoutSecs int) *ToolResult {
 	bgChan := backgroundChanFromContext(ctx)
 	runner := newShellCommandRunner(t, cmdStr, workingDir, timeoutSecs, bgChan)
 	return runner.run(ctx)
 }
 
-func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir string) (interface{}, error) {
+func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir string) *ToolResult {
 	logger.Debug("shell: starting background job (explicit request)")
 
 	cmd := exec.Command("sh", "-c", cmdStr)
@@ -128,18 +128,18 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		logger.Error("shell: failed to create stdout pipe: %v", err)
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to create stdout pipe: %v", err)}
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		logger.Error("shell: failed to create stderr pipe: %v", err)
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to create stderr pipe: %v", err)}
 	}
 
 	if err := cmd.Start(); err != nil {
 		logger.Error("shell: failed to start background command: %v", err)
-		return nil, fmt.Errorf("failed to start command: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to start command: %v", err)}
 	}
 
 	startedAt := time.Now()
@@ -180,11 +180,13 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 		job.Process = nil
 	}()
 
-	return map[string]interface{}{
-		"job_id":  jobID,
-		"pid":     job.PID,
-		"message": shellBackgroundMessage,
-	}, nil
+	return &ToolResult{
+		Result: map[string]interface{}{
+			"job_id":  jobID,
+			"pid":     job.PID,
+			"message": shellBackgroundMessage,
+		},
+	}
 }
 
 // StatusProgramTool checks status of background jobs
@@ -222,7 +224,7 @@ func (t *StatusProgramTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	jobID := GetStringParam(params, "job_id", "")
 	lastNLines := GetIntParam(params, "last_n_lines", 50)
 
@@ -245,18 +247,18 @@ func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]inter
 				"open_ports":     collectOpenPorts(ctx, job.PID),
 			}
 		}
-		return map[string]interface{}{
+		return &ToolResult{Result: map[string]interface{}{
 			"jobs": jobList,
-		}, nil
+		}}
 	}
 
 	// Get specific job
 	job, ok := t.session.GetBackgroundJob(jobID)
 	if !ok {
-		return nil, fmt.Errorf("job not found: %s", jobID)
+		return &ToolResult{Error: fmt.Sprintf("job not found: %s", jobID)}
 	}
 
-	return buildJobSnapshot(ctx, job, lastNLines), nil
+	return &ToolResult{Result: buildJobSnapshot(ctx, job, lastNLines)}
 }
 
 // WaitProgramTool blocks until a background job finishes and returns its output
@@ -293,10 +295,10 @@ func (t *WaitProgramTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	jobID := GetStringParam(params, "job_id", "")
 	if jobID == "" {
-		return nil, fmt.Errorf("job_id is required")
+		return &ToolResult{Error: "job_id is required"}
 	}
 
 	lastNLines := GetIntParam(params, "last_n_lines", 0)
@@ -306,7 +308,7 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 
 	job, ok := t.session.GetBackgroundJob(jobID)
 	if !ok {
-		return nil, fmt.Errorf("job not found: %s", jobID)
+		return &ToolResult{Error: fmt.Sprintf("job not found: %s", jobID)}
 	}
 
 	if !job.Completed {
@@ -315,7 +317,7 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 			select {
 			case <-done:
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return &ToolResult{Error: ctx.Err().Error()}
 			}
 		} else {
 			ticker := time.NewTicker(100 * time.Millisecond)
@@ -326,7 +328,7 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 				}
 				select {
 				case <-ctx.Done():
-					return nil, ctx.Err()
+					return &ToolResult{Error: ctx.Err().Error()}
 				case <-ticker.C:
 				}
 			}
@@ -335,7 +337,7 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 
 	result := buildJobSnapshot(ctx, job, lastNLines)
 	result["waited"] = true
-	return result, nil
+	return &ToolResult{Result: result}
 }
 
 func buildJobSnapshot(ctx context.Context, job *session.BackgroundJob, lastNLines int) map[string]interface{} {
@@ -615,15 +617,15 @@ func (t *StopProgramTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	jobID := GetStringParam(params, "job_id", "")
 	if jobID == "" {
-		return nil, fmt.Errorf("job_id is required")
+		return &ToolResult{Error: "job_id is required"}
 	}
 
 	job, ok := t.session.GetBackgroundJob(jobID)
 	if !ok {
-		return nil, fmt.Errorf("job not found: %s", jobID)
+		return &ToolResult{Error: fmt.Sprintf("job not found: %s", jobID)}
 	}
 
 	signalInput := strings.ToUpper(strings.TrimSpace(GetStringParam(params, "signal", "SIGTERM")))
@@ -639,21 +641,21 @@ func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interfa
 		sig = syscall.SIGKILL
 		signalName = "SIGKILL"
 	default:
-		return nil, fmt.Errorf("unsupported signal: %s", signalInput)
+		return &ToolResult{Error: fmt.Sprintf("unsupported signal: %s", signalInput)}
 	}
 
 	if job.Completed {
-		return map[string]interface{}{
+		return &ToolResult{Result: map[string]interface{}{
 			"job_id":    job.ID,
 			"message":   "Job already completed.",
 			"completed": true,
 			"exit_code": job.ExitCode,
-		}, nil
+		}}
 	}
 
 	if err := sendSignalToBackgroundJob(job, sig, signalName); err != nil {
 		logger.Error("stop_program: failed to send %s to job %s (pid=%d, pgid=%d): %v", signalName, job.ID, job.PID, job.ProcessGroupID, err)
-		return nil, err
+		return &ToolResult{Error: err.Error()}
 	}
 
 	job.StopRequested = true
@@ -661,9 +663,9 @@ func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interfa
 
 	logger.Info("stop_program: sent %s to job %s (pid=%d)", signalName, job.ID, job.PID)
 
-	return map[string]interface{}{
+	return &ToolResult{Result: map[string]interface{}{
 		"job_id":  job.ID,
 		"signal":  signalName,
 		"message": fmt.Sprintf("Signal %s sent to background job.", signalName),
-	}, nil
+	}}
 }

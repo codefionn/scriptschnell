@@ -177,8 +177,8 @@ func TestCleanMarkdown(t *testing.T) {
 
 func TestConvertHTMLWithHiddenElements(t *testing.T) {
 	tests := []struct {
-		name           string
-		input          string
+		name             string
+		input            string
 		shouldNotContain []string
 		shouldContain    []string
 	}{

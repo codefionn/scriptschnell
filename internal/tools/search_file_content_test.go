@@ -86,7 +86,7 @@ line 5
 				"glob":    "*.go",
 			},
 			// Should only match main.go
-			want: `main.go:`, 
+			want: `main.go:`,
 		},
 		{
 			name: "No match",
@@ -108,12 +108,12 @@ line 5
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tool.Execute(ctx, tt.params)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Execute() error = %v, wantErr %v", err, tt.wantErr)
+			got := tool.Execute(ctx, tt.params)
+			if (got.Error != "") != tt.wantErr {
+				t.Errorf("Execute() error = %v, wantErr %v", got.Error, tt.wantErr)
 				return
 			}
-			gotStr := got.(string)
+			gotStr := got.Result.(string)
 			if !strings.Contains(gotStr, tt.want) {
 				t.Errorf("Execute() = %q, want substring %q", gotStr, tt.want)
 			}

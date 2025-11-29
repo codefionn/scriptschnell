@@ -152,10 +152,10 @@ func (o *OpenAPITool) Parameters() map[string]interface{} {
 }
 
 // Execute performs the HTTP request defined by the tool configuration.
-func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	reqURL, err := o.buildURL(params)
 	if err != nil {
-		return nil, err
+		return &ToolResult{Error: err.Error()}
 	}
 
 	var bodyReader io.Reader
@@ -167,7 +167,7 @@ func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}
 		}
 		if bodyValue == nil {
 			if o.requestBody.Required {
-				return nil, fmt.Errorf("body is required")
+				return &ToolResult{Error: fmt.Sprintf("body is required")}
 			}
 		} else {
 			switch v := bodyValue.(type) {
@@ -176,7 +176,7 @@ func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}
 			default:
 				data, marshalErr := json.Marshal(v)
 				if marshalErr != nil {
-					return nil, fmt.Errorf("failed to marshal body: %w", marshalErr)
+					return &ToolResult{Error: fmt.Sprintf("failed to marshal body: %v", marshalErr)}
 				}
 				bodyReader = bytes.NewReader(data)
 				if o.requestBody.ContentType == "" {
@@ -191,7 +191,7 @@ func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}
 
 	req, err := http.NewRequestWithContext(ctx, o.method, reqURL, bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to create request: %v", err)}
 	}
 
 	// Apply default headers first.
@@ -228,13 +228,13 @@ func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}
 
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("request failed: %v", err)}
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to read response body: %v", err)}
 	}
 
 	result := map[string]interface{}{
@@ -256,7 +256,7 @@ func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}
 		result["body"] = ""
 	}
 
-	return result, nil
+	return &ToolResult{Result: result}
 }
 
 func (o *OpenAPITool) buildURL(params map[string]interface{}) (string, error) {

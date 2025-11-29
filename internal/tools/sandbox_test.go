@@ -116,12 +116,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	result, err := tool.Execute(ctx, params)
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.Result.(map[string]interface{})
 	if !ok {
 		t.Fatal("result should be a map")
 	}
@@ -182,12 +182,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	result, err := tool.Execute(ctx, params)
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
 	}
 
-	resultMap := result.(map[string]interface{})
+	resultMap := result.Result.(map[string]interface{})
 	stdout := resultMap["stdout"].(string)
 
 	if !strings.Contains(stdout, "Square root of 16 is 4") {
@@ -216,12 +216,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	result, err := tool.Execute(ctx, params)
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
 	}
 
-	resultMap := result.(map[string]interface{})
+	resultMap := result.Result.(map[string]interface{})
 	exitCode := resultMap["exit_code"].(int)
 
 	// Should have non-zero exit code due to compilation error
@@ -258,12 +258,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	result, err := tool.Execute(ctx, params)
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
 	}
 
-	resultMap := result.(map[string]interface{})
+	resultMap := result.Result.(map[string]interface{})
 	exitCode := resultMap["exit_code"].(int)
 
 	// In WASM, runtime panics may result in non-zero exit or runtime error
@@ -305,11 +305,11 @@ func main() {
 
 	ctx := context.Background()
 	start := time.Now()
-	result, err := tool.Execute(ctx, params)
+	result := tool.Execute(ctx, params)
 	duration := time.Since(start)
 
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
 	}
 
 	// Timeout should occur around the specified timeout value (plus compilation time)
@@ -317,7 +317,7 @@ func main() {
 		t.Errorf("execution took too long: %v (expected around 2-3 seconds)", duration)
 	}
 
-	resultMap := result.(map[string]interface{})
+	resultMap := result.Result.(map[string]interface{})
 
 	// Check if either timeout flag is set or exit code indicates termination
 	timeout := resultMap["timeout"].(bool)
@@ -342,12 +342,12 @@ func TestIntegration_SandboxTool_Execute_EmptyCode(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err := tool.Execute(ctx, params)
-	if err == nil {
+	result := tool.Execute(ctx, params)
+	if result.Error == "" {
 		t.Error("expected error for empty code")
 	}
-	if !strings.Contains(err.Error(), "required") {
-		t.Errorf("expected error message to mention 'required', got: %v", err)
+	if !strings.Contains(result.Error, "required") {
+		t.Errorf("expected error message to mention 'required', got: %s", result.Error)
 	}
 }
 
@@ -373,14 +373,14 @@ func main() {
 
 	ctx := context.Background()
 	start := time.Now()
-	result, err := tool.Execute(ctx, params)
+	result := tool.Execute(ctx, params)
 	duration := time.Since(start)
 
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
 	}
 
-	resultMap := result.(map[string]interface{})
+	resultMap := result.Result.(map[string]interface{})
 	exitCode := resultMap["exit_code"].(int)
 
 	if exitCode != 0 {
@@ -435,12 +435,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	result, err := tool.Execute(ctx, params)
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
 	}
 
-	resultMap := result.(map[string]interface{})
+	resultMap := result.Result.(map[string]interface{})
 	stdout := resultMap["stdout"].(string)
 
 	// In WASM, filesystem operations should fail (this is the security feature!)
@@ -543,12 +543,12 @@ func main() {
 		"timeout": 60,
 	}
 
-	result, err := tool.Execute(ctx, params)
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("Execute failed: %s", result.Error)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.Result.(map[string]interface{})
 	if !ok {
 		t.Fatal("result should be a map")
 	}
@@ -612,12 +612,12 @@ func main() {
 		"timeout": 60,
 	}
 
-	result, err := tool.Execute(ctx, params)
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("Execute failed: %s", result.Error)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.Result.(map[string]interface{})
 	if !ok {
 		t.Fatal("result should be a map")
 	}

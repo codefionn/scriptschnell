@@ -45,16 +45,16 @@ func (t *WebSearchTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	// Check if search is configured
 	if t.cfg.Search.Provider == "" {
-		return "", fmt.Errorf("no search provider configured - please configure a search provider in settings")
+		return &ToolResult{Error: "no search provider configured - please configure a search provider in settings"}
 	}
 
 	// Get query parameter
 	query := GetStringParam(params, "query", "")
 	if query == "" {
-		return "", fmt.Errorf("missing required parameter 'query'")
+		return &ToolResult{Error: "missing required parameter 'query'"}
 	}
 
 	// Get num_results parameter (optional, default 10)
@@ -66,7 +66,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 		case int:
 			numResults = v
 		default:
-			return "", fmt.Errorf("num_results must be an integer")
+			return &ToolResult{Error: "num_results must be an integer"}
 		}
 	}
 
@@ -84,22 +84,22 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 	case "perplexity":
 		provider = search.NewPerplexitySearchProvider(t.cfg.Search.Perplexity)
 	default:
-		return "", fmt.Errorf("unsupported search provider: %s", t.cfg.Search.Provider)
+		return &ToolResult{Error: fmt.Sprintf("unsupported search provider: %s", t.cfg.Search.Provider)}
 	}
 
 	// Validate provider configuration
 	if err := provider.Validate(); err != nil {
-		return "", fmt.Errorf("search provider validation failed: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("search provider validation failed: %v", err)}
 	}
 
 	// Perform the search
 	response, err := provider.Search(ctx, query, numResults)
 	if err != nil {
-		return "", fmt.Errorf("search failed: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("search failed: %v", err)}
 	}
 
 	// Format results for LLM consumption
-	return formatSearchResults(response), nil
+	return &ToolResult{Result: formatSearchResults(response)}
 }
 
 func formatSearchResults(response *search.SearchResponse) string {

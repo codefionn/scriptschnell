@@ -84,22 +84,22 @@ func TestSearchFilesTool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tool.Execute(context.Background(), tt.params)
+			result := tool.Execute(context.Background(), tt.params)
 
 			if tt.expectError {
-				if err == nil {
+				if result.Error == "" {
 					t.Errorf("expected error but got none")
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			if result.Error != "" {
+				t.Fatalf("unexpected error: %s", result.Error)
 			}
 
-			resultMap, ok := result.(map[string]interface{})
+			resultMap, ok := result.Result.(map[string]interface{})
 			if !ok {
-				t.Fatalf("expected result to be map[string]interface{}, got %T", result)
+				t.Fatalf("expected result to be map[string]interface{}, got %T", result.Result)
 			}
 
 			matches, ok := resultMap["matches"].([]string)
@@ -160,15 +160,15 @@ func TestSearchFilesToolGlobPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tool.Execute(context.Background(), map[string]interface{}{
+			result := tool.Execute(context.Background(), map[string]interface{}{
 				"pattern": tt.pattern,
 			})
 
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			if result.Error != "" {
+				t.Fatalf("unexpected error: %s", result.Error)
 			}
 
-			resultMap := result.(map[string]interface{})
+			resultMap := result.Result.(map[string]interface{})
 			matches := resultMap["matches"].([]string)
 			count := resultMap["count"].(int)
 

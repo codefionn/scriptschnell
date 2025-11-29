@@ -14,7 +14,7 @@ import (
 
 // MockClient mocks the llm.Client interface
 type MockClient struct {
-	CompleteFunc func(ctx context.Context, prompt string) (string, error)
+	CompleteFunc            func(ctx context.Context, prompt string) (string, error)
 	CompleteWithRequestFunc func(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error)
 }
 
@@ -117,14 +117,14 @@ func TestCodebaseInvestigator_Investigate_Success(t *testing.T) {
 	// Minimal provider manager that returns our mock
 	// But Orchestrator struct uses provider manager only for creation.
 	// We can manually inject the client into the orchestrator struct since we're in the same package.
-	
+
 	orch, _ := NewOrchestrator(cfg, func() *provider.Manager { m, _ := provider.NewManager("test-config", "test-password"); return m }(), true)
 	orch.fs = mockFS
 	orch.summarizeClient = mockLLM
 	orch.orchestrationClient = mockLLM // fallback
 
 	agent := NewCodebaseInvestigatorAgent(orch)
-	
+
 	result, err := agent.Investigate(context.Background(), "Find test.txt")
 	if err != nil {
 		t.Fatalf("Investigate failed: %v", err)
@@ -171,15 +171,15 @@ func TestCodebaseInvestigator_Investigate_ToolUse(t *testing.T) {
 	orch, _ := NewOrchestrator(cfg, func() *provider.Manager { m, _ := provider.NewManager("test-config", "test-password"); return m }(), true)
 	orch.fs = mockFS
 	orch.summarizeClient = mockLLM
-	
+
 	// We need to initialize the tool registry for the orchestrator so processToolCalls can work?
 	// Actually processToolCalls uses the 'executor' passed to it.
 	// The agent creates its own registry and executor.
 	// However, the agent uses 'a.orch.processToolCalls'.
 	// processToolCalls uses the passed executor.
-	
+
 	agent := NewCodebaseInvestigatorAgent(orch)
-	
+
 	result, err := agent.Investigate(context.Background(), "Find target.go")
 	if err != nil {
 		t.Fatalf("Investigate failed: %v", err)
@@ -199,10 +199,10 @@ func TestCodebaseInvestigator_Investigate_ContextLimit(t *testing.T) {
 				Content: "Looping...",
 				ToolCalls: []map[string]interface{}{
 					{
-						"id": "call_loop",
+						"id":   "call_loop",
 						"type": "function",
 						"function": map[string]interface{}{
-							"name": "search_files",
+							"name":      "search_files",
 							"arguments": `{"pattern": "nonexistent"}`,
 						},
 					},
@@ -220,7 +220,7 @@ func TestCodebaseInvestigator_Investigate_ContextLimit(t *testing.T) {
 
 	// This should hit the 10 turn limit
 	result, err := agent.Investigate(context.Background(), "Infinite loop check")
-	
+
 	// Investigate currently returns "Investigation timed out..." string and nil error on timeout
 	if err != nil {
 		t.Fatalf("Investigate failed: %v", err)

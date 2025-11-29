@@ -54,10 +54,10 @@ func (t *SearchFilesTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	pattern := GetStringParam(params, "pattern", "")
 	if pattern == "" {
-		return nil, fmt.Errorf("pattern is required")
+		return &ToolResult{Error: fmt.Sprintf("pattern is required")}
 	}
 
 	contentRegex := GetStringParam(params, "content_regex", "")
@@ -78,14 +78,14 @@ func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interfa
 	if contentRegex != "" {
 		contentRe, err = regexp.Compile(contentRegex)
 		if err != nil {
-			return nil, fmt.Errorf("invalid content_regex: %w", err)
+			return &ToolResult{Error: fmt.Sprintf("invalid content_regex: %v", err)}
 		}
 	}
 
 	// Find matching files
 	matches, err := t.searchFiles(ctx, basePath, pattern, contentRe, maxResults)
 	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("search failed: %v", err)}
 	}
 
 	result := map[string]interface{}{
@@ -100,7 +100,7 @@ func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interfa
 		result["content_regex"] = contentRegex
 	}
 
-	return result, nil
+	return &ToolResult{Result: result}
 }
 
 func (t *SearchFilesTool) searchFiles(ctx context.Context, basePath, pattern string, contentRe *regexp.Regexp, maxResults int) ([]string, error) {

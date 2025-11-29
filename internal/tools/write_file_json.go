@@ -80,21 +80,21 @@ type fileOperation struct {
 	LineContent string `json:"line_content"`
 }
 
-func (t *WriteFileJSONTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *WriteFileJSONTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return &ToolResult{Error: fmt.Sprintf("path is required")}
 	}
 
 	operationsParam, ok := params["operations"]
 	if !ok {
-		return nil, fmt.Errorf("operations is required")
+		return &ToolResult{Error: fmt.Sprintf("operations is required")}
 	}
 
 	// Re-marshal and unmarshal to decode into the struct. This is a common Go trick for map[string]interface{}
 	operationsData, err := json.Marshal(operationsParam)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal operations: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to marshal operations: %v", err)}
 	}
 
 	var operations []fileOperation
@@ -102,50 +102,50 @@ func (t *WriteFileJSONTool) Execute(ctx context.Context, params map[string]inter
 		// If it fails, maybe it's a string of JSON.
 		opsStr, ok := operationsParam.(string)
 		if !ok {
-			return nil, fmt.Errorf("operations must be an array of objects or a JSON string, failed to unmarshal: %w", err)
+			return &ToolResult{Error: fmt.Sprintf("operations must be an array of objects or a JSON string, failed to unmarshal: %v", err)}
 		}
 		if err := json.Unmarshal([]byte(opsStr), &operations); err != nil {
-			return nil, fmt.Errorf("failed to parse operations JSON string: %w", err)
+			return &ToolResult{Error: fmt.Sprintf("failed to parse operations JSON string: %v", err)}
 		}
 	}
 
 	if len(operations) == 0 {
-		return nil, fmt.Errorf("operations cannot be empty")
+		return &ToolResult{Error: fmt.Sprintf("operations cannot be empty")}
 	}
 
 	logger.Debug("write_file_json: path=%s", path)
 
 	if t.fs == nil {
-		return nil, fmt.Errorf("file system is not configured")
+		return &ToolResult{Error: fmt.Sprintf("file system is not configured")}
 	}
 
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
 		logger.Error("write_file_json: error checking if file exists: %v", err)
-		return nil, fmt.Errorf("error checking file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 
 	if !exists {
-		return nil, fmt.Errorf("cannot apply operations to non-existent file: %s (use create_file instead)", path)
+		return &ToolResult{Error: fmt.Sprintf("cannot apply operations to non-existent file: %s (use create_file instead)", path)}
 	}
 
 	if t.session != nil && !t.session.WasFileRead(path) {
-		return nil, fmt.Errorf("file %s was not read in this session; read it before applying operations", path)
+		return &ToolResult{Error: fmt.Sprintf("file %s was not read in this session; read it before applying operations", path)}
 	}
 
 	currentData, err := t.fs.ReadFile(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("error reading current file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error reading current file: %v", err)}
 	}
 
 	finalContent, err := applyJSONOperations(string(currentData), operations)
 	if err != nil {
-		return nil, fmt.Errorf("error applying operations: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error applying operations: %v", err)}
 	}
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
 		logger.Error("write_file_json: error writing file: %v", err)
-		return nil, fmt.Errorf("error writing file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 	}
 
 	if t.session != nil {
@@ -154,11 +154,11 @@ func (t *WriteFileJSONTool) Execute(ctx context.Context, params map[string]inter
 
 	logger.Info("write_file_json: updated %s (%d bytes)", path, len(finalContent))
 
-	return map[string]interface{}{
+	return &ToolResult{Result: map[string]interface{}{
 		"path":          path,
 		"bytes_written": len(finalContent),
 		"updated":       true,
-	}, nil
+	}}
 }
 
 type lineWithAdditions struct {

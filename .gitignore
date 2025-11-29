@@ -1,5 +1,6 @@
 # Binaries
 /statcode-ai
+/statcode-ai-test
 /test_menu
 /cmd/statcode-ai/statcode-ai
 *.exe

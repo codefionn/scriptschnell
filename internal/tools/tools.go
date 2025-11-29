@@ -13,7 +13,7 @@ type Tool interface {
 	Name() string
 	Description() string
 	Parameters() map[string]interface{}
-	Execute(ctx context.Context, params map[string]interface{}) (interface{}, error)
+	Execute(ctx context.Context, params map[string]interface{}) *ToolResult
 }
 
 // ToolCall represents a tool call from the LLM
@@ -31,41 +31,46 @@ type ToolResult struct {
 	RequiresUserInput      bool        `json:"requires_user_input,omitempty"`      // If true, user approval is needed
 	AuthReason             string      `json:"auth_reason,omitempty"`              // Reason for requiring authorization
 	SuggestedCommandPrefix string      `json:"suggested_command_prefix,omitempty"` // Suggested prefix to remember for future use
-	
+
 	// Enhanced execution metadata for better summaries and diagnostics
 	ExecutionMetadata *ExecutionMetadata `json:"execution_metadata,omitempty"`
+
+	// Dual response support: separate responses for LLM and UI
+	// If UIResult is set, it will be used for UI display instead of Result
+	// The LLM will always receive Result in its messages
+	UIResult interface{} `json:"ui_result,omitempty"`
 }
 
 // ExecutionMetadata captures detailed information about tool execution
 type ExecutionMetadata struct {
 	// Timing information
-	StartTime   *time.Time `json:"start_time,omitempty"`
-	EndTime     *time.Time `json:"end_time,omitempty"`
-	DurationMs  int64      `json:"duration_ms,omitempty"`
-	
+	StartTime  *time.Time `json:"start_time,omitempty"`
+	EndTime    *time.Time `json:"end_time,omitempty"`
+	DurationMs int64      `json:"duration_ms,omitempty"`
+
 	// Command/process information (for shell, sandbox, etc.)
-	Command     string `json:"command,omitempty"`
-	ExitCode    int    `json:"exit_code,omitempty"`
-	PID         int    `json:"pid,omitempty"`
-	ProcessID   string `json:"process_id,omitempty"` // For background jobs
-	
+	Command   string `json:"command,omitempty"`
+	ExitCode  int    `json:"exit_code,omitempty"`
+	PID       int    `json:"pid,omitempty"`
+	ProcessID string `json:"process_id,omitempty"` // For background jobs
+
 	// Output statistics
-	OutputSizeBytes int    `json:"output_size_bytes,omitempty"`
-	OutputLineCount  int    `json:"output_line_count,omitempty"`
-	HasStderr        bool   `json:"has_stderr,omitempty"`
-	StderrSizeBytes  int    `json:"stderr_size_bytes,omitempty"`
-	StderrLineCount  int    `json:"stderr_line_count,omitempty"`
-	
+	OutputSizeBytes int  `json:"output_size_bytes,omitempty"`
+	OutputLineCount int  `json:"output_line_count,omitempty"`
+	HasStderr       bool `json:"has_stderr,omitempty"`
+	StderrSizeBytes int  `json:"stderr_size_bytes,omitempty"`
+	StderrLineCount int  `json:"stderr_line_count,omitempty"`
+
 	// Execution context
 	WorkingDir      string `json:"working_dir,omitempty"`
 	TimeoutSeconds  int    `json:"timeout_seconds,omitempty"`
 	WasTimedOut     bool   `json:"was_timed_out,omitempty"`
 	WasBackgrounded bool   `json:"was_backgrounded,omitempty"`
-	
+
 	// Tool-specific metadata
 	ToolType string                 `json:"tool_type,omitempty"`
 	Details  map[string]interface{} `json:"details,omitempty"`
-	
+
 	// Error classification
 	ErrorType    string `json:"error_type,omitempty"`    // "timeout", "permission", "not_found", "syntax", etc.
 	ErrorContext string `json:"error_context,omitempty"` // Additional context for the error
@@ -126,18 +131,16 @@ func (r *Registry) ExecuteWithApproval(ctx context.Context, call *ToolCall) *Too
 
 	// Skip authorization check - user has already approved
 
-	result, err := tool.Execute(ctx, call.Parameters)
-	if err != nil {
+	result := tool.Execute(ctx, call.Parameters)
+	if result == nil {
 		return &ToolResult{
 			ID:    call.ID,
-			Error: err.Error(),
+			Error: "tool returned nil result",
 		}
 	}
 
-	return &ToolResult{
-		ID:     call.ID,
-		Result: result,
-	}
+	result.ID = call.ID
+	return result
 }
 
 // NewToolResultWithMetadata creates a ToolResult with execution metadata
@@ -147,7 +150,7 @@ func NewToolResultWithMetadata(id string, result interface{}, err error, metadat
 		Result:            result,
 		ExecutionMetadata: metadata,
 	}
-	
+
 	if err != nil {
 		toolResult.Error = err.Error()
 		// Classify error type if metadata is available
@@ -156,7 +159,7 @@ func NewToolResultWithMetadata(id string, result interface{}, err error, metadat
 			metadata.ErrorContext = extractErrorContext(err)
 		}
 	}
-	
+
 	return toolResult
 }
 
@@ -166,12 +169,12 @@ func EnhanceToolResult(result *ToolResult, metadata *ExecutionMetadata) *ToolRes
 		return nil
 	}
 	result.ExecutionMetadata = metadata
-	
+
 	// If there's an error and no error classification yet, add it
 	if result.Error != "" && metadata != nil && metadata.ErrorType == "" {
 		metadata.ErrorType = classifyErrorString(result.Error)
 	}
-	
+
 	return result
 }
 
@@ -180,9 +183,9 @@ func classifyError(err error) string {
 	if err == nil {
 		return ""
 	}
-	
+
 	errStr := strings.ToLower(err.Error())
-	
+
 	switch {
 	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline"):
 		return "timeout"
@@ -211,9 +214,9 @@ func extractErrorContext(err error) string {
 	if err == nil {
 		return ""
 	}
-	
+
 	errStr := err.Error()
-	
+
 	// Extract file paths from error messages
 	if idx := strings.Index(errStr, ": "); idx > 0 {
 		context := errStr[:idx]
@@ -222,7 +225,7 @@ func extractErrorContext(err error) string {
 			return context
 		}
 	}
-	
+
 	// Extract command names from shell errors
 	if strings.Contains(strings.ToLower(errStr), "command") {
 		words := strings.Fields(errStr)
@@ -232,7 +235,7 @@ func extractErrorContext(err error) string {
 			}
 		}
 	}
-	
+
 	return ""
 }
 
@@ -284,18 +287,16 @@ func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {
 		}
 	}
 
-	result, err := tool.Execute(ctx, call.Parameters)
-	if err != nil {
+	result := tool.Execute(ctx, call.Parameters)
+	if result == nil {
 		return &ToolResult{
 			ID:    call.ID,
-			Error: err.Error(),
+			Error: "tool returned nil result",
 		}
 	}
 
-	return &ToolResult{
-		ID:     call.ID,
-		Result: result,
-	}
+	result.ID = call.ID
+	return result
 }
 
 // ToJSONSchema converts tools to JSON schema format for LLM

@@ -106,18 +106,18 @@ func (o *OpenAITool) Parameters() map[string]interface{} {
 }
 
 // Execute runs the configured OpenAI model and returns the response text.
-func (o *OpenAITool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (o *OpenAITool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	if o.client == nil {
 		o.tryInitializeClient()
 	}
 
 	if o.client == nil {
-		return nil, fmt.Errorf("OpenAI client not configured; ensure API key and model are set")
+		return &ToolResult{Error: fmt.Sprintf("OpenAI client not configured; ensure API key and model are set")}
 	}
 
 	prompt := GetStringParam(params, "prompt", "")
 	if strings.TrimSpace(prompt) == "" {
-		return nil, fmt.Errorf("prompt parameter is required")
+		return &ToolResult{Error: fmt.Sprintf("prompt parameter is required")}
 	}
 
 	contextText := GetStringParam(params, "context", "")
@@ -149,7 +149,7 @@ func (o *OpenAITool) Execute(ctx context.Context, params map[string]interface{})
 
 	resp, err := o.client.CompleteWithRequest(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("OpenAI request failed: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("OpenAI request failed: %v", err)}
 	}
 
 	result := map[string]interface{}{
@@ -163,7 +163,7 @@ func (o *OpenAITool) Execute(ctx context.Context, params map[string]interface{})
 		result["note"] = "JSON response requested; ensure the model is prompted accordingly."
 	}
 
-	return result, nil
+	return &ToolResult{Result: result}
 }
 
 func (o *OpenAITool) tryInitializeClient() {

@@ -65,47 +65,63 @@ func (t *TodoTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	action := GetStringParam(params, "action", "")
 	if action == "" {
-		return nil, fmt.Errorf("action is required")
+		return &ToolResult{Error: fmt.Sprintf("action is required")}
 	}
 
 	switch action {
 	case "list":
-		return t.listTodos(), nil
+		return &ToolResult{Result: t.listTodos()}
 
 	case "add":
 		text := GetStringParam(params, "text", "")
 		if text == "" {
-			return nil, fmt.Errorf("text is required for add action")
+			return &ToolResult{Error: fmt.Sprintf("text is required for add action")}
 		}
 		parentID := GetStringParam(params, "parent_id", "")
-		return t.addTodo(ctx, text, parentID)
+		result, err := t.addTodo(ctx, text, parentID)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
 
 	case "check":
 		id := GetStringParam(params, "id", "")
 		if id == "" {
-			return nil, fmt.Errorf("id is required for check action")
+			return &ToolResult{Error: fmt.Sprintf("id is required for check action")}
 		}
-		return t.checkTodo(id, true)
+		result, err := t.checkTodo(id, true)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
 
 	case "uncheck":
 		id := GetStringParam(params, "id", "")
 		if id == "" {
-			return nil, fmt.Errorf("id is required for uncheck action")
+			return &ToolResult{Error: fmt.Sprintf("id is required for uncheck action")}
 		}
-		return t.checkTodo(id, false)
+		result, err := t.checkTodo(id, false)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
 
 	case "delete":
 		id := GetStringParam(params, "id", "")
 		if id == "" {
-			return nil, fmt.Errorf("id is required for delete action")
+			return &ToolResult{Error: fmt.Sprintf("id is required for delete action")}
 		}
-		return t.deleteTodo(id)
+		result, err := t.deleteTodo(id)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
 
 	default:
-		return nil, fmt.Errorf("unknown action: %s", action)
+		return &ToolResult{Error: fmt.Sprintf("unknown action: %s", action)}
 	}
 }
 

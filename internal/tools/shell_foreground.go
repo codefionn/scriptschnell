@@ -47,26 +47,26 @@ func newShellCommandRunner(tool *ShellTool, command, workingDir string, timeoutS
 	}
 }
 
-func (r *shellCommandRunner) run(ctx context.Context) (interface{}, error) {
+func (r *shellCommandRunner) run(ctx context.Context) *ToolResult {
 	cmd := exec.Command("sh", "-c", r.command)
 	cmd.Dir = r.workingDir
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		logger.Error("shell: failed to create stdout pipe: %v", err)
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to create stdout pipe: %v", err)}
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		logger.Error("shell: failed to create stderr pipe: %v", err)
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to create stderr pipe: %v", err)}
 	}
 
 	r.startedAt = time.Now()
 	if err := cmd.Start(); err != nil {
 		logger.Error("shell: failed to start command: %v", err)
-		return nil, fmt.Errorf("failed to start command: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("failed to start command: %v", err)}
 	}
 
 	r.startReaders(stdout, stderr)
@@ -95,11 +95,13 @@ func (r *shellCommandRunner) run(ctx context.Context) (interface{}, error) {
 			}
 			r.wg.Wait()
 			if job := r.output.backgroundJob(); job != nil {
-				return map[string]interface{}{
-					"job_id":  job.ID,
-					"pid":     job.PID,
-					"message": shellBackgroundMessage,
-				}, nil
+				return &ToolResult{
+					Result: map[string]interface{}{
+						"job_id":  job.ID,
+						"pid":     job.PID,
+						"message": shellBackgroundMessage,
+					},
+				}
 			}
 			return r.buildForegroundResult(err, timedOut)
 
@@ -112,7 +114,7 @@ func (r *shellCommandRunner) run(ctx context.Context) (interface{}, error) {
 			}
 			<-r.done
 			r.wg.Wait()
-			return nil, ctx.Err()
+			return &ToolResult{Error: ctx.Err().Error()}
 
 		case <-timerC:
 			timedOut = true
@@ -131,11 +133,13 @@ func (r *shellCommandRunner) run(ctx context.Context) (interface{}, error) {
 			}
 			go r.handleBackgroundCompletion(job)
 			logger.Info("shell: converted foreground command to background job: %s (pid=%d)", jobID, job.PID)
-			return map[string]interface{}{
-				"job_id":  jobID,
-				"pid":     job.PID,
-				"message": shellBackgroundMessage,
-			}, nil
+			return &ToolResult{
+				Result: map[string]interface{}{
+					"job_id":  jobID,
+					"pid":     job.PID,
+					"message": shellBackgroundMessage,
+				},
+			}
 		}
 	}
 }
@@ -167,7 +171,7 @@ func (r *shellCommandRunner) startStreamReader(reader io.Reader, handler func([]
 	}()
 }
 
-func (r *shellCommandRunner) buildForegroundResult(err error, timedOut bool) (map[string]interface{}, error) {
+func (r *shellCommandRunner) buildForegroundResult(err error, timedOut bool) *ToolResult {
 	exitCode := 0
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -178,7 +182,7 @@ func (r *shellCommandRunner) buildForegroundResult(err error, timedOut bool) (ma
 			logger.Warn("shell: command timed out after %s", r.timeout)
 		} else {
 			logger.Error("shell: failed to execute command: %v", err)
-			return nil, fmt.Errorf("failed to execute command: %w", err)
+			return &ToolResult{Error: fmt.Sprintf("failed to execute command: %v", err)}
 		}
 	} else {
 		logger.Info("shell: command completed successfully (exit_code=%d, output_bytes=%d)", exitCode, r.output.bytesWritten())
@@ -221,7 +225,10 @@ func (r *shellCommandRunner) buildForegroundResult(err error, timedOut bool) (ma
 	// Store metadata in the result for the TUI to use
 	result["_execution_metadata"] = metadata
 
-	return result, nil
+	return &ToolResult{
+		Result:            result,
+		ExecutionMetadata: metadata,
+	}
 }
 
 func timePtr(t time.Time) *time.Time {

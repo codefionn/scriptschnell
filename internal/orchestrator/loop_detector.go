@@ -9,19 +9,19 @@ import (
 )
 
 const (
-	maxSentences       = 100   // Maximum number of sentences to track
-	maxTotalChars      = 16384 // Maximum total characters to track
-	loopThreshold      = 10    // Number of repetitions to trigger loop detection
-	maxNGramSize       = 10    // Maximum n-gram size to check (1-10 sentences)
+	maxSentences  = 100   // Maximum number of sentences to track
+	maxTotalChars = 16384 // Maximum total characters to track
+	loopThreshold = 10    // Number of repetitions to trigger loop detection
+	maxNGramSize  = 10    // Maximum n-gram size to check (1-10 sentences)
 )
 
 // LoopDetector detects repetitive text patterns in LLM responses
 type LoopDetector struct {
 	mu            sync.Mutex
-	sentences     []string          // Rolling buffer of sentences
-	totalChars    int               // Total characters in buffer
-	patternCounts map[string]int    // Pattern -> occurrence count
-	sentenceRegex *regexp.Regexp    // Regex for sentence splitting
+	sentences     []string       // Rolling buffer of sentences
+	totalChars    int            // Total characters in buffer
+	patternCounts map[string]int // Pattern -> occurrence count
+	sentenceRegex *regexp.Regexp // Regex for sentence splitting
 }
 
 // NewLoopDetector creates a new loop detector

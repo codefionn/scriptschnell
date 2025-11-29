@@ -63,17 +63,17 @@ func TestWriteFileDiffTool_AppliesDiff(t *testing.T) {
  line 2
  line 3`
 
-	result, err := tool.Execute(ctx, map[string]interface{}{
+	result := tool.Execute(ctx, map[string]interface{}{
 		"path": "file.txt",
 		"diff": diff,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", result)
+		t.Fatalf("expected map result, got %T", result.Result)
 	}
 	if updated, _ := resultMap["updated"].(bool); !updated {
 		t.Fatalf("expected updated=true, got %v", resultMap["updated"])
@@ -96,12 +96,14 @@ func TestWriteFileDiffTool_AppliesDiff(t *testing.T) {
 func TestWriteFileDiffTool_RequiresPathAndDiff(t *testing.T) {
 	tool := NewWriteFileDiffTool(fs.NewMockFS(), nil)
 
-	if _, err := tool.Execute(context.Background(), map[string]interface{}{"diff": "data"}); err == nil || !strings.Contains(err.Error(), "path is required") {
-		t.Fatalf("expected path required error, got %v", err)
+	result := tool.Execute(context.Background(), map[string]interface{}{"diff": "data"})
+	if result.Error == "" || !strings.Contains(result.Error, "path is required") {
+		t.Fatalf("expected path required error, got %s", result.Error)
 	}
 
-	if _, err := tool.Execute(context.Background(), map[string]interface{}{"path": "file.txt"}); err == nil || !strings.Contains(err.Error(), "diff is required") {
-		t.Fatalf("expected diff required error, got %v", err)
+	result = tool.Execute(context.Background(), map[string]interface{}{"path": "file.txt"})
+	if result.Error == "" || !strings.Contains(result.Error, "diff is required") {
+		t.Fatalf("expected diff required error, got %s", result.Error)
 	}
 }
 
@@ -115,23 +117,23 @@ func TestWriteFileDiffTool_FailsIfNotRead(t *testing.T) {
 		t.Fatalf("failed to seed file: %v", err)
 	}
 
-	_, err := tool.Execute(ctx, map[string]interface{}{
+	result := tool.Execute(ctx, map[string]interface{}{
 		"path": "file.txt",
 		"diff": "@@ -1 +1 @@\n-content\n+new content",
 	})
-	if err == nil || !strings.Contains(err.Error(), "was not read") {
-		t.Fatalf("expected unread error, got %v", err)
+	if result.Error == "" || !strings.Contains(result.Error, "was not read") {
+		t.Fatalf("expected unread error, got %s", result.Error)
 	}
 }
 
 func TestWriteFileDiffTool_FailsIfMissingFile(t *testing.T) {
 	tool := NewWriteFileDiffTool(fs.NewMockFS(), nil)
 
-	_, err := tool.Execute(context.Background(), map[string]interface{}{
+	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "missing.txt",
 		"diff": "@@ -0,0 +1 @@\n+hello",
 	})
-	if err == nil || !strings.Contains(err.Error(), "cannot apply diff to non-existent file") {
-		t.Fatalf("expected missing file error, got %v", err)
+	if result.Error == "" || !strings.Contains(result.Error, "cannot apply diff to non-existent file") {
+		t.Fatalf("expected missing file error, got %s", result.Error)
 	}
 }

@@ -58,8 +58,8 @@ func TestDetectModelFamily_Claude41(t *testing.T) {
 
 func TestDetectContextWindow_Claude(t *testing.T) {
 	tests := []struct {
-		modelID string
-		family  ModelFamily
+		modelID  string
+		family   ModelFamily
 		expected int
 	}{
 		{"claude-4.5-sonnet", FamilyClaude45, 1000000},
@@ -80,8 +80,8 @@ func TestDetectContextWindow_Claude(t *testing.T) {
 
 func TestDetectMaxOutputTokens_Claude(t *testing.T) {
 	tests := []struct {
-		modelID string
-		family  ModelFamily
+		modelID  string
+		family   ModelFamily
 		expected int
 	}{
 		{"claude-4.5-sonnet", FamilyClaude45, 64000},
@@ -102,8 +102,8 @@ func TestDetectMaxOutputTokens_Claude(t *testing.T) {
 
 func TestFormatModelDisplayName_Claude(t *testing.T) {
 	tests := []struct {
-		modelID string
-		family  ModelFamily
+		modelID  string
+		family   ModelFamily
 		expected string
 	}{
 		{"claude-4.5-sonnet", FamilyClaude45, "Claude 4.5 Sonnet"},
@@ -124,8 +124,8 @@ func TestFormatModelDisplayName_Claude(t *testing.T) {
 
 func TestGetModelDescription_Claude(t *testing.T) {
 	tests := []struct {
-		modelID string
-		family  ModelFamily
+		modelID  string
+		family   ModelFamily
 		contains string
 	}{
 		{"claude-4.5-sonnet", FamilyClaude45, "most intelligent model"},

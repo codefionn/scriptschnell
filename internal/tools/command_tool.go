@@ -88,9 +88,9 @@ func (c *CommandTool) Parameters() map[string]interface{} {
 }
 
 // Execute runs the configured command with optional STDIN and extra arguments.
-func (c *CommandTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (c *CommandTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	if len(c.command) == 0 {
-		return nil, fmt.Errorf("command not configured")
+		return &ToolResult{Error: fmt.Sprintf("command not configured")}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
@@ -152,7 +152,7 @@ func (c *CommandTool) Execute(ctx context.Context, params map[string]interface{}
 		result["error"] = err.Error()
 	}
 
-	return result, nil
+	return &ToolResult{Result: result}
 }
 
 func extractStringSlice(value interface{}) []string {

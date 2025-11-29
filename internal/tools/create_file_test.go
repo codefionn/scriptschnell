@@ -55,14 +55,14 @@ func TestCreateFileTool_CreateNewFile(t *testing.T) {
 		"content": "Hello, world!",
 	}
 
-	result, err := tool.Execute(context.Background(), params)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	result := tool.Execute(context.Background(), params)
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", result)
+		t.Fatalf("expected map result, got %T", result.Result)
 	}
 
 	if resultMap["path"] != "newfile.txt" {
@@ -98,9 +98,9 @@ func TestCreateFileTool_PathRequired(t *testing.T) {
 	mockFS := fs.NewMockFS()
 	tool := NewCreateFileTool(mockFS, nil)
 
-	_, err := tool.Execute(context.Background(), map[string]interface{}{})
-	if err == nil || err.Error() != "path is required" {
-		t.Fatalf("expected path required error, got %v", err)
+	result := tool.Execute(context.Background(), map[string]interface{}{})
+	if result.Error == "" || result.Error != "path is required" {
+		t.Fatalf("expected path required error, got %s", result.Error)
 	}
 }
 
@@ -112,11 +112,11 @@ func TestCreateFileTool_ExistingFileError(t *testing.T) {
 		t.Fatalf("failed to set up file: %v", err)
 	}
 
-	_, err := tool.Execute(context.Background(), map[string]interface{}{
+	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path":    "file.txt",
 		"content": "new contents",
 	})
-	if err == nil {
+	if result.Error == "" {
 		t.Fatalf("expected error when file already exists")
 	}
 }
@@ -134,9 +134,9 @@ func TestCreateFileTool_ThenWriteDiff(t *testing.T) {
 		"content": initialContent,
 	}
 
-	_, err := createTool.Execute(context.Background(), params)
-	if err != nil {
-		t.Fatalf("create failed: %v", err)
+	createResult := createTool.Execute(context.Background(), params)
+	if createResult.Error != "" {
+		t.Fatalf("create failed: %s", createResult.Error)
 	}
 
 	// Verify that the file was tracked as read
@@ -154,14 +154,14 @@ func TestCreateFileTool_ThenWriteDiff(t *testing.T) {
  line 3`,
 	}
 
-	result, err := diffTool.Execute(context.Background(), diffParams)
-	if err != nil {
-		t.Fatalf("diff failed after create: %v", err)
+	result := diffTool.Execute(context.Background(), diffParams)
+	if result.Error != "" {
+		t.Fatalf("diff failed after create: %s", result.Error)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", result)
+		t.Fatalf("expected map result, got %T", result.Result)
 	}
 
 	if updated, _ := resultMap["updated"].(bool); !updated {

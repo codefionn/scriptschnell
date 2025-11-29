@@ -36,14 +36,14 @@ func TestStatusProgramTool_ListAndDetail(t *testing.T) {
 	ctx := context.Background()
 
 	// List existing jobs
-	res, err := tool.Execute(ctx, map[string]interface{}{})
-	if err != nil {
-		t.Fatalf("status list failed: %v", err)
+	res := tool.Execute(ctx, map[string]interface{}{})
+	if res.Error != "" {
+		t.Fatalf("status list failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	jobsRaw, ok := resMap["jobs"].([]map[string]interface{})
@@ -66,17 +66,17 @@ func TestStatusProgramTool_ListAndDetail(t *testing.T) {
 	}
 
 	// Fetch detailed information with tailing
-	detailRes, err := tool.Execute(ctx, map[string]interface{}{
+	detailRes := tool.Execute(ctx, map[string]interface{}{
 		"job_id":       job.ID,
 		"last_n_lines": 1,
 	})
-	if err != nil {
-		t.Fatalf("status detail failed: %v", err)
+	if detailRes.Error != "" {
+		t.Fatalf("status detail failed: %s", detailRes.Error)
 	}
 
-	detailMap, ok := detailRes.(map[string]interface{})
+	detailMap, ok := detailRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected detail map result, got %T", detailRes)
+		t.Fatalf("expected detail map result, got %T", detailRes.Result)
 	}
 
 	if detailMap["job_id"] != job.ID {
@@ -113,14 +113,14 @@ func TestWaitProgramTool_WaitsForCompletion(t *testing.T) {
 		"background": true,
 	}
 
-	res, err := shellTool.Execute(ctx, cmdParams)
-	if err != nil {
-		t.Fatalf("shell execute failed: %v", err)
+	res := shellTool.Execute(ctx, cmdParams)
+	if res.Error != "" {
+		t.Fatalf("shell execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 	jobID, ok := resMap["job_id"].(string)
 	if !ok || jobID == "" {
@@ -131,14 +131,14 @@ func TestWaitProgramTool_WaitsForCompletion(t *testing.T) {
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	waitRes, err := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
-	if err != nil {
-		t.Fatalf("wait_program failed: %v", err)
+	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
+	if waitRes.Error != "" {
+		t.Fatalf("wait_program failed: %s", waitRes.Error)
 	}
 
-	waitMap, ok := waitRes.(map[string]interface{})
+	waitMap, ok := waitRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map from wait_program, got %T", waitRes)
+		t.Fatalf("expected map from wait_program, got %T", waitRes.Result)
 	}
 
 	if waitMap["completed"] != true {
@@ -174,17 +174,17 @@ func TestStopProgramTool_TerminatesProcess(t *testing.T) {
 
 	ctx := context.Background()
 
-	res, err := shellTool.Execute(ctx, map[string]interface{}{
+	res := shellTool.Execute(ctx, map[string]interface{}{
 		"command":    "sleep 5",
 		"background": true,
 	})
-	if err != nil {
-		t.Fatalf("shell execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("shell execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 	jobID := resMap["job_id"].(string)
 
@@ -199,17 +199,17 @@ func TestStopProgramTool_TerminatesProcess(t *testing.T) {
 	// Give the sleep process a brief moment to start
 	time.Sleep(100 * time.Millisecond)
 
-	stopRes, err := stopTool.Execute(ctx, map[string]interface{}{
+	stopRes := stopTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 		"signal": "SIGKILL",
 	})
-	if err != nil {
-		t.Fatalf("stop_program failed: %v", err)
+	if stopRes.Error != "" {
+		t.Fatalf("stop_program failed: %s", stopRes.Error)
 	}
 
-	stopMap, ok := stopRes.(map[string]interface{})
+	stopMap, ok := stopRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map stop result, got %T", stopRes)
+		t.Fatalf("expected map stop result, got %T", stopRes.Result)
 	}
 	if stopMap["signal"] != "SIGKILL" {
 		t.Errorf("expected signal SIGKILL, got %v", stopMap["signal"])
@@ -217,14 +217,14 @@ func TestStopProgramTool_TerminatesProcess(t *testing.T) {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	waitRes, err := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
-	if err != nil {
-		t.Fatalf("wait_program after stop failed: %v", err)
+	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
+	if waitRes.Error != "" {
+		t.Fatalf("wait_program after stop failed: %s", waitRes.Error)
 	}
 
-	waitMap, ok := waitRes.(map[string]interface{})
+	waitMap, ok := waitRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected wait map result, got %T", waitRes)
+		t.Fatalf("expected wait map result, got %T", waitRes.Result)
 	}
 
 	if waitMap["completed"] != true {
@@ -260,32 +260,32 @@ func TestStopProgramTool_TerminatesProcessGroup(t *testing.T) {
 
 	ctx := context.Background()
 
-	res, err := shellTool.Execute(ctx, map[string]interface{}{
+	res := shellTool.Execute(ctx, map[string]interface{}{
 		"command":    "sh -c 'sleep 30'",
 		"background": true,
 	})
-	if err != nil {
-		t.Fatalf("shell execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("shell execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 	jobID := resMap["job_id"].(string)
 
 	time.Sleep(100 * time.Millisecond)
 
-	stopRes, err := stopTool.Execute(ctx, map[string]interface{}{
+	stopRes := stopTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 	})
-	if err != nil {
-		t.Fatalf("stop_program failed: %v", err)
+	if stopRes.Error != "" {
+		t.Fatalf("stop_program failed: %s", stopRes.Error)
 	}
 
-	stopMap, ok := stopRes.(map[string]interface{})
+	stopMap, ok := stopRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected stop map, got %T", stopRes)
+		t.Fatalf("expected stop map, got %T", stopRes.Result)
 	}
 	if stopMap["signal"] != "SIGTERM" {
 		t.Errorf("expected default SIGTERM signal, got %v", stopMap["signal"])
@@ -293,14 +293,14 @@ func TestStopProgramTool_TerminatesProcessGroup(t *testing.T) {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	waitRes, err := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
-	if err != nil {
-		t.Fatalf("wait_program after stop failed: %v", err)
+	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
+	if waitRes.Error != "" {
+		t.Fatalf("wait_program after stop failed: %s", waitRes.Error)
 	}
 
-	waitMap, ok := waitRes.(map[string]interface{})
+	waitMap, ok := waitRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected wait map, got %T", waitRes)
+		t.Fatalf("expected wait map, got %T", waitRes.Result)
 	}
 	if waitMap["completed"] != true {
 		t.Errorf("expected completed true after stop, got %v", waitMap["completed"])
@@ -334,33 +334,30 @@ func TestShellTool_BackgroundShortcut(t *testing.T) {
 	backgroundChan := make(chan struct{}, 1)
 	ctx := ContextWithShellBackground(context.Background(), backgroundChan)
 
-	resultCh := make(chan interface{}, 1)
-	errCh := make(chan error, 1)
+	resultCh := make(chan *ToolResult, 1)
 
 	go func() {
-		res, err := tool.Execute(ctx, map[string]interface{}{"command": "sleep 1"})
-		if err != nil {
-			errCh <- err
-			return
-		}
+		res := tool.Execute(ctx, map[string]interface{}{"command": "sleep 1"})
 		resultCh <- res
 	}()
 
 	time.Sleep(50 * time.Millisecond)
 	backgroundChan <- struct{}{}
 
-	var result interface{}
+	var result *ToolResult
 	select {
-	case err := <-errCh:
-		t.Fatalf("shell execute returned error: %v", err)
 	case result = <-resultCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for shell execution result")
 	}
 
-	resMap, ok := result.(map[string]interface{})
+	if result.Error != "" {
+		t.Fatalf("shell execute returned error: %s", result.Error)
+	}
+
+	resMap, ok := result.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", result)
+		t.Fatalf("expected map result, got %T", result.Result)
 	}
 
 	jobID, ok := resMap["job_id"].(string)

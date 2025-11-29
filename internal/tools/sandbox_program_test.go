@@ -37,14 +37,14 @@ func TestStatusProgramTool_SandboxBackgroundJob(t *testing.T) {
 
 	// Test listing all jobs
 	t.Run("ListAllJobs", func(t *testing.T) {
-		res, err := statusTool.Execute(ctx, map[string]interface{}{})
-		if err != nil {
-			t.Fatalf("status_program list failed: %v", err)
+		res := statusTool.Execute(ctx, map[string]interface{}{})
+		if res.Error != "" {
+			t.Fatalf("status_program list failed: %s", res.Error)
 		}
 
-		resMap, ok := res.(map[string]interface{})
+		resMap, ok := res.Result.(map[string]interface{})
 		if !ok {
-			t.Fatalf("expected map result, got %T", res)
+			t.Fatalf("expected map result, got %T", res.Result)
 		}
 
 		jobsRaw, ok := resMap["jobs"].([]map[string]interface{})
@@ -73,17 +73,17 @@ func TestStatusProgramTool_SandboxBackgroundJob(t *testing.T) {
 
 	// Test getting specific job details with line limiting
 	t.Run("GetJobDetailsWithLineLimiting", func(t *testing.T) {
-		res, err := statusTool.Execute(ctx, map[string]interface{}{
+		res := statusTool.Execute(ctx, map[string]interface{}{
 			"job_id":       jobID,
 			"last_n_lines": 2,
 		})
-		if err != nil {
-			t.Fatalf("status_program detail failed: %v", err)
+		if res.Error != "" {
+			t.Fatalf("status_program detail failed: %s", res.Error)
 		}
 
-		detailMap, ok := res.(map[string]interface{})
+		detailMap, ok := res.Result.(map[string]interface{})
 		if !ok {
-			t.Fatalf("expected map result, got %T", res)
+			t.Fatalf("expected map result, got %T", res.Result)
 		}
 
 		if detailMap["job_id"] != jobID {
@@ -112,14 +112,14 @@ func TestStatusProgramTool_SandboxBackgroundJob(t *testing.T) {
 
 	// Test getting nonexistent job
 	t.Run("GetNonexistentJob", func(t *testing.T) {
-		_, err := statusTool.Execute(ctx, map[string]interface{}{
+		res := statusTool.Execute(ctx, map[string]interface{}{
 			"job_id": "nonexistent-job",
 		})
-		if err == nil {
+		if res.Error == "" {
 			t.Fatal("expected error for nonexistent job, got nil")
 		}
-		if !strings.Contains(err.Error(), "not found") {
-			t.Errorf("expected 'not found' error, got: %v", err)
+		if !strings.Contains(res.Error, "not found") {
+			t.Errorf("expected 'not found' error, got: %s", res.Error)
 		}
 	})
 }
@@ -150,16 +150,16 @@ func TestStatusProgramTool_CompletedSandboxJob(t *testing.T) {
 	statusTool := NewStatusProgramTool(sess)
 	ctx := context.Background()
 
-	res, err := statusTool.Execute(ctx, map[string]interface{}{
+	res := statusTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 	})
-	if err != nil {
-		t.Fatalf("status_program failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("status_program failed: %s", res.Error)
 	}
 
-	detailMap, ok := res.(map[string]interface{})
+	detailMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	if detailMap["completed"] != true {
@@ -191,17 +191,17 @@ func main() {
 	fmt.Println("Hello from sandbox")
 }`
 
-	res, err := sandboxTool.Execute(ctx, map[string]interface{}{
+	res := sandboxTool.Execute(ctx, map[string]interface{}{
 		"code":       code,
 		"background": true,
 	})
-	if err != nil {
-		t.Fatalf("sandbox execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("sandbox execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	jobID, ok := resMap["job_id"].(string)
@@ -214,16 +214,16 @@ func main() {
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	waitRes, err := waitTool.Execute(waitCtx, map[string]interface{}{
+	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{
 		"job_id": jobID,
 	})
-	if err != nil {
-		t.Fatalf("wait_program failed: %v", err)
+	if waitRes.Error != "" {
+		t.Fatalf("wait_program failed: %s", waitRes.Error)
 	}
 
-	waitMap, ok := waitRes.(map[string]interface{})
+	waitMap, ok := waitRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map from wait_program, got %T", waitRes)
+		t.Fatalf("expected map from wait_program, got %T", waitRes.Result)
 	}
 
 	// Verify completion
@@ -276,16 +276,16 @@ func TestWaitProgramTool_SandboxTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	_, err := waitTool.Execute(ctx, map[string]interface{}{
+	result := waitTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 	})
 
 	// Should timeout
-	if err == nil {
+	if result.Error == "" {
 		t.Fatal("expected timeout error, got nil")
 	}
-	if !strings.Contains(err.Error(), "context deadline exceeded") {
-		t.Errorf("expected context deadline exceeded error, got: %v", err)
+	if !strings.Contains(result.Error, "context deadline exceeded") {
+		t.Errorf("expected context deadline exceeded error, got: %s", result.Error)
 	}
 }
 
@@ -317,13 +317,13 @@ func TestWaitProgramTool_AlreadyCompleted(t *testing.T) {
 
 	// Should return immediately since job is already completed
 	start := time.Now()
-	res, err := waitTool.Execute(ctx, map[string]interface{}{
+	res := waitTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 	})
 	elapsed := time.Since(start)
 
-	if err != nil {
-		t.Fatalf("wait_program failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("wait_program failed: %s", res.Error)
 	}
 
 	// Should not have waited long
@@ -331,9 +331,9 @@ func TestWaitProgramTool_AlreadyCompleted(t *testing.T) {
 		t.Errorf("wait_program took too long for completed job: %v", elapsed)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	if resMap["completed"] != true {
@@ -371,17 +371,17 @@ func TestWaitProgramTool_LineLimiting(t *testing.T) {
 	ctx := context.Background()
 
 	// Test with last_n_lines = 2
-	res, err := waitTool.Execute(ctx, map[string]interface{}{
+	res := waitTool.Execute(ctx, map[string]interface{}{
 		"job_id":       jobID,
 		"last_n_lines": 2,
 	})
-	if err != nil {
-		t.Fatalf("wait_program failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("wait_program failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	stdout, ok := resMap["stdout"].(string)
@@ -426,18 +426,18 @@ func main() {
 	println("Should not reach here")
 }`
 
-	res, err := sandboxTool.Execute(ctx, map[string]interface{}{
+	res := sandboxTool.Execute(ctx, map[string]interface{}{
 		"code":       code,
 		"background": true,
 		"timeout":    90,
 	})
-	if err != nil {
-		t.Fatalf("sandbox execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("sandbox execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	jobID, ok := resMap["job_id"].(string)
@@ -450,16 +450,16 @@ func main() {
 
 	// Stop the job
 	stopTool := NewStopProgramTool(sess)
-	stopRes, err := stopTool.Execute(ctx, map[string]interface{}{
+	stopRes := stopTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 	})
-	if err != nil {
-		t.Fatalf("stop_program failed: %v", err)
+	if stopRes.Error != "" {
+		t.Fatalf("stop_program failed: %s", stopRes.Error)
 	}
 
-	stopMap, ok := stopRes.(map[string]interface{})
+	stopMap, ok := stopRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", stopRes)
+		t.Fatalf("expected map result, got %T", stopRes.Result)
 	}
 
 	if stopMap["job_id"] != jobID {
@@ -471,16 +471,16 @@ func main() {
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	waitRes, err := waitTool.Execute(waitCtx, map[string]interface{}{
+	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{
 		"job_id": jobID,
 	})
-	if err != nil {
-		t.Fatalf("wait_program after stop failed: %v", err)
+	if waitRes.Error != "" {
+		t.Fatalf("wait_program after stop failed: %s", waitRes.Error)
 	}
 
-	waitMap, ok := waitRes.(map[string]interface{})
+	waitMap, ok := waitRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", waitRes)
+		t.Fatalf("expected map result, got %T", waitRes.Result)
 	}
 
 	// Verify the job was stopped
@@ -527,16 +527,16 @@ func TestStopProgramTool_AlreadyCompleted(t *testing.T) {
 	stopTool := NewStopProgramTool(sess)
 	ctx := context.Background()
 
-	res, err := stopTool.Execute(ctx, map[string]interface{}{
+	res := stopTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 	})
-	if err != nil {
-		t.Fatalf("stop_program failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("stop_program failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	// Should indicate job already completed
@@ -563,15 +563,15 @@ func TestStopProgramTool_NonexistentJob(t *testing.T) {
 	stopTool := NewStopProgramTool(sess)
 	ctx := context.Background()
 
-	_, err := stopTool.Execute(ctx, map[string]interface{}{
+	result := stopTool.Execute(ctx, map[string]interface{}{
 		"job_id": "does-not-exist",
 	})
 
-	if err == nil {
+	if result.Error == "" {
 		t.Fatal("expected error for nonexistent job, got nil")
 	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected 'not found' error, got: %v", err)
+	if !strings.Contains(result.Error, "not found") {
+		t.Errorf("expected 'not found' error, got: %s", result.Error)
 	}
 }
 
@@ -606,17 +606,17 @@ func TestStopProgramTool_SIGKILLSignal(t *testing.T) {
 	stopTool := NewStopProgramTool(sess)
 	ctx := context.Background()
 
-	res, err := stopTool.Execute(ctx, map[string]interface{}{
+	res := stopTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 		"signal": "SIGKILL",
 	})
-	if err != nil {
-		t.Fatalf("stop_program failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("stop_program failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	if resMap["signal"] != "SIGKILL" {
@@ -651,12 +651,12 @@ func TestWaitProgramTool_MissingJobID(t *testing.T) {
 	waitTool := NewWaitProgramTool(sess)
 	ctx := context.Background()
 
-	_, err := waitTool.Execute(ctx, map[string]interface{}{})
-	if err == nil {
+	result := waitTool.Execute(ctx, map[string]interface{}{})
+	if result.Error == "" {
 		t.Fatal("expected error for missing job_id, got nil")
 	}
-	if !strings.Contains(err.Error(), "required") {
-		t.Errorf("expected 'required' error, got: %v", err)
+	if !strings.Contains(result.Error, "required") {
+		t.Errorf("expected 'required' error, got: %s", result.Error)
 	}
 }
 
@@ -669,12 +669,12 @@ func TestStopProgramTool_MissingJobID(t *testing.T) {
 	stopTool := NewStopProgramTool(sess)
 	ctx := context.Background()
 
-	_, err := stopTool.Execute(ctx, map[string]interface{}{})
-	if err == nil {
+	result := stopTool.Execute(ctx, map[string]interface{}{})
+	if result.Error == "" {
 		t.Fatal("expected error for missing job_id, got nil")
 	}
-	if !strings.Contains(err.Error(), "required") {
-		t.Errorf("expected 'required' error, got: %v", err)
+	if !strings.Contains(result.Error, "required") {
+		t.Errorf("expected 'required' error, got: %s", result.Error)
 	}
 }
 
@@ -702,14 +702,14 @@ func main() {
 }`
 
 	start := time.Now()
-	res, err := sandboxTool.Execute(ctx, map[string]interface{}{
+	res := sandboxTool.Execute(ctx, map[string]interface{}{
 		"code":    code,
 		"timeout": 2, // 2 second timeout
 	})
 	elapsed := time.Since(start)
 
-	if err != nil {
-		t.Fatalf("sandbox execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("sandbox execute failed: %s", res.Error)
 	}
 
 	// Should complete within reasonable time (not wait full 30 seconds)
@@ -717,9 +717,9 @@ func main() {
 		t.Errorf("timeout took too long: %v (expected ~2 seconds)", elapsed)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	// Log the full result for debugging
@@ -787,18 +787,18 @@ func main() {
 }`
 
 	// Start in background with short timeout
-	res, err := sandboxTool.Execute(ctx, map[string]interface{}{
+	res := sandboxTool.Execute(ctx, map[string]interface{}{
 		"code":       code,
 		"timeout":    2, // 2 second timeout
 		"background": true,
 	})
-	if err != nil {
-		t.Fatalf("sandbox execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("sandbox execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	jobID, ok := resMap["job_id"].(string)
@@ -812,13 +812,13 @@ func main() {
 	defer cancel()
 
 	start := time.Now()
-	waitRes, err := waitTool.Execute(waitCtx, map[string]interface{}{
+	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{
 		"job_id": jobID,
 	})
 	elapsed := time.Since(start)
 
-	if err != nil {
-		t.Fatalf("wait_program failed: %v", err)
+	if waitRes.Error != "" {
+		t.Fatalf("wait_program failed: %s", waitRes.Error)
 	}
 
 	// Should complete within reasonable time (not full 30 seconds)
@@ -826,9 +826,9 @@ func main() {
 		t.Errorf("wait took too long: %v (expected ~2-5 seconds)", elapsed)
 	}
 
-	waitMap, ok := waitRes.(map[string]interface{})
+	waitMap, ok := waitRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", waitRes)
+		t.Fatalf("expected map result, got %T", waitRes.Result)
 	}
 
 	// Check job completed
@@ -871,18 +871,18 @@ func main() {
 }`
 
 	// Start in background with short timeout
-	res, err := sandboxTool.Execute(ctx, map[string]interface{}{
+	res := sandboxTool.Execute(ctx, map[string]interface{}{
 		"code":       code,
 		"timeout":    2,
 		"background": true,
 	})
-	if err != nil {
-		t.Fatalf("sandbox execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("sandbox execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	jobID, ok := resMap["job_id"].(string)
@@ -895,16 +895,16 @@ func main() {
 
 	// Check status
 	statusTool := NewStatusProgramTool(sess)
-	statusRes, err := statusTool.Execute(ctx, map[string]interface{}{
+	statusRes := statusTool.Execute(ctx, map[string]interface{}{
 		"job_id": jobID,
 	})
-	if err != nil {
-		t.Fatalf("status_program failed: %v", err)
+	if statusRes.Error != "" {
+		t.Fatalf("status_program failed: %s", statusRes.Error)
 	}
 
-	statusMap, ok := statusRes.(map[string]interface{})
+	statusMap, ok := statusRes.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", statusRes)
+		t.Fatalf("expected map result, got %T", statusRes.Result)
 	}
 
 	// Job should be completed due to timeout
@@ -952,17 +952,17 @@ func main() {
 	fmt.Println("Quick execution")
 }`
 
-	res, err := sandboxTool.Execute(ctx, map[string]interface{}{
+	res := sandboxTool.Execute(ctx, map[string]interface{}{
 		"code":    code,
 		"timeout": 30, // Plenty of time
 	})
-	if err != nil {
-		t.Fatalf("sandbox execute failed: %v", err)
+	if res.Error != "" {
+		t.Fatalf("sandbox execute failed: %s", res.Error)
 	}
 
-	resMap, ok := res.(map[string]interface{})
+	resMap, ok := res.Result.(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected map result, got %T", res)
+		t.Fatalf("expected map result, got %T", res.Result)
 	}
 
 	// Should NOT timeout

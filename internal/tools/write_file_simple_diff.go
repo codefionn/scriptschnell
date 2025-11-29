@@ -100,50 +100,50 @@ Example update diff 2:
 	}
 }
 
-func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return &ToolResult{Error: "path is required"}
 	}
 
 	diffText, ok := params["diff"].(string)
 	if !ok || diffText == "" {
-		return nil, fmt.Errorf("diff is required")
+		return &ToolResult{Error: "diff is required"}
 	}
 
 	logger.Debug("write_file_diff(simple): path=%s", path)
 
 	if t.fs == nil {
-		return nil, fmt.Errorf("file system is not configured")
+		return &ToolResult{Error: "file system is not configured"}
 	}
 
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
 		logger.Error("write_file_diff(simple): error checking if file exists: %v", err)
-		return nil, fmt.Errorf("error checking file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 
 	if !exists {
-		return nil, fmt.Errorf("cannot apply diff to non-existent file: %s (use create_file instead)", path)
+		return &ToolResult{Error: fmt.Sprintf("cannot apply diff to non-existent file: %s (use create_file instead)", path)}
 	}
 
 	if t.session != nil && !t.session.WasFileRead(path) {
-		return nil, fmt.Errorf("file %s was not read in this session; read it before applying a diff", path)
+		return &ToolResult{Error: fmt.Sprintf("file %s was not read in this session; read it before applying a diff", path)}
 	}
 
 	currentData, err := t.fs.ReadFile(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("error reading current file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error reading current file: %v", err)}
 	}
 
 	finalContent, err := applySimpleDiff(string(currentData), diffText)
 	if err != nil {
-		return nil, fmt.Errorf("error applying diff: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error applying diff: %v", err)}
 	}
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
 		logger.Error("write_file_diff(simple): error writing file: %v", err)
-		return nil, fmt.Errorf("error writing file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 	}
 
 	if t.session != nil {
@@ -152,11 +152,14 @@ func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string
 
 	logger.Info("write_file_diff(simple): updated %s (%d bytes)", path, len(finalContent))
 
-	return map[string]interface{}{
-		"path":          path,
-		"bytes_written": len(finalContent),
-		"updated":       true,
-	}, nil
+	return &ToolResult{
+		Result: map[string]interface{}{
+			"path":          path,
+			"bytes_written": len(finalContent),
+			"updated":       true,
+		},
+		UIResult: generateGitDiff(path, string(currentData), finalContent),
+	}
 }
 
 func applySimpleDiff(original, diffText string) (string, error) {

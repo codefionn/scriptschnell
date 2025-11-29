@@ -66,42 +66,46 @@ func (t *ToolSummarizeTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *ToolSummarizeTool) Execute(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (t *ToolSummarizeTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	// Extract parameters
 	toolName := GetStringParam(args, "tool_name", "")
 	if toolName == "" {
-		return nil, fmt.Errorf("tool_name is required")
+		return &ToolResult{Error: "tool_name is required"}
 	}
 
 	toolArgs, ok := args["tool_args"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("tool_args must be an object")
+		return &ToolResult{Error: "tool_args must be an object"}
 	}
 
 	summaryGoal := GetStringParam(args, "summary_goal", "")
 	if summaryGoal == "" {
-		return nil, fmt.Errorf("summary_goal is required")
+		return &ToolResult{Error: "summary_goal is required"}
 	}
 
 	// Get the tool from registry
 	tool, ok := t.registry.Get(toolName)
 	if !ok {
-		return nil, fmt.Errorf("tool not found: %s", toolName)
+		return &ToolResult{Error: fmt.Sprintf("tool not found: %s", toolName)}
 	}
 
 	// Execute the tool
-	result, err := tool.Execute(ctx, toolArgs)
-	if err != nil {
-		return nil, fmt.Errorf("tool execution failed: %w", err)
+	result := tool.Execute(ctx, toolArgs)
+	if result == nil {
+		return &ToolResult{Error: "tool returned nil result"}
+	}
+
+	if result.Error != "" {
+		return &ToolResult{Error: fmt.Sprintf("tool execution failed: %s", result.Error)}
 	}
 
 	// Convert result to string for summarization
-	resultStr := fmt.Sprintf("%v", result)
+	resultStr := fmt.Sprintf("%v", result.Result)
 
 	// Check if summarization client is available
 	if t.summarizeClient == nil {
 		// If no summarization client, just return the raw result
-		return fmt.Sprintf("Tool output (no summarization available):\n\n%s", resultStr), nil
+		return &ToolResult{Result: fmt.Sprintf("Tool output (no summarization available):\n\n%s", resultStr)}
 	}
 
 	// Build summarization prompt
@@ -125,10 +129,10 @@ Based on the user's goal, extract and return ONLY the relevant information. Be c
 	summary, err := t.summarizeClient.Complete(ctx, prompt)
 	if err != nil {
 		// If summarization fails, return raw result with error note
-		return fmt.Sprintf("Note: Summarization failed (%v)\n\nRaw tool output:\n%s", err, resultStr), nil
+		return &ToolResult{Result: fmt.Sprintf("Note: Summarization failed (%v)\n\nRaw tool output:\n%s", err, resultStr)}
 	}
 
-	return summary, nil
+	return &ToolResult{Result: summary}
 }
 
 // formatArgs formats tool arguments for display

@@ -49,30 +49,30 @@ func (t *SummarizeFileTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *SummarizeFileTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *SummarizeFileTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return &ToolResult{Error: fmt.Sprintf("path is required")}
 	}
 
 	goal := GetStringParam(params, "goal", "")
 	if goal == "" {
-		return nil, fmt.Errorf("goal is required")
+		return &ToolResult{Error: fmt.Sprintf("goal is required")}
 	}
 
 	// Check if file exists
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("error checking file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 	if !exists {
-		return nil, fmt.Errorf("file not found: %s", path)
+		return &ToolResult{Error: fmt.Sprintf("file not found: %s", path)}
 	}
 
 	// Read file
 	data, err := t.fs.ReadFile(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("error reading file: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
 	}
 
 	content := string(data)
@@ -89,7 +89,7 @@ Provide a concise summary focusing on the specified goal.`, goal, path, content)
 	// Call summarize LLM
 	response, err := t.summarizeClient.Complete(ctx, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("error generating summary: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("error generating summary: %v", err)}
 	}
 
 	// Track file as read in session
@@ -97,9 +97,9 @@ Provide a concise summary focusing on the specified goal.`, goal, path, content)
 		t.session.TrackFileRead(path, content)
 	}
 
-	return map[string]interface{}{
+	return &ToolResult{Result: map[string]interface{}{
 		"path":    path,
 		"goal":    goal,
 		"summary": response,
-	}, nil
+	}}
 }

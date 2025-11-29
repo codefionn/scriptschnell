@@ -56,10 +56,10 @@ func (t *SearchFileContentTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	pattern := GetStringParam(params, "pattern", "")
 	if pattern == "" {
-		return nil, fmt.Errorf("pattern is required")
+		return &ToolResult{Error: fmt.Sprintf("pattern is required")}
 	}
 
 	searchPath := GetStringParam(params, "path", ".")
@@ -68,7 +68,7 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+		return &ToolResult{Error: fmt.Sprintf("invalid regex pattern: %v", err)}
 	}
 
 	var results strings.Builder
@@ -179,14 +179,14 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 	})
 
 	if err != nil {
-		return nil, err
+		return &ToolResult{Error: err.Error()}
 	}
 
 	if matchCount == 0 {
-		return "No matches found.", nil
+		return &ToolResult{Result: "No matches found."}
 	}
 
-	return results.String(), nil
+	return &ToolResult{Result: results.String()}
 }
 
 // walkDir is a helper to walk directory, similar to SearchFilesTool

@@ -339,11 +339,11 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	// Extract parameters
 	code := GetStringParam(params, "code", "")
 	if code == "" {
-		return nil, fmt.Errorf("code is required")
+		return &ToolResult{Error: "code is required"}
 	}
 
 	logger.Debug("go_sandbox code:\n%s", code)
@@ -368,11 +368,19 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 	background := GetBoolParam(params, "background", false)
 
 	if background {
-		return t.executeBackground(ctx, code, timeout, libraries)
+		result, err := t.executeBackground(ctx, code, timeout, libraries)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
 	}
 
 	// Use builder to execute
-	return t.executeWithBuilder(ctx, code, timeout, libraries)
+	result, err := t.executeWithBuilder(ctx, code, timeout, libraries)
+	if err != nil {
+		return &ToolResult{Error: err.Error()}
+	}
+	return &ToolResult{Result: result}
 }
 
 // executeWithBuilder uses the SandboxBuilder to execute code

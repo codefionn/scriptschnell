@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
@@ -30,53 +31,73 @@ func NewACPFileSystem(conn *acp.AgentSideConnection, sessionID string, workingDi
 	}
 }
 
-// isOutsideCodebase determines if a file path is outside the working directory (codebase)
-func (afs *ACPFileSystem) isOutsideCodebase(path string) bool {
-	// If it's an absolute path, check if it starts with working directory
-	if strings.HasPrefix(path, "/") {
-		return !strings.HasPrefix(path, afs.workingDir+"/") && path != afs.workingDir
+func (afs *ACPFileSystem) resolvePath(path string) (string, bool, error) {
+	if path == "" {
+		return "", false, fmt.Errorf("invalid path: empty")
 	}
 
-	// For relative paths, check if they try to go outside the working directory
-	// using ".." to escape the working directory
-	if strings.Contains(path, "..") {
-		logger.Debug("ACP FS: rejecting path %s outside codebase", path)
-		return true
+	originalPath := path
+
+	if !filepath.IsAbs(path) {
+		if afs.workingDir == "" {
+			return "", false, fmt.Errorf("path must be absolute (got %q) and no working directory set to resolve", path)
+		}
+		path = filepath.Join(afs.workingDir, path)
 	}
 
-	return false
+	path = filepath.Clean(path)
+	workingDir := filepath.Clean(afs.workingDir)
+
+	// Normalize to absolute paths
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to resolve absolute path for %q: %w", originalPath, err)
+	}
+	path = absPath
+
+	if workingDir != "" {
+		absWD, err := filepath.Abs(workingDir)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to resolve absolute working directory %q: %w", workingDir, err)
+		}
+		workingDir = absWD
+	}
+
+	// If the resolved path escapes the working directory, fall back to the local filesystem
+	if workingDir != "" && path != workingDir && !strings.HasPrefix(path, workingDir+string(os.PathSeparator)) {
+		logger.Debug("ACP FS: path %s is outside codebase, using fallback filesystem", originalPath)
+		return path, true, nil
+	}
+
+	return path, false, nil
 }
 
 // ReadFile implements fs.FileSystem using client's readTextFile
 func (afs *ACPFileSystem) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	logger.Debug("ACP FS: Reading file %s", path)
 
-	// Normalize path to ensure it's relative
-	originalPath := path
-	path = strings.TrimPrefix(path, "/")
-	if path == "" {
-		return nil, fmt.Errorf("invalid path: empty")
+	resolvedPath, useFallback, err := afs.resolvePath(path)
+	if err != nil {
+		return nil, err
 	}
 
-	// Check if file is outside codebase and fallback to normal filesystem
-	if afs.isOutsideCodebase(originalPath) {
-		logger.Debug("ACP FS: File %s is outside codebase, using fallback filesystem", originalPath)
-		return afs.fallbackFS.ReadFile(ctx, originalPath)
+	if useFallback {
+		return afs.fallbackFS.ReadFile(ctx, resolvedPath)
 	}
 
-	logger.Debug("ACP FS: requesting ReadTextFile via ACP (session=%s path=%s)", afs.sessionID, path)
+	logger.Debug("ACP FS: requesting ReadTextFile via ACP (session=%s path=%s)", afs.sessionID, resolvedPath)
 	// Use the client's filesystem protocol
 	result, err := afs.conn.ReadTextFile(ctx, acp.ReadTextFileRequest{
 		SessionId: acp.SessionId(afs.sessionID),
-		Path:      path,
+		Path:      resolvedPath,
 	})
 
 	if err != nil {
-		logger.Error("ACP FS: Error reading file %s: %v", path, err)
-		return nil, fmt.Errorf("failed to read file %s via ACP: %w", path, err)
+		logger.Error("ACP FS: Error reading file %s: %v", resolvedPath, err)
+		return nil, fmt.Errorf("failed to read file %s via ACP: %w", resolvedPath, err)
 	}
 
-	logger.Debug("ACP FS: Successfully read %d bytes from %s", len(result.Content), path)
+	logger.Debug("ACP FS: Successfully read %d bytes from %s", len(result.Content), resolvedPath)
 	return []byte(result.Content), nil
 }
 
@@ -113,35 +134,31 @@ func (afs *ACPFileSystem) ReadFileLines(ctx context.Context, path string, from, 
 func (afs *ACPFileSystem) WriteFile(ctx context.Context, path string, data []byte) error {
 	logger.Debug("ACP FS: Writing file %s (%d bytes)", path, len(data))
 
-	// Normalize path to ensure it's relative
-	originalPath := path
-	path = strings.TrimPrefix(path, "/")
-	if path == "" {
-		return fmt.Errorf("invalid path: empty")
+	resolvedPath, useFallback, err := afs.resolvePath(path)
+	if err != nil {
+		return err
 	}
 
-	// Check if file is outside codebase and fallback to normal filesystem
-	if afs.isOutsideCodebase(originalPath) {
-		logger.Debug("ACP FS: File %s is outside codebase, using fallback filesystem", originalPath)
-		return afs.fallbackFS.WriteFile(ctx, originalPath, data)
+	if useFallback {
+		return afs.fallbackFS.WriteFile(ctx, resolvedPath, data)
 	}
 
-	logger.Debug("ACP FS: requesting WriteTextFile via ACP (session=%s path=%s bytes=%d)", afs.sessionID, path, len(data))
+	logger.Debug("ACP FS: requesting WriteTextFile via ACP (session=%s path=%s bytes=%d)", afs.sessionID, resolvedPath, len(data))
 	content := string(data)
 
 	// Use the client's filesystem protocol
-	_, err := afs.conn.WriteTextFile(ctx, acp.WriteTextFileRequest{
+	_, err = afs.conn.WriteTextFile(ctx, acp.WriteTextFileRequest{
 		SessionId: acp.SessionId(afs.sessionID),
-		Path:      path,
+		Path:      resolvedPath,
 		Content:   content,
 	})
 
 	if err != nil {
-		logger.Error("ACP FS: Error writing file %s: %v", path, err)
-		return fmt.Errorf("failed to write file %s via ACP: %w", path, err)
+		logger.Error("ACP FS: Error writing file %s: %v", resolvedPath, err)
+		return fmt.Errorf("failed to write file %s via ACP: %w", resolvedPath, err)
 	}
 
-	logger.Debug("ACP FS: Successfully wrote file %s", path)
+	logger.Debug("ACP FS: Successfully wrote file %s", resolvedPath)
 	return nil
 }
 
@@ -152,10 +169,14 @@ func (afs *ACPFileSystem) Stat(ctx context.Context, path string) (*fs.FileInfo, 
 
 // ListDir implements fs.FileSystem - limited implementation for ACP
 func (afs *ACPFileSystem) ListDir(ctx context.Context, path string) ([]*fs.FileInfo, error) {
-	// Check if file is outside codebase and fallback to normal filesystem
-	if afs.isOutsideCodebase(path) {
+	resolvedPath, useFallback, err := afs.resolvePath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if useFallback {
 		logger.Debug("ACP FS: ListDir for %s is outside codebase, using fallback filesystem", path)
-		return afs.fallbackFS.ListDir(ctx, path)
+		return afs.fallbackFS.ListDir(ctx, resolvedPath)
 	}
 
 	// The ACP filesystem protocol doesn't have a direct directory listing method

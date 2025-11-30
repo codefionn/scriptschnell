@@ -125,114 +125,43 @@ func (a *ACPTodoActor) Receive(ctx context.Context, msg actor.Message) error {
 	switch m := msg.(type) {
 	case ACPTodoListMsg:
 		logger.Debug("ACPTodoActor[%s]: received list request", a.name)
-		a.mu.RLock()
-		// Create a copy of the todo list to avoid concurrent access issues
-		items := make([]*TodoItem, len(a.todos.Items))
-		copy(items, a.todos.Items)
-		a.mu.RUnlock()
+		return a.handleList(m.ResponseChan)
 
-		m.ResponseChan <- &TodoList{Items: items}
-		return nil
+	case TodoListMsg:
+		logger.Debug("ACPTodoActor[%s]: received legacy list request", a.name)
+		return a.handleList(m.ResponseChan)
 
 	case ACPTodoAddMsg:
 		logger.Debug("ACPTodoActor[%s]: add todo text=%q parent=%s", a.name, m.Text, m.ParentID)
-		a.mu.Lock()
+		return a.handleAdd(m.Text, m.Timestamp, m.ParentID, m.Priority, m.ResponseChan)
 
-		// Validate parent exists if parentID is provided
-		if m.ParentID != "" {
-			parentExists := false
-			for _, item := range a.todos.Items {
-				if item.ID == m.ParentID {
-					parentExists = true
-					break
-				}
-			}
-			if !parentExists {
-				a.mu.Unlock()
-				m.ResponseChan <- nil
-				return fmt.Errorf("parent todo not found: %s", m.ParentID)
-			}
-		}
-
-		id := nextTodoID(a.todos)
-		item := &TodoItem{
-			ID:        id,
-			Text:      m.Text,
-			Completed: false,
-			Created:   m.Timestamp,
-			ParentID:  m.ParentID,
-		}
-		a.todos.Items = append(a.todos.Items, item)
-		a.mu.Unlock()
-
-		logger.Debug("ACPTodoActor[%s]: added todo id=%s", a.name, id)
-		// Send plan update via ACP if connection is available
-		a.sendPlanUpdate()
-
-		m.ResponseChan <- item
-		return nil
+	case TodoAddMsg:
+		logger.Debug("ACPTodoActor[%s]: add todo text=%q parent=%s (legacy)", a.name, m.Text, m.ParentID)
+		return a.handleAdd(m.Text, m.Timestamp, m.ParentID, "", m.ResponseChan)
 
 	case ACPTodoCheckMsg:
 		logger.Debug("ACPTodoActor[%s]: check todo id=%s checked=%t", a.name, m.ID, m.Checked)
-		a.mu.Lock()
-		defer a.mu.Unlock()
+		return a.handleCheck(m.ID, m.Checked, m.ResponseChan)
 
-		for _, item := range a.todos.Items {
-			if item.ID == m.ID {
-				item.Completed = m.Checked
-				// Send plan update via ACP if connection is available
-				a.sendPlanUpdate()
-				m.ResponseChan <- nil
-				return nil
-			}
-		}
-
-		logger.Warn("ACPTodoActor[%s]: check failed, todo not found: %s", a.name, m.ID)
-		m.ResponseChan <- fmt.Errorf("todo not found: %s", m.ID)
-		return nil
+	case TodoCheckMsg:
+		logger.Debug("ACPTodoActor[%s]: check todo id=%s checked=%t (legacy)", a.name, m.ID, m.Checked)
+		return a.handleCheck(m.ID, m.Checked, m.ResponseChan)
 
 	case ACPTodoDeleteMsg:
 		logger.Debug("ACPTodoActor[%s]: delete todo id=%s", a.name, m.ID)
-		a.mu.Lock()
-		defer a.mu.Unlock()
+		return a.handleDelete(m.ID, m.ResponseChan)
 
-		// Find the todo to delete
-		found := false
-		for i, item := range a.todos.Items {
-			if item.ID == m.ID {
-				found = true
-				// Remove the todo
-				a.todos.Items = append(a.todos.Items[:i], a.todos.Items[i+1:]...)
-				break
-			}
-		}
-
-		if !found {
-			logger.Warn("ACPTodoActor[%s]: delete failed, todo not found: %s", a.name, m.ID)
-			m.ResponseChan <- fmt.Errorf("todo not found: %s", m.ID)
-			return nil
-		}
-
-		// Recursively delete all sub-todos
-		a.deleteSubTodosRecursive(m.ID)
-
-		// Send plan update via ACP if connection is available
-		a.sendPlanUpdate()
-
-		m.ResponseChan <- nil
-		return nil
+	case TodoDeleteMsg:
+		logger.Debug("ACPTodoActor[%s]: delete todo id=%s (legacy)", a.name, m.ID)
+		return a.handleDelete(m.ID, m.ResponseChan)
 
 	case ACPTodoClearMsg:
 		logger.Debug("ACPTodoActor[%s]: clear all todos", a.name)
-		a.mu.Lock()
-		a.todos = &TodoList{Items: make([]*TodoItem, 0)}
-		a.mu.Unlock()
+		return a.handleClear(m.ResponseChan)
 
-		// Send plan update via ACP if connection is available
-		a.sendPlanUpdate()
-
-		m.ResponseChan <- nil
-		return nil
+	case TodoClearMsg:
+		logger.Debug("ACPTodoActor[%s]: clear all todos (legacy)", a.name)
+		return a.handleClear(m.ResponseChan)
 
 	case ACPTodoSetConnectionMsg:
 		logger.Debug("ACPTodoActor[%s]: setting ACP connection session=%s", a.name, m.SessionID)
@@ -250,6 +179,132 @@ func (a *ACPTodoActor) Receive(ctx context.Context, msg actor.Message) error {
 	default:
 		return fmt.Errorf("unknown message type: %T", msg)
 	}
+}
+
+func (a *ACPTodoActor) handleList(resp chan<- *TodoList) error {
+	if resp == nil {
+		return fmt.Errorf("response channel is nil")
+	}
+
+	a.mu.RLock()
+	items := make([]*TodoItem, len(a.todos.Items))
+	copy(items, a.todos.Items)
+	a.mu.RUnlock()
+
+	resp <- &TodoList{Items: items}
+	return nil
+}
+
+func (a *ACPTodoActor) handleAdd(text, timestamp, parentID, priority string, resp chan<- *TodoItem) error {
+	if resp == nil {
+		return fmt.Errorf("response channel is nil")
+	}
+
+	a.mu.Lock()
+
+	if parentID != "" {
+		parentExists := false
+		for _, item := range a.todos.Items {
+			if item.ID == parentID {
+				parentExists = true
+				break
+			}
+		}
+		if !parentExists {
+			a.mu.Unlock()
+			resp <- nil
+			return fmt.Errorf("parent todo not found: %s", parentID)
+		}
+	}
+
+	id := nextTodoID(a.todos)
+	item := &TodoItem{
+		ID:        id,
+		Text:      text,
+		Completed: false,
+		Created:   timestamp,
+		ParentID:  parentID,
+	}
+	a.todos.Items = append(a.todos.Items, item)
+	a.mu.Unlock()
+
+	logger.Debug("ACPTodoActor[%s]: added todo id=%s", a.name, id)
+	a.sendPlanUpdate()
+
+	resp <- item
+	return nil
+}
+
+func (a *ACPTodoActor) handleCheck(id string, checked bool, resp chan<- error) error {
+	if resp == nil {
+		return fmt.Errorf("response channel is nil")
+	}
+
+	a.mu.Lock()
+	found := false
+	for _, item := range a.todos.Items {
+		if item.ID == id {
+			item.Completed = checked
+			found = true
+			break
+		}
+	}
+	a.mu.Unlock()
+
+	if !found {
+		logger.Warn("ACPTodoActor[%s]: check failed, todo not found: %s", a.name, id)
+		resp <- fmt.Errorf("todo not found: %s", id)
+		return nil
+	}
+
+	a.sendPlanUpdate()
+	resp <- nil
+	return nil
+}
+
+func (a *ACPTodoActor) handleDelete(id string, resp chan<- error) error {
+	if resp == nil {
+		return fmt.Errorf("response channel is nil")
+	}
+
+	a.mu.Lock()
+	found := false
+	for i, item := range a.todos.Items {
+		if item.ID == id {
+			found = true
+			a.todos.Items = append(a.todos.Items[:i], a.todos.Items[i+1:]...)
+			break
+		}
+	}
+
+	if found {
+		a.deleteSubTodosRecursive(id)
+	}
+	a.mu.Unlock()
+
+	if !found {
+		logger.Warn("ACPTodoActor[%s]: delete failed, todo not found: %s", a.name, id)
+		resp <- fmt.Errorf("todo not found: %s", id)
+		return nil
+	}
+
+	a.sendPlanUpdate()
+	resp <- nil
+	return nil
+}
+
+func (a *ACPTodoActor) handleClear(resp chan<- error) error {
+	if resp == nil {
+		return fmt.Errorf("response channel is nil")
+	}
+
+	a.mu.Lock()
+	a.todos = &TodoList{Items: make([]*TodoItem, 0)}
+	a.mu.Unlock()
+
+	a.sendPlanUpdate()
+	resp <- nil
+	return nil
 }
 
 // deleteSubTodosRecursive deletes all sub-todos of the given parent ID recursively

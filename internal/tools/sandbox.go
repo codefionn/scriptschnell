@@ -165,7 +165,8 @@ func (t *SandboxTool) Name() string {
 
 func (t *SandboxTool) Description() string {
 	var b strings.Builder
-	b.WriteString("Execute Go code in a strongly sandboxed WebAssembly environment. Standard library packages available. Timeout enforced.\n")
+	b.WriteString("Execute Go code in a strongly sandboxed WebAssembly environment. ")
+	b.WriteString("Standard library packages available (try to not use the `os` package instead, but methods provided below). Timeout enforced.\n")
 	b.WriteString("Every program **must** declare `package main`, define `func main()`, and print results (e.g., via `fmt.Println`) so the orchestrator receives the output.\n\n")
 	b.WriteString("Seven custom functions are automatically available in your code:\n\n")
 

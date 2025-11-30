@@ -978,7 +978,23 @@ func (o *Orchestrator) processToolCalls(
 	toolCallCb ToolCallCallback,
 	toolResultCb ToolResultCallback,
 ) error {
-	for _, toolCall := range toolCalls {
+	type toolCallResult struct {
+		idx      int
+		message  *session.Message
+		toolName string
+		toolID   string
+		uiResult string
+		errorMsg string
+		metadata *tools.ExecutionMetadata
+	}
+
+	var (
+		wg      sync.WaitGroup
+		results = make([]*toolCallResult, len(toolCalls))
+		authMu  sync.Mutex // serialize user auth prompts to avoid overlapping requests
+	)
+
+	for i, toolCall := range toolCalls {
 		toolID, _ := toolCall["id"].(string)
 		toolType, _ := toolCall["type"].(string)
 
@@ -1005,11 +1021,18 @@ func (o *Orchestrator) processToolCalls(
 		// Parse arguments
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			sess.AddMessage(&session.Message{
-				Role:    "tool",
-				Content: fmt.Sprintf("Error parsing tool arguments: %v", err),
-				ToolID:  toolID,
-			})
+			results[i] = &toolCallResult{
+				idx: i,
+				message: &session.Message{
+					Role:    "tool",
+					Content: fmt.Sprintf("Error parsing tool arguments: %v", err),
+					ToolID:  toolID,
+				},
+				toolName: toolName,
+				toolID:   toolID,
+				uiResult: fmt.Sprintf("Error parsing tool arguments: %v", err),
+				errorMsg: fmt.Sprintf("Error parsing tool arguments: %v", err),
+			}
 			continue
 		}
 
@@ -1026,134 +1049,159 @@ func (o *Orchestrator) processToolCalls(
 			}
 		}
 
-		// Execute the tool and capture the result, using ACP support if available
-		var result *tools.ToolResult
-		var execErr error
+		wg.Add(1)
+		go func(idx int, toolName, toolID string, args map[string]interface{}, callObj *tools.ToolCall) {
+			defer wg.Done()
 
-		if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
-			// Use enhanced ACP-aware execution
-			result, execErr = acpExec.ExecuteWithACPSupport(ctx, toolCallObj, toolName, statusCb, toolCallCb, toolResultCb)
-		} else {
-			// Use standard execution
-			result, execErr = executor.Execute(ctx, toolCallObj, toolName, statusCb)
-		}
-		if execErr != nil {
-			result = &tools.ToolResult{
-				ID:    toolID,
-				Error: execErr.Error(),
+			// Execute the tool and capture the result, using ACP support if available
+			var result *tools.ToolResult
+			var execErr error
+
+			if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
+				// Use enhanced ACP-aware execution
+				result, execErr = acpExec.ExecuteWithACPSupport(ctx, callObj, toolName, statusCb, toolCallCb, toolResultCb)
+			} else {
+				// Use standard execution
+				result, execErr = executor.Execute(ctx, callObj, toolName, statusCb)
 			}
-		}
+			if execErr != nil {
+				result = &tools.ToolResult{
+					ID:    toolID,
+					Error: execErr.Error(),
+				}
+			}
 
-		// Check if authorization is required
-		if result.RequiresUserInput {
-			// Ask user for approval
-			approved := false
-			if authCb != nil {
-				var err error
-				suggestedPrefix := result.SuggestedCommandPrefix
-				approved, err = authCb(toolName, args, result.AuthReason)
-				if err != nil {
-					result = &tools.ToolResult{
-						ID:    toolID,
-						Error: fmt.Sprintf("Authorization error: %v", err),
-					}
-				} else if approved {
-					if suggestedPrefix != "" {
-						sess.AuthorizeCommand(suggestedPrefix)
-						logger.Info("Authorized command prefix for session: %q", suggestedPrefix)
-						if o.config != nil && !o.config.IsCommandAuthorized(suggestedPrefix) {
-							o.config.AuthorizeCommand(suggestedPrefix)
-							if err := o.config.Save(config.GetConfigPath()); err != nil {
-								logger.Warn("Failed to persist authorized command prefix %q: %v", suggestedPrefix, err)
-							} else {
-								logger.Info("Persisted authorized command prefix %q to config", suggestedPrefix)
-							}
-						}
-					}
-
-					if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
-						// Use enhanced ACP-aware execution with approval
-						result, execErr = acpExec.ExecuteWithACPSupportAndApproval(ctx, toolCallObj, toolName, statusCb, toolCallCb, toolResultCb)
-					} else {
-						// Use standard execution with approval
-						result, execErr = executor.ExecuteWithApproval(ctx, toolCallObj, toolName, statusCb)
-					}
-					if execErr != nil {
+			// Check if authorization is required
+			if result.RequiresUserInput {
+				// Ask user for approval
+				approved := false
+				if authCb != nil {
+					var err error
+					suggestedPrefix := result.SuggestedCommandPrefix
+					authMu.Lock()
+					approved, err = authCb(toolName, args, result.AuthReason)
+					authMu.Unlock()
+					if err != nil {
 						result = &tools.ToolResult{
 							ID:    toolID,
-							Error: execErr.Error(),
+							Error: fmt.Sprintf("Authorization error: %v", err),
+						}
+					} else if approved {
+						if suggestedPrefix != "" {
+							sess.AuthorizeCommand(suggestedPrefix)
+							logger.Info("Authorized command prefix for session: %q", suggestedPrefix)
+							if o.config != nil && !o.config.IsCommandAuthorized(suggestedPrefix) {
+								o.config.AuthorizeCommand(suggestedPrefix)
+								if err := o.config.Save(config.GetConfigPath()); err != nil {
+									logger.Warn("Failed to persist authorized command prefix %q: %v", suggestedPrefix, err)
+								} else {
+									logger.Info("Persisted authorized command prefix %q to config", suggestedPrefix)
+								}
+							}
+						}
+
+						if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
+							// Use enhanced ACP-aware execution with approval
+							result, execErr = acpExec.ExecuteWithACPSupportAndApproval(ctx, callObj, toolName, statusCb, toolCallCb, toolResultCb)
+						} else {
+							// Use standard execution with approval
+							result, execErr = executor.ExecuteWithApproval(ctx, callObj, toolName, statusCb)
+						}
+						if execErr != nil {
+							result = &tools.ToolResult{
+								ID:    toolID,
+								Error: execErr.Error(),
+							}
+						}
+					} else {
+						// User denied
+						result = &tools.ToolResult{
+							ID:    toolID,
+							Error: "Operation denied by user",
 						}
 					}
 				} else {
-					// User denied
+					// No callback provided, deny by default
 					result = &tools.ToolResult{
 						ID:    toolID,
-						Error: "Operation denied by user",
+						Error: "Authorization required but no approval mechanism available",
 					}
-				}
-			} else {
-				// No callback provided, deny by default
-				result = &tools.ToolResult{
-					ID:    toolID,
-					Error: "Authorization required but no approval mechanism available",
 				}
 			}
-		}
 
-		// Format result as string for LLM and UI
-		var toolResult string // For LLM
-		var uiResult string   // For UI display
-		var executionMetadata *tools.ExecutionMetadata
+			// Format result as string for LLM and UI
+			var toolResult string // For LLM
+			var uiResult string   // For UI display
+			var executionMetadata *tools.ExecutionMetadata
 
-		if result.Error != "" {
-			toolResult = fmt.Sprintf("Error: %s", result.Error)
-			uiResult = toolResult
-		} else {
-			// Extract execution metadata if present
-			if resultMap, ok := result.Result.(map[string]interface{}); ok {
-				if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
-					if metadataObj, ok := metadata.(*tools.ExecutionMetadata); ok {
-						executionMetadata = metadataObj
+			if result.Error != "" {
+				toolResult = fmt.Sprintf("Error: %s", result.Error)
+				uiResult = toolResult
+			} else {
+				// Extract execution metadata if present
+				if resultMap, ok := result.Result.(map[string]interface{}); ok {
+					if metadata, hasMetadata := resultMap["_execution_metadata"]; hasMetadata {
+						if metadataObj, ok := metadata.(*tools.ExecutionMetadata); ok {
+							executionMetadata = metadataObj
+						}
 					}
-				}
 
-				if jsonBytes, err := json.Marshal(resultMap); err == nil {
-					toolResult = string(jsonBytes)
+					if jsonBytes, err := json.Marshal(resultMap); err == nil {
+						toolResult = string(jsonBytes)
+					} else {
+						toolResult = fmt.Sprintf("%v", result.Result)
+					}
 				} else {
 					toolResult = fmt.Sprintf("%v", result.Result)
 				}
-			} else {
-				toolResult = fmt.Sprintf("%v", result.Result)
+
+				// Use UIResult for UI if available, otherwise use the same result as LLM
+				if result.UIResult != nil {
+					if uiStr, ok := result.UIResult.(string); ok {
+						uiResult = uiStr
+					} else {
+						uiResult = fmt.Sprintf("%v", result.UIResult)
+					}
+				} else {
+					uiResult = toolResult
+				}
 			}
 
-			// Use UIResult for UI if available, otherwise use the same result as LLM
-			if result.UIResult != nil {
-				if uiStr, ok := result.UIResult.(string); ok {
-					uiResult = uiStr
-				} else {
-					uiResult = fmt.Sprintf("%v", result.UIResult)
-				}
-			} else {
-				uiResult = toolResult
+			results[idx] = &toolCallResult{
+				idx: idx,
+				message: &session.Message{
+					Role:     "tool",
+					Content:  toolResult,
+					ToolID:   toolID,
+					ToolName: toolName,
+				},
+				toolName: toolName,
+				toolID:   toolID,
+				uiResult: uiResult,
+				errorMsg: result.Error,
+				metadata: executionMetadata,
 			}
+		}(i, toolName, toolID, args, toolCallObj)
+	}
+
+	wg.Wait()
+
+	for _, res := range results {
+		if res == nil {
+			continue
 		}
 
 		// Notify UI about tool result (using UI-specific format)
 		if toolResultCb != nil {
-			// Create enhanced callback that includes metadata
-			if err := o.enhancedToolResultCallback(toolResultCb, toolName, toolID, uiResult, result.Error, executionMetadata); err != nil {
+			if err := o.enhancedToolResultCallback(toolResultCb, res.toolName, res.toolID, res.uiResult, res.errorMsg, res.metadata); err != nil {
 				logger.Warn("Failed to send tool result message: %v", err)
 			}
 		}
 
 		// Add tool result to session (using LLM format)
-		sess.AddMessage(&session.Message{
-			Role:     "tool",
-			Content:  toolResult,
-			ToolID:   toolID,
-			ToolName: toolName,
-		})
+		sess.AddMessage(res.message)
 	}
+
 	return nil
 }
 

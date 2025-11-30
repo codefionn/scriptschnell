@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/statcode-ai/statcode-ai/internal/acp"
 	"github.com/statcode-ai/statcode-ai/internal/cli"
 	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
@@ -20,7 +21,10 @@ import (
 	"golang.org/x/term"
 )
 
-var ErrQuitRequested = errors.New("quit requested")
+var (
+	ErrQuitRequested = errors.New("quit requested")
+	errACPMode       = errors.New("ACP mode requested")
+)
 
 type stringSlice []string
 
@@ -60,6 +64,10 @@ func run() (err error) {
 	if parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			return nil
+		}
+		if errors.Is(parseErr, errACPMode) {
+			// Handle ACP mode separately
+			return runACPMode()
 		}
 		return parseErr
 	}
@@ -221,6 +229,60 @@ func promptForPassword(prompt string) (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
+func runACPMode() error {
+	fmt.Fprintf(os.Stderr, "Starting StatCode AI in Agent Client Protocol (ACP) mode...\n")
+
+	// Load configuration
+	cfg, err := config.Load(config.GetConfigPath())
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Override logging from environment if set
+	if envLevel := strings.TrimSpace(os.Getenv("STATCODE_LOG_LEVEL")); envLevel != "" {
+		cfg.LogLevel = envLevel
+	}
+	if envPath := strings.TrimSpace(os.Getenv("STATCODE_LOG_PATH")); envPath != "" {
+		cfg.LogPath = envPath
+	}
+
+	// Initialize logger
+	logLevel := logger.ParseLevel(cfg.LogLevel)
+	if initErr := logger.Init(logLevel, cfg.LogPath); initErr != nil {
+		return fmt.Errorf("failed to initialize logger: %w", initErr)
+	}
+	defer func() {
+		if closeErr := logger.Global().Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close logger: %v\n", closeErr)
+		}
+	}()
+
+	logger.Info("StatCode AI starting in ACP mode")
+
+	// Ensure temp directory exists
+	if err := os.MkdirAll(cfg.TempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	// Load provider manager (without password for ACP mode)
+	secretsPassword, err := ensureSecretsPassword(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to unlock API keys: %w", err)
+	}
+
+	providerMgr, err := provider.NewManager(cfg.ProviderConfigPath, secretsPassword)
+	if err != nil {
+		return fmt.Errorf("failed to initialize provider manager: %w", err)
+	}
+
+	// Refresh models from APIs
+	ctx := context.Background()
+	providerMgr.RefreshAllModels(ctx)
+
+	// Run the ACP agent
+	return acp.RunACPAgent(ctx, cfg, providerMgr)
+}
+
 func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs := flag.NewFlagSet("statcode-ai", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -234,6 +296,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		showHelp     bool
 		model        string
 		provider     string
+		acpMode      bool
 	)
 
 	fs.BoolVar(&dangerous, "dangerous-allow-all", false, "Bypass all authorization checks (dangerous)")
@@ -243,6 +306,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs.Var(&allowDomains, "allow-domain", "Pre-authorize network access to a domain (repeatable)")
 	fs.StringVar(&model, "model", "", "Model to use (e.g., gpt-5, claude-sonnet-4.5, gemini-2.5-pro)")
 	fs.StringVar(&provider, "provider", "", "Provider name (e.g., openai, anthropic, google)")
+	fs.BoolVar(&acpMode, "acp", false, "Run in Agent Client Protocol (ACP) mode for integration with code editors")
 	fs.BoolVar(&showHelp, "help", false, "Show CLI usage information")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0])
@@ -264,6 +328,19 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 
 	remaining := fs.Args()
 	optionsUsed := dangerous || allowNetwork || len(allowDirs) > 0 || len(allowFiles) > 0 || len(allowDomains) > 0
+
+	// Handle ACP mode
+	if acpMode {
+		if len(remaining) > 0 {
+			return "", nil, false, fmt.Errorf("ACP mode does not accept prompt arguments")
+		}
+		if optionsUsed {
+			return "", nil, false, fmt.Errorf("authorization flags are not supported in ACP mode")
+		}
+		// Return special values to indicate ACP mode
+		return "", nil, false, errACPMode
+	}
+
 	if len(remaining) == 0 {
 		if optionsUsed {
 			return "", nil, false, fmt.Errorf("authorization flags require a prompt in CLI mode")

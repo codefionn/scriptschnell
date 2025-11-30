@@ -49,6 +49,7 @@ type Orchestrator struct {
 	compactionInProgress  bool
 	cliMode               bool
 	todoClient            *tools.TodoActorClient
+	todoActor             tools.TodoActorInterface
 	todoActorCancel       context.CancelFunc
 	currentStatusCb       StatusCallback
 	statusCbMu            sync.Mutex
@@ -58,6 +59,8 @@ type Orchestrator struct {
 	errorJudgeCancel      context.CancelFunc
 	toolExecutor          *tools.ToolExecutorActorClient
 	toolExecutorCancel    context.CancelFunc
+	shellActorClient      *actor.ShellActorClient
+	shellActorCancel      context.CancelFunc
 	activeShellMu         sync.Mutex
 	activeShellChan       chan struct{}
 	loopDetector          *LoopDetector
@@ -79,16 +82,36 @@ const (
 )
 
 func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode bool) (*Orchestrator, error) {
+	return NewOrchestratorWithFS(cfg, providerMgr, cliMode, nil)
+}
+
+// NewOrchestratorWithTodoActor creates a new orchestrator with a custom todo actor
+func NewOrchestratorWithTodoActor(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, customTodoActor tools.TodoActorInterface) (*Orchestrator, error) {
+	return NewOrchestratorWithFSAndTodoActor(cfg, providerMgr, cliMode, nil, customTodoActor)
+}
+
+func NewOrchestratorWithFS(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, customFS fs.FileSystem) (*Orchestrator, error) {
+	return NewOrchestratorWithFSAndTodoActor(cfg, providerMgr, cliMode, customFS, nil)
+}
+
+// NewOrchestratorWithFSAndTodoActor creates a new orchestrator with custom filesystem and todo actor
+func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, customFS fs.FileSystem, customTodoActor tools.TodoActorInterface) (*Orchestrator, error) {
 	logger.Debug("Creating new orchestrator with working_dir=%s, cliMode=%v", cfg.WorkingDir, cliMode)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create filesystem
-	filesystem := fs.NewCachedFS(
-		cfg.WorkingDir,
-		time.Duration(cfg.CacheTTL)*time.Second,
-		cfg.MaxCacheEntries,
-	)
-	logger.Debug("Filesystem initialized with cache_ttl=%ds", cfg.CacheTTL)
+	// Create filesystem (use custom if provided, otherwise create default)
+	var filesystem fs.FileSystem
+	if customFS != nil {
+		filesystem = customFS
+		logger.Debug("Using custom filesystem")
+	} else {
+		filesystem = fs.NewCachedFS(
+			cfg.WorkingDir,
+			time.Duration(cfg.CacheTTL)*time.Second,
+			cfg.MaxCacheEntries,
+		)
+		logger.Debug("Filesystem initialized with cache_ttl=%ds", cfg.CacheTTL)
+	}
 
 	// Create session
 	sess := session.NewSession("main", cfg.WorkingDir)
@@ -150,7 +173,14 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 
 	// Set up todo actor
 	todoCtx, todoCancel := context.WithCancel(context.Background())
-	todoActor := tools.NewTodoActor("todo")
+	var todoActor actor.Actor
+	if customTodoActor != nil {
+		todoActor = customTodoActor
+		logger.Debug("Using custom todo actor")
+	} else {
+		todoActor = tools.NewTodoActor("todo")
+		logger.Debug("Using default todo actor")
+	}
 	todoRef, err := orch.actorSystem.Spawn(todoCtx, "todo", todoActor, 16)
 	if err != nil {
 		todoCancel()
@@ -161,7 +191,29 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 	}
 	logger.Debug("Todo actor spawned")
 	orch.todoClient = tools.NewTodoActorClient(todoRef)
+	if customTodoActor != nil {
+		orch.todoActor = customTodoActor
+	} else {
+		// Cast the default todo actor to the interface
+		orch.todoActor = todoActor.(tools.TodoActorInterface)
+	}
 	orch.todoActorCancel = todoCancel
+
+	// Set up shell actor for shell execution
+	shellCtx, shellCancel := context.WithCancel(context.Background())
+	shellActor := actor.NewShellActor("shell", sess)
+	shellRef, err := orch.actorSystem.Spawn(shellCtx, "shell", shellActor, 64)
+	if err != nil {
+		shellCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start shell actor: %v", err)
+		return nil, fmt.Errorf("failed to start shell actor: %w", err)
+	}
+	logger.Debug("Shell actor spawned")
+	orch.shellActorClient = actor.NewShellActorClient(shellRef)
+	orch.shellActorCancel = shellCancel
 
 	// Set up error judge actor with summarize client
 	errorJudgeCtx, errorJudgeCancel := context.WithCancel(context.Background())
@@ -330,9 +382,9 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(&tools.StopProgramToolSpec{}, true, tools.NewStopProgramToolFactory(o.session), false, "")
 
 	// Sandbox tool with TinyGo status forwarding - needs custom factory for configuration
-	sandboxSpec, _ := tools.WrapLegacyTool(tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session))
+	sandboxSpec, _ := tools.WrapLegacyTool(tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session, o.shellActorClient))
 	sandboxFactory := func(_ *tools.Registry) tools.ToolExecutor {
-		instance := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
+		instance := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session, o.shellActorClient)
 		o.configureSandboxTool(instance)
 		return instance
 	}
@@ -909,6 +961,13 @@ type toolExecutor interface {
 	ExecuteWithApproval(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error)
 }
 
+// acpToolExecutor extends toolExecutor with ACP callback support
+type acpToolExecutor interface {
+	toolExecutor
+	ExecuteWithACPSupport(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*tools.ToolResult, error)
+	ExecuteWithACPSupportAndApproval(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*tools.ToolResult, error)
+}
+
 func (o *Orchestrator) processToolCalls(
 	ctx context.Context,
 	toolCalls []map[string]interface{},
@@ -967,7 +1026,17 @@ func (o *Orchestrator) processToolCalls(
 			}
 		}
 
-		result, execErr := executor.Execute(ctx, toolCallObj, toolName, statusCb)
+		// Execute the tool and capture the result, using ACP support if available
+		var result *tools.ToolResult
+		var execErr error
+
+		if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
+			// Use enhanced ACP-aware execution
+			result, execErr = acpExec.ExecuteWithACPSupport(ctx, toolCallObj, toolName, statusCb, toolCallCb, toolResultCb)
+		} else {
+			// Use standard execution
+			result, execErr = executor.Execute(ctx, toolCallObj, toolName, statusCb)
+		}
 		if execErr != nil {
 			result = &tools.ToolResult{
 				ID:    toolID,
@@ -1002,7 +1071,13 @@ func (o *Orchestrator) processToolCalls(
 						}
 					}
 
-					result, execErr = executor.ExecuteWithApproval(ctx, toolCallObj, toolName, statusCb)
+					if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
+						// Use enhanced ACP-aware execution with approval
+						result, execErr = acpExec.ExecuteWithACPSupportAndApproval(ctx, toolCallObj, toolName, statusCb, toolCallCb, toolResultCb)
+					} else {
+						// Use standard execution with approval
+						result, execErr = executor.ExecuteWithApproval(ctx, toolCallObj, toolName, statusCb)
+					}
 					if execErr != nil {
 						result = &tools.ToolResult{
 							ID:    toolID,
@@ -1769,6 +1844,11 @@ func (o *Orchestrator) GetCurrentModel() string {
 // GetTodoClient returns the TodoActorClient for UI access
 func (o *Orchestrator) GetTodoClient() *tools.TodoActorClient {
 	return o.todoClient
+}
+
+// GetTodoActor returns the TodoActorInterface for ACP access
+func (o *Orchestrator) GetTodoActor() tools.TodoActorInterface {
+	return o.todoActor
 }
 
 // UpdateModels updates the LLM clients

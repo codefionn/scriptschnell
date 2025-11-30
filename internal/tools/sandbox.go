@@ -27,6 +27,16 @@ import (
 	"github.com/tetratelabs/wazero/sys"
 )
 
+// ShellExecutor is an interface for executing shell commands
+// This allows the sandbox to use either direct execution or actor-based execution
+type ShellExecutor interface {
+	// ExecuteCommand executes a shell command and returns stdout, stderr, and exit code
+	ExecuteCommand(ctx context.Context, command string, workingDir string, timeout time.Duration, stdin string) (stdout string, stderr string, exitCode int, err error)
+}
+
+// Note: The actor.ShellActor interface already matches this signature perfectly,
+// so we can use it directly as a ShellExecutor without needing an adapter
+
 // SandboxTool executes Go code in a sandboxed WebAssembly environment
 type SandboxTool struct {
 	workingDir      string
@@ -36,6 +46,7 @@ type SandboxTool struct {
 	authorizer      Authorizer
 	tinygoManager   *TinyGoManager
 	summarizeClient llm.Client
+	shellExecutor   ShellExecutor
 }
 
 type sandboxCall struct {
@@ -110,7 +121,7 @@ func NewSandboxTool(workingDir, tempDir string) *SandboxTool {
 }
 
 // NewSandboxToolWithFS creates a sandbox with filesystem and session support
-func NewSandboxToolWithFS(workingDir, tempDir string, filesystem fs.FileSystem, sess *session.Session) *SandboxTool {
+func NewSandboxToolWithFS(workingDir, tempDir string, filesystem fs.FileSystem, sess *session.Session, shellExecutor ShellExecutor) *SandboxTool {
 	tinygoMgr, err := NewTinyGoManager()
 	if err != nil {
 		// Log error - TinyGo is required for WASI compilation
@@ -124,6 +135,7 @@ func NewSandboxToolWithFS(workingDir, tempDir string, filesystem fs.FileSystem, 
 		filesystem:    filesystem,
 		session:       sess,
 		tinygoManager: tinygoMgr,
+		shellExecutor: shellExecutor,
 	}
 }
 
@@ -135,6 +147,11 @@ func (t *SandboxTool) SetAuthorizer(auth Authorizer) {
 // SetSummarizeClient sets the summarization LLM client
 func (t *SandboxTool) SetSummarizeClient(client llm.Client) {
 	t.summarizeClient = client
+}
+
+// SetShellExecutor sets the shell executor for command execution
+func (t *SandboxTool) SetShellExecutor(executor ShellExecutor) {
+	t.shellExecutor = executor
 }
 
 // GetTinyGoManager returns the TinyGo manager instance (can be nil)
@@ -718,35 +735,49 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 
 			callTracker.record("shell", commandDisplay)
 
-			// Execute the command with timeout
-			cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
+			// Execute the command using the shell executor
+			var stdoutStr, stderrStr string
+			var exitCode int
+			var err error
 
-			cmd := exec.CommandContext(cmdCtx, commandArgs[0], commandArgs[1:]...)
+			if t.shellExecutor != nil {
+				// Use the shell executor (actor-based)
+				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandDisplay, "", 30*time.Second, string(stdinData))
+			} else {
+				// Fallback to direct execution if no executor is set
+				cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
 
-			// Set stdin if provided
-			if len(stdinData) > 0 {
-				cmd.Stdin = bytes.NewReader(stdinData)
-			}
+				cmd := exec.CommandContext(cmdCtx, commandArgs[0], commandArgs[1:]...)
 
-			// Capture stdout and stderr
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-
-			// Execute command
-			err := cmd.Run()
-			exitCode := 0
-			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok {
-					exitCode = exitErr.ExitCode()
-				} else {
-					exitCode = 1
+				// Set stdin if provided
+				if len(stdinData) > 0 {
+					cmd.Stdin = bytes.NewReader(stdinData)
 				}
+
+				// Capture stdout and stderr
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout = &stdout
+				cmd.Stderr = &stderr
+
+				// Execute command
+				err = cmd.Run()
+				if err != nil {
+					if exitErr, ok := err.(*exec.ExitError); ok {
+						exitCode = exitErr.ExitCode()
+					} else {
+						exitCode = 1
+					}
+				} else {
+					exitCode = 0
+				}
+
+				stdoutStr = stdout.String()
+				stderrStr = stderr.String()
 			}
 
 			// Write stdout to WASM memory
-			stdoutBytes := stdout.Bytes()
+			stdoutBytes := []byte(stdoutStr)
 			if uint32(len(stdoutBytes)) > stdoutCap {
 				stdoutBytes = stdoutBytes[:stdoutCap]
 			}
@@ -755,7 +786,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			}
 
 			// Write stderr to WASM memory
-			stderrBytes := stderr.Bytes()
+			stderrBytes := []byte(stderrStr)
 			if uint32(len(stderrBytes)) > stderrCap {
 				stderrBytes = stderrBytes[:stderrCap]
 			}

@@ -70,12 +70,16 @@ func getTinyGoCacheDir() (string, error) {
 
 	switch runtime.GOOS {
 	case "linux":
-		// On Linux, use ~/.cache/statcode-ai/tinygo
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
+		// Prefer XDG cache home, fall back to ~/.cache
+		cacheHome := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME"))
+		if cacheHome == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			cacheHome = filepath.Join(homeDir, ".cache")
 		}
-		baseDir = filepath.Join(homeDir, ".cache", "statcode-ai", "tinygo")
+		baseDir = filepath.Join(cacheHome, "statcode-ai", "tinygo")
 	case "darwin":
 		// On macOS, use ~/Library/Caches/statcode-ai/tinygo
 		homeDir, err := os.UserHomeDir()
@@ -85,7 +89,7 @@ func getTinyGoCacheDir() (string, error) {
 		baseDir = filepath.Join(homeDir, "Library", "Caches", "statcode-ai", "tinygo")
 	case "windows":
 		// On Windows, use %LOCALAPPDATA%\statcode-ai\tinygo
-		localAppData := os.Getenv("LOCALAPPDATA")
+		localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
 		if localAppData == "" {
 			homeDir, err := os.UserHomeDir()
 			if err != nil {

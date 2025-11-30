@@ -17,6 +17,9 @@ go test ./... -short
 # Run in CLI mode (single-shot)
 ./statcode-ai "your prompt here"
 
+# Run in Agent Client Protocol (ACP) mode for code editor integration
+./statcode-ai --acp
+
 # Install globally
 go install ./cmd/statcode-ai
 ```
@@ -127,7 +130,7 @@ Available tools:
     - Downloads TinyGo compiler on first use (no system Go installation required)
     - **TinyGo is REQUIRED** - standard Go only supports WASI P1, we need WASI P2
     - Platform-specific cache directories:
-      - Linux: `~/.cache/statcode-ai/tinygo/`
+      - Linux: `$XDG_CACHE_HOME/statcode-ai/tinygo/` (or `~/.cache/statcode-ai/tinygo/`)
       - macOS: `~/Library/Caches/statcode-ai/tinygo/`
       - Windows: `%LOCALAPPDATA%\statcode-ai\tinygo\`
     - Cache persists across sessions for faster compilation
@@ -205,7 +208,10 @@ Available tools:
 
 ### Configuration
 
-Configuration files stored in `~/.config/statcode-ai/`:
+Configuration files stored in platform-specific locations:
+
+- Linux: `~/.config/statcode-ai/`
+- Windows: `%APPDATA%\\statcode-ai\\`
 
 - **config.json**: Application settings (working_dir, cache_ttl_seconds, temperature, log_level, log_path)
   - **Note**: `max_tokens` is deprecated and automatically retrieved from model metadata via `GetModelMaxOutputTokens()`
@@ -221,7 +227,7 @@ The application includes a comprehensive logging system ([internal/logger/logger
 
 - **Log Levels**: debug, info, warn, error, none
 - **Configuration**: Set `log_level` and `log_path` in config.json
-- **Default**: INFO level, logs to `~/.config/statcode-ai/statcode-ai.log`
+- **Default**: INFO level; on Linux logs to `$XDG_STATE_HOME/statcode-ai/statcode-ai.log` (or `~/.local/state/statcode-ai/statcode-ai.log`), on Windows to `%LOCALAPPDATA%\\statcode-ai\\statcode-ai.log` (or `~/AppData/Local/statcode-ai/statcode-ai.log`), and on other platforms to `~/.config/statcode-ai/statcode-ai.log`
 - **Features**:
   - Timestamp and level for each log entry
   - Component-specific prefixes via `WithPrefix()`

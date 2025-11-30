@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.17.0
+	github.com/coder/acp-go-sdk v0.6.3
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -36,6 +37,7 @@ require (
 	github.com/charmbracelet/x/exp/slice v0.0.0-20251020183722-ee4914f58d13 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/coder/acp-go-sdk v0.6.3 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

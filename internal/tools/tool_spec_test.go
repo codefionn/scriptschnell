@@ -8,7 +8,7 @@ import (
 // Test types defined at package level
 type testToolSpec struct{}
 
-func (s *testToolSpec) Name() string { return "test_tool" }
+func (s *testToolSpec) Name() string        { return "test_tool" }
 func (s *testToolSpec) Description() string { return "A test tool" }
 func (s *testToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
@@ -40,7 +40,7 @@ func (e *testToolExecutor) Execute(ctx context.Context, params map[string]interf
 // Legacy tool type for testing backward compatibility
 type legacyTestTool struct{}
 
-func (t *legacyTestTool) Name() string { return "legacy_tool" }
+func (t *legacyTestTool) Name() string        { return "legacy_tool" }
 func (t *legacyTestTool) Description() string { return "Legacy tool" }
 func (t *legacyTestTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{

@@ -34,10 +34,10 @@ line 5
 	mockFS.WriteFile(ctx, "bin.dat", []byte{0, 1, 2, 3})
 
 	tests := []struct {
-		name          string
-		params        map[string]interface{}
-		wantContains  []string
-		wantErr       bool
+		name         string
+		params       map[string]interface{}
+		wantContains []string
+		wantErr      bool
 	}{
 		{
 			name: "Basic match",

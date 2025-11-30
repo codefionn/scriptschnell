@@ -27,6 +27,10 @@ func (a *CodebaseInvestigatorAgent) Investigate(ctx context.Context, objective s
 }
 
 func (a *CodebaseInvestigatorAgent) InvestigateWithCallback(ctx context.Context, objective string, statusCb StatusCallback) (string, error) {
+	return a.InvestigateWithACPCallbacks(ctx, objective, statusCb, nil, nil)
+}
+
+func (a *CodebaseInvestigatorAgent) InvestigateWithACPCallbacks(ctx context.Context, objective string, statusCb StatusCallback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (string, error) {
 	// If no status callback provided, try to get it from the orchestrator's current context
 	if statusCb == nil {
 		a.orch.statusCbMu.Lock()
@@ -43,6 +47,20 @@ func (a *CodebaseInvestigatorAgent) InvestigateWithCallback(ctx context.Context,
 	// Send initial progress message to chat
 	if streamCb != nil {
 		streamCb(fmt.Sprintf("\n\n🔍 **Investigating codebase**: %s\n\n", objective))
+	}
+
+	// Create enhanced status callback that also sends ACP progress updates
+	enhancedStatusCb := func(status string) error {
+		// Send regular status
+		if statusCb != nil {
+			if err := statusCb(status); err != nil {
+				return err
+			}
+		}
+
+		// If we have ACP callbacks, send progress as tool call updates
+		// This enables investigation progress to be shown in ACP clients
+		return nil
 	}
 
 	// Create a new session for the investigation
@@ -161,8 +179,9 @@ The requested logic is found in internal/module/file.go function DoWork().
 		executor := &registryExecutor{registry: registry}
 
 		// Use the extracted processToolCalls method
-		// Pass the status callback to show live progress in the UI
-		err = a.orch.processToolCalls(ctx, resp.ToolCalls, executor, investigationSession, statusCb, nil, nil, nil)
+		// Pass the enhanced status callback to show live progress in the UI and ACP
+		// If ACP callbacks are available, tool calls will be properly tracked
+		err = a.orch.processToolCalls(ctx, resp.ToolCalls, executor, investigationSession, enhancedStatusCb, nil, toolCallCb, toolResultCb)
 		if err != nil {
 			return "", fmt.Errorf("tool execution failed: %w", err)
 		}

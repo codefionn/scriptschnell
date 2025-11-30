@@ -62,17 +62,18 @@ import (
 //	The builder accumulates errors during configuration. Once an error occurs,
 //	subsequent method calls are no-ops. Check the error in Execute() or Validate().
 type SandboxBuilder struct {
-	code         string           // Go source code to execute
-	libraries    []string         // External Go module dependencies
-	timeout      int              // Execution timeout in seconds (1-120)
-	workingDir   string           // Working directory for the sandbox
-	tempDir      string           // Temporary directory for compilation
-	filesystem   fs.FileSystem    // Filesystem for controlled file access
-	session      *session.Session // Session for tracking read/write operations
-	authorizer   Authorizer       // Authorization actor for network/command checks
-	allowDomains []string         // Pre-authorized domains (bypass LLM checks)
-	allowAll     bool             // Allow all network access (dangerous)
-	err          error            // Accumulated validation errors
+	code          string           // Go source code to execute
+	libraries     []string         // External Go module dependencies
+	timeout       int              // Execution timeout in seconds (1-120)
+	workingDir    string           // Working directory for the sandbox
+	tempDir       string           // Temporary directory for compilation
+	filesystem    fs.FileSystem    // Filesystem for controlled file access
+	session       *session.Session // Session for tracking read/write operations
+	authorizer    Authorizer       // Authorization actor for network/command checks
+	allowDomains  []string         // Pre-authorized domains (bypass LLM checks)
+	allowAll      bool             // Allow all network access (dangerous)
+	shellExecutor ShellExecutor    // Shell executor for command execution
+	err           error            // Accumulated validation errors
 }
 
 // NewSandboxBuilder creates a new sandbox builder with sensible defaults.
@@ -393,6 +394,15 @@ func (b *SandboxBuilder) SetSession(sess *session.Session) *SandboxBuilder {
 	return b
 }
 
+// SetShellExecutor sets the shell executor for command execution in sandbox
+func (b *SandboxBuilder) SetShellExecutor(executor ShellExecutor) *SandboxBuilder {
+	if b.err != nil {
+		return b
+	}
+	b.shellExecutor = executor
+	return b
+}
+
 // SetAuthorization sets the authorization actor for network access control.
 //
 // The authorizer enables network access in sandboxed code with LLM-based
@@ -630,9 +640,12 @@ func (b *SandboxBuilder) Build() (*SandboxTool, error) {
 	// Create sandbox tool
 	var tool *SandboxTool
 	if b.filesystem != nil && b.session != nil {
-		tool = NewSandboxToolWithFS(b.workingDir, b.tempDir, b.filesystem, b.session)
+		tool = NewSandboxToolWithFS(b.workingDir, b.tempDir, b.filesystem, b.session, b.shellExecutor)
 	} else {
 		tool = NewSandboxTool(b.workingDir, b.tempDir)
+		if b.shellExecutor != nil {
+			tool.SetShellExecutor(b.shellExecutor)
+		}
 	}
 
 	// Set authorization if provided
@@ -700,15 +713,16 @@ func (b *SandboxBuilder) Reset() *SandboxBuilder {
 // Useful for creating variations of a base configuration
 func (b *SandboxBuilder) Clone() *SandboxBuilder {
 	clone := &SandboxBuilder{
-		code:       b.code,
-		timeout:    b.timeout,
-		workingDir: b.workingDir,
-		tempDir:    b.tempDir,
-		filesystem: b.filesystem,
-		session:    b.session,
-		authorizer: b.authorizer,
-		allowAll:   b.allowAll,
-		err:        b.err,
+		code:          b.code,
+		timeout:       b.timeout,
+		workingDir:    b.workingDir,
+		tempDir:       b.tempDir,
+		filesystem:    b.filesystem,
+		session:       b.session,
+		authorizer:    b.authorizer,
+		shellExecutor: b.shellExecutor,
+		allowAll:      b.allowAll,
+		err:           b.err,
 	}
 
 	// Deep copy slices

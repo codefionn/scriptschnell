@@ -14,6 +14,35 @@ On first run, it will download tinygo (if not in PATH).
 - Auto-continue for long-running sessions
 - Auto-compaction during generation for longer sessions
 - Two separate LLM models for orchestration and summarization
+- **Agent Client Protocol (ACP) support** for integration with code editors
+
+## Agent Client Protocol (ACP) Mode
+
+StatCode AI supports the [Agent Client Protocol](https://agentclientprotocol.com/), enabling seamless integration with code editors that support ACP. This allows you to use StatCode AI's capabilities directly within your preferred development environment.
+
+### Using ACP Mode
+
+```bash
+# Start StatCode AI in ACP mode
+./statcode-ai --acp
+
+# Or with go run
+go run ./cmd/statcode-ai --acp
+```
+
+When running in ACP mode, StatCode AI communicates via stdio using the ACP protocol, allowing code editors to:
+- Send prompts and receive streaming responses
+- Handle tool execution with permission requests
+- Manage sessions and context
+- Access all StatCode AI features including file operations, web search, and sandbox execution
+
+### ACP Features
+
+- **Streaming Responses**: Real-time text generation as the LLM processes your request
+- **Tool Integration**: All StatCode AI tools (file operations, shell commands, web search, etc.) are available via ACP
+- **Permission Management**: Secure control over sensitive operations through the client's authorization UI
+- **Session Management**: Persistent conversation context across multiple interactions
+- **Error Handling**: Comprehensive error reporting and recovery
 
 ## TODO
 
@@ -24,7 +53,7 @@ On first run, it will download tinygo (if not in PATH).
 - [ ] System prompt optimized for current codebase
 - [ ] Better `/init` command for generating AGENTS.md
 - [ ] Fix write diff
-- [ ] [agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol) for better editor integration
+- [x] [agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol) for better editor integration
 - [ ] Better UI experience for `parallel_tools` call
 - [ ] Encourage LLMs to use the `parallel_tools` call (only gemini seems to do this)
 - [ ] Limit the auto-continue judge so it doesn't get stuck in a loop
@@ -46,6 +75,8 @@ On first run, it will download tinygo (if not in PATH).
 - [ ] Use token usage response from provider if available
 - [ ] Output credit usage per session
 - [ ] Weird kimi k2 context window problems
+- [ ] Deadlock problem when model used invalid tool call (the session cannot continue)
+- [ ] Multi session support in the tui
 
 ## Goals
 

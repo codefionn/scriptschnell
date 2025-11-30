@@ -60,8 +60,10 @@ func NewSearchFileContentTool(filesystem fs.FileSystem) *SearchFileContentTool {
 }
 
 // Legacy interface implementation for backward compatibility
-func (t *SearchFileContentTool) Name() string        { return ToolNameSearchFileContent }
-func (t *SearchFileContentTool) Description() string { return (&SearchFileContentToolSpec{}).Description() }
+func (t *SearchFileContentTool) Name() string { return ToolNameSearchFileContent }
+func (t *SearchFileContentTool) Description() string {
+	return (&SearchFileContentToolSpec{}).Description()
+}
 func (t *SearchFileContentTool) Parameters() map[string]interface{} {
 	return (&SearchFileContentToolSpec{}).Parameters()
 }

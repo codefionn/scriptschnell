@@ -15,6 +15,12 @@ type InvestigatorWithCallback interface {
 	InvestigateWithCallback(ctx context.Context, objective string, statusCb func(string) error) (string, error)
 }
 
+// InvestigatorWithACPCallbacks is an extended investigator interface that supports ACP tool call callbacks
+type InvestigatorWithACPCallbacks interface {
+	Investigator
+	InvestigateWithACPCallbacks(ctx context.Context, objective string, statusCb func(string) error, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) (string, error)
+}
+
 // CodebaseInvestigatorToolSpec is the static specification for the codebase_investigator tool
 type CodebaseInvestigatorToolSpec struct{}
 
@@ -75,6 +81,41 @@ func (t *CodebaseInvestigatorTool) Execute(ctx context.Context, params map[strin
 		return &ToolResult{Error: "objective is required"}
 	}
 
+	result, err := t.investigator.Investigate(ctx, objective)
+	if err != nil {
+		return &ToolResult{Error: err.Error()}
+	}
+	return &ToolResult{Result: result}
+}
+
+// ExecuteWithACPSupport executes the investigation with ACP callback support
+func (t *CodebaseInvestigatorTool) ExecuteWithACPSupport(ctx context.Context, params map[string]interface{}, statusCb func(string) error, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) *ToolResult {
+	objective := GetStringParam(params, "objective", "")
+	if objective == "" {
+		return &ToolResult{Error: "objective is required"}
+	}
+
+	// Try to use the enhanced ACP callback interface if available
+	if investigatorWithACP, ok := t.investigator.(interface {
+		InvestigateWithACPCallbacks(ctx context.Context, objective string, statusCb func(string) error, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) (string, error)
+	}); ok {
+		result, err := investigatorWithACP.InvestigateWithACPCallbacks(ctx, objective, statusCb, toolCallCb, toolResultCb)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
+	}
+
+	// Fall back to callback interface if available
+	if investigatorWithCb, ok := t.investigator.(InvestigatorWithCallback); ok {
+		result, err := investigatorWithCb.InvestigateWithCallback(ctx, objective, statusCb)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
+	}
+
+	// Final fallback to basic interface
 	result, err := t.investigator.Investigate(ctx, objective)
 	if err != nil {
 		return &ToolResult{Error: err.Error()}

@@ -8,6 +8,12 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/actor"
 )
 
+// TodoActorInterface defines the interface for todo actors
+type TodoActorInterface interface {
+	actor.Actor
+	SendSetConnectionMsg(conn interface{}, sessionID string) error
+}
+
 // TodoMessage types for actor communication
 type (
 	// TodoListMsg requests the current list of todos
@@ -70,6 +76,12 @@ func (a *TodoActor) Start(ctx context.Context) error {
 
 // Stop stops the actor gracefully
 func (a *TodoActor) Stop(ctx context.Context) error {
+	return nil
+}
+
+// SendSetConnectionMsg is a no-op for the regular todo actor (ACP specific)
+func (a *TodoActor) SendSetConnectionMsg(conn interface{}, sessionID string) error {
+	// Regular todo actor doesn't support ACP connections
 	return nil
 }
 

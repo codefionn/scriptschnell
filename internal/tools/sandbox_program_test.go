@@ -180,7 +180,7 @@ func TestWaitProgramTool_SandboxCompletion(t *testing.T) {
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
 	sess := session.NewSession("test", workingDir)
-	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess)
+	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess, nil)
 
 	ctx := context.Background()
 
@@ -414,7 +414,7 @@ func TestStopProgramTool_SandboxJob(t *testing.T) {
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
 	sess := session.NewSession("test", workingDir)
-	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess)
+	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess, nil)
 
 	ctx := context.Background()
 
@@ -689,7 +689,7 @@ func TestIntegration_SandboxTimeout_Foreground(t *testing.T) {
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
 	sess := session.NewSession("test", workingDir)
-	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess)
+	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess, nil)
 
 	ctx := context.Background()
 
@@ -773,7 +773,7 @@ func TestIntegration_SandboxTimeout_Background(t *testing.T) {
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
 	sess := session.NewSession("test", workingDir)
-	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess)
+	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess, nil)
 
 	ctx := context.Background()
 
@@ -857,7 +857,7 @@ func TestIntegration_SandboxTimeout_StatusCheck(t *testing.T) {
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
 	sess := session.NewSession("test", workingDir)
-	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess)
+	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess, nil)
 
 	ctx := context.Background()
 
@@ -941,7 +941,7 @@ func TestIntegration_SandboxTimeout_QuickCompletion(t *testing.T) {
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
 	sess := session.NewSession("test", workingDir)
-	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess)
+	sandboxTool := NewSandboxToolWithFS(workingDir, tempDir, nil, sess, nil)
 
 	ctx := context.Background()
 

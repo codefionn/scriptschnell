@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/statcode-ai/statcode-ai/internal/secrets"
 )
@@ -107,10 +109,47 @@ type SecretsSettings struct {
 	Verifier    string `json:"verifier,omitempty"`
 }
 
+func defaultConfigDir() string {
+	switch runtime.GOOS {
+	case "linux":
+		homeDir, _ := os.UserHomeDir()
+		return filepath.Join(homeDir, ".config", "statcode-ai")
+	case "windows":
+		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+			return filepath.Join(appData, "statcode-ai")
+		}
+		homeDir, _ := os.UserHomeDir()
+		return filepath.Join(homeDir, "AppData", "Roaming", "statcode-ai")
+	default:
+		homeDir, _ := os.UserHomeDir()
+		return filepath.Join(homeDir, ".config", "statcode-ai")
+	}
+}
+
+func defaultStateDir() string {
+	switch runtime.GOOS {
+	case "linux":
+		if stateHome := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); stateHome != "" {
+			return filepath.Join(stateHome, "statcode-ai")
+		}
+		homeDir, _ := os.UserHomeDir()
+		return filepath.Join(homeDir, ".local", "state", "statcode-ai")
+	case "windows":
+		if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
+			return filepath.Join(localAppData, "statcode-ai")
+		}
+		homeDir, _ := os.UserHomeDir()
+		return filepath.Join(homeDir, "AppData", "Local", "statcode-ai")
+	default:
+		homeDir, _ := os.UserHomeDir()
+		return filepath.Join(homeDir, ".config", "statcode-ai")
+	}
+}
+
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
-	homeDir, _ := os.UserHomeDir()
-	configDir := filepath.Join(homeDir, ".config", "statcode-ai")
+	configDir := defaultConfigDir()
+	stateDir := defaultStateDir()
 
 	return &Config{
 		WorkingDir:         ".",
@@ -122,7 +161,7 @@ func DefaultConfig() *Config {
 		MaxTokens:          4096,
 		ProviderConfigPath: filepath.Join(configDir, "providers.json"),
 		LogLevel:           "info",
-		LogPath:            filepath.Join(configDir, "statcode-ai.log"),
+		LogPath:            filepath.Join(stateDir, "statcode-ai.log"),
 		AuthorizedDomains:  make(map[string]bool),
 		AuthorizedCommands: make(map[string]bool),
 		Search: SearchConfig{
@@ -164,8 +203,8 @@ func Load(path string) (*Config, error) {
 	if config.WorkingDir == "" {
 		config.WorkingDir = "."
 	}
-	homeDir, _ := os.UserHomeDir()
-	configDir := filepath.Join(homeDir, ".config", "statcode-ai")
+	configDir := defaultConfigDir()
+	stateDir := defaultStateDir()
 	if config.ProviderConfigPath == "" {
 		config.ProviderConfigPath = filepath.Join(configDir, "providers.json")
 	}
@@ -173,7 +212,7 @@ func Load(path string) (*Config, error) {
 		config.LogLevel = "info"
 	}
 	if config.LogPath == "" {
-		config.LogPath = filepath.Join(configDir, "statcode-ai.log")
+		config.LogPath = filepath.Join(stateDir, "statcode-ai.log")
 	}
 	if config.AuthorizedDomains == nil {
 		config.AuthorizedDomains = make(map[string]bool)
@@ -238,8 +277,7 @@ func (c *Config) Save(path string) error {
 
 // GetConfigPath returns the default config path
 func GetConfigPath() string {
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".config", "statcode-ai", "config.json")
+	return filepath.Join(defaultConfigDir(), "config.json")
 }
 
 // ApplySecretsPassword records the active password and decrypts any encrypted fields.

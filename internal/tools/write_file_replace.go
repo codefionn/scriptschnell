@@ -61,8 +61,10 @@ func NewWriteFileReplaceTool(filesystem fs.FileSystem, sess *session.Session) *W
 }
 
 // Legacy interface implementation for backward compatibility
-func (t *WriteFileReplaceTool) Name() string        { return ToolNameWriteFileDiff }
-func (t *WriteFileReplaceTool) Description() string { return (&WriteFileReplaceToolSpec{}).Description() }
+func (t *WriteFileReplaceTool) Name() string { return ToolNameWriteFileDiff }
+func (t *WriteFileReplaceTool) Description() string {
+	return (&WriteFileReplaceToolSpec{}).Description()
+}
 func (t *WriteFileReplaceTool) Parameters() map[string]interface{} {
 	return (&WriteFileReplaceToolSpec{}).Parameters()
 }

@@ -227,12 +227,19 @@ func (a *StatCodeAIAgent) handleStatusCommand(session *statcodeSession) string {
 
 // handleClearCommand handles the /clear command
 func (a *StatCodeAIAgent) handleClearCommand(session *statcodeSession) string {
-	logger.Debug("handleClearCommand[%s]: acknowledged", session.sessionID)
+	logger.Debug("handleClearCommand[%s]: clearing session", session.sessionID)
 
-	// In a real implementation, this would clear the session context
-	// For now, we'll just acknowledge the request
+	if session == nil || session.orchestrator == nil {
+		logger.Warn("handleClearCommand[%s]: session or orchestrator missing", session.sessionID)
+		return "⚠️ Unable to clear session: orchestrator not available."
+	}
 
-	response := "🧹 Conversation context cleared.\n\n"
+	if err := session.orchestrator.ClearSession(); err != nil {
+		logger.Warn("handleClearCommand[%s]: failed to clear session: %v", session.sessionID, err)
+		return fmt.Sprintf("⚠️ Failed to clear session: %v", err)
+	}
+
+	response := "🧹 Conversation context and todos cleared.\n\n"
 	response += "Ready for a fresh start! What would you like to work on?\n"
 
 	return response

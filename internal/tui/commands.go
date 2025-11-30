@@ -73,7 +73,7 @@ func getDefaultCommandDefinitions() []commandDefinition {
 		},
 		{
 			Name:        "/clear",
-			Description: "Clear conversation and start a new session",
+			Description: "Clear conversation, todos, and start a new session",
 			Suggestions: []string{"/clear"},
 			Handler:     (*CommandHandler).handleClear,
 		},

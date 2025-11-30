@@ -331,3 +331,43 @@ func TestTodoActorDeleteSubTodoOnly(t *testing.T) {
 		t.Error("Expected grandchild to be deleted")
 	}
 }
+
+func TestTodoActorClear(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	// Seed multiple todos (including nested)
+	parent, err := client.Add("Parent", "2024-01-01T00:00:00Z", "")
+	if err != nil {
+		t.Fatalf("Failed to add parent todo: %v", err)
+	}
+	if _, err = client.Add("Child", "2024-01-01T00:00:00Z", parent.ID); err != nil {
+		t.Fatalf("Failed to add child todo: %v", err)
+	}
+	if _, err = client.Add("Root", "2024-01-01T00:00:00Z", ""); err != nil {
+		t.Fatalf("Failed to add root todo: %v", err)
+	}
+
+	// Clear all todos
+	if err := client.Clear(); err != nil {
+		t.Fatalf("Failed to clear todos: %v", err)
+	}
+
+	list, err := client.List()
+	if err != nil {
+		t.Fatalf("Failed to list todos: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Fatalf("Expected 0 todos after clear, got %d", len(list.Items))
+	}
+}

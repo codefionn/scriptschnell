@@ -41,6 +41,11 @@ type (
 		ID           string
 		ResponseChan chan error
 	}
+
+	// TodoClearMsg clears all todos
+	TodoClearMsg struct {
+		ResponseChan chan error
+	}
 )
 
 // Implement actor.Message interface for all message types
@@ -48,6 +53,7 @@ func (m TodoListMsg) Type() string   { return "TodoListMsg" }
 func (m TodoAddMsg) Type() string    { return "TodoAddMsg" }
 func (m TodoCheckMsg) Type() string  { return "TodoCheckMsg" }
 func (m TodoDeleteMsg) Type() string { return "TodoDeleteMsg" }
+func (m TodoClearMsg) Type() string  { return "TodoClearMsg" }
 
 // TodoActor manages todo items as an actor
 type TodoActor struct {
@@ -172,6 +178,14 @@ func (a *TodoActor) Receive(ctx context.Context, msg actor.Message) error {
 		m.ResponseChan <- nil
 		return nil
 
+	case TodoClearMsg:
+		a.mu.Lock()
+		a.todos = &TodoList{Items: make([]*TodoItem, 0)}
+		a.mu.Unlock()
+
+		m.ResponseChan <- nil
+		return nil
+
 	default:
 		return fmt.Errorf("unknown message type: %T", msg)
 	}
@@ -262,6 +276,15 @@ func (c *TodoActorClient) Delete(id string) error {
 		ID:           id,
 		ResponseChan: respChan,
 	}); err != nil {
+		return err
+	}
+	return <-respChan
+}
+
+// Clear removes all todos
+func (c *TodoActorClient) Clear() error {
+	respChan := make(chan error, 1)
+	if err := c.actorRef.Send(TodoClearMsg{ResponseChan: respChan}); err != nil {
 		return err
 	}
 	return <-respChan

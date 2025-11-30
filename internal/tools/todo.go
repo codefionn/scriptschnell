@@ -37,8 +37,8 @@ func (s *TodoToolSpec) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "Action to perform: 'list', 'add', 'check', 'uncheck', 'delete'",
-				"enum":        []string{"list", "add", "check", "uncheck", "delete"},
+				"description": "Action to perform: 'list', 'add', 'check', 'uncheck', 'delete', 'clear'",
+				"enum":        []string{"list", "add", "check", "uncheck", "delete", "clear"},
 			},
 			"text": map[string]interface{}{
 				"type":        "string",
@@ -130,6 +130,13 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 		}
 		return &ToolResult{Result: result}
 
+	case "clear":
+		result, err := t.clearTodos()
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
+
 	default:
 		return &ToolResult{Error: fmt.Sprintf("unknown action: %s", action)}
 	}
@@ -193,6 +200,16 @@ func (t *TodoTool) deleteTodo(id string) (interface{}, error) {
 	return map[string]interface{}{
 		"id":      id,
 		"message": "Todo deleted successfully",
+	}, nil
+}
+
+func (t *TodoTool) clearTodos() (interface{}, error) {
+	if err := t.client.Clear(); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"message": "All todos cleared successfully",
 	}, nil
 }
 

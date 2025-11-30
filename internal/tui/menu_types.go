@@ -97,6 +97,6 @@ func NewSettingsMenuResult() MenuResult {
 func NewClearSessionResult() MenuResult {
 	return MenuResult{
 		Type:    MenuTypeClearSession,
-		Message: "Session cleared. Starting fresh conversation.",
+		Message: "Session and todos cleared. Starting fresh conversation.",
 	}
 }

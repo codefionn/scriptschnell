@@ -41,6 +41,11 @@ type (
 		ResponseChan chan error
 	}
 
+	// ACPTodoClearMsg clears all todos and sends plan update via ACP
+	ACPTodoClearMsg struct {
+		ResponseChan chan error
+	}
+
 	// ACPTodoSetConnectionMsg sets the ACP connection for plan updates
 	ACPTodoSetConnectionMsg struct {
 		Conn         *acp.AgentSideConnection
@@ -54,6 +59,7 @@ func (m ACPTodoListMsg) Type() string          { return "ACPTodoListMsg" }
 func (m ACPTodoAddMsg) Type() string           { return "ACPTodoAddMsg" }
 func (m ACPTodoCheckMsg) Type() string         { return "ACPTodoCheckMsg" }
 func (m ACPTodoDeleteMsg) Type() string        { return "ACPTodoDeleteMsg" }
+func (m ACPTodoClearMsg) Type() string         { return "ACPTodoClearMsg" }
 func (m ACPTodoSetConnectionMsg) Type() string { return "ACPTodoSetConnectionMsg" }
 
 // ACPTodoActor manages todo items as an actor with ACP agent plan support
@@ -209,6 +215,18 @@ func (a *ACPTodoActor) Receive(ctx context.Context, msg actor.Message) error {
 
 		// Recursively delete all sub-todos
 		a.deleteSubTodosRecursive(m.ID)
+
+		// Send plan update via ACP if connection is available
+		a.sendPlanUpdate()
+
+		m.ResponseChan <- nil
+		return nil
+
+	case ACPTodoClearMsg:
+		logger.Debug("ACPTodoActor[%s]: clear all todos", a.name)
+		a.mu.Lock()
+		a.todos = &TodoList{Items: make([]*TodoItem, 0)}
+		a.mu.Unlock()
 
 		// Send plan update via ACP if connection is available
 		a.sendPlanUpdate()
@@ -478,6 +496,15 @@ func (c *ACPTodoActorClient) Delete(id string) error {
 		ID:           id,
 		ResponseChan: respChan,
 	}); err != nil {
+		return err
+	}
+	return <-respChan
+}
+
+// Clear removes all todos and sends plan update
+func (c *ACPTodoActorClient) Clear() error {
+	respChan := make(chan error, 1)
+	if err := c.actorRef.Send(ACPTodoClearMsg{ResponseChan: respChan}); err != nil {
 		return err
 	}
 	return <-respChan

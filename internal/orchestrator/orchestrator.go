@@ -1997,8 +1997,15 @@ func (o *Orchestrator) GetWorkingDir() string {
 	return o.workingDir
 }
 
-// ClearSession clears the current session, removing all messages and file tracking
+// ClearSession clears the current session, removing all messages, file tracking, and todos
 func (o *Orchestrator) ClearSession() error {
 	o.session.Clear()
+
+	if o.todoClient != nil {
+		if err := o.todoClient.Clear(); err != nil {
+			return fmt.Errorf("failed to clear todos: %w", err)
+		}
+	}
+
 	return nil
 }

@@ -169,20 +169,7 @@ func (afs *ACPFileSystem) Stat(ctx context.Context, path string) (*fs.FileInfo, 
 
 // ListDir implements fs.FileSystem - limited implementation for ACP
 func (afs *ACPFileSystem) ListDir(ctx context.Context, path string) ([]*fs.FileInfo, error) {
-	resolvedPath, useFallback, err := afs.resolvePath(path)
-	if err != nil {
-		return nil, err
-	}
-
-	if useFallback {
-		logger.Debug("ACP FS: ListDir for %s is outside codebase, using fallback filesystem", path)
-		return afs.fallbackFS.ListDir(ctx, resolvedPath)
-	}
-
-	// The ACP filesystem protocol doesn't have a direct directory listing method
-	// This is a limitation - we would need to implement this via client-specific methods
-	// For now, return an error to indicate this operation is not supported
-	return nil, fmt.Errorf("directory listing not supported via ACP filesystem protocol")
+	return afs.fallbackFS.ListDir(ctx, path)
 }
 
 // Exists implements fs.FileSystem

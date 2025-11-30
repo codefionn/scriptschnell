@@ -87,12 +87,14 @@ func (a *CodebaseInvestigatorAgent) InvestigateWithACPCallbacks(ctx context.Cont
 	registry.Register(tools.NewParallelTool(registry))
 
 	// System prompt for investigator
-	systemPrompt := `You are a Codebase Investigator agent.
+	systemPrompt := `You are a Codebase Investigator agent.:
 Your goal is to explore the codebase to answer the user's objective.
 You have access to tools to search and read files.
 You should systematically explore relevant files.
 
 Use the parallel_tool to execute multiple tools (e.g. multiple search_files, search_file_content, read_file) concurrently.
+
+Exit early (e.g. 5 tool calls) if you have not sufficient information to answer the objective.
 
 When you have found the answer or gathered enough information, provide a comprehensive summary wrapped in <answer> tags.
 If you cannot find the answer, explain what you checked and why you failed, also wrapped in <answer> tags.

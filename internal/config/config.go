@@ -99,6 +99,8 @@ type Config struct {
 	Search             SearchConfig    `json:"search"`                        // Web search provider configuration
 	MCP                MCPConfig       `json:"mcp,omitempty"`                 // Custom MCP server configuration
 	Secrets            SecretsSettings `json:"secrets,omitempty"`             // Encryption settings
+	EnablePromptCache  bool            `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
+	PromptCacheTTL     string          `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
 
 	secretsPassword string `json:"-"`
 }
@@ -173,7 +175,9 @@ func DefaultConfig() *Config {
 		MCP: MCPConfig{
 			Servers: make(map[string]*MCPServerConfig),
 		},
-		Secrets: SecretsSettings{},
+		Secrets:           SecretsSettings{},
+		EnablePromptCache: true,  // Enable by default for cost savings
+		PromptCacheTTL:    "1h",  // Default to 1 hour for longer sessions
 	}
 }
 

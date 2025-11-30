@@ -792,11 +792,13 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 
 		// Prepare request
 		req := &llm.CompletionRequest{
-			Messages:     llmMessages,
-			Tools:        o.toolRegistry.ToJSONSchema(),
-			Temperature:  o.config.Temperature,
-			MaxTokens:    maxTokens,
-			SystemPrompt: systemPrompt,
+			Messages:      llmMessages,
+			Tools:         o.toolRegistry.ToJSONSchema(),
+			Temperature:   o.config.Temperature,
+			MaxTokens:     maxTokens,
+			SystemPrompt:  systemPrompt,
+			EnableCaching: o.config.EnablePromptCache,
+			CacheTTL:      o.config.PromptCacheTTL,
 		}
 
 		// Notify UI that we're waiting for LLM response

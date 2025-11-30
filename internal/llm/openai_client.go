@@ -323,10 +323,15 @@ func convertMessagesToOpenAI(req *CompletionRequest) ([]openAIChatMessage, error
 	messages := make([]openAIChatMessage, 0, len(req.Messages)+1)
 
 	if system := strings.TrimSpace(req.SystemPrompt); system != "" {
-		messages = append(messages, openAIChatMessage{
+		sysMsg := openAIChatMessage{
 			Role:    "system",
 			Content: system,
-		})
+		}
+		// Enable caching for system prompt if requested
+		if req.EnableCaching {
+			sysMsg.CacheControl = map[string]interface{}{"type": "ephemeral"}
+		}
+		messages = append(messages, sysMsg)
 	}
 
 	for _, msg := range req.Messages {
@@ -444,11 +449,12 @@ type openAIChatRequest struct {
 }
 
 type openAIChatMessage struct {
-	Role       string                   `json:"role"`
-	Content    interface{}              `json:"content"`
-	Name       string                   `json:"name,omitempty"`
-	ToolCalls  []map[string]interface{} `json:"tool_calls,omitempty"`
-	ToolCallID string                   `json:"tool_call_id,omitempty"`
+	Role         string                   `json:"role"`
+	Content      interface{}              `json:"content"`
+	Name         string                   `json:"name,omitempty"`
+	ToolCalls    []map[string]interface{} `json:"tool_calls,omitempty"`
+	ToolCallID   string                   `json:"tool_call_id,omitempty"`
+	CacheControl map[string]interface{}   `json:"cache_control,omitempty"` // For prompt caching
 }
 
 type openAIChatResponse struct {

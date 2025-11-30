@@ -238,10 +238,24 @@ func convertMessagesToOpenRouter(req *CompletionRequest) ([]openRouterChatMessag
 	messages := make([]openRouterChatMessage, 0, len(req.Messages)+1)
 
 	if system := strings.TrimSpace(req.SystemPrompt); system != "" {
-		messages = append(messages, openRouterChatMessage{
-			Role:    "system",
-			Content: system,
-		})
+		sysMsg := openRouterChatMessage{
+			Role: "system",
+		}
+
+		// Use multipart content with cache_control for caching support
+		if req.EnableCaching {
+			sysMsg.Content = []openRouterContentBlock{
+				{
+					Type:         "text",
+					Text:         system,
+					CacheControl: map[string]interface{}{"type": "ephemeral"},
+				},
+			}
+		} else {
+			sysMsg.Content = system
+		}
+
+		messages = append(messages, sysMsg)
 	}
 
 	for _, msg := range req.Messages {
@@ -346,10 +360,16 @@ type openRouterChatRequest struct {
 
 type openRouterChatMessage struct {
 	Role       string                   `json:"role"`
-	Content    string                   `json:"content"`
+	Content    interface{}              `json:"content"` // Can be string or []contentBlock for caching
 	Name       string                   `json:"name,omitempty"`
 	ToolCalls  []map[string]interface{} `json:"tool_calls,omitempty"`
 	ToolCallID string                   `json:"tool_call_id,omitempty"`
+}
+
+type openRouterContentBlock struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl map[string]interface{} `json:"cache_control,omitempty"`
 }
 
 type openRouterChatResponse struct {

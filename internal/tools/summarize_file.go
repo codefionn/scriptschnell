@@ -17,7 +17,13 @@ func (s *SummarizeFileToolSpec) Name() string {
 }
 
 func (s *SummarizeFileToolSpec) Description() string {
-	return "Read and summarize a file using AI. Useful for large files or when you need a targeted summary based on specific goals."
+	return `Read and summarize a file using AI. Useful for large files or when you need a targeted summary based on specific goals. 
+Don't use this tool if you want to edit the file immediately afterwards. Don't use for just reading a section of a file.
+
+This tool should be used for:
+- Getting a broad understanding of the file
+- Extracting key information based on a specific goal
+- Extracting type structure`
 }
 
 func (s *SummarizeFileToolSpec) Parameters() map[string]interface{} {

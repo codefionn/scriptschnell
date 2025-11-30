@@ -196,9 +196,11 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 				Content: promptBuilder.String(),
 			},
 		},
-		Temperature:  0,
-		MaxTokens:    16384,
-		SystemPrompt: systemPrompt,
+		Temperature:   0,
+		MaxTokens:     16384,
+		SystemPrompt:  systemPrompt,
+		EnableCaching: true, // Enable caching for tool selection
+		CacheTTL:      "1h",
 	}
 
 	resp, err := o.summarizeClient.CompleteWithRequest(o.ctx, req)

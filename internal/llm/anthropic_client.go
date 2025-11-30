@@ -179,7 +179,7 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 		return anthropic.BetaMessageNewParams{}, fmt.Errorf("anthropic completion request cannot be nil")
 	}
 
-	systemBlocks, chatMessages, err := convertMessagesToAnthropic(req.SystemPrompt, req.Messages)
+	systemBlocks, chatMessages, err := convertMessagesToAnthropic(req.SystemPrompt, req.Messages, req.EnableCaching, req.CacheTTL)
 	if err != nil {
 		return anthropic.BetaMessageNewParams{}, err
 	}
@@ -206,7 +206,7 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 	}
 
 	if len(req.Tools) > 0 {
-		params.Tools = convertAnthropicTools(req.Tools)
+		params.Tools = convertAnthropicTools(req.Tools, req.EnableCaching, req.CacheTTL)
 	}
 
 	return params, nil
@@ -231,10 +231,15 @@ func buildAnthropicCompletionResponse(msg *anthropic.BetaMessage) *CompletionRes
 	}
 }
 
-func convertMessagesToAnthropic(systemPrompt string, messages []*Message) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {
+func convertMessagesToAnthropic(systemPrompt string, messages []*Message, enableCaching bool, cacheTTL string) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {
 	systemBlocks := make([]anthropic.BetaTextBlockParam, 0, 1)
 	if sys := strings.TrimSpace(systemPrompt); sys != "" {
-		systemBlocks = append(systemBlocks, anthropic.BetaTextBlockParam{Text: sys})
+		block := anthropic.BetaTextBlockParam{Text: sys}
+		// Add cache control to system prompt if caching is enabled
+		if enableCaching {
+			block.CacheControl = makeCacheControl(cacheTTL)
+		}
+		systemBlocks = append(systemBlocks, block)
 	}
 
 	chatMessages := make([]anthropic.BetaMessageParam, 0, len(messages))
@@ -372,13 +377,13 @@ func buildAnthropicTextBlocks(content string) []anthropic.BetaContentBlockParamU
 	return []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(content)}
 }
 
-func convertAnthropicTools(tools []map[string]interface{}) []anthropic.BetaToolUnionParam {
+func convertAnthropicTools(tools []map[string]interface{}, enableCaching bool, cacheTTL string) []anthropic.BetaToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}
 
 	result := make([]anthropic.BetaToolUnionParam, 0, len(tools))
-	for _, raw := range tools {
+	for idx, raw := range tools {
 		if raw == nil {
 			continue
 		}
@@ -420,6 +425,12 @@ func convertAnthropicTools(tools []map[string]interface{}) []anthropic.BetaToolU
 
 		if desc := strings.TrimSpace(toString(function["description"])); desc != "" {
 			tool.Description = anthropic.String(desc)
+		}
+
+		// Add cache control to the last tool definition if caching is enabled
+		// This creates a cache breakpoint after all tool definitions
+		if enableCaching && idx == len(tools)-1 {
+			tool.CacheControl = makeCacheControl(cacheTTL)
 		}
 
 		result = append(result, anthropic.BetaToolUnionParam{OfTool: tool})
@@ -543,4 +554,22 @@ func normalizeRole(role string) string {
 		return "user"
 	}
 	return role
+}
+
+// makeCacheControl creates a cache control parameter with the specified TTL
+func makeCacheControl(ttl string) anthropic.BetaCacheControlEphemeralParam {
+	cacheControl := anthropic.NewBetaCacheControlEphemeralParam()
+
+	// Set TTL based on configuration (default to 1h for longer sessions)
+	switch strings.ToLower(strings.TrimSpace(ttl)) {
+	case "5m":
+		cacheControl.TTL = anthropic.BetaCacheControlEphemeralTTLTTL5m
+	case "1h", "":
+		cacheControl.TTL = anthropic.BetaCacheControlEphemeralTTLTTL1h
+	default:
+		// Default to 1h if unrecognized
+		cacheControl.TTL = anthropic.BetaCacheControlEphemeralTTLTTL1h
+	}
+
+	return cacheControl
 }

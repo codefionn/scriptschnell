@@ -17,7 +17,6 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/sourcegraph/go-diff v0.7.0
 	github.com/tetratelabs/wazero v1.9.0
-	github.com/tmc/langchaingo v0.1.14
 	google.golang.org/genai v1.32.0
 )
 

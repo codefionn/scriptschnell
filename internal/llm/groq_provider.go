@@ -240,7 +240,7 @@ func groqFallbackModels() []*ModelInfo {
 	return result
 }
 
-// NewGroqClient creates a Groq client backed by the LangChain OpenAI-compatible implementation.
+// NewGroqClient creates a Groq client backed by the native OpenAI-compatible implementation.
 func NewGroqClient(apiKey, modelID string) (Client, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("API key is required")
@@ -251,13 +251,5 @@ func NewGroqClient(apiKey, modelID string) (Client, error) {
 		model = "llama-3.1-8b-instant"
 	}
 
-	client, err := NewOpenAICompatibleClient(apiKey, "https://api.groq.com/openai/v1", model)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Groq client: %w", err)
-	}
-
-	// Ensure the provider identifier is set to groq for downstream features.
-	client.provider = "groq"
-
-	return client, nil
+	return NewOpenAICompatibleClient(apiKey, "https://api.groq.com/openai/v1", model)
 }

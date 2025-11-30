@@ -210,28 +210,18 @@ func (c *OpenAIClient) streamWithChat(ctx context.Context, req *CompletionReques
 }
 
 func (c *OpenAIClient) buildChatRequest(req *CompletionRequest, stream bool) (*openAIChatRequest, error) {
-	messages, err := convertMessagesToOpenAI(req)
+	payload, err := convertRequestToOpenAI(req, c.model, stream, true)
 	if err != nil {
 		return nil, err
 	}
 
-	payload := &openAIChatRequest{
-		Model:    c.model,
-		Messages: messages,
-		Stream:   stream,
-	}
-
+	// override temperature handling for models that don't support it
 	if req.Temperature != 0 && !isOpenAITemperatureUnsupported(c.model) {
 		temp := req.Temperature
 		payload.Temperature = &temp
-	}
-
-	if req.MaxTokens > 0 {
-		payload.MaxTokens = req.MaxTokens
-	}
-
-	if len(req.Tools) > 0 {
-		payload.Tools = req.Tools
+	} else if isOpenAITemperatureUnsupported(c.model) {
+		one := 1.0
+		payload.Temperature = &one
 	}
 
 	return payload, nil

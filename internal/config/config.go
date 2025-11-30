@@ -92,7 +92,7 @@ type Config struct {
 	MaxTokens          int             `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
 	ProviderConfigPath string          `json:"-"`
 	DisableAnimations  bool            `json:"disable_animations"`
-	LogLevel           string          `json:"log_level"`                     // debug, info, warn, error, none
+	LogLevel           string          `json:"log_level"` // debug, info, warn, error, none
 	LogPath            string          `json:"-"`
 	AuthorizedDomains  map[string]bool `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
 	AuthorizedCommands map[string]bool `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project

@@ -87,13 +87,13 @@ type Config struct {
 	CacheTTL           int             `json:"cache_ttl_seconds"`
 	MaxCacheEntries    int             `json:"max_cache_entries"`
 	DefaultTimeout     int             `json:"default_timeout_seconds"`
-	TempDir            string          `json:"temp_dir"`
+	TempDir            string          `json:"-"`
 	Temperature        float64         `json:"temperature"`
 	MaxTokens          int             `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
-	ProviderConfigPath string          `json:"provider_config_path"`
+	ProviderConfigPath string          `json:"-"`
 	DisableAnimations  bool            `json:"disable_animations"`
 	LogLevel           string          `json:"log_level"`                     // debug, info, warn, error, none
-	LogPath            string          `json:"log_path"`                      // path to log file
+	LogPath            string          `json:"-"`
 	AuthorizedDomains  map[string]bool `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
 	AuthorizedCommands map[string]bool `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
 	Search             SearchConfig    `json:"search"`                        // Web search provider configuration

@@ -213,7 +213,7 @@ Configuration files stored in platform-specific locations:
 - Linux: `~/.config/statcode-ai/`
 - Windows: `%APPDATA%\\statcode-ai\\`
 
-- **config.json**: Application settings (working_dir, cache_ttl_seconds, temperature, log_level, log_path)
+- **config.json**: Application settings (working_dir, cache_ttl_seconds, temperature, log_level)
   - **Note**: `max_tokens` is deprecated and automatically retrieved from model metadata via `GetModelMaxOutputTokens()`
   - **authorized_domains**: Permanently authorized domains for network access (map of domain -> bool)
   - **authorized_commands**: Permanently authorized shell command prefixes for this project (map of prefix -> bool)
@@ -226,7 +226,7 @@ Configuration files stored in platform-specific locations:
 The application includes a comprehensive logging system ([internal/logger/logger.go](internal/logger/logger.go)) with configurable log levels:
 
 - **Log Levels**: debug, info, warn, error, none
-- **Configuration**: Set `log_level` and `log_path` in config.json
+- **Configuration**: Set `log_level` in config.json; log path is derived from the state directory and can be overridden via `STATCODE_LOG_PATH`
 - **Default**: INFO level; on Linux logs to `$XDG_STATE_HOME/statcode-ai/statcode-ai.log` (or `~/.local/state/statcode-ai/statcode-ai.log`), on Windows to `%LOCALAPPDATA%\\statcode-ai\\statcode-ai.log` (or `~/AppData/Local/statcode-ai/statcode-ai.log`), and on other platforms to `~/.config/statcode-ai/statcode-ai.log`
 - **Features**:
   - Timestamp and level for each log entry

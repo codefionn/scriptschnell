@@ -11,30 +11,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/session"
 )
 
-// WriteFileDiffTool applies unified diffs to existing files.
-// This tool required actual git-like diffs with hunk headers
-// which seems to be a big problem in today's LLMs.
-type WriteFileDiffTool struct {
-	fs      fs.FileSystem
-	session *session.Session
-}
+// WriteFileDiffToolSpec is the static specification for the write_file_diff tool
+type WriteFileDiffToolSpec struct{}
 
-func NewWriteFileDiffTool(filesystem fs.FileSystem, sess *session.Session) *WriteFileDiffTool {
-	return &WriteFileDiffTool{
-		fs:      filesystem,
-		session: sess,
-	}
-}
-
-func (t *WriteFileDiffTool) Name() string {
+func (s *WriteFileDiffToolSpec) Name() string {
 	return ToolNameWriteFileDiff
 }
 
-func (t *WriteFileDiffTool) Description() string {
+func (s *WriteFileDiffToolSpec) Description() string {
 	return "Update an existing file by applying a unified diff (with standard hunk headers). The file must have been read earlier in the session."
 }
 
-func (t *WriteFileDiffTool) Parameters() map[string]interface{} {
+func (s *WriteFileDiffToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -99,6 +87,28 @@ Example update diff 2:
 		},
 		"required": []string{"path", "diff"},
 	}
+}
+
+// WriteFileDiffTool applies unified diffs to existing files.
+// This tool required actual git-like diffs with hunk headers
+// which seems to be a big problem in today's LLMs.
+type WriteFileDiffTool struct {
+	fs      fs.FileSystem
+	session *session.Session
+}
+
+func NewWriteFileDiffTool(filesystem fs.FileSystem, sess *session.Session) *WriteFileDiffTool {
+	return &WriteFileDiffTool{
+		fs:      filesystem,
+		session: sess,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *WriteFileDiffTool) Name() string        { return ToolNameWriteFileDiff }
+func (t *WriteFileDiffTool) Description() string { return (&WriteFileDiffToolSpec{}).Description() }
+func (t *WriteFileDiffTool) Parameters() map[string]interface{} {
+	return (&WriteFileDiffToolSpec{}).Parameters()
 }
 
 func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -320,4 +330,11 @@ func generateGitDiff(path, original, modified string) string {
 	}
 
 	return diff.String()
+}
+
+// NewWriteFileDiffToolFactory creates a factory for WriteFileDiffTool
+func NewWriteFileDiffToolFactory(filesystem fs.FileSystem, sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewWriteFileDiffTool(filesystem, sess)
+	}
 }

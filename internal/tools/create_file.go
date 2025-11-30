@@ -9,28 +9,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/session"
 )
 
-// CreateFileTool writes brand new files.
-type CreateFileTool struct {
-	fs      fs.FileSystem
-	session *session.Session
-}
+// CreateFileToolSpec is the static specification for the create_file tool
+type CreateFileToolSpec struct{}
 
-func NewCreateFileTool(filesystem fs.FileSystem, sess *session.Session) *CreateFileTool {
-	return &CreateFileTool{
-		fs:      filesystem,
-		session: sess,
-	}
-}
-
-func (t *CreateFileTool) Name() string {
+func (s *CreateFileToolSpec) Name() string {
 	return ToolNameCreateFile
 }
 
-func (t *CreateFileTool) Description() string {
+func (s *CreateFileToolSpec) Description() string {
 	return "Create a new file with the provided content. Fails if the file already exists."
 }
 
-func (t *CreateFileTool) Parameters() map[string]interface{} {
+func (s *CreateFileToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -45,6 +35,26 @@ func (t *CreateFileTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"path"},
 	}
+}
+
+// CreateFileTool is the executor with runtime dependencies
+type CreateFileTool struct {
+	fs      fs.FileSystem
+	session *session.Session
+}
+
+func NewCreateFileTool(filesystem fs.FileSystem, sess *session.Session) *CreateFileTool {
+	return &CreateFileTool{
+		fs:      filesystem,
+		session: sess,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *CreateFileTool) Name() string        { return ToolNameCreateFile }
+func (t *CreateFileTool) Description() string { return (&CreateFileToolSpec{}).Description() }
+func (t *CreateFileTool) Parameters() map[string]interface{} {
+	return (&CreateFileToolSpec{}).Parameters()
 }
 
 func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -92,5 +102,12 @@ func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interfac
 			"created":       true,
 		},
 		UIResult: generateGitDiff(path, "", content),
+	}
+}
+
+// NewCreateFileToolFactory creates a factory for CreateFileTool
+func NewCreateFileToolFactory(filesystem fs.FileSystem, sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewCreateFileTool(filesystem, sess)
 	}
 }

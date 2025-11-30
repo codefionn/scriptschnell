@@ -20,26 +20,18 @@ type TodoList struct {
 	Items []*TodoItem `json:"items"`
 }
 
-// TodoTool manages todos via a TodoActor
-type TodoTool struct {
-	client *TodoActorClient
-}
+// TodoToolSpec is the static specification for the todo tool
+type TodoToolSpec struct{}
 
-func NewTodoTool(client *TodoActorClient) *TodoTool {
-	return &TodoTool{
-		client: client,
-	}
-}
-
-func (t *TodoTool) Name() string {
+func (s *TodoToolSpec) Name() string {
 	return ToolNameTodo
 }
 
-func (t *TodoTool) Description() string {
+func (s *TodoToolSpec) Description() string {
 	return "Manage todo items with hierarchical sub-todos. Supports reading, writing, checking/unchecking todos, and adding sub-todos to parent tasks."
 }
 
-func (t *TodoTool) Parameters() map[string]interface{} {
+func (s *TodoToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -63,6 +55,24 @@ func (t *TodoTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"action"},
 	}
+}
+
+// TodoTool is the executor with runtime dependencies
+type TodoTool struct {
+	client *TodoActorClient
+}
+
+func NewTodoTool(client *TodoActorClient) *TodoTool {
+	return &TodoTool{
+		client: client,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *TodoTool) Name() string        { return ToolNameTodo }
+func (t *TodoTool) Description() string { return (&TodoToolSpec{}).Description() }
+func (t *TodoTool) Parameters() map[string]interface{} {
+	return (&TodoToolSpec{}).Parameters()
 }
 
 func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -219,4 +229,11 @@ func todoTimestamp(ctx context.Context) string {
 		}
 	}
 	return time.Now().Format(time.RFC3339)
+}
+
+// NewTodoToolFactory creates a factory for TodoTool
+func NewTodoToolFactory(client *TodoActorClient) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewTodoTool(client)
+	}
 }

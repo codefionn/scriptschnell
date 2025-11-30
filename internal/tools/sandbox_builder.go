@@ -299,7 +299,7 @@ const MaxTimeoutSeconds = 600
 //
 // Constraints:
 //   - Minimum: 1 second
-//   - Maximum: 120 seconds (2 minutes)
+//   - Maximum: 600 seconds (10 minutes)
 //   - Default: 30 seconds (if not set)
 //
 // Timeout Behavior:

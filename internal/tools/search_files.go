@@ -10,26 +10,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 )
 
-// SearchFilesTool allows searching for files by name pattern and optionally by content
-type SearchFilesTool struct {
-	fs fs.FileSystem
-}
+// SearchFilesToolSpec is the static specification for the search_files tool
+type SearchFilesToolSpec struct{}
 
-func NewSearchFilesTool(filesystem fs.FileSystem) *SearchFilesTool {
-	return &SearchFilesTool{
-		fs: filesystem,
-	}
-}
-
-func (t *SearchFilesTool) Name() string {
+func (s *SearchFilesToolSpec) Name() string {
 	return ToolNameSearchFiles
 }
 
-func (t *SearchFilesTool) Description() string {
+func (s *SearchFilesToolSpec) Description() string {
 	return "Search for files by name pattern (glob) and optionally filter by content. Returns list of matching file paths. Use this to find files in the project before reading them."
 }
 
-func (t *SearchFilesTool) Parameters() map[string]interface{} {
+func (s *SearchFilesToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -52,6 +44,24 @@ func (t *SearchFilesTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"pattern"},
 	}
+}
+
+// SearchFilesTool is the executor with runtime dependencies
+type SearchFilesTool struct {
+	fs fs.FileSystem
+}
+
+func NewSearchFilesTool(filesystem fs.FileSystem) *SearchFilesTool {
+	return &SearchFilesTool{
+		fs: filesystem,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *SearchFilesTool) Name() string        { return ToolNameSearchFiles }
+func (t *SearchFilesTool) Description() string { return (&SearchFilesToolSpec{}).Description() }
+func (t *SearchFilesTool) Parameters() map[string]interface{} {
+	return (&SearchFilesToolSpec{}).Parameters()
 }
 
 func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -269,4 +279,11 @@ func (t *SearchFilesTool) matchGlobPattern(path, pattern string) (bool, error) {
 	}
 
 	return re.MatchString(path), nil
+}
+
+// NewSearchFilesToolFactory creates a factory for SearchFilesTool
+func NewSearchFilesToolFactory(filesystem fs.FileSystem) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewSearchFilesTool(filesystem)
+	}
 }

@@ -10,28 +10,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/session"
 )
 
-// ReadFileTool allows reading files
-type ReadFileTool struct {
-	fs      fs.FileSystem
-	session *session.Session
-}
+// ReadFileToolSpec is the static specification for the read_file tool
+type ReadFileToolSpec struct{}
 
-func NewReadFileTool(filesystem fs.FileSystem, sess *session.Session) *ReadFileTool {
-	return &ReadFileTool{
-		fs:      filesystem,
-		session: sess,
-	}
-}
-
-func (t *ReadFileTool) Name() string {
+func (s *ReadFileToolSpec) Name() string {
 	return ToolNameReadFile
 }
 
-func (t *ReadFileTool) Description() string {
+func (s *ReadFileToolSpec) Description() string {
 	return "Read a file from the filesystem. Can read entire file or specific line ranges. Maximum 2000 lines per read. Files read during the session are tracked for diff operations."
 }
 
-func (t *ReadFileTool) Parameters() map[string]interface{} {
+func (s *ReadFileToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -50,6 +40,26 @@ func (t *ReadFileTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"path"},
 	}
+}
+
+// ReadFileTool is the executor with runtime dependencies
+type ReadFileTool struct {
+	fs      fs.FileSystem
+	session *session.Session
+}
+
+func NewReadFileTool(filesystem fs.FileSystem, sess *session.Session) *ReadFileTool {
+	return &ReadFileTool{
+		fs:      filesystem,
+		session: sess,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *ReadFileTool) Name() string        { return ToolNameReadFile }
+func (t *ReadFileTool) Description() string { return (&ReadFileToolSpec{}).Description() }
+func (t *ReadFileTool) Parameters() map[string]interface{} {
+	return (&ReadFileToolSpec{}).Parameters()
 }
 
 func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -134,5 +144,12 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 			"start_line": startLine,
 			"end_line":   endLine,
 		},
+	}
+}
+
+// NewReadFileToolFactory creates a factory for ReadFileTool
+func NewReadFileToolFactory(filesystem fs.FileSystem, sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewReadFileTool(filesystem, sess)
 	}
 }

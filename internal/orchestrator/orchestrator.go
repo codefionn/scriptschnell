@@ -249,10 +249,12 @@ func (o *Orchestrator) getSummarizeModelID() string {
 	return modelID
 }
 
+// toolSpec holds tool registration information
+// Uses ToolSpec (static descriptor) + ToolFactory (executor factory) pattern
 type toolSpec struct {
-	template tools.Tool
+	spec     tools.ToolSpec
+	factory  tools.ToolFactory
 	critical bool
-	factory  func(reg *tools.Registry) tools.Tool
 	isMCP    bool
 	mcpKey   string
 }
@@ -261,179 +263,97 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	var errs []error
 
 	specs := make([]toolSpec, 0, 16)
-	addSpec := func(template tools.Tool, critical bool, factory func(reg *tools.Registry) tools.Tool, isMCP bool, mcpKey string) {
-		if template == nil || factory == nil {
+	addSpec := func(spec tools.ToolSpec, critical bool, factory tools.ToolFactory, isMCP bool, mcpKey string) {
+		if spec == nil || factory == nil {
 			return
 		}
 		specs = append(specs, toolSpec{
-			template: template,
+			spec:     spec,
 			critical: critical,
 			factory:  factory,
 			isMCP:    isMCP,
 			mcpKey:   mcpKey,
 		})
 	}
+	// Helper for legacy tools that haven't been migrated yet
+	addLegacyTool := func(tool tools.Tool, critical bool, isMCP bool, mcpKey string) {
+		if tool == nil {
+			return
+		}
+		spec, factory := tools.WrapLegacyTool(tool)
+		addSpec(spec, critical, factory, isMCP, mcpKey)
+	}
 
 	modelFamily := llm.DetectModelFamily(o.providerMgr.GetOrchestrationModel())
 
-	// Core filesystem tools
-	readFileTool := o.getReadFileTool(modelFamily, o.session)
+	// Core filesystem tools - using new pattern for migrated tools
+	readFileSpec, readFileFactory := o.getReadFileToolSpec(modelFamily, o.session)
+	addSpec(readFileSpec, true, readFileFactory, false, "")
+
 	addSpec(
-		readFileTool,
+		&tools.CreateFileToolSpec{},
 		true,
-		func(_ *tools.Registry) tools.Tool { return o.getReadFileTool(modelFamily, o.session) },
-		false,
-		"",
-	)
-	addSpec(
-		tools.NewCreateFileTool(o.fs, o.session),
-		true,
-		func(_ *tools.Registry) tools.Tool { return tools.NewCreateFileTool(o.fs, o.session) },
+		tools.NewCreateFileToolFactory(o.fs, o.session),
 		false,
 		"",
 	)
 	if o.shouldUseNonDiffUpdateTool(modelFamily) {
-		addSpec(
-			tools.NewWriteFileJSONTool(o.fs, o.session),
-			true,
-			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileJSONTool(o.fs, o.session) },
-			false,
-			"",
-		)
+		addSpec(&tools.WriteFileJSONToolSpec{}, true, tools.NewWriteFileJSONToolFactory(o.fs, o.session), false, "")
 	} else if o.shouldUseSimpleDiffTool(modelFamily) {
-		addSpec(
-			tools.NewWriteFileReplaceTool(o.fs, o.session),
-			true,
-			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileReplaceTool(o.fs, o.session) },
-			false,
-			"",
-		)
+		addSpec(&tools.WriteFileReplaceToolSpec{}, true, tools.NewWriteFileReplaceToolFactory(o.fs, o.session), false, "")
 	} else {
 		addSpec(
-			tools.NewWriteFileDiffTool(o.fs, o.session),
+			&tools.WriteFileDiffToolSpec{},
 			true,
-			func(_ *tools.Registry) tools.Tool { return tools.NewWriteFileDiffTool(o.fs, o.session) },
+			tools.NewWriteFileDiffToolFactory(o.fs, o.session),
 			false,
 			"",
 		)
 	}
 
 	// Discovery / search tools
-	addSpec(
-		tools.NewSearchFilesTool(o.fs),
-		false,
-		func(_ *tools.Registry) tools.Tool { return tools.NewSearchFilesTool(o.fs) },
-		false,
-		"",
-	)
-	addSpec(
-		tools.NewSearchFileContentTool(o.fs),
-		false,
-		func(_ *tools.Registry) tools.Tool { return tools.NewSearchFileContentTool(o.fs) },
-		false,
-		"",
-	)
-	addSpec(
-		tools.NewCodebaseInvestigatorTool(NewCodebaseInvestigatorAgent(o)),
-		false,
-		func(_ *tools.Registry) tools.Tool {
-			return tools.NewCodebaseInvestigatorTool(NewCodebaseInvestigatorAgent(o))
-		},
-		false,
-		"",
-	)
-	addSpec(
-		tools.NewWebSearchTool(o.config),
-		false,
-		func(_ *tools.Registry) tools.Tool { return tools.NewWebSearchTool(o.config) },
-		false,
-		"",
-	)
+	addSpec(&tools.SearchFilesToolSpec{}, false, tools.NewSearchFilesToolFactory(o.fs), false, "")
+	addSpec(&tools.SearchFileContentToolSpec{}, false, tools.NewSearchFileContentToolFactory(o.fs), false, "")
+	addSpec(&tools.CodebaseInvestigatorToolSpec{}, false, tools.NewCodebaseInvestigatorToolFactory(NewCodebaseInvestigatorAgent(o)), false, "")
+	addSpec(&tools.WebSearchToolSpec{}, false, tools.NewWebSearchToolFactory(o.config), false, "")
 
 	// Task management
-	addSpec(
-		tools.NewTodoTool(o.todoClient),
-		false,
-		func(_ *tools.Registry) tools.Tool { return tools.NewTodoTool(o.todoClient) },
-		false,
-		"",
-	)
+	addSpec(&tools.TodoToolSpec{}, false, tools.NewTodoToolFactory(o.todoClient), false, "")
 
 	// Shell tooling
 	if o.shouldUseShellTool(modelFamily) {
-		addSpec(
-			tools.NewShellTool(o.session, o.workingDir),
-			true,
-			func(_ *tools.Registry) tools.Tool { return tools.NewShellTool(o.session, o.workingDir) },
-			false,
-			"",
-		)
+		addSpec(&tools.ShellToolSpec{}, true, tools.NewShellToolFactory(o.session, o.workingDir), false, "")
 	}
 
-	addSpec(
-		tools.NewStatusProgramTool(o.session),
-		true,
-		func(_ *tools.Registry) tools.Tool { return tools.NewStatusProgramTool(o.session) },
-		false,
-		"",
-	)
-	addSpec(
-		tools.NewWaitProgramTool(o.session),
-		true,
-		func(_ *tools.Registry) tools.Tool { return tools.NewWaitProgramTool(o.session) },
-		false,
-		"",
-	)
-	addSpec(
-		tools.NewStopProgramTool(o.session),
-		true,
-		func(_ *tools.Registry) tools.Tool { return tools.NewStopProgramTool(o.session) },
-		false,
-		"",
-	)
+	addSpec(&tools.StatusProgramToolSpec{}, true, tools.NewStatusProgramToolFactory(o.session), false, "")
+	addSpec(&tools.WaitProgramToolSpec{}, true, tools.NewWaitProgramToolFactory(o.session), false, "")
+	addSpec(&tools.StopProgramToolSpec{}, true, tools.NewStopProgramToolFactory(o.session), false, "")
 
-	// Sandbox tool with TinyGo status forwarding
-	sandboxTemplate := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
-	o.configureSandboxTool(sandboxTemplate)
-	addSpec(
-		sandboxTemplate,
-		true,
-		func(_ *tools.Registry) tools.Tool {
-			instance := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
-			o.configureSandboxTool(instance)
-			return instance
-		},
-		false,
-		"",
-	)
+	// Sandbox tool with TinyGo status forwarding - needs custom factory for configuration
+	sandboxSpec, _ := tools.WrapLegacyTool(tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session))
+	sandboxFactory := func(_ *tools.Registry) tools.ToolExecutor {
+		instance := tools.NewSandboxToolWithFS(o.workingDir, o.config.TempDir, o.fs, o.session)
+		o.configureSandboxTool(instance)
+		return instance
+	}
+	addSpec(sandboxSpec, true, sandboxFactory, false, "")
 
-	// Parallel execution
-	addSpec(
-		tools.NewParallelTool(nil),
-		false,
-		func(reg *tools.Registry) tools.Tool { return tools.NewParallelTool(reg) },
-		false,
-		"",
-	)
+	// Parallel execution - needs registry access
+	parallelSpec, _ := tools.WrapLegacyTool(tools.NewParallelTool(nil))
+	parallelFactory := func(reg *tools.Registry) tools.ToolExecutor {
+		return tools.NewParallelTool(reg)
+	}
+	addSpec(parallelSpec, false, parallelFactory, false, "")
 
 	// Summarization-related tools
 	if o.summarizeClient != nil {
-		addSpec(
-			tools.NewSummarizeFileTool(o.fs, o.session, o.summarizeClient),
-			false,
-			func(_ *tools.Registry) tools.Tool {
-				return tools.NewSummarizeFileTool(o.fs, o.session, o.summarizeClient)
-			},
-			false,
-			"",
-		)
-		addSpec(
-			tools.NewToolSummarizeTool(nil, o.summarizeClient),
-			false,
-			func(reg *tools.Registry) tools.Tool { return tools.NewToolSummarizeTool(reg, o.summarizeClient) },
-			false,
-			"",
-		)
+		addSpec(&tools.SummarizeFileToolSpec{}, false, tools.NewSummarizeFileToolFactory(o.fs, o.session, o.summarizeClient), false, "")
+
+		summarizeSpec, _ := tools.WrapLegacyTool(tools.NewToolSummarizeTool(nil, o.summarizeClient))
+		summarizeFactory := func(reg *tools.Registry) tools.ToolExecutor {
+			return tools.NewToolSummarizeTool(reg, o.summarizeClient)
+		}
+		addSpec(summarizeSpec, false, summarizeFactory, false, "")
 	}
 
 	// MCP-derived tools
@@ -447,13 +367,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		for _, tool := range mcpTools {
 			t := tool
 			mcpKey := extractMCPSanitizedServer(t.Name())
-			addSpec(
-				t,
-				false,
-				func(_ *tools.Registry) tools.Tool { return t },
-				true,
-				mcpKey,
-			)
+			addLegacyTool(t, false, true, mcpKey)
 		}
 	}
 
@@ -478,15 +392,15 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		}
 
 		if len(mcpSpecs) > 0 {
-			filterMap := make(map[tools.Tool]struct{}, len(filteredMCP))
+			filterMap := make(map[string]struct{}, len(filteredMCP))
 			for i := range filteredMCP {
-				filterMap[filteredMCP[i].template] = struct{}{}
+				filterMap[filteredMCP[i].spec.Name()] = struct{}{}
 			}
 
 			filteredSpecs = make([]toolSpec, 0, len(specs))
 			for _, spec := range specs {
 				if spec.isMCP {
-					if _, ok := filterMap[spec.template]; ok {
+					if _, ok := filterMap[spec.spec.Name()]; ok {
 						filteredSpecs = append(filteredSpecs, spec)
 					}
 					continue
@@ -509,11 +423,8 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	seenMCP := make(map[string]struct{})
 
 	for _, spec := range filteredSpecs {
-		toolInstance := spec.factory(registry)
-		if toolInstance == nil {
-			continue
-		}
-		registry.Register(toolInstance)
+		// Use RegisterSpec with the new pattern
+		registry.RegisterSpec(spec.spec, spec.factory)
 
 		if applyFilter && spec.isMCP && spec.mcpKey != "" {
 			if _, exists := seenMCP[spec.mcpKey]; !exists {
@@ -542,6 +453,16 @@ func (o *Orchestrator) getReadFileTool(modelFamily llm.ModelFamily, sess *sessio
 		return tools.NewReadFileNumberedTool(o.fs, sess)
 	}
 	return tools.NewReadFileTool(o.fs, sess)
+}
+
+func (o *Orchestrator) getReadFileToolSpec(modelFamily llm.ModelFamily, sess *session.Session) (tools.ToolSpec, tools.ToolFactory) {
+	if o.shouldUseNumberedReadFileTool(modelFamily) {
+		// read_file_numbered hasn't been migrated yet, wrap legacy tool
+		tool := tools.NewReadFileNumberedTool(o.fs, sess)
+		return tools.WrapLegacyTool(tool)
+	}
+	// read_file has been migrated to new pattern
+	return &tools.ReadFileToolSpec{}, tools.NewReadFileToolFactory(o.fs, sess)
 }
 
 func (o *Orchestrator) shouldUseShellTool(modelFamily llm.ModelFamily) bool {

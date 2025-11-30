@@ -10,29 +10,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/session"
 )
 
-// WriteFileReplaceTool replaces text in existing files.
-// This is a variation of the write_file_diff tool that uses exact string replacement.
-type WriteFileReplaceTool struct {
-	fs      fs.FileSystem
-	session *session.Session
-}
+// WriteFileReplaceToolSpec is the static specification for the write_file_replace tool
+type WriteFileReplaceToolSpec struct{}
 
-func NewWriteFileReplaceTool(filesystem fs.FileSystem, sess *session.Session) *WriteFileReplaceTool {
-	return &WriteFileReplaceTool{
-		fs:      filesystem,
-		session: sess,
-	}
-}
-
-func (t *WriteFileReplaceTool) Name() string {
+func (s *WriteFileReplaceToolSpec) Name() string {
 	return ToolNameWriteFileDiff
 }
 
-func (t *WriteFileReplaceTool) Description() string {
+func (s *WriteFileReplaceToolSpec) Description() string {
 	return "Update an existing file by replacing a specific string with a new string. Ensure the old_string matches exactly (including whitespace and indentation)."
 }
 
-func (t *WriteFileReplaceTool) Parameters() map[string]interface{} {
+func (s *WriteFileReplaceToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -55,6 +44,27 @@ func (t *WriteFileReplaceTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"path", "old_string", "new_string"},
 	}
+}
+
+// WriteFileReplaceTool is the executor with runtime dependencies
+// This is a variation of the write_file_diff tool that uses exact string replacement.
+type WriteFileReplaceTool struct {
+	fs      fs.FileSystem
+	session *session.Session
+}
+
+func NewWriteFileReplaceTool(filesystem fs.FileSystem, sess *session.Session) *WriteFileReplaceTool {
+	return &WriteFileReplaceTool{
+		fs:      filesystem,
+		session: sess,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *WriteFileReplaceTool) Name() string        { return ToolNameWriteFileDiff }
+func (t *WriteFileReplaceTool) Description() string { return (&WriteFileReplaceToolSpec{}).Description() }
+func (t *WriteFileReplaceTool) Parameters() map[string]interface{} {
+	return (&WriteFileReplaceToolSpec{}).Parameters()
 }
 
 func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -155,5 +165,12 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 			"updated":      true,
 		},
 		UIResult: generateGitDiff(path, content, finalContent),
+	}
+}
+
+// NewWriteFileReplaceToolFactory creates a factory for WriteFileReplaceTool
+func NewWriteFileReplaceToolFactory(filesystem fs.FileSystem, sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewWriteFileReplaceTool(filesystem, sess)
 	}
 }

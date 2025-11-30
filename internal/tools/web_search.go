@@ -9,25 +9,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/search"
 )
 
-// WebSearchTool performs web searches using configured search providers
-type WebSearchTool struct {
-	cfg *config.Config
-}
+// WebSearchToolSpec is the static specification for the web_search tool
+type WebSearchToolSpec struct{}
 
-// NewWebSearchTool creates a new web search tool
-func NewWebSearchTool(cfg *config.Config) *WebSearchTool {
-	return &WebSearchTool{cfg: cfg}
-}
-
-func (t *WebSearchTool) Name() string {
+func (s *WebSearchToolSpec) Name() string {
 	return ToolNameWebSearch
 }
 
-func (t *WebSearchTool) Description() string {
+func (s *WebSearchToolSpec) Description() string {
 	return "Search the web using the configured search provider (Exa, Google PSE, or Perplexity). Returns titles, URLs, and snippets from search results."
 }
 
-func (t *WebSearchTool) Parameters() map[string]interface{} {
+func (s *WebSearchToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -43,6 +36,23 @@ func (t *WebSearchTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"query"},
 	}
+}
+
+// WebSearchTool is the executor with runtime dependencies
+type WebSearchTool struct {
+	cfg *config.Config
+}
+
+// NewWebSearchTool creates a new web search tool
+func NewWebSearchTool(cfg *config.Config) *WebSearchTool {
+	return &WebSearchTool{cfg: cfg}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *WebSearchTool) Name() string        { return ToolNameWebSearch }
+func (t *WebSearchTool) Description() string { return (&WebSearchToolSpec{}).Description() }
+func (t *WebSearchTool) Parameters() map[string]interface{} {
+	return (&WebSearchToolSpec{}).Parameters()
 }
 
 func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -129,4 +139,11 @@ func formatSearchResults(response *search.SearchResponse) string {
 	}
 
 	return sb.String()
+}
+
+// NewWebSearchToolFactory creates a factory for WebSearchTool
+func NewWebSearchToolFactory(cfg *config.Config) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewWebSearchTool(cfg)
+	}
 }

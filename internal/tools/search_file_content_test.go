@@ -34,10 +34,10 @@ line 5
 	mockFS.WriteFile(ctx, "bin.dat", []byte{0, 1, 2, 3})
 
 	tests := []struct {
-		name    string
-		params  map[string]interface{}
-		want    string
-		wantErr bool
+		name          string
+		params        map[string]interface{}
+		wantContains  []string
+		wantErr       bool
 	}{
 		{
 			name: "Basic match",
@@ -45,13 +45,12 @@ line 5
 				"pattern": "World",
 				"path":    ".",
 			},
-			want: `main.go:
- 5: func main() {
- 6: 	fmt.Println("Hello")
- 7: 	fmt.Println("World") // match me
- 8: 	fmt.Println("Foo")
- 9: }
-`,
+			wantContains: []string{
+				"## Content Search Results",
+				"### `main.go`",
+				"*1 match(es)*",
+				"  7: \tfmt.Println(\"World\") // match me",
+			},
 		},
 		{
 			name: "Context control",
@@ -60,9 +59,11 @@ line 5
 				"path":    "test.txt",
 				"context": 0,
 			},
-			want: `test.txt:
- 3: line 3
-`,
+			wantContains: []string{
+				"**Search Path:** `test.txt`",
+				"### `test.txt`",
+				" 3: line 3",
+			},
 		},
 		{
 			name: "Padding check",
@@ -72,11 +73,11 @@ line 5
 				"context": 1,
 			},
 			// max line 5 -> digits 1 -> padding 2
-			want: `test.txt:
- 2: line 2
- 3: line 3
- 4: line 4
-`,
+			wantContains: []string{
+				" 2: line 2",
+				" 3: line 3",
+				" 4: line 4",
+			},
 		},
 		{
 			name: "Glob filtering",
@@ -86,7 +87,10 @@ line 5
 				"glob":    "*.go",
 			},
 			// Should only match main.go
-			want: `main.go:`,
+			wantContains: []string{
+				"**File Filter:** `*.go`",
+				"### `main.go`",
+			},
 		},
 		{
 			name: "No match",
@@ -94,7 +98,7 @@ line 5
 				"pattern": "NonExistent",
 				"path":    ".",
 			},
-			want: "No matches found.",
+			wantContains: []string{"*No matches found.*"},
 		},
 		{
 			name: "Binary skip",
@@ -102,7 +106,7 @@ line 5
 				"pattern": ".", // Match anything
 				"path":    "bin.dat",
 			},
-			want: "No matches found.",
+			wantContains: []string{"*No matches found.*"},
 		},
 	}
 
@@ -113,9 +117,18 @@ line 5
 				t.Errorf("Execute() error = %v, wantErr %v", got.Error, tt.wantErr)
 				return
 			}
-			gotStr := got.Result.(string)
-			if !strings.Contains(gotStr, tt.want) {
-				t.Errorf("Execute() = %q, want substring %q", gotStr, tt.want)
+
+			if got.Result == nil {
+				t.Fatalf("expected non-nil result")
+			}
+			gotStr, ok := got.Result.(string)
+			if !ok {
+				t.Fatalf("expected result to be string, got %T", got.Result)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(gotStr, want) {
+					t.Errorf("Execute() = %q, want substring %q", gotStr, want)
+				}
 			}
 		})
 	}

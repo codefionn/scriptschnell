@@ -10,7 +10,7 @@ const (
 	ToolNameStatusProgram        = "status_program"
 	ToolNameWaitProgram          = "wait_program"
 	ToolNameStopProgram          = "stop_program"
-	ToolNameParallel             = "parallel_tools"
+	ToolNameParallel             = "parallel_tool_execution"
 	ToolNameGoSandbox            = "go_sandbox"
 	ToolNameGoSandboxDomain      = "go_sandbox_domain"
 	ToolNameWebSearch            = "web_search"

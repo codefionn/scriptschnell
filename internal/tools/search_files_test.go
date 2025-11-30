@@ -2,16 +2,16 @@ package tools
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 )
 
 func TestSearchFilesTool(t *testing.T) {
-	// Create mock filesystem
 	mockFS := fs.NewMockFS()
 
-	// Add test files
 	write := func(path, contents string) {
 		if err := mockFS.WriteFile(context.Background(), path, []byte(contents)); err != nil {
 			t.Fatalf("failed to write file %s: %v", path, err)
@@ -31,23 +31,30 @@ func TestSearchFilesTool(t *testing.T) {
 		params        map[string]interface{}
 		expectedCount int
 		expectError   bool
-		checkMatches  func([]string) bool
+		expectedFiles []string
 	}{
 		{
 			name: "search for go files",
 			params: map[string]interface{}{
 				"pattern": "*.go",
 			},
-			expectedCount: 3, // main.go, read_file.go, write_file_diff.go
-			expectError:   false,
+			expectedCount: 3,
+			expectedFiles: []string{
+				"main.go",
+				"internal/tools/read_file.go",
+				"internal/tools/write_file_diff.go",
+			},
 		},
 		{
 			name: "search for markdown files",
 			params: map[string]interface{}{
 				"pattern": "*.md",
 			},
-			expectedCount: 2, // README.md, guide.md
-			expectError:   false,
+			expectedCount: 2,
+			expectedFiles: []string{
+				"README.md",
+				"docs/guide.md",
+			},
 		},
 		{
 			name: "search with content regex",
@@ -55,8 +62,8 @@ func TestSearchFilesTool(t *testing.T) {
 				"pattern":       "*.go",
 				"content_regex": "ReadFileTool",
 			},
-			expectedCount: 1, // Only read_file.go contains "ReadFileTool"
-			expectError:   false,
+			expectedCount: 1,
+			expectedFiles: []string{"internal/tools/read_file.go"},
 		},
 		{
 			name: "search with max_results",
@@ -65,7 +72,6 @@ func TestSearchFilesTool(t *testing.T) {
 				"max_results": 2,
 			},
 			expectedCount: 2,
-			expectError:   false,
 		},
 		{
 			name: "invalid content regex",
@@ -97,23 +103,29 @@ func TestSearchFilesTool(t *testing.T) {
 				t.Fatalf("unexpected error: %s", result.Error)
 			}
 
-			resultMap, ok := result.Result.(map[string]interface{})
+			resultStr, ok := result.Result.(string)
 			if !ok {
-				t.Fatalf("expected result to be map[string]interface{}, got %T", result.Result)
+				t.Fatalf("expected result to be string, got %T", result.Result)
 			}
 
-			matches, ok := resultMap["matches"].([]string)
-			if !ok {
-				t.Fatalf("expected matches to be []string, got %T", resultMap["matches"])
+			if !strings.Contains(resultStr, "## Search Results") {
+				t.Fatalf("expected markdown header in result: %s", resultStr)
 			}
 
-			count := resultMap["count"].(int)
-			if count != tt.expectedCount {
-				t.Errorf("expected %d matches, got %d. Matches: %v", tt.expectedCount, count, matches)
+			countFragment := fmt.Sprintf("**Found:** %d file(s)", tt.expectedCount)
+			if tt.expectedCount > 0 && !strings.Contains(resultStr, countFragment) {
+				t.Fatalf("expected count fragment %q in result: %s", countFragment, resultStr)
 			}
 
-			if tt.checkMatches != nil && !tt.checkMatches(matches) {
-				t.Errorf("match validation failed for matches: %v", matches)
+			matches := extractMarkdownMatches(resultStr)
+			if tt.expectedCount >= 0 && len(matches) != tt.expectedCount {
+				t.Fatalf("expected %d matches, got %d (%v)", tt.expectedCount, len(matches), matches)
+			}
+
+			for _, expectedFile := range tt.expectedFiles {
+				if !containsString(matches, expectedFile) {
+					t.Fatalf("expected file %s in matches %v", expectedFile, matches)
+				}
 			}
 		})
 	}
@@ -122,7 +134,6 @@ func TestSearchFilesTool(t *testing.T) {
 func TestSearchFilesToolGlobPattern(t *testing.T) {
 	mockFS := fs.NewMockFS()
 
-	// Create a directory structure
 	write := func(path, contents string) {
 		if err := mockFS.WriteFile(context.Background(), path, []byte(contents)); err != nil {
 			t.Fatalf("failed to write file %s: %v", path, err)
@@ -144,17 +155,17 @@ func TestSearchFilesToolGlobPattern(t *testing.T) {
 		{
 			name:          "recursive search with **",
 			pattern:       "**/*.go",
-			expectedCount: 4, // All .go files
+			expectedCount: 4,
 		},
 		{
 			name:          "specific directory pattern",
 			pattern:       "internal/**/*.go",
-			expectedCount: 2, // tool.go and fs.go
+			expectedCount: 2,
 		},
 		{
 			name:          "simple pattern matches all",
 			pattern:       "*.go",
-			expectedCount: 4, // All .go files (matches basename anywhere)
+			expectedCount: 4,
 		},
 	}
 
@@ -168,13 +179,35 @@ func TestSearchFilesToolGlobPattern(t *testing.T) {
 				t.Fatalf("unexpected error: %s", result.Error)
 			}
 
-			resultMap := result.Result.(map[string]interface{})
-			matches := resultMap["matches"].([]string)
-			count := resultMap["count"].(int)
+			resultStr, ok := result.Result.(string)
+			if !ok {
+				t.Fatalf("expected result to be string, got %T", result.Result)
+			}
 
-			if count != tt.expectedCount {
-				t.Errorf("expected %d matches, got %d. Matches: %v", tt.expectedCount, count, matches)
+			matches := extractMarkdownMatches(resultStr)
+			if tt.expectedCount >= 0 && len(matches) != tt.expectedCount {
+				t.Fatalf("expected %d matches, got %d (%v)", tt.expectedCount, len(matches), matches)
 			}
 		})
 	}
+}
+
+func extractMarkdownMatches(markdown string) []string {
+	var matches []string
+	for _, line := range strings.Split(markdown, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- `") && strings.HasSuffix(trimmed, "`") {
+			matches = append(matches, strings.Trim(trimmed[3:], "`"))
+		}
+	}
+	return matches
+}
+
+func containsString(list []string, target string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }

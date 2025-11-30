@@ -12,26 +12,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 )
 
-// SearchFileContentTool searches for content within files using regex
-type SearchFileContentTool struct {
-	fs fs.FileSystem
-}
+// SearchFileContentToolSpec is the static specification for the search_file_content tool
+type SearchFileContentToolSpec struct{}
 
-func NewSearchFileContentTool(filesystem fs.FileSystem) *SearchFileContentTool {
-	return &SearchFileContentTool{
-		fs: filesystem,
-	}
-}
-
-func (t *SearchFileContentTool) Name() string {
+func (s *SearchFileContentToolSpec) Name() string {
 	return ToolNameSearchFileContent
 }
 
-func (t *SearchFileContentTool) Description() string {
+func (s *SearchFileContentToolSpec) Description() string {
 	return "Search for a regex pattern in files, returning matches with line numbers and context. Similar to grep/rg."
 }
 
-func (t *SearchFileContentTool) Parameters() map[string]interface{} {
+func (s *SearchFileContentToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -54,6 +46,24 @@ func (t *SearchFileContentTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"pattern"},
 	}
+}
+
+// SearchFileContentTool is the executor with runtime dependencies
+type SearchFileContentTool struct {
+	fs fs.FileSystem
+}
+
+func NewSearchFileContentTool(filesystem fs.FileSystem) *SearchFileContentTool {
+	return &SearchFileContentTool{
+		fs: filesystem,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *SearchFileContentTool) Name() string        { return ToolNameSearchFileContent }
+func (t *SearchFileContentTool) Description() string { return (&SearchFileContentToolSpec{}).Description() }
+func (t *SearchFileContentTool) Parameters() map[string]interface{} {
+	return (&SearchFileContentToolSpec{}).Parameters()
 }
 
 func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -296,4 +306,11 @@ func isBinary(data []byte) bool {
 		}
 	}
 	return false
+}
+
+// NewSearchFileContentToolFactory creates a factory for SearchFileContentTool
+func NewSearchFileContentToolFactory(filesystem fs.FileSystem) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewSearchFileContentTool(filesystem)
+	}
 }

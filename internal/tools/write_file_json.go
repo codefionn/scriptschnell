@@ -11,25 +11,14 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/session"
 )
 
-// WriteFileJSONTool applies changes to a file based on a JSON payload.
-type WriteFileJSONTool struct {
-	fs      fs.FileSystem
-	session *session.Session
-}
+// WriteFileJSONToolSpec is the static specification for the write_file_json tool
+type WriteFileJSONToolSpec struct{}
 
-// NewWriteFileJSONTool creates a new instance of the JSON file writing tool.
-func NewWriteFileJSONTool(filesystem fs.FileSystem, sess *session.Session) *WriteFileJSONTool {
-	return &WriteFileJSONTool{
-		fs:      filesystem,
-		session: sess,
-	}
-}
-
-func (t *WriteFileJSONTool) Name() string {
+func (s *WriteFileJSONToolSpec) Name() string {
 	return ToolNameWriteFileJSON
 }
 
-func (t *WriteFileJSONTool) Description() string {
+func (s *WriteFileJSONToolSpec) Description() string {
 	return `Update an existing file using a JSON structure of operations.
 The operations array contains a sequence of modifications to be applied to the file.
 Each operation is one of:
@@ -38,7 +27,7 @@ Each operation is one of:
 - insert_after: inserts a new line after a specific line.`
 }
 
-func (t *WriteFileJSONTool) Parameters() map[string]interface{} {
+func (s *WriteFileJSONToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -72,6 +61,27 @@ func (t *WriteFileJSONTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"path", "operations"},
 	}
+}
+
+// WriteFileJSONTool is the executor with runtime dependencies
+type WriteFileJSONTool struct {
+	fs      fs.FileSystem
+	session *session.Session
+}
+
+// NewWriteFileJSONTool creates a new instance of the JSON file writing tool.
+func NewWriteFileJSONTool(filesystem fs.FileSystem, sess *session.Session) *WriteFileJSONTool {
+	return &WriteFileJSONTool{
+		fs:      filesystem,
+		session: sess,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *WriteFileJSONTool) Name() string        { return ToolNameWriteFileJSON }
+func (t *WriteFileJSONTool) Description() string { return (&WriteFileJSONToolSpec{}).Description() }
+func (t *WriteFileJSONTool) Parameters() map[string]interface{} {
+	return (&WriteFileJSONToolSpec{}).Parameters()
 }
 
 type fileOperation struct {
@@ -207,4 +217,11 @@ func applyJSONOperations(original string, operations []fileOperation) (string, e
 	}
 
 	return strings.Join(resultLines, "\n"), nil
+}
+
+// NewWriteFileJSONToolFactory creates a factory for WriteFileJSONTool
+func NewWriteFileJSONToolFactory(filesystem fs.FileSystem, sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewWriteFileJSONTool(filesystem, sess)
+	}
 }

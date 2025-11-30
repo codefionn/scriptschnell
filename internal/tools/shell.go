@@ -24,28 +24,18 @@ type shellBackgroundKey struct{}
 
 const shellBackgroundMessage = "Command started in background. Use 'status_program' to stream progress, 'wait_program' to block until completion, or 'stop_program' to terminate."
 
-// ShellTool executes shell commands
-type ShellTool struct {
-	session    *session.Session
-	workingDir string
-}
+// ShellToolSpec is the static specification for the shell tool
+type ShellToolSpec struct{}
 
-func NewShellTool(sess *session.Session, workingDir string) *ShellTool {
-	return &ShellTool{
-		session:    sess,
-		workingDir: workingDir,
-	}
-}
-
-func (t *ShellTool) Name() string {
+func (s *ShellToolSpec) Name() string {
 	return ToolNameShell
 }
 
-func (t *ShellTool) Description() string {
+func (s *ShellToolSpec) Description() string {
 	return "Execute shell commands. Working directory defaults to current directory. Supports background execution."
 }
 
-func (t *ShellTool) Parameters() map[string]interface{} {
+func (s *ShellToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -68,6 +58,26 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"command"},
 	}
+}
+
+// ShellTool is the executor with runtime dependencies
+type ShellTool struct {
+	session    *session.Session
+	workingDir string
+}
+
+func NewShellTool(sess *session.Session, workingDir string) *ShellTool {
+	return &ShellTool{
+		session:    sess,
+		workingDir: workingDir,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *ShellTool) Name() string        { return ToolNameShell }
+func (t *ShellTool) Description() string { return (&ShellToolSpec{}).Description() }
+func (t *ShellTool) Parameters() map[string]interface{} {
+	return (&ShellToolSpec{}).Parameters()
 }
 
 func (t *ShellTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -189,26 +199,18 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 	}
 }
 
-// StatusProgramTool checks status of background jobs
-type StatusProgramTool struct {
-	session *session.Session
-}
+// StatusProgramToolSpec is the static specification for the status_program tool
+type StatusProgramToolSpec struct{}
 
-func NewStatusProgramTool(sess *session.Session) *StatusProgramTool {
-	return &StatusProgramTool{
-		session: sess,
-	}
-}
-
-func (t *StatusProgramTool) Name() string {
+func (s *StatusProgramToolSpec) Name() string {
 	return ToolNameStatusProgram
 }
 
-func (t *StatusProgramTool) Description() string {
+func (s *StatusProgramToolSpec) Description() string {
 	return "Check status of background programs launched by the shell or sandbox tools."
 }
 
-func (t *StatusProgramTool) Parameters() map[string]interface{} {
+func (s *StatusProgramToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -222,6 +224,24 @@ func (t *StatusProgramTool) Parameters() map[string]interface{} {
 			},
 		},
 	}
+}
+
+// StatusProgramTool is the executor with runtime dependencies
+type StatusProgramTool struct {
+	session *session.Session
+}
+
+func NewStatusProgramTool(sess *session.Session) *StatusProgramTool {
+	return &StatusProgramTool{
+		session: sess,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *StatusProgramTool) Name() string        { return ToolNameStatusProgram }
+func (t *StatusProgramTool) Description() string { return (&StatusProgramToolSpec{}).Description() }
+func (t *StatusProgramTool) Parameters() map[string]interface{} {
+	return (&StatusProgramToolSpec{}).Parameters()
 }
 
 func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -261,24 +281,18 @@ func (t *StatusProgramTool) Execute(ctx context.Context, params map[string]inter
 	return &ToolResult{Result: buildJobSnapshot(ctx, job, lastNLines)}
 }
 
-// WaitProgramTool blocks until a background job finishes and returns its output
-type WaitProgramTool struct {
-	session *session.Session
-}
+// WaitProgramToolSpec is the static specification for the wait_program tool
+type WaitProgramToolSpec struct{}
 
-func NewWaitProgramTool(sess *session.Session) *WaitProgramTool {
-	return &WaitProgramTool{session: sess}
-}
-
-func (t *WaitProgramTool) Name() string {
+func (s *WaitProgramToolSpec) Name() string {
 	return ToolNameWaitProgram
 }
 
-func (t *WaitProgramTool) Description() string {
+func (s *WaitProgramToolSpec) Description() string {
 	return "Block until a background program completes and return its final output."
 }
 
-func (t *WaitProgramTool) Parameters() map[string]interface{} {
+func (s *WaitProgramToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -293,6 +307,22 @@ func (t *WaitProgramTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"job_id"},
 	}
+}
+
+// WaitProgramTool is the executor with runtime dependencies
+type WaitProgramTool struct {
+	session *session.Session
+}
+
+func NewWaitProgramTool(sess *session.Session) *WaitProgramTool {
+	return &WaitProgramTool{session: sess}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *WaitProgramTool) Name() string        { return ToolNameWaitProgram }
+func (t *WaitProgramTool) Description() string { return (&WaitProgramToolSpec{}).Description() }
+func (t *WaitProgramTool) Parameters() map[string]interface{} {
+	return (&WaitProgramToolSpec{}).Parameters()
 }
 
 func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -583,24 +613,18 @@ func isIgnorableSignalError(err error) bool {
 	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
 }
 
-// StopProgramTool sends termination signals to background processes
-type StopProgramTool struct {
-	session *session.Session
-}
+// StopProgramToolSpec is the static specification for the stop_program tool
+type StopProgramToolSpec struct{}
 
-func NewStopProgramTool(sess *session.Session) *StopProgramTool {
-	return &StopProgramTool{session: sess}
-}
-
-func (t *StopProgramTool) Name() string {
+func (s *StopProgramToolSpec) Name() string {
 	return ToolNameStopProgram
 }
 
-func (t *StopProgramTool) Description() string {
+func (s *StopProgramToolSpec) Description() string {
 	return "Stop a background program by sending SIGTERM or SIGKILL."
 }
 
-func (t *StopProgramTool) Parameters() map[string]interface{} {
+func (s *StopProgramToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -615,6 +639,22 @@ func (t *StopProgramTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"job_id"},
 	}
+}
+
+// StopProgramTool is the executor with runtime dependencies
+type StopProgramTool struct {
+	session *session.Session
+}
+
+func NewStopProgramTool(sess *session.Session) *StopProgramTool {
+	return &StopProgramTool{session: sess}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *StopProgramTool) Name() string        { return ToolNameStopProgram }
+func (t *StopProgramTool) Description() string { return (&StopProgramToolSpec{}).Description() }
+func (t *StopProgramTool) Parameters() map[string]interface{} {
+	return (&StopProgramToolSpec{}).Parameters()
 }
 
 func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -668,4 +708,32 @@ func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interfa
 		"signal":  signalName,
 		"message": fmt.Sprintf("Signal %s sent to background job.", signalName),
 	}}
+}
+
+// NewStatusProgramToolFactory creates a factory for StatusProgramTool
+func NewStatusProgramToolFactory(sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewStatusProgramTool(sess)
+	}
+}
+
+// NewWaitProgramToolFactory creates a factory for WaitProgramTool
+func NewWaitProgramToolFactory(sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewWaitProgramTool(sess)
+	}
+}
+
+// NewStopProgramToolFactory creates a factory for StopProgramTool
+func NewStopProgramToolFactory(sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewStopProgramTool(sess)
+	}
+}
+
+// NewShellToolFactory creates a factory for ShellTool
+func NewShellToolFactory(sess *session.Session, workingDir string) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewShellTool(sess, workingDir)
+	}
 }

@@ -9,30 +9,18 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/session"
 )
 
-// SummarizeFileTool summarizes file content using LLM
-type SummarizeFileTool struct {
-	fs              fs.FileSystem
-	session         *session.Session
-	summarizeClient llm.Client
-}
+// SummarizeFileToolSpec is the static specification for the read_file_summarized tool
+type SummarizeFileToolSpec struct{}
 
-func NewSummarizeFileTool(filesystem fs.FileSystem, sess *session.Session, summarizeClient llm.Client) *SummarizeFileTool {
-	return &SummarizeFileTool{
-		fs:              filesystem,
-		session:         sess,
-		summarizeClient: summarizeClient,
-	}
-}
-
-func (t *SummarizeFileTool) Name() string {
+func (s *SummarizeFileToolSpec) Name() string {
 	return ToolNameReadFileSummarized
 }
 
-func (t *SummarizeFileTool) Description() string {
+func (s *SummarizeFileToolSpec) Description() string {
 	return "Read and summarize a file using AI. Useful for large files or when you need a targeted summary based on specific goals."
 }
 
-func (t *SummarizeFileTool) Parameters() map[string]interface{} {
+func (s *SummarizeFileToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -47,6 +35,28 @@ func (t *SummarizeFileTool) Parameters() map[string]interface{} {
 		},
 		"required": []string{"path", "goal"},
 	}
+}
+
+// SummarizeFileTool is the executor with runtime dependencies
+type SummarizeFileTool struct {
+	fs              fs.FileSystem
+	session         *session.Session
+	summarizeClient llm.Client
+}
+
+func NewSummarizeFileTool(filesystem fs.FileSystem, sess *session.Session, summarizeClient llm.Client) *SummarizeFileTool {
+	return &SummarizeFileTool{
+		fs:              filesystem,
+		session:         sess,
+		summarizeClient: summarizeClient,
+	}
+}
+
+// Legacy interface implementation for backward compatibility
+func (t *SummarizeFileTool) Name() string        { return ToolNameReadFileSummarized }
+func (t *SummarizeFileTool) Description() string { return (&SummarizeFileToolSpec{}).Description() }
+func (t *SummarizeFileTool) Parameters() map[string]interface{} {
+	return (&SummarizeFileToolSpec{}).Parameters()
 }
 
 func (t *SummarizeFileTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
@@ -102,4 +112,11 @@ Provide a concise summary focusing on the specified goal.`, goal, path, content)
 		"goal":    goal,
 		"summary": response,
 	}}
+}
+
+// NewSummarizeFileToolFactory creates a factory for SummarizeFileTool
+func NewSummarizeFileToolFactory(filesystem fs.FileSystem, sess *session.Session, summarizeClient llm.Client) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewSummarizeFileTool(filesystem, sess, summarizeClient)
+	}
 }

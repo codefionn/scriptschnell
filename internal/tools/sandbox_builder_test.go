@@ -120,10 +120,10 @@ func TestSandboxBuilder_SetTimeout(t *testing.T) {
 	}{
 		{"valid timeout", 30, false},
 		{"min timeout", 1, false},
-		{"max timeout", 120, false},
+		{"max timeout", 600, false},
 		{"zero timeout", 0, true},
 		{"negative timeout", -1, true},
-		{"exceeds max", 121, true},
+		{"exceeds max", 601, true},
 	}
 
 	for _, tt := range tests {

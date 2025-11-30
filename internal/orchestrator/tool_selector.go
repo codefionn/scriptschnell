@@ -37,11 +37,11 @@ func (o *Orchestrator) filterToolSpecs(specs []toolSpec) ([]toolSpec, error) {
 					}
 					mcpSummaries[spec.mcpKey] = summary
 				}
-				desc := spec.template.Description()
+				desc := spec.spec.Description()
 				if desc == "" {
-					desc = fmt.Sprintf("Tool %s", spec.template.Name())
+					desc = fmt.Sprintf("Tool %s", spec.spec.Name())
 				} else {
-					desc = fmt.Sprintf("%s — %s", spec.template.Name(), desc)
+					desc = fmt.Sprintf("%s — %s", spec.spec.Name(), desc)
 				}
 				summary.entries = append(summary.entries, desc)
 			}
@@ -83,17 +83,17 @@ func (o *Orchestrator) filterToolSpecs(specs []toolSpec) ([]toolSpec, error) {
 			if includeAll || selectedMap[serverNameLower] || selectedMap[mcpKeyLower] {
 				result = append(result, spec)
 			} else {
-				logger.Debug("MCP tool %s disabled (server %s not selected)", spec.template.Name(), serverName)
+				logger.Debug("MCP tool %s disabled (server %s not selected)", spec.spec.Name(), serverName)
 			}
 			continue
 		}
 
 		// For built-in tools, check individual tool name
-		name := strings.ToLower(spec.template.Name())
+		name := strings.ToLower(spec.spec.Name())
 		if includeAll || selectedMap[name] {
 			result = append(result, spec)
 		} else {
-			logger.Debug("Tool %s disabled by summarization model", spec.template.Name())
+			logger.Debug("Tool %s disabled by summarization model", spec.spec.Name())
 		}
 	}
 
@@ -129,17 +129,17 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 				summary = &mcpSummary{displayName: serverName}
 				mcpSummaries[spec.mcpKey] = summary
 			}
-			desc := spec.template.Description()
+			desc := spec.spec.Description()
 			if desc == "" {
-				desc = spec.template.Name()
+				desc = spec.spec.Name()
 			} else {
-				desc = fmt.Sprintf("%s — %s", spec.template.Name(), desc)
+				desc = fmt.Sprintf("%s — %s", spec.spec.Name(), desc)
 			}
 			summary.entries = append(summary.entries, desc)
 			continue
 		}
-		desc := truncateForPrompt(spec.template.Description(), descriptionLimit)
-		builtinBuilder.WriteString(fmt.Sprintf("- %s: %s\n", spec.template.Name(), desc))
+		desc := truncateForPrompt(spec.spec.Description(), descriptionLimit)
+		builtinBuilder.WriteString(fmt.Sprintf("- %s: %s\n", spec.spec.Name(), desc))
 	}
 
 	// Second pass: format MCP summaries

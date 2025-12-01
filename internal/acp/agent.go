@@ -386,6 +386,28 @@ func (a *StatCodeAIAgent) Initialize(ctx context.Context, params acp.InitializeR
 	}, nil
 }
 
+// createTodoPlanUpdateCallback creates a callback function that sends todo plan updates via ACP
+func (a *StatCodeAIAgent) createTodoPlanUpdateCallback(sessionID string) tools.TodoChangeCallback {
+	return func(todos *tools.TodoList) {
+		// Format the plan as text
+		planText := tools.FormatTodoPlanAsText(todos)
+
+		// Send plan update via ACP
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		logger.Debug("Sending todo plan update for session %s with %d items", sessionID, len(todos.Items))
+		err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: acp.SessionId(sessionID),
+			Update:    acp.UpdateAgentMessageText(planText),
+		})
+
+		if err != nil {
+			logger.Error("Failed to send todo plan update via ACP: %v", err)
+		}
+	}
+}
+
 // NewSession implements acp.Agent
 func (a *StatCodeAIAgent) NewSession(ctx context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sessionID := fmt.Sprintf("statcode_%d", time.Now().UnixNano())
@@ -407,17 +429,17 @@ func (a *StatCodeAIAgent) NewSession(ctx context.Context, params acp.NewSessionR
 		logger.Debug("NewSession[%s]: ACP filesystem configured (session=%s)", sessionID, afs.sessionID)
 	}
 
-	// Create ACP todo actor for this session
-	acpTodoActor := tools.NewACPTodoActor("todo_acp")
-	logger.Debug("NewSession[%s]: instantiated ACP todo actor (%p)", sessionID, acpTodoActor)
+	// Create todo actor for this session
+	todoActor := tools.NewTodoActor("todo")
+	logger.Debug("NewSession[%s]: instantiated todo actor (%p)", sessionID, todoActor)
 
 	// Create a new orchestrator instance for this session to maintain isolation
-	// Use the ACP todo actor and custom filesystem
-	sessionOrch, err := orchestrator.NewOrchestratorWithFSAndTodoActor(a.config, a.providerMgr, false, sessionFS, acpTodoActor)
+	// Use the todo actor and custom filesystem
+	sessionOrch, err := orchestrator.NewOrchestratorWithFSAndTodoActor(a.config, a.providerMgr, false, sessionFS, todoActor)
 	if err != nil {
-		logger.Warn("NewSession[%s]: orchestrator with ACP filesystem failed: %v", sessionID, err)
-		// Fallback: try creating without custom filesystem but with ACP todo actor
-		sessionOrch, err = orchestrator.NewOrchestratorWithTodoActor(a.config, a.providerMgr, false, acpTodoActor)
+		logger.Warn("NewSession[%s]: orchestrator with filesystem failed: %v", sessionID, err)
+		// Fallback: try creating without custom filesystem but with todo actor
+		sessionOrch, err = orchestrator.NewOrchestratorWithTodoActor(a.config, a.providerMgr, false, todoActor)
 		if err != nil {
 			logger.Warn("NewSession[%s]: orchestrator with todo actor fallback failed: %v", sessionID, err)
 			// Final fallback: try creating without customizations
@@ -451,16 +473,15 @@ func (a *StatCodeAIAgent) NewSession(ctx context.Context, params acp.NewSessionR
 	logger.Debug("NewSession[%s]: session state initialized", sessionID)
 	a.mu.Unlock()
 
-	// Set up ACP connection on the todo actor if it's an ACP todo actor
-	todoActor := sessionOrch.GetTodoActor()
-	logger.Debug("NewSession[%s]: configuring ACP connection on todo actor (actor=%T)", sessionID, todoActor)
-	if todoActor != nil {
-		if err := todoActor.SendSetConnectionMsg(a.conn, sessionID); err != nil {
-			logger.Error("Failed to set ACP connection on todo actor: %v", err)
-			// Don't fail the session creation, just log the error
-		} else {
-			logger.Debug("ACP connection set on todo actor for session %s", sessionID)
-		}
+	// Set up change callback on the todo actor to send plan updates via ACP
+	// Get the todo actor from the orchestrator (might be the same one we passed in, or a fallback)
+	sessionTodoActor := sessionOrch.GetTodoActor()
+	logger.Debug("NewSession[%s]: configuring change callback on todo actor (actor=%T)", sessionID, sessionTodoActor)
+	if sessionTodoActor != nil {
+		// Create a callback that sends plan updates via ACP
+		callback := a.createTodoPlanUpdateCallback(sessionID)
+		sessionTodoActor.SetChangeCallback(callback)
+		logger.Debug("Change callback set on todo actor for session %s", sessionID)
 	} else {
 		logger.Warn("NewSession[%s]: todo actor missing; ACP plan updates unavailable", sessionID)
 	}

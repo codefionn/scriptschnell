@@ -22,7 +22,7 @@ func TestTodoActor(t *testing.T) {
 	client := NewTodoActorClient(todoRef)
 
 	// Test adding a todo
-	item, err := client.Add("Test task", "2024-01-01T00:00:00Z", "")
+	item, err := client.Add("Test task", "2024-01-01T00:00:00Z", "", "pending", "medium")
 	if err != nil {
 		t.Fatalf("Failed to add todo: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestTodoActorConcurrency(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			_, err := client.Add("Task", "2024-01-01T00:00:00Z", "")
+			_, err := client.Add("Task", "2024-01-01T00:00:00Z", "", "pending", "medium")
 			if err != nil {
 				t.Errorf("Failed to add todo: %v", err)
 			}
@@ -141,13 +141,13 @@ func TestTodoActorSubTodos(t *testing.T) {
 	client := NewTodoActorClient(todoRef)
 
 	// Add a parent todo
-	parent, err := client.Add("Parent task", "2024-01-01T00:00:00Z", "")
+	parent, err := client.Add("Parent task", "2024-01-01T00:00:00Z", "", "pending", "medium")
 	if err != nil {
 		t.Fatalf("Failed to add parent todo: %v", err)
 	}
 
 	// Add a sub-todo
-	sub1, err := client.Add("Sub-task 1", "2024-01-01T00:00:00Z", parent.ID)
+	sub1, err := client.Add("Sub-task 1", "2024-01-01T00:00:00Z", parent.ID, "pending", "medium")
 	if err != nil {
 		t.Fatalf("Failed to add sub-todo: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestTodoActorSubTodos(t *testing.T) {
 	}
 
 	// Add another sub-todo
-	sub2, err := client.Add("Sub-task 2", "2024-01-01T00:00:00Z", parent.ID)
+	sub2, err := client.Add("Sub-task 2", "2024-01-01T00:00:00Z", parent.ID, "pending", "medium")
 	if err != nil {
 		t.Fatalf("Failed to add sub-todo: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestTodoActorSubTodos(t *testing.T) {
 	}
 
 	// Add a nested sub-todo (grandchild)
-	grandchild, err := client.Add("Nested sub-task", "2024-01-01T00:00:00Z", sub1.ID)
+	grandchild, err := client.Add("Nested sub-task", "2024-01-01T00:00:00Z", sub1.ID, "pending", "medium")
 	if err != nil {
 		t.Fatalf("Failed to add nested sub-todo: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestTodoActorSubTodoValidation(t *testing.T) {
 	client := NewTodoActorClient(todoRef)
 
 	// Try to add a sub-todo with non-existent parent
-	_, err = client.Add("Sub-task", "2024-01-01T00:00:00Z", "nonexistent_id")
+	_, err = client.Add("Sub-task", "2024-01-01T00:00:00Z", "nonexistent_id", "pending", "medium")
 	if err == nil {
 		t.Error("Expected error when adding sub-todo with non-existent parent")
 	}
@@ -242,10 +242,10 @@ func TestTodoActorRecursiveDelete(t *testing.T) {
 
 	// Create a hierarchy: parent -> child1 -> grandchild
 	//                            -> child2
-	parent, _ := client.Add("Parent", "2024-01-01T00:00:00Z", "")
-	child1, _ := client.Add("Child 1", "2024-01-01T00:00:00Z", parent.ID)
-	_, _ = client.Add("Grandchild", "2024-01-01T00:00:00Z", child1.ID)
-	_, _ = client.Add("Child 2", "2024-01-01T00:00:00Z", parent.ID)
+	parent, _ := client.Add("Parent", "2024-01-01T00:00:00Z", "", "pending", "medium")
+	child1, _ := client.Add("Child 1", "2024-01-01T00:00:00Z", parent.ID, "pending", "medium")
+	_, _ = client.Add("Grandchild", "2024-01-01T00:00:00Z", child1.ID, "pending", "medium")
+	_, _ = client.Add("Child 2", "2024-01-01T00:00:00Z", parent.ID, "pending", "medium")
 
 	// Verify we have 4 todos
 	list, _ := client.List()
@@ -281,10 +281,10 @@ func TestTodoActorDeleteSubTodoOnly(t *testing.T) {
 	client := NewTodoActorClient(todoRef)
 
 	// Create a hierarchy
-	parent, _ := client.Add("Parent", "2024-01-01T00:00:00Z", "")
-	child1, _ := client.Add("Child 1", "2024-01-01T00:00:00Z", parent.ID)
-	grandchild, _ := client.Add("Grandchild", "2024-01-01T00:00:00Z", child1.ID)
-	_, _ = client.Add("Child 2", "2024-01-01T00:00:00Z", parent.ID)
+	parent, _ := client.Add("Parent", "2024-01-01T00:00:00Z", "", "pending", "medium")
+	child1, _ := client.Add("Child 1", "2024-01-01T00:00:00Z", parent.ID, "pending", "medium")
+	grandchild, _ := client.Add("Grandchild", "2024-01-01T00:00:00Z", child1.ID, "pending", "medium")
+	_, _ = client.Add("Child 2", "2024-01-01T00:00:00Z", parent.ID, "pending", "medium")
 
 	// Delete only child1 - should also delete grandchild but keep parent and child2
 	err = client.Delete(child1.ID)
@@ -347,14 +347,14 @@ func TestTodoActorClear(t *testing.T) {
 	client := NewTodoActorClient(todoRef)
 
 	// Seed multiple todos (including nested)
-	parent, err := client.Add("Parent", "2024-01-01T00:00:00Z", "")
+	parent, err := client.Add("Parent", "2024-01-01T00:00:00Z", "", "pending", "medium")
 	if err != nil {
 		t.Fatalf("Failed to add parent todo: %v", err)
 	}
-	if _, err = client.Add("Child", "2024-01-01T00:00:00Z", parent.ID); err != nil {
+	if _, err = client.Add("Child", "2024-01-01T00:00:00Z", parent.ID, "pending", "medium"); err != nil {
 		t.Fatalf("Failed to add child todo: %v", err)
 	}
-	if _, err = client.Add("Root", "2024-01-01T00:00:00Z", ""); err != nil {
+	if _, err = client.Add("Root", "2024-01-01T00:00:00Z", "", "pending", "medium"); err != nil {
 		t.Fatalf("Failed to add root todo: %v", err)
 	}
 

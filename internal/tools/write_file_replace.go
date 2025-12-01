@@ -18,7 +18,9 @@ func (s *WriteFileReplaceToolSpec) Name() string {
 }
 
 func (s *WriteFileReplaceToolSpec) Description() string {
-	return "Update an existing file by replacing a specific string with a new string. Ensure the old_string matches exactly (including whitespace and indentation)."
+	return `Update an existing file by replacing a specific string with a new string. 
+Ensure the old_string matches exactly (including whitespace and indentation). 
+Be careful around opening and closing brackets (e.g. '{' and '}' in C like languages) when editing code.`
 }
 
 func (s *WriteFileReplaceToolSpec) Parameters() map[string]interface{} {

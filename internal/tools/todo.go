@@ -10,7 +10,9 @@ import (
 type TodoItem struct {
 	ID        string `json:"id"`
 	Text      string `json:"text"`
-	Completed bool   `json:"completed"`
+	Completed bool   `json:"completed"` // Deprecated: use Status instead
+	Status    string `json:"status"`    // "pending", "in_progress", "completed"
+	Priority  string `json:"priority"`  // "high", "medium", "low"
 	Created   string `json:"created"`
 	ParentID  string `json:"parent_id,omitempty"` // Empty string means top-level todo
 }
@@ -28,7 +30,7 @@ func (s *TodoToolSpec) Name() string {
 }
 
 func (s *TodoToolSpec) Description() string {
-	return "Manage todo items with hierarchical sub-todos. Supports reading, writing, checking/unchecking todos, and adding sub-todos to parent tasks."
+	return "Manage todo items with hierarchical sub-todos. Supports reading, writing, checking/unchecking todos, and adding sub-todos to parent tasks. Each todo has a status (pending/in_progress/completed) and priority (high/medium/low)."
 }
 
 func (s *TodoToolSpec) Parameters() map[string]interface{} {
@@ -37,8 +39,8 @@ func (s *TodoToolSpec) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "Action to perform: 'list', 'add', 'check', 'uncheck', 'delete', 'clear'",
-				"enum":        []string{"list", "add", "check", "uncheck", "delete", "clear"},
+				"description": "Action to perform: 'list', 'add', 'check', 'uncheck', 'delete', 'clear', 'set_status'",
+				"enum":        []string{"list", "add", "check", "uncheck", "delete", "clear", "set_status"},
 			},
 			"text": map[string]interface{}{
 				"type":        "string",
@@ -46,11 +48,21 @@ func (s *TodoToolSpec) Parameters() map[string]interface{} {
 			},
 			"id": map[string]interface{}{
 				"type":        "string",
-				"description": "Todo ID (for 'check', 'uncheck', 'delete' actions)",
+				"description": "Todo ID (for 'check', 'uncheck', 'delete', 'set_status' actions)",
 			},
 			"parent_id": map[string]interface{}{
 				"type":        "string",
 				"description": "Parent todo ID (for 'add' action, optional - creates a sub-todo under the specified parent)",
+			},
+			"status": map[string]interface{}{
+				"type":        "string",
+				"description": "Status of the todo (for 'add' and 'set_status' actions): 'pending', 'in_progress', 'completed'",
+				"enum":        []string{"pending", "in_progress", "completed"},
+			},
+			"priority": map[string]interface{}{
+				"type":        "string",
+				"description": "Priority of the todo (for 'add' action): 'high', 'medium', 'low'. Defaults to 'medium' if not specified.",
+				"enum":        []string{"high", "medium", "low"},
 			},
 		},
 		"required": []string{"action"},
@@ -91,7 +103,9 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 			return &ToolResult{Error: fmt.Sprintf("text is required for add action")}
 		}
 		parentID := GetStringParam(params, "parent_id", "")
-		result, err := t.addTodo(ctx, text, parentID)
+		status := GetStringParam(params, "status", "pending")
+		priority := GetStringParam(params, "priority", "medium")
+		result, err := t.addTodo(ctx, text, parentID, status, priority)
 		if err != nil {
 			return &ToolResult{Error: err.Error()}
 		}
@@ -114,6 +128,24 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 			return &ToolResult{Error: fmt.Sprintf("id is required for uncheck action")}
 		}
 		result, err := t.checkTodo(id, false)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
+
+	case "set_status":
+		id := GetStringParam(params, "id", "")
+		if id == "" {
+			return &ToolResult{Error: fmt.Sprintf("id is required for set_status action")}
+		}
+		status := GetStringParam(params, "status", "")
+		if status == "" {
+			return &ToolResult{Error: fmt.Sprintf("status is required for set_status action")}
+		}
+		if status != "pending" && status != "in_progress" && status != "completed" {
+			return &ToolResult{Error: fmt.Sprintf("invalid status: %s (must be 'pending', 'in_progress', or 'completed')", status)}
+		}
+		result, err := t.setStatus(id, status)
 		if err != nil {
 			return &ToolResult{Error: err.Error()}
 		}
@@ -156,9 +188,20 @@ func (t *TodoTool) listTodos() interface{} {
 	}
 }
 
-func (t *TodoTool) addTodo(ctx context.Context, text string, parentID string) (interface{}, error) {
+func (t *TodoTool) addTodo(ctx context.Context, text string, parentID string, status string, priority string) (interface{}, error) {
 	timestamp := todoTimestamp(ctx)
-	item, err := t.client.Add(text, timestamp, parentID)
+
+	// Validate status
+	if status != "pending" && status != "in_progress" && status != "completed" {
+		status = "pending" // Default to pending if invalid
+	}
+
+	// Validate priority
+	if priority != "high" && priority != "medium" && priority != "low" {
+		priority = "medium" // Default to medium if invalid
+	}
+
+	item, err := t.client.Add(text, timestamp, parentID, status, priority)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +214,8 @@ func (t *TodoTool) addTodo(ctx context.Context, text string, parentID string) (i
 	return map[string]interface{}{
 		"id":        item.ID,
 		"parent_id": item.ParentID,
+		"status":    item.Status,
+		"priority":  item.Priority,
 		"message":   message,
 	}, nil
 }
@@ -188,6 +233,19 @@ func (t *TodoTool) checkTodo(id string, checked bool) (interface{}, error) {
 	return map[string]interface{}{
 		"id":      id,
 		"message": fmt.Sprintf("Todo %s successfully", status),
+	}, nil
+}
+
+func (t *TodoTool) setStatus(id string, status string) (interface{}, error) {
+	err := t.client.SetStatus(id, status)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"id":      id,
+		"status":  status,
+		"message": fmt.Sprintf("Todo status set to '%s' successfully", status),
 	}, nil
 }
 

@@ -4,7 +4,8 @@ import orchestratorpkg "github.com/statcode-ai/statcode-ai/internal/orchestrator
 
 type (
 	AuthorizationCallback = orchestratorpkg.AuthorizationCallback
-	StatusCallback        = orchestratorpkg.StatusCallback
+	ProgressCallback      = orchestratorpkg.ProgressCallback
+	ProgressUpdate        = orchestratorpkg.ProgressUpdate
 	ContextUsageCallback  = orchestratorpkg.ContextUsageCallback
 )
 

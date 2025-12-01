@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -157,8 +158,12 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 	job.ProcessGroupID = getProcessGroupID(cmd)
 	logger.Info("shell: background job started: %s (pid=%d)", jobID, job.PID)
 
+	var wg sync.WaitGroup
+
 	// Read output in goroutines
 	go func() {
+		wg.Add(1)
+		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			job.Stdout = append(job.Stdout, scanner.Text())
@@ -166,6 +171,8 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 	}()
 
 	go func() {
+		wg.Add(1)
+		defer wg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			job.Stderr = append(job.Stderr, scanner.Text())
@@ -176,6 +183,7 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 	go func() {
 		defer close(job.Done)
 		err := cmd.Wait()
+		wg.Wait()
 		job.Completed = true
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/statcode-ai/statcode-ai/internal/config"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 )
 
@@ -95,14 +96,13 @@ func getDefaultCommandDefinitions() []commandDefinition {
 
 // CommandHandler handles TUI commands
 type CommandHandler struct {
-	providerMgr     *provider.Manager
-	orchestrator    *Orchestrator
-	config          *config.Config
-	ctx             context.Context
-	streamCallback  func(string) error
-	statusCallback  func(string) error
-	contextCallback ContextUsageCallback
-	commands        map[string]commandDefinition
+	providerMgr      *provider.Manager
+	orchestrator     *Orchestrator
+	config           *config.Config
+	ctx              context.Context
+	progressCallback ProgressCallback
+	contextCallback  ContextUsageCallback
+	commands         map[string]commandDefinition
 }
 
 func NewCommandHandler(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, orchestrator *Orchestrator) *CommandHandler {
@@ -124,14 +124,9 @@ func (ch *CommandHandler) initCommands() {
 	}
 }
 
-// SetStreamCallback sets the callback for streaming responses
-func (ch *CommandHandler) SetStreamCallback(callback func(string) error) {
-	ch.streamCallback = callback
-}
-
-// SetStatusCallback sets the callback for status updates
-func (ch *CommandHandler) SetStatusCallback(callback func(string) error) {
-	ch.statusCallback = callback
+// SetProgressCallback sets the callback for progress/status updates
+func (ch *CommandHandler) SetProgressCallback(callback ProgressCallback) {
+	ch.progressCallback = callback
 }
 
 // SetContextCallback sets the callback for context usage updates
@@ -794,39 +789,33 @@ func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
 		return MenuResult{}, fmt.Errorf("no orchestration model configured. Use /models to set one")
 	}
 
-	// Check if we have a stream callback
-	if ch.streamCallback == nil {
+	// Check if we have a progress callback
+	if ch.progressCallback == nil {
 		return MenuResult{}, fmt.Errorf("streaming not available in this context")
+	}
+
+	dispatch := func(update progress.Update) {
+		if err := progress.Dispatch(ch.progressCallback, update); err != nil {
+			log.Printf("Failed to send progress update: %v", err)
+		}
 	}
 
 	// Get init prompt
 	initPrompt := ch.orchestrator.GetInitPrompt()
 
 	// Set initial status
-	if ch.statusCallback != nil {
-		if err := ch.statusCallback("Analyzing codebase to generate AGENTS.md"); err != nil {
-			return MenuResult{}, fmt.Errorf("failed to update status: %w", err)
-		}
-	}
+	dispatch(progress.Update{Message: "Analyzing codebase to generate AGENTS.md", Mode: progress.ReportJustStatus, Ephemeral: true})
 
 	// Process through orchestrator with streaming (in background)
 	go func() {
-		if err := ch.orchestrator.ProcessPrompt(ch.ctx, initPrompt, ch.streamCallback, ch.statusCallback, ch.contextCallback, nil, nil, nil); err != nil {
+		if err := ch.orchestrator.ProcessPrompt(ch.ctx, initPrompt, ch.progressCallback, ch.contextCallback, nil, nil, nil); err != nil {
 			// Error will be handled by orchestrator's error handling
 			// Clear status on error
-			if ch.statusCallback != nil {
-				if err := ch.statusCallback(""); err != nil {
-					log.Printf("Failed to clear status after init error: %v", err)
-				}
-			}
+			dispatch(progress.Update{Message: "", Mode: progress.ReportJustStatus, Ephemeral: true})
 			return
 		}
 		// Clear status on success
-		if ch.statusCallback != nil {
-			if err := ch.statusCallback(""); err != nil {
-				log.Printf("Failed to clear status after init success: %v", err)
-			}
-		}
+		dispatch(progress.Update{Message: "", Mode: progress.ReportJustStatus, Ephemeral: true})
 	}()
 
 	return NewMenuResult("Analyzing codebase to generate AGENTS.md..."), nil

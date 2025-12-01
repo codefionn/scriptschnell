@@ -8,17 +8,20 @@ import (
 
 	"github.com/statcode-ai/statcode-ai/internal/actor"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 )
 
 // ToolExecutionMsg requests execution of a tool call.
 type ToolExecutionMsg struct {
-	Call            *ToolCall
-	ToolName        string
-	Approved        bool
-	Context         context.Context
-	StatusCallback  func(string) error
-	Heartbeat       time.Duration
-	ResponseChannel chan *ToolResult
+	Call               *ToolCall
+	ToolName           string
+	Approved           bool
+	Context            context.Context
+	ProgressCallback   progress.Callback
+	ToolCallCallback   func(string, string, map[string]interface{}) error
+	ToolResultCallback func(string, string, string, string) error
+	Heartbeat          time.Duration
+	ResponseChannel    chan *ToolResult
 }
 
 // Type implements actor.Message.
@@ -109,12 +112,17 @@ func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecut
 
 	resultChan := make(chan *ToolResult, 1)
 
-	go func() {
-		if msg.Approved {
-			resultChan <- a.registry.ExecuteWithApproval(execCtx, msg.Call)
-		} else {
-			resultChan <- a.registry.Execute(execCtx, msg.Call)
+	sendProgress := func(update progress.Update) {
+		if update.Message == "" && !update.ShouldStatus() {
+			return
 		}
+		if err := progress.Dispatch(msg.ProgressCallback, update); err != nil {
+			logger.Debug("tool executor: progress callback error: %v", err)
+		}
+	}
+
+	go func() {
+		resultChan <- a.registry.ExecuteWithCallbacks(execCtx, msg.Call, msg.ToolName, msg.ProgressCallback, msg.ToolCallCallback, msg.ToolResultCallback, msg.Approved)
 	}()
 
 	heartbeatInterval := msg.Heartbeat
@@ -123,7 +131,7 @@ func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecut
 	}
 
 	var ticker *time.Ticker
-	if msg.StatusCallback != nil && heartbeatInterval > 0 {
+	if msg.ProgressCallback != nil && heartbeatInterval > 0 {
 		ticker = time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 	}
@@ -135,11 +143,13 @@ func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecut
 			msg.ResponseChannel <- result
 			return
 		case <-tickerTick(ticker):
-			if msg.StatusCallback != nil {
+			if msg.ProgressCallback != nil {
 				status := fmt.Sprintf("Calling tool: %s%s", msg.ToolName, strings.Repeat(".", heartbeatCount%4))
-				if err := msg.StatusCallback(status); err != nil {
-					logger.Debug("tool executor: status callback error: %v", err)
-				}
+				sendProgress(progress.Update{
+					Message:   status,
+					Mode:      progress.ReportJustStatus,
+					Ephemeral: true,
+				})
 				heartbeatCount++
 			}
 		case <-execCtx.Done():
@@ -172,13 +182,18 @@ func NewToolExecutorActorClient(ref interface{ Send(actor.Message) error }) *Too
 }
 
 // Execute runs the tool call through the actor.
-func (c *ToolExecutorActorClient) Execute(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error) (*ToolResult, error) {
-	return c.execute(ctx, call, toolName, statusCallback, false)
+func (c *ToolExecutorActorClient) Execute(ctx context.Context, call *ToolCall, toolName string, progressCallback progress.Callback) (*ToolResult, error) {
+	return c.execute(ctx, call, toolName, progressCallback, nil, nil, false)
 }
 
 // ExecuteWithApproval runs the tool call with prior approval.
-func (c *ToolExecutorActorClient) ExecuteWithApproval(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error) (*ToolResult, error) {
-	return c.execute(ctx, call, toolName, statusCallback, true)
+func (c *ToolExecutorActorClient) ExecuteWithApproval(ctx context.Context, call *ToolCall, toolName string, progressCallback progress.Callback) (*ToolResult, error) {
+	return c.execute(ctx, call, toolName, progressCallback, nil, nil, true)
+}
+
+// ExecuteWithCallbacks runs the tool call with optional callbacks and optional approval bypass.
+func (c *ToolExecutorActorClient) ExecuteWithCallbacks(ctx context.Context, call *ToolCall, toolName string, progressCallback progress.Callback, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error, approved bool) (*ToolResult, error) {
+	return c.execute(ctx, call, toolName, progressCallback, toolCallCb, toolResultCb, approved)
 }
 
 // SetRegistry updates the executor's registry.
@@ -189,19 +204,21 @@ func (c *ToolExecutorActorClient) SetRegistry(reg *Registry) error {
 	return c.actorRef.Send(ToolExecutorUpdateRegistryMsg{Registry: reg})
 }
 
-func (c *ToolExecutorActorClient) execute(ctx context.Context, call *ToolCall, toolName string, statusCallback func(string) error, approved bool) (*ToolResult, error) {
+func (c *ToolExecutorActorClient) execute(ctx context.Context, call *ToolCall, toolName string, progressCallback progress.Callback, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error, approved bool) (*ToolResult, error) {
 	if call == nil {
 		return nil, fmt.Errorf("tool call is nil")
 	}
 
 	respChan := make(chan *ToolResult, 1)
 	msg := ToolExecutionMsg{
-		Call:            call,
-		ToolName:        toolName,
-		Approved:        approved,
-		Context:         ctx,
-		StatusCallback:  statusCallback,
-		ResponseChannel: respChan,
+		Call:               call,
+		ToolName:           toolName,
+		Approved:           approved,
+		Context:            ctx,
+		ProgressCallback:   progressCallback,
+		ToolCallCallback:   toolCallCb,
+		ToolResultCallback: toolResultCb,
+		ResponseChannel:    respChan,
 	}
 
 	if err := c.actorRef.Send(msg); err != nil {

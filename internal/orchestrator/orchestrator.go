@@ -15,6 +15,7 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/llm"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
 	"github.com/statcode-ai/statcode-ai/internal/mcp"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 	"github.com/statcode-ai/statcode-ai/internal/session"
 	"github.com/statcode-ai/statcode-ai/internal/tools"
@@ -29,6 +30,9 @@ type ToolCallCallback func(toolName, toolID string, parameters map[string]interf
 
 // ToolResultCallback is called when a tool execution completes
 type ToolResultCallback func(toolName, toolID, result, errorMsg string) error
+
+type ProgressCallback = progress.Callback
+type ProgressUpdate = progress.Update
 
 // Orchestrator manages the LLM interaction
 type Orchestrator struct {
@@ -51,10 +55,8 @@ type Orchestrator struct {
 	todoClient            *tools.TodoActorClient
 	todoActor             tools.TodoActorInterface
 	todoActorCancel       context.CancelFunc
-	currentStatusCb       StatusCallback
-	statusCbMu            sync.Mutex
-	currentStreamCb       func(string) error
-	streamCbMu            sync.Mutex
+	currentProgressCb     progress.Callback
+	progressCbMu          sync.Mutex
 	errorJudge            *tools.ErrorJudgeActorClient
 	errorJudgeCancel      context.CancelFunc
 	toolExecutor          *tools.ToolExecutorActorClient
@@ -80,6 +82,8 @@ const (
 	errorRetryMaxAttempts   = 5
 	preconnectThrottle      = 2 * time.Second
 )
+
+type toolExecutionFunc func(ctx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error)
 
 func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode bool) (*Orchestrator, error) {
 	return NewOrchestratorWithFS(cfg, providerMgr, cliMode, nil)
@@ -538,17 +542,14 @@ func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
 		return
 	}
 	sandboxTool.SetSummarizeClient(o.summarizeClient)
+	sandboxTool.SetProgressCallback(o.GetCurrentProgressCallback())
 	if sandboxTool.GetTinyGoManager() != nil {
 		sandboxTool.GetTinyGoManager().SetStatusCallback(func(status string) {
-			o.statusCbMu.Lock()
-			cb := o.currentStatusCb
-			o.statusCbMu.Unlock()
-
-			if cb != nil {
-				if err := cb(status); err != nil {
-					logger.Warn("Failed to send TinyGo status update: %v", err)
-				}
-			}
+			dispatchProgress(o.GetCurrentProgressCallback(), progress.Update{
+				Message:   status,
+				Mode:      progress.ReportJustStatus,
+				Ephemeral: true,
+			})
 		})
 	}
 }
@@ -679,14 +680,30 @@ func sanitizeMCPIdentifier(name string) string {
 	return strings.Trim(b.String(), "_")
 }
 
-// StatusCallback is called to update the UI with processing status
-type StatusCallback func(status string) error
-
 // ContextUsageCallback receives free context percentage and total context window updates for UI display
 type ContextUsageCallback func(freePercent int, contextWindow int) error
 
+// GetCurrentProgressCallback returns the active progress callback, if any.
+func (o *Orchestrator) GetCurrentProgressCallback() progress.Callback {
+	o.progressCbMu.Lock()
+	defer o.progressCbMu.Unlock()
+	return o.currentProgressCb
+}
+
+func dispatchProgress(cb progress.Callback, update progress.Update) {
+	if cb == nil {
+		return
+	}
+	if update.Message == "" && !update.ShouldStatus() {
+		return
+	}
+	if err := progress.Dispatch(cb, update); err != nil {
+		logger.Debug("progress callback error: %v", err)
+	}
+}
+
 // ProcessPrompt processes a user prompt
-func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamCallback func(string) error, statusCallback StatusCallback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback, toolCallCallback ToolCallCallback, toolResultCallback ToolResultCallback) error {
+func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progressCallback progress.Callback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback, toolCallCallback ToolCallCallback, toolResultCallback ToolResultCallback) error {
 	combinedCtx, cancel := combineContexts(ctx, o.ctx)
 	if cancel != nil {
 		defer cancel()
@@ -697,26 +714,31 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 		return fmt.Errorf("no orchestration model configured. Use /provider and /models commands to set up")
 	}
 
-	// Store status callback for use by tools (e.g., TinyGo download progress)
-	o.statusCbMu.Lock()
-	o.currentStatusCb = statusCallback
-	o.statusCbMu.Unlock()
+	sendStatus := func(msg string) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message:   msg,
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
+	}
+
+	sendStream := func(msg string, addNewLine bool) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message:    msg,
+			AddNewLine: addNewLine,
+			Mode:       progress.ReportNoStatus,
+		})
+	}
+
+	// Store progress callback for use by tools (e.g., TinyGo download progress)
+	o.progressCbMu.Lock()
+	o.currentProgressCb = progressCallback
+	o.progressCbMu.Unlock()
 
 	defer func() {
-		o.statusCbMu.Lock()
-		o.currentStatusCb = nil
-		o.statusCbMu.Unlock()
-	}()
-
-	// Store stream callback for use by sub-agents (e.g., codebase investigator)
-	o.streamCbMu.Lock()
-	o.currentStreamCb = streamCallback
-	o.streamCbMu.Unlock()
-
-	defer func() {
-		o.streamCbMu.Lock()
-		o.currentStreamCb = nil
-		o.streamCbMu.Unlock()
+		o.progressCbMu.Lock()
+		o.currentProgressCb = nil
+		o.progressCbMu.Unlock()
 	}()
 
 	// Add user message
@@ -778,7 +800,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 
 		totalTokens, perMessageTokens, _ := estimateContextTokens(modelID, systemPrompt, sessionMessages)
 		o.dispatchContextUsage(modelID, totalTokens, contextCallback)
-		o.maybeCompactContext(modelID, systemPrompt, sessionMessages, perMessageTokens, totalTokens, streamCallback, contextCallback)
+		o.maybeCompactContext(modelID, systemPrompt, sessionMessages, perMessageTokens, totalTokens, progressCallback, contextCallback)
 
 		// Get model's max output tokens from model metadata
 		maxTokens := o.providerMgr.GetModelMaxOutputTokens(modelID)
@@ -802,15 +824,12 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 		}
 
 		// Notify UI that we're waiting for LLM response
-		if statusCallback != nil && len(llmMessages) > 1 {
-			// Show that we're processing with the LLM
-			if err := statusCallback("Thinking..."); err != nil {
-				logger.Warn("Failed to send status update: %v", err)
-			}
+		if progressCallback != nil && len(llmMessages) > 1 {
+			sendStatus("Thinking...")
 		}
 
 		// Get completion with error retry logic
-		response, err := o.completeWithRetry(ctx, req, statusCallback, streamCallback)
+		response, err := o.completeWithRetry(ctx, req, progressCallback)
 		if err != nil {
 			return fmt.Errorf("completion failed: %w", err)
 		}
@@ -835,10 +854,8 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 		o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
 		// Stream the content to UI if present
-		if response.Content != "" && streamCallback != nil {
-			if err := streamCallback(response.Content); err != nil {
-				return err
-			}
+		if response.Content != "" {
+			sendStream(response.Content, false)
 		} else if len(response.ToolCalls) > 0 && response.Content == "" {
 			// Log when we have tool calls but no content - this is normal but worth tracking
 			logger.Debug("Response contains %d tool calls with no text content", len(response.ToolCalls))
@@ -849,14 +866,12 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 			isLoop, pattern, count := o.loopDetector.AddText(response.Content)
 			if isLoop {
 				logger.Warn("Text loop detected at iteration %d: pattern repeated %d times", iteration, count)
-				if streamCallback != nil {
-					// Show a truncated version of the pattern to the user
-					displayPattern := pattern
-					if len(displayPattern) > 100 {
-						displayPattern = displayPattern[:100] + "..."
-					}
-					_ = streamCallback(fmt.Sprintf("\n\n🔁 Loop detected! The LLM is repeating the same text pattern %d times.\nPattern: %s\nStopping generation to prevent infinite loop.\n", count, displayPattern))
+				// Show a truncated version of the pattern to the user
+				displayPattern := pattern
+				if len(displayPattern) > 100 {
+					displayPattern = displayPattern[:100] + "..."
 				}
+				sendStream(fmt.Sprintf("\n\n🔁 Loop detected! The LLM is repeating the same text pattern %d times.\nPattern: %s\nStopping generation to prevent infinite loop.\n", count, displayPattern), false)
 				logger.Debug("Breaking out of loop due to text repetition (iteration %d)", iteration)
 				break
 			}
@@ -874,16 +889,8 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 			if shouldContinue && autoContinueAttempts < autoContinueMaxAttempts {
 				autoContinueAttempts++
 				logger.Info("Auto-continue triggered (attempt %d/%d)", autoContinueAttempts, autoContinueMaxAttempts)
-				if streamCallback != nil {
-					if err := streamCallback("\n⏭ Auto-continue requested.\n"); err != nil {
-						return err
-					}
-				}
-				if statusCallback != nil {
-					if err := statusCallback("Continuing..."); err != nil {
-						logger.Warn("Failed to send status update: %v", err)
-					}
-				}
+				sendStream("\n⏭ Auto-continue requested.\n", false)
+				sendStatus("Continuing...")
 				o.session.AddMessage(&session.Message{
 					Role:    "user",
 					Content: "continue",
@@ -894,11 +901,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 			if judgeOutput != "" {
 				logger.Debug("Auto-continue judge decision: %s", judgeOutput)
 			}
-			if statusCallback != nil {
-				if err := statusCallback(""); err != nil {
-					logger.Warn("Failed to clear status: %v", err)
-				}
-			}
+			sendStatus("")
 			logger.Debug("Breaking out of loop: no tool calls and no auto-continue (iteration %d)", iteration)
 			break
 		}
@@ -911,16 +914,8 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 			if shouldContinue && autoContinueAttempts < autoContinueMaxAttempts {
 				autoContinueAttempts++
 				logger.Info("Auto-continue triggered due to truncation (attempt %d/%d)", autoContinueAttempts, autoContinueMaxAttempts)
-				if streamCallback != nil {
-					if err := streamCallback("\n⏭ Response truncated, auto-continuing...\n"); err != nil {
-						return err
-					}
-				}
-				if statusCallback != nil {
-					if err := statusCallback("Continuing..."); err != nil {
-						logger.Warn("Failed to send status update: %v", err)
-					}
-				}
+				sendStream("\n⏭ Response truncated, auto-continuing...\n", false)
+				sendStatus("Continuing...")
 				o.session.AddMessage(&session.Message{
 					Role:    "user",
 					Content: "continue",
@@ -933,7 +928,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 		// Execute each tool call
 		logger.Debug("Executing %d tool calls from iteration %d", len(response.ToolCalls), iteration)
 
-		if err := o.processToolCalls(ctx, response.ToolCalls, o, o.session, statusCallback, authCallback, toolCallCallback, toolResultCallback); err != nil {
+		if err := o.processToolCalls(ctx, response.ToolCalls, o.session, progressCallback, authCallback, toolCallCallback, toolResultCallback, nil); err != nil {
 			logger.Warn("Error processing tool calls: %v", err)
 		}
 
@@ -949,37 +944,32 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, streamC
 	// Check if we exited due to hitting max iterations
 	if hitMaxIterations {
 		logger.Warn("ProcessPrompt reached maximum iteration limit (%d). This may indicate the LLM is stuck in a loop.", maxIterations)
-		if streamCallback != nil {
-			_ = streamCallback(fmt.Sprintf("\n⚠️  Reached maximum iteration limit (%d). Stopping to prevent infinite loop.\n", maxIterations))
-		}
+		sendStream(fmt.Sprintf("\n⚠️  Reached maximum iteration limit (%d). Stopping to prevent infinite loop.\n", maxIterations), false)
 	}
 
 	logger.Debug("ProcessPrompt completed")
 	return nil
 }
 
-type toolExecutor interface {
-	Execute(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error)
-	ExecuteWithApproval(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error)
-}
-
-// acpToolExecutor extends toolExecutor with ACP callback support
-type acpToolExecutor interface {
-	toolExecutor
-	ExecuteWithACPSupport(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*tools.ToolResult, error)
-	ExecuteWithACPSupportAndApproval(ctx context.Context, call *tools.ToolCall, toolName string, statusCallback StatusCallback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*tools.ToolResult, error)
+func (o *Orchestrator) executeToolWithMode(ctx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error) {
+	return o.ExecuteTool(ctx, call, toolName, progressCb, toolCallCb, toolResultCb, approved)
 }
 
 func (o *Orchestrator) processToolCalls(
 	ctx context.Context,
 	toolCalls []map[string]interface{},
-	executor toolExecutor,
 	sess *session.Session,
-	statusCb StatusCallback,
+	progressCb progress.Callback,
 	authCb AuthorizationCallback,
 	toolCallCb ToolCallCallback,
 	toolResultCb ToolResultCallback,
+	execFn toolExecutionFunc,
 ) error {
+	execFunc := execFn
+	if execFunc == nil {
+		execFunc = o.executeToolWithMode
+	}
+
 	type toolCallResult struct {
 		idx      int
 		message  *session.Message
@@ -1014,11 +1004,11 @@ func (o *Orchestrator) processToolCalls(
 		logger.Debug("Executing tool: %s (id=%s)", toolName, toolID)
 
 		// Notify UI about tool call
-		if statusCb != nil {
-			if err := statusCb(fmt.Sprintf("Calling tool: %s", toolName)); err != nil {
-				logger.Warn("Failed to send status update: %v", err)
-			}
-		}
+		dispatchProgress(progressCb, progress.Update{
+			Message:   fmt.Sprintf("Calling tool: %s", toolName),
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
 
 		// Parse arguments
 		var args map[string]interface{}
@@ -1055,17 +1045,11 @@ func (o *Orchestrator) processToolCalls(
 		go func(idx int, toolName, toolID string, args map[string]interface{}, callObj *tools.ToolCall) {
 			defer wg.Done()
 
-			// Execute the tool and capture the result, using ACP support if available
+			// Execute the tool and capture the result
 			var result *tools.ToolResult
 			var execErr error
 
-			if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
-				// Use enhanced ACP-aware execution
-				result, execErr = acpExec.ExecuteWithACPSupport(ctx, callObj, toolName, statusCb, toolCallCb, toolResultCb)
-			} else {
-				// Use standard execution
-				result, execErr = executor.Execute(ctx, callObj, toolName, statusCb)
-			}
+			result, execErr = execFunc(ctx, callObj, toolName, progressCb, toolCallCb, toolResultCb, false)
 			if execErr != nil {
 				result = &tools.ToolResult{
 					ID:    toolID,
@@ -1102,13 +1086,7 @@ func (o *Orchestrator) processToolCalls(
 							}
 						}
 
-						if acpExec, ok := executor.(acpToolExecutor); ok && toolCallCb != nil && toolResultCb != nil {
-							// Use enhanced ACP-aware execution with approval
-							result, execErr = acpExec.ExecuteWithACPSupportAndApproval(ctx, callObj, toolName, statusCb, toolCallCb, toolResultCb)
-						} else {
-							// Use standard execution with approval
-							result, execErr = executor.ExecuteWithApproval(ctx, callObj, toolName, statusCb)
-						}
+						result, execErr = execFunc(ctx, callObj, toolName, progressCb, toolCallCb, toolResultCb, true)
 						if execErr != nil {
 							result = &tools.ToolResult{
 								ID:    toolID,
@@ -1208,8 +1186,23 @@ func (o *Orchestrator) processToolCalls(
 }
 
 // completeWithRetry wraps LLM completion with error retry logic
-func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.CompletionRequest, statusCallback StatusCallback, streamCallback func(string) error) (*llm.CompletionResponse, error) {
+func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.CompletionRequest, progressCallback progress.Callback) (*llm.CompletionResponse, error) {
 	modelID := o.providerMgr.GetOrchestrationModel()
+
+	sendStatus := func(msg string) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message:   msg,
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
+	}
+
+	sendStream := func(msg string) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message: msg,
+			Mode:    progress.ReportNoStatus,
+		})
+	}
 
 	for attempt := 1; attempt <= errorRetryMaxAttempts; attempt++ {
 		// Try the completion
@@ -1239,9 +1232,7 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 		// Check if we should retry
 		if !decision.ShouldRetry {
 			logger.Info("Error judge decided to halt: %s", decision.Reason)
-			if streamCallback != nil {
-				_ = streamCallback(fmt.Sprintf("\n⚠️  %s\n", decision.Reason))
-			}
+			sendStream(fmt.Sprintf("\n⚠️  %s\n", decision.Reason))
 			return nil, err
 		}
 
@@ -1249,14 +1240,10 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 		logger.Info("Error judge decided to retry (attempt %d/%d, sleep %ds): %s",
 			attempt, errorRetryMaxAttempts, decision.SleepSeconds, decision.Reason)
 
-		if streamCallback != nil {
-			_ = streamCallback(fmt.Sprintf("\n⏳ Retrying in %d seconds... (Attempt %d/%d: %s)\n",
-				decision.SleepSeconds, attempt, errorRetryMaxAttempts, decision.Reason))
-		}
+		sendStream(fmt.Sprintf("\n⏳ Retrying in %d seconds... (Attempt %d/%d: %s)\n",
+			decision.SleepSeconds, attempt, errorRetryMaxAttempts, decision.Reason))
 
-		if statusCallback != nil {
-			_ = statusCallback(fmt.Sprintf("Retrying in %ds...", decision.SleepSeconds))
-		}
+		sendStatus(fmt.Sprintf("Retrying in %ds...", decision.SleepSeconds))
 
 		// Sleep before retry
 		if decision.SleepSeconds > 0 {
@@ -1269,9 +1256,7 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 		}
 
 		// Update status to show we're retrying
-		if statusCallback != nil {
-			_ = statusCallback(fmt.Sprintf("Retrying (attempt %d/%d)...", attempt+1, errorRetryMaxAttempts))
-		}
+		sendStatus(fmt.Sprintf("Retrying (attempt %d/%d)...", attempt+1, errorRetryMaxAttempts))
 	}
 
 	// Should never reach here, but just in case
@@ -1350,7 +1335,7 @@ func (o *Orchestrator) heuristicErrorDecision(err error, attemptNumber int) tool
 	}
 }
 
-func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, sessionMessages []*session.Message, perMessageTokens []int, totalTokens int, streamCallback func(string) error, contextCallback ContextUsageCallback) {
+func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, sessionMessages []*session.Message, perMessageTokens []int, totalTokens int, progressCallback progress.Callback, contextCallback ContextUsageCallback) {
 	if len(sessionMessages) < 4 {
 		return
 	}
@@ -1391,10 +1376,10 @@ func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, session
 	o.compactionInProgress = true
 	o.compactionMu.Unlock()
 
-	go o.compactContext(modelID, systemPrompt, contextCallback, messagesCopy, streamCallback)
+	go o.compactContext(modelID, systemPrompt, contextCallback, messagesCopy, progressCallback)
 }
 
-func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallback ContextUsageCallback, messages []*session.Message, streamCallback func(string) error) {
+func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallback ContextUsageCallback, messages []*session.Message, progressCallback progress.Callback) {
 	defer func() {
 		o.compactionMu.Lock()
 		o.compactionInProgress = false
@@ -1445,9 +1430,9 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 
 	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
-	if streamCallback != nil {
-		_ = streamCallback("\n🧹 Auto-compacted earlier context.\n")
-	}
+	dispatchProgress(progressCallback, progress.Update{
+		Message: "\n🧹 Auto-compacted earlier context.\n",
+	})
 }
 
 func (o *Orchestrator) dispatchContextUsage(modelID string, totalTokens int, callback ContextUsageCallback) {
@@ -1801,38 +1786,24 @@ func (o *Orchestrator) enhancedToolResultCallback(callback ToolResultCallback, t
 	return nil
 }
 
-func (o *Orchestrator) Execute(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
+// ExecuteTool executes a tool call with optional callbacks; approved bypasses authorization.
+func (o *Orchestrator) ExecuteTool(ctx context.Context, toolCall *tools.ToolCall, toolName string, progressCallback progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error) {
 	ctx, cleanup := o.prepareShellExecutionContext(ctx, toolCall, toolName)
 	if cleanup != nil {
 		defer cleanup()
 	}
 
-	if o.toolExecutor != nil {
-		var cb func(string) error
-		if statusCallback != nil {
-			cb = statusCallback
-		}
-		return o.toolExecutor.Execute(ctx, toolCall, toolName, cb)
-	}
-	// Fallback to direct execution if tool executor is unavailable
-	return o.toolRegistry.Execute(ctx, toolCall), nil
-}
-
-func (o *Orchestrator) ExecuteWithApproval(ctx context.Context, toolCall *tools.ToolCall, toolName string, statusCallback StatusCallback) (*tools.ToolResult, error) {
-	ctx, cleanup := o.prepareShellExecutionContext(ctx, toolCall, toolName)
-	if cleanup != nil {
-		defer cleanup()
+	var progressFn progress.Callback
+	if progressCallback != nil {
+		progressFn = progressCallback
 	}
 
 	if o.toolExecutor != nil {
-		var cb func(string) error
-		if statusCallback != nil {
-			cb = statusCallback
-		}
-		return o.toolExecutor.ExecuteWithApproval(ctx, toolCall, toolName, cb)
+		return o.toolExecutor.ExecuteWithCallbacks(ctx, toolCall, toolName, progressFn, toolCallCb, toolResultCb, approved)
 	}
-	// Fallback to direct execution if tool executor is unavailable
-	return o.toolRegistry.ExecuteWithApproval(ctx, toolCall), nil
+
+	result := o.toolRegistry.ExecuteWithCallbacks(ctx, toolCall, toolName, progressFn, toolCallCb, toolResultCb, approved)
+	return result, nil
 }
 
 func (o *Orchestrator) prepareShellExecutionContext(ctx context.Context, toolCall *tools.ToolCall, toolName string) (context.Context, func()) {

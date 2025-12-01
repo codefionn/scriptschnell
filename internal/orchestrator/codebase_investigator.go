@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/statcode-ai/statcode-ai/internal/llm"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 	"github.com/statcode-ai/statcode-ai/internal/session"
 	"github.com/statcode-ai/statcode-ai/internal/tools"
 )
@@ -23,44 +24,43 @@ func NewCodebaseInvestigatorAgent(orch *Orchestrator) *CodebaseInvestigatorAgent
 }
 
 func (a *CodebaseInvestigatorAgent) Investigate(ctx context.Context, objective string) (string, error) {
-	return a.InvestigateWithCallback(ctx, objective, nil)
+	return a.investigateInternal(ctx, objective, nil)
 }
 
-func (a *CodebaseInvestigatorAgent) InvestigateWithCallback(ctx context.Context, objective string, statusCb StatusCallback) (string, error) {
-	return a.InvestigateWithACPCallbacks(ctx, objective, statusCb, nil, nil)
-}
-
-func (a *CodebaseInvestigatorAgent) InvestigateWithACPCallbacks(ctx context.Context, objective string, statusCb StatusCallback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (string, error) {
-	// If no status callback provided, try to get it from the orchestrator's current context
-	if statusCb == nil {
-		a.orch.statusCbMu.Lock()
-		statusCb = a.orch.currentStatusCb
-		a.orch.statusCbMu.Unlock()
+func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, objective string, progressCb progress.Callback) (string, error) {
+	// If no callback provided, try to get it from the orchestrator's current context
+	if progressCb == nil {
+		progressCb = a.orch.GetCurrentProgressCallback()
 	}
 
-	// Get stream callback for sending progress messages to the chat
-	var streamCb func(string) error
-	a.orch.streamCbMu.Lock()
-	streamCb = a.orch.currentStreamCb
-	a.orch.streamCbMu.Unlock()
+	sendStatus := func(msg string) {
+		dispatchProgress(progressCb, progress.Update{
+			Message:   msg,
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
+	}
+
+	sendStream := func(msg string) {
+		dispatchProgress(progressCb, progress.Update{
+			Message: msg,
+			Mode:    progress.ReportNoStatus,
+		})
+	}
 
 	// Send initial progress message to chat
-	if streamCb != nil {
-		streamCb(fmt.Sprintf("\n\n🔍 **Investigating codebase**: %s\n\n", objective))
-	}
+	sendStream(fmt.Sprintf("\n\n🔍 **Investigating codebase**: %s\n\n", objective))
+	sendStatus(fmt.Sprintf("→ Starting investigation: %s", objective))
 
 	// Create enhanced status callback that also sends ACP progress updates
-	enhancedStatusCb := func(status string) error {
-		// Send regular status
-		if statusCb != nil {
-			if err := statusCb(status); err != nil {
-				return err
-			}
+	enhancedStatusCb := func(update progress.Update) error {
+		if update.Message == "" && !update.ShouldStatus() {
+			return nil
 		}
-
-		// If we have ACP callbacks, send progress as tool call updates
-		// This enables investigation progress to be shown in ACP clients
-		return nil
+		if update.ShouldStatus() {
+			update.Ephemeral = true
+		}
+		return progress.Dispatch(progressCb, progress.Normalize(update))
 	}
 
 	// Create a new session for the investigation
@@ -150,14 +150,13 @@ The requested logic is found in internal/module/file.go function DoWork().
 
 		if len(resp.ToolCalls) == 0 {
 			// No tools called, this is the final answer
-			if streamCb != nil {
-				streamCb("✓ Investigation complete\n\n")
-			}
+			sendStream("✓ Investigation complete\n\n")
+			sendStatus("✓ Investigation complete")
 			return extractAnswer(resp.Content), nil
 		}
 
 		// Send progress update for tool calls with details
-		if streamCb != nil && len(resp.ToolCalls) > 0 {
+		if len(resp.ToolCalls) > 0 {
 			for _, tc := range resp.ToolCalls {
 				if fn, ok := tc["function"].(map[string]interface{}); ok {
 					toolName, _ := fn["name"].(string)
@@ -172,38 +171,30 @@ The requested logic is found in internal/module/file.go function DoWork().
 					// Format tool call message based on tool type
 					msg := formatToolCallMessage(toolName, args)
 					if msg != "" {
-						streamCb(msg)
+						// Stream to chat if available
+						sendStream(msg)
+						// Also send status updates so ACP clients receive progress as tool_call_update
+						sendStatus(strings.TrimSpace(msg))
 					}
 				}
 			}
 		}
 
-		// Execute tools using extracted logic
-		// We use a simple adapter for the registry
-		executor := &registryExecutor{registry: registry}
+		// Execute tools using extracted logic.
+		// Use a unified execution function so ACP-aware callbacks share the same path.
+		execFn := func(execCtx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error) {
+			return registry.ExecuteWithCallbacks(execCtx, call, toolName, progressCb, toolCallCb, toolResultCb, approved), nil
+		}
 
-		// Use the extracted processToolCalls method
-		// Pass the enhanced status callback to show live progress in the UI and ACP
-		// If ACP callbacks are available, tool calls will be properly tracked
-		err = a.orch.processToolCalls(ctx, resp.ToolCalls, executor, investigationSession, enhancedStatusCb, nil, toolCallCb, toolResultCb)
+		// Use the extracted processToolCalls method.
+		// Pass the enhanced status callback to show live progress in the UI and ACP.
+		err = a.orch.processToolCalls(ctx, resp.ToolCalls, investigationSession, enhancedStatusCb, nil, nil, nil, execFn)
 		if err != nil {
 			return "", fmt.Errorf("tool execution failed: %w", err)
 		}
 	}
 
 	return "Investigation timed out after maximum turns.", nil
-}
-
-type registryExecutor struct {
-	registry *tools.Registry
-}
-
-func (e *registryExecutor) Execute(ctx context.Context, call *tools.ToolCall, toolName string, statusCb StatusCallback) (*tools.ToolResult, error) {
-	return e.registry.Execute(ctx, call), nil
-}
-
-func (e *registryExecutor) ExecuteWithApproval(ctx context.Context, call *tools.ToolCall, toolName string, statusCb StatusCallback) (*tools.ToolResult, error) {
-	return e.registry.ExecuteWithApproval(ctx, call), nil
 }
 
 func formatToolCallMessage(toolName string, args map[string]interface{}) string {

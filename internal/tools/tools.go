@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 )
 
 // ToolSpec represents the static specification of a tool (name, description, parameters).
@@ -465,8 +467,8 @@ func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {
 	return result
 }
 
-// ExecuteWithACPSupport executes a tool call with ACP callback support
-func (r *Registry) ExecuteWithACPSupport(ctx context.Context, call *ToolCall, toolName string, statusCb func(string) error, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) *ToolResult {
+// ExecuteWithCallbacks executes a tool call with optional callbacks and optional authorization skipping.
+func (r *Registry) ExecuteWithCallbacks(ctx context.Context, call *ToolCall, toolName string, progressCb progress.Callback, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error, skipAuthorization bool) *ToolResult {
 	entry, ok := r.entries[call.Name]
 	if !ok {
 		return &ToolResult{
@@ -483,8 +485,7 @@ func (r *Registry) ExecuteWithACPSupport(ctx context.Context, call *ToolCall, to
 		}
 	}
 
-	// Handle authorization (same as regular Execute)
-	if r.authorizer != nil {
+	if !skipAuthorization && r.authorizer != nil {
 		decision, err := r.authorizer.Authorize(ctx, call.Name, call.Parameters)
 		if err != nil {
 			return &ToolResult{
@@ -510,11 +511,11 @@ func (r *Registry) ExecuteWithACPSupport(ctx context.Context, call *ToolCall, to
 		}
 	}
 
-	// Try to use ACP-aware execution if the tool supports it
-	if acpTool, ok := executor.(interface {
-		ExecuteWithACPSupport(ctx context.Context, params map[string]interface{}, statusCb func(string) error, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) *ToolResult
-	}); ok && toolCallCb != nil && toolResultCb != nil {
-		result := acpTool.ExecuteWithACPSupport(ctx, call.Parameters, statusCb, toolCallCb, toolResultCb)
+	// Allow tools to consume callbacks if they support it
+	if cbTool, ok := executor.(interface {
+		ExecuteWithCallbacks(ctx context.Context, params map[string]interface{}, progressCb progress.Callback, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) *ToolResult
+	}); ok {
+		result := cbTool.ExecuteWithCallbacks(ctx, call.Parameters, progressCb, toolCallCb, toolResultCb)
 		if result == nil {
 			return &ToolResult{
 				ID:    call.ID,
@@ -525,52 +526,7 @@ func (r *Registry) ExecuteWithACPSupport(ctx context.Context, call *ToolCall, to
 		return result
 	}
 
-	// Fall back to regular execution
-	result := executor.Execute(ctx, call.Parameters)
-	if result == nil {
-		return &ToolResult{
-			ID:    call.ID,
-			Error: "tool returned nil result",
-		}
-	}
-	result.ID = call.ID
-	return result
-}
-
-// ExecuteWithACPSupportAndApproval executes a tool call with ACP callbacks, bypassing authorization
-func (r *Registry) ExecuteWithACPSupportAndApproval(ctx context.Context, call *ToolCall, toolName string, statusCb func(string) error, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) *ToolResult {
-	entry, ok := r.entries[call.Name]
-	if !ok {
-		return &ToolResult{
-			ID:    call.ID,
-			Error: "tool not found: " + call.Name,
-		}
-	}
-
-	executor := entry.getExecutor()
-	if executor == nil {
-		return &ToolResult{
-			ID:    call.ID,
-			Error: "tool executor not available: " + call.Name,
-		}
-	}
-
-	// Try to use ACP-aware execution if the tool supports it
-	if acpTool, ok := executor.(interface {
-		ExecuteWithACPSupport(ctx context.Context, params map[string]interface{}, statusCb func(string) error, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) *ToolResult
-	}); ok && toolCallCb != nil && toolResultCb != nil {
-		result := acpTool.ExecuteWithACPSupport(ctx, call.Parameters, statusCb, toolCallCb, toolResultCb)
-		if result == nil {
-			return &ToolResult{
-				ID:    call.ID,
-				Error: "tool returned nil result",
-			}
-		}
-		result.ID = call.ID
-		return result
-	}
-
-	// Fall back to regular execution
+	// Fallback to regular execution
 	result := executor.Execute(ctx, call.Parameters)
 	if result == nil {
 		return &ToolResult{

@@ -9,6 +9,7 @@ import (
 
 	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/htmlconv"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 	"github.com/statcode-ai/statcode-ai/internal/tui"
 )
@@ -79,17 +80,24 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		fmt.Fprintln(os.Stderr, "[Detected and converted HTML to markdown]")
 	}
 
-	// Stream callback: print chunks to stdout
-	streamCallback := func(chunk string) error {
-		fmt.Print(chunk)
-		return nil
-	}
-
-	// Status callback: print status to stderr
-	statusCallback := func(status string) error {
-		if status != "" {
-			fmt.Fprintf(os.Stderr, "[%s]\n", status)
+	// Progress callback: print streaming to stdout and status to stderr
+	progressCallback := func(update progress.Update) error {
+		normalized := progress.Normalize(update)
+		if normalized.ShouldStatus() {
+			if normalized.Message == "" {
+				return nil
+			}
+			msg := normalized.Message
+			if !strings.HasSuffix(msg, "\n") {
+				msg += "\n"
+			}
+			fmt.Fprint(os.Stderr, msg)
+			return nil
 		}
+		if normalized.Message == "" || !normalized.ShouldStream() {
+			return nil
+		}
+		fmt.Print(normalized.Message)
 		return nil
 	}
 
@@ -146,7 +154,7 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 	}
 
 	// Use the orchestrator to process the prompt
-	err := c.orchestrator.ProcessPrompt(ctx, prompt, streamCallback, statusCallback, contextCallback, authCallback, nil, nil)
+	err := c.orchestrator.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to process prompt: %w", err)
 	}

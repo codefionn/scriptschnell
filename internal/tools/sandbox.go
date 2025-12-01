@@ -19,6 +19,7 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 	"github.com/statcode-ai/statcode-ai/internal/llm"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 	"github.com/statcode-ai/statcode-ai/internal/session"
 	"github.com/statcode-ai/statcode-ai/internal/wasi"
 	"github.com/tetratelabs/wazero"
@@ -47,6 +48,7 @@ type SandboxTool struct {
 	tinygoManager   *TinyGoManager
 	summarizeClient llm.Client
 	shellExecutor   ShellExecutor
+	progressCb      progress.Callback
 }
 
 type sandboxCall struct {
@@ -147,6 +149,11 @@ func (t *SandboxTool) SetAuthorizer(auth Authorizer) {
 // SetSummarizeClient sets the summarization LLM client
 func (t *SandboxTool) SetSummarizeClient(client llm.Client) {
 	t.summarizeClient = client
+}
+
+// SetProgressCallback sets a callback for streaming status/output messages.
+func (t *SandboxTool) SetProgressCallback(cb progress.Callback) {
+	t.progressCb = cb
 }
 
 // SetShellExecutor sets the shell executor for command execution
@@ -393,12 +400,74 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 		return &ToolResult{Result: result}
 	}
 
+	sendProgress := func(update progress.Update) {
+		if update.Message == "" {
+			return
+		}
+		if err := progress.Dispatch(t.progressCb, update); err != nil {
+			logger.Debug("sandbox progress callback error: %v", err)
+		}
+	}
+
+	sendStatus := func(msg string) {
+		sendProgress(progress.Update{
+			Message:    msg,
+			AddNewLine: true,
+			Mode:       progress.ReportJustStatus,
+			Ephemeral:  true,
+		})
+	}
+
+	sendStatus("→ Compiling sandbox program with TinyGo")
+
 	// Use builder to execute
 	result, err := t.executeWithBuilder(ctx, code, timeout, libraries)
 	if err != nil {
+		sendStatus(fmt.Sprintf("✗ Sandbox failed: %v", err))
 		return &ToolResult{Error: err.Error()}
 	}
-	return &ToolResult{Result: result}
+
+	var (
+		uiResult interface{}
+		metadata *ExecutionMetadata
+	)
+
+	exitCode := 0
+	timedOut := false
+
+	if resMap, ok := result.(map[string]interface{}); ok {
+		// Format a UI-friendly result to ensure ACP/TUI clients show sandbox output
+		if formatted := formatSandboxUIResult(resMap); formatted != "" {
+			uiResult = formatted
+		}
+
+		// Propagate execution metadata if present
+		if metaVal, ok := resMap["_execution_metadata"]; ok {
+			if metaObj, ok := metaVal.(*ExecutionMetadata); ok {
+				metadata = metaObj
+			}
+		}
+
+		exitCode = coerceExitCode(resMap["exit_code"])
+		if timeoutVal, ok := resMap["timeout"].(bool); ok && timeoutVal {
+			timedOut = true
+		}
+	}
+
+	switch {
+	case timedOut:
+		sendStatus("✗ Sandbox timed out")
+	case exitCode == 0:
+		sendStatus("✓ Sandbox completed successfully")
+	default:
+		sendStatus(fmt.Sprintf("⚠️ Sandbox completed with exit code %d", exitCode))
+	}
+
+	return &ToolResult{
+		Result:            result,
+		UIResult:          uiResult,
+		ExecutionMetadata: metadata,
+	}
 }
 
 // executeWithBuilder uses the SandboxBuilder to execute code
@@ -1326,6 +1395,56 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 		"exit_code": finalExitCode,
 		"timeout":   false,
 	}, metadata), nil
+}
+
+// formatSandboxUIResult builds a human-readable UI string from sandbox execution output.
+func formatSandboxUIResult(result map[string]interface{}) string {
+	stdout := strings.TrimSpace(getStringValue(result, "stdout"))
+	stderr := strings.TrimSpace(getStringValue(result, "stderr"))
+	errorMsg := strings.TrimSpace(getStringValue(result, "error"))
+	message := strings.TrimSpace(getStringValue(result, "message"))
+	exitCode := coerceExitCode(result["exit_code"])
+	timedOut := false
+	if timeoutVal, ok := result["timeout"].(bool); ok {
+		timedOut = timeoutVal
+	}
+
+	var sections []string
+
+	if stdout != "" {
+		sections = append(sections, fmt.Sprintf("stdout:\n%s", stdout))
+	}
+	if stderr != "" {
+		sections = append(sections, fmt.Sprintf("stderr:\n%s", stderr))
+	}
+	if errorMsg != "" {
+		sections = append(sections, fmt.Sprintf("error: %s", errorMsg))
+	}
+	if timedOut {
+		sections = append(sections, "timeout: execution timed out")
+	}
+	if message != "" {
+		sections = append(sections, message)
+	}
+
+	// Always include exit code for clarity, especially when there is no other output
+	if exitCode != 0 || len(sections) == 0 {
+		sections = append(sections, fmt.Sprintf("exit code: %d", exitCode))
+	}
+
+	return strings.TrimSpace(strings.Join(sections, "\n\n"))
+}
+
+func getStringValue(data map[string]interface{}, key string) string {
+	if data == nil {
+		return ""
+	}
+	if val, ok := data[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 // executeFetch performs an HTTP request from WASM with authorization

@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	godiff "github.com/sourcegraph/go-diff/diff"
 	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/fs"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
 	"github.com/statcode-ai/statcode-ai/internal/orchestrator"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 	"github.com/statcode-ai/statcode-ai/internal/tools"
 )
@@ -259,12 +262,58 @@ type StatCodeAIAgent struct {
 }
 
 type statcodeSession struct {
-	sessionID    string
-	orchestrator *orchestrator.Orchestrator
-	promptCtx    context.Context
-	promptCancel context.CancelFunc
-	isActive     bool
-	mu           sync.Mutex
+	sessionID     string
+	orchestrator  *orchestrator.Orchestrator
+	promptCtx     context.Context
+	promptCancel  context.CancelFunc
+	isActive      bool
+	toolLocations map[string][]acp.ToolCallLocation
+	toolParams    map[string]map[string]interface{}
+	mu            sync.Mutex
+}
+
+func (a *StatCodeAIAgent) rememberToolContext(session *statcodeSession, toolID string, params map[string]interface{}, locations []acp.ToolCallLocation) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if session.toolLocations == nil {
+		session.toolLocations = make(map[string][]acp.ToolCallLocation)
+	}
+	if session.toolParams == nil {
+		session.toolParams = make(map[string]map[string]interface{})
+	}
+
+	session.toolParams[toolID] = params
+	if len(locations) > 0 {
+		session.toolLocations[toolID] = locations
+	}
+}
+
+func (a *StatCodeAIAgent) getToolLocations(session *statcodeSession, toolID string) []acp.ToolCallLocation {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	locs := session.toolLocations[toolID]
+	if len(locs) == 0 {
+		return nil
+	}
+
+	out := make([]acp.ToolCallLocation, len(locs))
+	copy(out, locs)
+	return out
+}
+
+func (a *StatCodeAIAgent) popToolContext(session *statcodeSession, toolID string) (map[string]interface{}, []acp.ToolCallLocation) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	params := session.toolParams[toolID]
+	locations := session.toolLocations[toolID]
+
+	delete(session.toolParams, toolID)
+	delete(session.toolLocations, toolID)
+
+	return params, locations
 }
 
 var (
@@ -388,11 +437,13 @@ func (a *StatCodeAIAgent) NewSession(ctx context.Context, params acp.NewSessionR
 	promptCtx, promptCancel := context.WithCancel(a.ctx)
 
 	session := &statcodeSession{
-		sessionID:    sessionID,
-		orchestrator: sessionOrch,
-		promptCtx:    promptCtx,
-		promptCancel: promptCancel,
-		isActive:     true,
+		sessionID:     sessionID,
+		orchestrator:  sessionOrch,
+		promptCtx:     promptCtx,
+		promptCancel:  promptCancel,
+		isActive:      true,
+		toolLocations: make(map[string][]acp.ToolCallLocation),
+		toolParams:    make(map[string]map[string]interface{}),
 	}
 
 	a.mu.Lock()
@@ -601,9 +652,11 @@ func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, p
 	var textBuffer strings.Builder
 	var lastSentLength int
 	var mu sync.Mutex
+	var toolProgressMu sync.Mutex
+	activeToolCalls := make(map[string]string)
 
 	// Create streaming callback for ACP
-	streamCallback := func(chunk string) error {
+	streamChunk := func(chunk string) error {
 		logger.Debug("streamCallback[%s]: chunk=%q", session.sessionID, truncateForLog(chunk))
 		mu.Lock()
 		defer mu.Unlock()
@@ -666,16 +719,22 @@ func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, p
 		return nil
 	}
 
-	// Create status callback
-	statusCallback := func(status string) error {
-		// For now, we'll just log status - could be exposed as ACP updates if needed
-		logger.Debug("Prompt[%s] status: %s", session.sessionID, status)
+	// Create progress callback
+	progressCallback := func(update progress.Update) error {
+		normalized := progress.Normalize(update)
+
+		// Log for debugging
+		if normalized.ShouldStatus() {
+			logger.Debug("Prompt[%s] status: %s", session.sessionID, normalized.Message)
+		}
+
+		// Stream messages that should be shown to the user in the main conversation
+		if normalized.ShouldStream() && normalized.Message != "" {
+			return streamChunk(normalized.Message)
+		}
+
 		return nil
 	}
-
-	// Track current tool call for progress updates
-	var currentToolCallID string
-	var currentToolCallName string
 
 	// Create context usage callback
 	contextCallback := func(percent int, contextWindow int) error {
@@ -695,8 +754,9 @@ func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, p
 	// Create tool call callbacks
 	toolCallCallback := func(toolName, toolID string, parameters map[string]interface{}) error {
 		logger.Debug("toolCallCallback[%s]: start tool=%s id=%s params=%s", session.sessionID, toolName, toolID, truncateMapForLog(parameters))
-		currentToolCallID = toolID
-		currentToolCallName = toolName
+		toolProgressMu.Lock()
+		activeToolCalls[toolID] = toolName
+		toolProgressMu.Unlock()
 		startErr := a.handleToolCallStart(session, toolName, toolID, parameters)
 		if startErr != nil {
 			logger.Warn("toolCallCallback[%s]: failed to notify start for tool=%s id=%s err=%v", session.sessionID, toolName, toolID, startErr)
@@ -706,8 +766,9 @@ func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, p
 
 	toolResultCallback := func(toolName, toolID, result, errorMsg string) error {
 		logger.Debug("toolResultCallback[%s]: done tool=%s id=%s err=%q resultLen=%d", session.sessionID, toolName, toolID, errorMsg, len(result))
-		currentToolCallID = ""
-		currentToolCallName = ""
+		toolProgressMu.Lock()
+		delete(activeToolCalls, toolID)
+		toolProgressMu.Unlock()
 		resultErr := a.handleToolCallResult(session, toolName, toolID, result, errorMsg)
 		if resultErr != nil {
 			logger.Warn("toolResultCallback[%s]: failed to notify result for tool=%s id=%s err=%v", session.sessionID, toolName, toolID, resultErr)
@@ -715,21 +776,28 @@ func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, p
 		return resultErr
 	}
 
-	// Create enhanced status callback that can send tool progress
-	enhancedStatusCallback := func(status string) error {
-		// Send regular status
-		if err := statusCallback(status); err != nil {
+	// Create enhanced progress callback that can send tool progress
+	enhancedProgressCallback := func(update progress.Update) error {
+		normalized := progress.Normalize(update)
+
+		// Send regular progress/status updates to the main conversation
+		if err := progressCallback(normalized); err != nil {
 			return err
 		}
 
-		// If we have an active tool call and this looks like progress, send it too
-		if currentToolCallID != "" && currentToolCallName != "" {
-			// Check if this is a progress message for the current tool
-			if strings.Contains(status, "→") || strings.Contains(status, "✓") ||
-				strings.Contains(status, "progress") || strings.Contains(status, "found") ||
-				strings.Contains(status, "completed") || strings.Contains(status, "searching") {
-				if err := a.sendToolCallProgress(session, currentToolCallID, status); err != nil {
-					logger.Warn("Failed to send tool progress: %v", err)
+		// Forward status updates to active tool calls for ACP tool progress streaming
+		// This ensures tools can show progress in their tool call UI
+		if normalized.ShouldStatus() && normalized.Message != "" {
+			toolProgressMu.Lock()
+			activeIDs := make([]string, 0, len(activeToolCalls))
+			for id := range activeToolCalls {
+				activeIDs = append(activeIDs, id)
+			}
+			toolProgressMu.Unlock()
+
+			for _, toolID := range activeIDs {
+				if err := a.sendToolCallProgress(session, toolID, normalized.Message); err != nil {
+					logger.Warn("Failed to send tool progress for %s: %v", toolID, err)
 					// Don't fail the whole operation
 				}
 			}
@@ -742,8 +810,7 @@ func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, p
 	err := session.orchestrator.ProcessPrompt(
 		session.promptCtx,
 		promptText,
-		streamCallback,
-		enhancedStatusCallback,
+		enhancedProgressCallback,
 		contextCallback,
 		authCallback,
 		toolCallCallback,
@@ -957,7 +1024,8 @@ func (a *StatCodeAIAgent) createTerminalForToolCall(session *statcodeSession, to
 // handleToolCallStart handles the start of a tool call
 func (a *StatCodeAIAgent) handleToolCallStart(session *statcodeSession, toolName, toolID string, parameters map[string]interface{}) error {
 	toolKind := a.getToolKind(toolName, parameters)
-	_ = a.extractLocations(toolName, parameters) // TODO: Use locations when we figure out how to add them
+	locations := a.extractLocations(toolName, parameters)
+	a.rememberToolContext(session, toolID, parameters, locations)
 
 	// Check if we should create a terminal for this tool call
 	terminalID, err := a.createTerminalForToolCall(session, toolName, toolID, parameters)
@@ -993,15 +1061,20 @@ func (a *StatCodeAIAgent) handleToolCallStart(session *statcodeSession, toolName
 	}
 
 	// Notify the client about the tool call
-	update := acp.StartToolCall(
-		acp.ToolCallId(toolID),
-		title,
+	opts := []acp.ToolCallStartOpt{
 		acp.WithStartKind(toolKind),
 		acp.WithStartStatus(acp.ToolCallStatusPending),
 		acp.WithStartRawInput(parameters),
-	)
+	}
+	if len(locations) > 0 {
+		opts = append(opts, acp.WithStartLocations(locations))
+	}
 
-	// TODO: Figure out how to add locations properly - might need additional WithStart functions
+	update := acp.StartToolCall(
+		acp.ToolCallId(toolID),
+		title,
+		opts...,
+	)
 
 	if err := a.conn.SessionUpdate(session.promptCtx, acp.SessionNotification{
 		SessionId: acp.SessionId(session.sessionID),
@@ -1020,11 +1093,7 @@ func (a *StatCodeAIAgent) handleToolCallStart(session *statcodeSession, toolName
 	// Add terminal content if we created one
 	if terminalID != "" {
 		progressUpdate.ToolCallUpdate.Content = []acp.ToolCallContent{
-			{
-				Terminal: &acp.ToolCallContentTerminal{
-					TerminalId: terminalID,
-				},
-			},
+			acp.ToolTerminalRef(terminalID),
 		}
 	}
 
@@ -1040,124 +1109,107 @@ func (a *StatCodeAIAgent) handleToolCallStart(session *statcodeSession, toolName
 }
 
 // formatToolResultContent formats the tool result into appropriate ACP content types
-func (a *StatCodeAIAgent) formatToolResultContent(toolName string, result string) []acp.ToolCallContent {
-	var content []acp.ToolCallContent
-
-	if result == "" {
-		return content
+func (a *StatCodeAIAgent) formatToolResultContent(toolName string, result string, params map[string]interface{}) []acp.ToolCallContent {
+	if strings.TrimSpace(result) == "" {
+		return nil
 	}
 
-	// Handle different tool types with appropriate content formatting
 	switch toolName {
-	case "write_file_diff":
-		// Try to parse as a diff and format as diff content
-		if lines := strings.Split(result, "\n"); len(lines) > 0 {
-			// Look for diff indicators
-			isDiff := false
-			for _, line := range lines {
-				if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") ||
-					strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "-") ||
-					strings.HasPrefix(line, "+") {
-					isDiff = true
-					break
-				}
-			}
-
-			if isDiff {
-				// For diffs, we need to extract the file path and old/new text
-				// This is a simplified implementation - a full diff parser would be more robust
-				var filePath string
-				var oldText, newText strings.Builder
-				var inOld, inNew bool
-
-				for _, line := range lines {
-					if strings.HasPrefix(line, "--- ") {
-						// Extract file path from old file line
-						parts := strings.Fields(line)
-						if len(parts) > 1 {
-							filePath = parts[1]
-							if strings.HasPrefix(filePath, "a/") {
-								filePath = strings.TrimPrefix(filePath, "a/")
-							}
-						}
-					} else if strings.HasPrefix(line, "+++ ") {
-						// Extract file path from new file line
-						parts := strings.Fields(line)
-						if len(parts) > 1 {
-							filePath = parts[1]
-							if strings.HasPrefix(filePath, "b/") {
-								filePath = strings.TrimPrefix(filePath, "b/")
-							}
-						}
-					} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-						if inNew {
-							inNew = false
-						}
-						inOld = true
-						oldText.WriteString(line[1:] + "\n")
-					} else if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-						if inOld {
-							inOld = false
-						}
-						inNew = true
-						newText.WriteString(line[1:] + "\n")
-					} else if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "@@") {
-						// Context lines or hunk headers
-						inOld = false
-						inNew = false
-					}
-				}
-
-				if filePath != "" {
-					// Convert to absolute path
-					if !strings.HasPrefix(filePath, "/") {
-						filePath = a.config.WorkingDir + "/" + filePath
-					}
-
-					oldContent := strings.TrimSuffix(oldText.String(), "\n")
-					newContent := strings.TrimSuffix(newText.String(), "\n")
-
-					content = append(content, acp.ToolCallContent{
-						Diff: &acp.ToolCallContentDiff{
-							Path:    filePath,
-							OldText: &oldContent,
-							NewText: newContent,
-						},
-					})
-					return content
-				}
-			}
+	case "write_file_diff", "write_file_simple_diff", "write_file_replace", "create_file":
+		if diffContent := a.parseDiffContent(result, params); len(diffContent) > 0 {
+			return diffContent
 		}
-		fallthrough // Fall back to text if not a proper diff
-
-	case "shell", "go_sandbox":
-		// Shell output could be terminal content, but for now use text
-		// In a future enhancement, we could create terminals for long-running commands
-		fallthrough
-
-	case "read_file", "read_file_summarized", "create_file", "search_file_content",
-		"search_files", "web_search", "todo", "parallel_tool_execution",
-		"status_program", "stop_program", "codebase_investigator":
-		// Default: format as text content
-		content = append(content, acp.ToolContent(acp.TextBlock(result)))
-
-	default:
-		// Unknown tool - default to text content
-		content = append(content, acp.ToolContent(acp.TextBlock(result)))
 	}
 
-	return content
+	return []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(result))}
+}
+
+func (a *StatCodeAIAgent) parseDiffContent(diffText string, params map[string]interface{}) []acp.ToolCallContent {
+	fileDiffs, err := godiff.ParseMultiFileDiff([]byte(diffText))
+	if err != nil {
+		return nil
+	}
+
+	var contents []acp.ToolCallContent
+
+	for _, fd := range fileDiffs {
+		if fd == nil {
+			continue
+		}
+
+		path := a.resolveDiffPath(fd, params)
+		if path == "" {
+			continue
+		}
+
+		newContent, readErr := os.ReadFile(path)
+		if readErr != nil {
+			logger.Debug("formatToolResultContent: unable to read updated file %s: %v", path, readErr)
+		}
+
+		finalText := string(newContent)
+		if fd.NewName == "/dev/null" {
+			// File was deleted
+			finalText = ""
+		} else if finalText == "" && readErr != nil {
+			// Fall back to the diff text so the client still shows context
+			finalText = diffText
+		}
+
+		contents = append(contents, acp.ToolDiffContent(path, finalText))
+	}
+
+	return contents
+}
+
+func (a *StatCodeAIAgent) resolveDiffPath(fd *godiff.FileDiff, params map[string]interface{}) string {
+	if fd == nil {
+		return ""
+	}
+
+	candidate := strings.TrimSpace(fd.NewName)
+	if candidate == "" || candidate == "/dev/null" {
+		candidate = strings.TrimSpace(fd.OrigName)
+	}
+
+	candidate = strings.Trim(candidate, "\"")
+	candidate = strings.TrimPrefix(candidate, "a/")
+	candidate = strings.TrimPrefix(candidate, "b/")
+
+	if candidate == "" && params != nil {
+		if pathVal, ok := params["path"].(string); ok {
+			candidate = pathVal
+		}
+	}
+
+	if candidate == "" {
+		return ""
+	}
+
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(a.config.WorkingDir, candidate)
+	}
+
+	return filepath.Clean(candidate)
 }
 
 // sendToolCallProgress sends intermediate progress updates for long-running tools
 func (a *StatCodeAIAgent) sendToolCallProgress(session *statcodeSession, toolID string, message string) error {
+	opts := []acp.ToolCallUpdateOpt{
+		acp.WithUpdateContent([]acp.ToolCallContent{
+			acp.ToolContent(acp.TextBlock(message)),
+		}),
+	}
+
+	if locations := a.getToolLocations(session, toolID); len(locations) > 0 {
+		opts = append(opts, acp.WithUpdateLocations(locations))
+	}
+
 	if err := a.conn.SessionUpdate(session.promptCtx, acp.SessionNotification{
 		SessionId: acp.SessionId(session.sessionID),
 		Update: acp.UpdateToolCall(
 			acp.ToolCallId(toolID),
-			acp.WithUpdateContent([]acp.ToolCallContent{
-				acp.ToolContent(acp.TextBlock(message)),
-			}),
+			opts...,
 		),
 	}); err != nil {
 		logger.Warn("Failed to send tool call progress update: %v", err)
@@ -1168,6 +1220,8 @@ func (a *StatCodeAIAgent) sendToolCallProgress(session *statcodeSession, toolID 
 
 // handleToolCallResult handles the completion of a tool call
 func (a *StatCodeAIAgent) handleToolCallResult(session *statcodeSession, toolName, toolID, result, errorMsg string) error {
+	params, locations := a.popToolContext(session, toolID)
+
 	status := acp.ToolCallStatusCompleted
 	var content []acp.ToolCallContent
 
@@ -1175,7 +1229,7 @@ func (a *StatCodeAIAgent) handleToolCallResult(session *statcodeSession, toolNam
 		status = acp.ToolCallStatusFailed
 		content = append(content, acp.ToolContent(acp.TextBlock(fmt.Sprintf("Error: %s", errorMsg))))
 	} else {
-		content = a.formatToolResultContent(toolName, result)
+		content = a.formatToolResultContent(toolName, result, params)
 	}
 
 	// Update the client about the tool call result
@@ -1184,13 +1238,20 @@ func (a *StatCodeAIAgent) handleToolCallResult(session *statcodeSession, toolNam
 		rawOutput["error"] = errorMsg
 	}
 
+	updateOpts := []acp.ToolCallUpdateOpt{
+		acp.WithUpdateStatus(status),
+		acp.WithUpdateContent(content),
+		acp.WithUpdateRawOutput(rawOutput),
+	}
+	if len(locations) > 0 {
+		updateOpts = append(updateOpts, acp.WithUpdateLocations(locations))
+	}
+
 	if err := a.conn.SessionUpdate(session.promptCtx, acp.SessionNotification{
 		SessionId: acp.SessionId(session.sessionID),
 		Update: acp.UpdateToolCall(
 			acp.ToolCallId(toolID),
-			acp.WithUpdateStatus(status),
-			acp.WithUpdateContent(content),
-			acp.WithUpdateRawOutput(rawOutput),
+			updateOpts...,
 		),
 	}); err != nil {
 		logger.Warn("handleToolCallResult[%s]: failed to send result for tool %s (status=%s): %v", session.sessionID, toolName, status, err)

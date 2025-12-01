@@ -15,6 +15,7 @@ import (
 	"github.com/statcode-ai/statcode-ai/internal/cli"
 	"github.com/statcode-ai/statcode-ai/internal/config"
 	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/statcode-ai/internal/progress"
 	"github.com/statcode-ai/statcode-ai/internal/provider"
 	"github.com/statcode-ai/statcode-ai/internal/secrets"
 	"github.com/statcode-ai/statcode-ai/internal/tui"
@@ -397,24 +398,22 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	// Declare program variable first (will be assigned later)
 	var program *tea.Program
 
-	// Create streaming callback
-	streamCallback := func(chunk string) error {
-		if program != nil {
-			program.Send(tui.GeneratingMsg{Content: chunk})
+	// Create progress callback
+	progressCallback := func(update progress.Update) error {
+		normalized := progress.Normalize(update)
+		if program != nil && normalized.ShouldStatus() {
+			statusMsg := strings.TrimRight(normalized.Message, "\n")
+			program.Send(tui.ProcessingStatusMsg{Status: statusMsg})
+		}
+		if program != nil && normalized.Message != "" && normalized.ShouldStream() {
+			program.Send(tui.GeneratingMsg{Content: normalized.Message})
 		}
 		return nil
 	}
 
 	// Create command handler with streaming support
 	cmdHandler := tui.NewCommandHandler(ctx, cfg, providerMgr, orch)
-	cmdHandler.SetStreamCallback(streamCallback)
-	cmdHandler.SetStatusCallback(func(status string) error {
-		// Send processing status updates
-		if program != nil {
-			program.Send(tui.ProcessingStatusMsg{Status: status})
-		}
-		return nil
-	})
+	cmdHandler.SetProgressCallback(progressCallback)
 	cmdHandler.SetContextCallback(func(percent int, contextWindow int) error {
 		if program != nil {
 			program.Send(tui.ContextUsageMsg{FreePercent: percent, ContextWindow: contextWindow})
@@ -472,19 +471,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 		}
 		// Process prompt in a goroutine and send chunks via tea.Cmd
 		go func() {
-			err := orch.ProcessPrompt(ctx, input, func(chunk string) error {
-				// Send each chunk as a message to the program
-				if program != nil {
-					program.Send(tui.GeneratingMsg{Content: chunk})
-				}
-				return nil
-			}, func(status string) error {
-				// Send processing status updates
-				if program != nil {
-					program.Send(tui.ProcessingStatusMsg{Status: status})
-				}
-				return nil
-			}, func(percent int, contextWindow int) error {
+			err := orch.ProcessPrompt(ctx, input, progressCallback, func(percent int, contextWindow int) error {
 				if program != nil {
 					program.Send(tui.ContextUsageMsg{FreePercent: percent, ContextWindow: contextWindow})
 				}

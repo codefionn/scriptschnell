@@ -72,6 +72,10 @@ var (
 				Foreground(lipgloss.Color("240")).
 				Strikethrough(true)
 
+	todoInProgressStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214")).
+				Bold(true)
+
 	todoEmptyStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240"))
 
@@ -1517,9 +1521,26 @@ func (m *Model) renderTodoTree(content *strings.Builder, items []*tools.TodoItem
 
 		marker := " "
 		itemStyle := todoItemStyle
-		if item.Completed {
-			marker = "x"
+
+		// Determine style based on status
+		switch item.Status {
+		case "completed":
+			marker = "✓"
 			itemStyle = todoCompletedStyle
+		case "in_progress":
+			marker = "▶"
+			itemStyle = todoInProgressStyle
+		case "pending":
+			marker = "○"
+			itemStyle = todoItemStyle
+		default:
+			// Fallback to old Completed field for backward compatibility
+			if item.Completed {
+				marker = "✓"
+				itemStyle = todoCompletedStyle
+			} else {
+				marker = "○"
+			}
 		}
 
 		// Add indentation for nested items

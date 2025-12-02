@@ -694,6 +694,7 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 	args = append(args, "main.go")
 	buildCmd := exec.CommandContext(execCtx, tinyGoBinary, args...)
 	buildCmd.Dir = sandboxDir
+	buildCmd.Env = os.Environ()
 
 	buildOutput, err := buildCmd.CombinedOutput()
 	if err != nil {
@@ -819,6 +820,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 				defer cancel()
 
 				cmd := exec.CommandContext(cmdCtx, commandArgs[0], commandArgs[1:]...)
+				cmd.Env = os.Environ()
 
 				// Set stdin if provided
 				if len(stdinData) > 0 {

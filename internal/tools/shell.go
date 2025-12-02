@@ -134,6 +134,7 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 
 	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Dir = workingDir
+	cmd.Env = os.Environ()
 	configureProcessGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
@@ -432,6 +433,7 @@ func collectOpenPorts(ctx context.Context, pid int) []string {
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, "lsof", "-Pan", "-p", strconv.Itoa(pid), "-i")
+	cmd.Env = os.Environ()
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard

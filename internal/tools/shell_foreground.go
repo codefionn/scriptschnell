@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ func newShellCommandRunner(tool *ShellTool, command, workingDir string, timeoutS
 func (r *shellCommandRunner) run(ctx context.Context) *ToolResult {
 	cmd := exec.Command("sh", "-c", r.command)
 	cmd.Dir = r.workingDir
+	cmd.Env = os.Environ()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

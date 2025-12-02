@@ -119,6 +119,7 @@ func (m *TinyGoManager) checkTinyGoInPATH() (string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, path, "version")
+	cmd.Env = os.Environ()
 	output, err := cmd.Output()
 	if err != nil {
 		m.logger.Warn("Found tinygo in PATH at %s but version check failed: %v", path, err)

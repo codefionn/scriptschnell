@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -120,6 +121,7 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, command, workingDir
 
 	cmd := exec.CommandContext(cmdCtx, "sh", "-c", command)
 	cmd.Dir = workingDir
+	cmd.Env = os.Environ()
 
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -147,6 +149,7 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, command, workingDir
 func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, command, workingDir string) (string, int, error) {
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = workingDir
+	cmd.Env = os.Environ()
 	configureProcessGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()

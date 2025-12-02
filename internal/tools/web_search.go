@@ -70,6 +70,10 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 		return &ToolResult{Error: "missing required parameter 'queries'"}
 	}
 
+	if queriesInterface == nil {
+		return &ToolResult{Error: "missing required parameter 'queries'"}
+	}
+
 	// Convert to slice of strings
 	var queries []string
 	switch v := queriesInterface.(type) {

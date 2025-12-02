@@ -486,6 +486,115 @@ func ListFiles(pattern string) string {
 	return result
 }
 
+//go:wasmimport env remove_file
+func removeFileHost(pathPtr *byte, pathLen int32, resultPtr *byte, resultCap int32) int32
+
+// RemoveFile removes a file from the filesystem
+// The file must have been read earlier in the session (read-before-write rule)
+// Returns empty string on success, error message on failure
+func RemoveFile(path string) string {
+	pathBytes := []byte(path)
+	var pathPtr *byte
+	if len(pathBytes) > 0 {
+		pathPtr = &pathBytes[0]
+	}
+
+	// Prepare result buffer for error messages
+	resultBuffer := make([]byte, 1024)
+	var resultPtr *byte
+	if len(resultBuffer) > 0 {
+		resultPtr = &resultBuffer[0]
+	}
+
+	// Call host remove_file function
+	statusCode := removeFileHost(
+		pathPtr, int32(len(pathBytes)),
+		resultPtr, int32(len(resultBuffer)),
+	)
+
+	// Find actual length of result
+	resultLen := 0
+	for i, b := range resultBuffer {
+		if b == 0 {
+			resultLen = i
+			break
+		}
+	}
+	if resultLen == 0 && len(resultBuffer) > 0 && resultBuffer[0] != 0 {
+		resultLen = len(resultBuffer)
+	}
+
+	result := string(resultBuffer[:resultLen])
+
+	// Check status code (0 = success, negative = error)
+	if statusCode == 0 {
+		return "" // Success
+	}
+
+	if result == "" {
+		return fmt.Sprintf("Error: Failed to remove file (status %d)", statusCode)
+	}
+	return result // Error message from host
+}
+
+//go:wasmimport env remove_dir
+func removeDirHost(pathPtr *byte, pathLen int32, recursive int32, resultPtr *byte, resultCap int32) int32
+
+// RemoveDir removes a directory from the filesystem
+// If recursive is true, removes the directory and all its contents
+// If recursive is false, only removes empty directories
+// Returns empty string on success, error message on failure
+func RemoveDir(path string, recursive bool) string {
+	pathBytes := []byte(path)
+	var pathPtr *byte
+	if len(pathBytes) > 0 {
+		pathPtr = &pathBytes[0]
+	}
+
+	recursiveInt := int32(0)
+	if recursive {
+		recursiveInt = 1
+	}
+
+	// Prepare result buffer for error messages
+	resultBuffer := make([]byte, 1024)
+	var resultPtr *byte
+	if len(resultBuffer) > 0 {
+		resultPtr = &resultBuffer[0]
+	}
+
+	// Call host remove_dir function
+	statusCode := removeDirHost(
+		pathPtr, int32(len(pathBytes)),
+		recursiveInt,
+		resultPtr, int32(len(resultBuffer)),
+	)
+
+	// Find actual length of result
+	resultLen := 0
+	for i, b := range resultBuffer {
+		if b == 0 {
+			resultLen = i
+			break
+		}
+	}
+	if resultLen == 0 && len(resultBuffer) > 0 && resultBuffer[0] != 0 {
+		resultLen = len(resultBuffer)
+	}
+
+	result := string(resultBuffer[:resultLen])
+
+	// Check status code (0 = success, negative = error)
+	if statusCode == 0 {
+		return "" // Success
+	}
+
+	if result == "" {
+		return fmt.Sprintf("Error: Failed to remove directory (status %d)", statusCode)
+	}
+	return result // Error message from host
+}
+
 // END STATCODE_AI_INTERNAL
 
 // User code begins here:

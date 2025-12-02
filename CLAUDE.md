@@ -259,9 +259,9 @@ componentLogger := logger.Global().WithPrefix("mycomponent")
 
 ### Provider System
 
-Multi-provider support via langchaingo ([internal/provider/provider.go](internal/provider/provider.go)):
+Multi-provider support
 
-- Supports OpenAI, Anthropic, and other langchaingo-compatible providers
+- Supports OpenAI, Anthropic and other
 - Provider manager handles API key storage and model selection
 - Model search uses Aho-Corasick algorithm for efficient matching
 
@@ -282,7 +282,6 @@ When modifying the codebase:
 
 3. **Changing LLM integration**:
    - Update `internal/llm/client.go` interface if needed
-   - Modify langchaingo wrapper in `internal/llm/langchain.go`
    - Test with multiple providers (OpenAI, Anthropic)
 
 4. **Actor system changes**:
@@ -300,7 +299,7 @@ scriptschnell/
 │   ├── cli/                  # CLI mode
 │   ├── config/               # Configuration management
 │   ├── fs/                   # Filesystem abstraction (CachedFS, MockFS)
-│   ├── llm/                  # LLM client interface + langchaingo wrapper
+│   ├── llm/                  # LLM client interface
 │   ├── provider/             # Provider management (API keys, models)
 │   ├── session/              # Session state management
 │   ├── tools/                # LLM tools (read_file, create_file, write_file_diff, shell, etc.)
@@ -310,7 +309,6 @@ scriptschnell/
 ## Dependencies
 
 - **bubbletea**: TUI framework
-- **langchaingo**: LLM integration (OpenAI, Anthropic, etc.)
 - **wasmer-go**: WebAssembly runtime with WASI support and custom host function hooks for sandboxed code execution
 - **fsnotify**: Filesystem watcher for cache invalidation
 - **ahocorasick**: Efficient model name search

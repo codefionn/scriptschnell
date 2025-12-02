@@ -82,7 +82,7 @@ You are an interactive CLI agent specializing in software engineering tasks. You
   2. Answer the question
 - **Fix failing Tests or Build**
   1. Run tests or build (investigate what tooling is required only if necessary, otherwise the context may be sufficient)
-    - Use the go_sandbox tool to run tests or build with shell commands
+    - Use the go_sandbox tool to run tests (e.g. with the Shell method)
     - Try to extract only errors from the output with the tool_summarize and/or searching it in the go_sandbox tool
   2. Gather context about errors (with codebase investigator)
   3. If necessary, think about what are root causes for the errors and how to fix them

@@ -43,7 +43,7 @@ The codebase uses a custom actor model ([internal/actor/actor.go](internal/actor
 
 Key actors in the system:
 - **Orchestrator Actor**: Manages LLM interactions and tool execution
-- **Tool Actors**: Execute individual tools (read_file, create_file, write_file_diff, shell, etc.)
+- **Tool Actors**: Execute individual tools (read_file, create_file, write_file_diff, etc.)
 - **Session Actor**: Manages conversation state and file tracking
 - **FS Actor**: Handles filesystem operations with caching
 
@@ -91,7 +91,7 @@ Sessions track conversation state and enforce safety rules ([internal/session/se
 
 - **FilesRead**: Map of files read in session (required for write operations)
 - **FilesModified**: Tracks which files were changed
-- **BackgroundJobs**: Manages long-running shell commands
+- **BackgroundJobs**: Manages long-running sandbox commands
 - **Thread-safe**: All operations use read/write locks
 
 #### Tool Registry System
@@ -108,27 +108,10 @@ Available tools:
 - **read_file_summarized**: AI-powered summarization of large files
 - **create_file**: Create new files
 - **write_file_diff**: Update existing files with unified diffs (headers + `@@` hunks by default; GPT models get a simplified parser that tolerates missing hunks)
-- **shell**: Execute shell commands (supports background jobs with `&`)
 - **go_sandbox**: Execute Go code in sandboxed environment
 - **parallel_tools**: Execute several registered tools concurrently and merge responses
 - **todo**: Manage todo items
 - **status**: Check status of background jobs
-
-### Critical Safety Rules
-
-1. **Read-Before-Write**: Files must be read before modification ([internal/tools/write_file_diff.go](internal/tools/write_file_diff.go#L73) or the simplified parser variant in [internal/tools/write_file_simple_diff.go](internal/tools/write_file_simple_diff.go#L60))
-   - Session tracks which files were read via `TrackFileRead()`
-   - Write operations check `WasFileRead()` before allowing modifications
-   - New files can be written without reading
-
-2. **Line Limits**: Maximum 2000 lines per read operation ([internal/tools/read_file.go](internal/tools/read_file.go:96-104))
-   - Files exceeding limit are automatically truncated with notification
-   - Use `from_line` and `to_line` parameters to read specific ranges
-
-3. **Timeouts**:
-   - Sandbox execution: 30s default, 600s max
-
-4. **Sandbox Shell Helper**: When writing Go sandbox programs, call `Shell` with a command slice (e.g., `Shell([]string{"ls", "-la"}, "")`). The earlier `Shell("ls -la")` form is deprecated and will be rejected.
 
 ### Configuration
 
@@ -144,9 +127,9 @@ Configuration files stored in `~/.config/scriptschnell/`:
 
 ### Provider System
 
-Multi-provider support via langchaingo ([internal/provider/provider.go](internal/provider/provider.go)):
+Multi-provider support
 
-- Supports OpenAI, Anthropic, and other langchaingo-compatible providers
+- Supports OpenAI, Anthropic and other
 - Provider manager handles API key storage and model selection
 - Model search uses Aho-Corasick algorithm for efficient matching
 
@@ -167,7 +150,6 @@ When modifying the codebase:
 
 3. **Changing LLM integration**:
    - Update `internal/llm/client.go` interface if needed
-   - Modify langchaingo wrapper in `internal/llm/langchain.go`
    - Test with multiple providers (OpenAI, Anthropic)
 
 4. **Actor system changes**:
@@ -185,7 +167,7 @@ scriptschnell/
 │   ├── cli/                  # CLI mode
 │   ├── config/               # Configuration management
 │   ├── fs/                   # Filesystem abstraction (CachedFS, MockFS)
-│   ├── llm/                  # LLM client interface + langchaingo wrapper
+│   ├── llm/                  # LLM client interface
 │   ├── provider/             # Provider management (API keys, models)
 │   ├── session/              # Session state management
 │   ├── tools/                # LLM tools (read_file, create_file, write_file_diff, shell, etc.)
@@ -195,7 +177,6 @@ scriptschnell/
 ## Dependencies
 
 - **bubbletea**: TUI framework
-- **langchaingo**: LLM integration (OpenAI, Anthropic, etc.)
 - **fsnotify**: Filesystem watcher for cache invalidation
 - **ahocorasick**: Efficient model name search
 

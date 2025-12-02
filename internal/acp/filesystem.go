@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
-	"github.com/statcode-ai/statcode-ai/internal/fs"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
 )
 
 // ACPFileSystem implements the fs.FileSystem interface using the ACP client's filesystem protocol

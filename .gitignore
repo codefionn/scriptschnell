@@ -1,8 +1,11 @@
 # Binaries
 /statcode-ai
 /statcode-ai-test
+/scriptschnell
+/scriptschnell-test
 /test_menu
 /cmd/statcode-ai/statcode-ai
+/cmd/scriptschnell/scriptschnell
 *.exe
 *.exe~
 *.dll

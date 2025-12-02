@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/statcode-ai/statcode-ai/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
 )
 
 func TestSearchFileContentTool_Execute(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/llm"
+	"github.com/statcode-ai/scriptschnell/internal/llm"
 )
 
 // OpenAIToolConfig contains the configuration required to create an OpenAITool.

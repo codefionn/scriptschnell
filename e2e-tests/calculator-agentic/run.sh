@@ -16,7 +16,7 @@ init_e2e_test "$@"
 # Describe what the test does
 echo "Starting AGENTIC E2E test..."
 echo "This will:"
-echo "  1. Build statcode-ai Docker container"
+echo "  1. Build scriptschnell Docker container"
 echo "  2. Give AI full autonomy to design and build calculator"
 echo "  3. AI writes and runs its own tests"
 echo "  4. AI iterates until all tests pass"

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
 )
 
 // StopProgramToolWithActor is the stop program tool that uses ShellActor

@@ -1,8 +1,8 @@
-# StatCode AI
+# scriptschnell
 
 > This project is actively in initial development. Use at your own risk!
 
-**statcode-ai** is a TUI that generates code from prompts using LLMs.
+**scriptschnell** is a TUI that generates code from prompts using LLMs.
 
 On first run, it will download tinygo (if not in PATH).
 
@@ -18,23 +18,23 @@ On first run, it will download tinygo (if not in PATH).
 
 ## Agent Client Protocol (ACP) Mode
 
-StatCode AI supports the [Agent Client Protocol](https://agentclientprotocol.com/), enabling seamless integration with code editors that support ACP. This allows you to use StatCode AI's capabilities directly within your preferred development environment.
+scriptschnell supports the [Agent Client Protocol](https://agentclientprotocol.com/), enabling seamless integration with code editors that support ACP. This allows you to use scriptschnell's capabilities directly within your preferred development environment.
 
 ### Using ACP Mode
 
 ```bash
-# Start StatCode AI in ACP mode
-./statcode-ai --acp
+# Start scriptschnell in ACP mode
+./scriptschnell --acp
 
 # Or with go run
-go run ./cmd/statcode-ai --acp
+go run ./cmd/scriptschnell --acp
 ```
 
-When running in ACP mode, StatCode AI communicates via stdio using the ACP protocol, allowing code editors to:
+When running in ACP mode, scriptschnell communicates via stdio using the ACP protocol, allowing code editors to:
 - Send prompts and receive streaming responses
 - Handle tool execution with permission requests
 - Manage sessions and context
-- Access all StatCode AI features including file operations, web search, and sandbox execution
+- Access all scriptschnell features including file operations, web search, and sandbox execution
 
 ### ACP Features
 
@@ -146,7 +146,7 @@ Recommended are `Cerebras` with `zai-glm-4.6` for the orchestration model and
 
 ### Provider Rate Limits
 
-If you frequently hit HTTP 429 errors, add a `rate_limit` block to a provider entry in `~/.config/statcode-ai/providers.json` to slow requests:
+If you frequently hit HTTP 429 errors, add a `rate_limit` block to a provider entry in `~/.config/scriptschnell/providers.json` to slow requests:
 
 ```json
 {
@@ -177,20 +177,20 @@ Add `tokens_per_minute` when you need to throttle large tool outputs being sent 
 
 ```bash
 # Build the binary
-go build -o statcode-ai ./cmd/statcode-ai
+go build -o scriptschnell ./cmd/scriptschnell
 ```
 
 ### Running
 
 ```bash
 # Run in TUI mode (interactive)
-./statcode-ai
+./scriptschnell
 
 # Run in CLI mode (single-shot)
-./statcode-ai "your prompt here"
+./scriptschnell "your prompt here"
 
 # Install globally
-go install ./cmd/statcode-ai
+go install ./cmd/scriptschnell
 ```
 
 ### Testing

@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/statcode-ai/statcode-ai/internal/config"
+	"github.com/statcode-ai/scriptschnell/internal/config"
 )
 
 var (

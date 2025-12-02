@@ -6,19 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build the binary
-go build -o statcode-ai ./cmd/statcode-ai
+go build -o scriptschnell ./cmd/scriptschnell
 
 # Run simple tests
 go test ./... -short
 
 # Run in TUI mode
-./statcode-ai
+./scriptschnell
 
 # Run in CLI mode (single-shot)
-./statcode-ai "your prompt here"
+./scriptschnell "your prompt here"
 
 # Install globally
-go install ./cmd/statcode-ai
+go install ./cmd/scriptschnell
 ```
 
 Test the codebase with `-short` flag to skip slow integration tests.
@@ -129,15 +129,15 @@ Available tools:
 
 ### Configuration
 
-Configuration files stored in `~/.config/statcode-ai/`:
+Configuration files stored in `~/.config/scriptschnell/`:
 
 - **config.json**: Application settings (working_dir, cache_ttl_seconds, temperature, max_tokens)
 - **providers.json**: Provider API keys and model selections
 
 ### Entry Points
 
-- **TUI Mode** ([cmd/statcode-ai/main.go](cmd/statcode-ai/main.go:61-116)): Interactive Bubbletea interface
-- **CLI Mode** ([cmd/statcode-ai/main.go](cmd/statcode-ai/main.go:53-59)): Single-shot prompt execution
+- **TUI Mode** ([cmd/scriptschnell/main.go](cmd/scriptschnell/main.go:61-116)): Interactive Bubbletea interface
+- **CLI Mode** ([cmd/scriptschnell/main.go](cmd/scriptschnell/main.go:53-59)): Single-shot prompt execution
 
 ### Provider System
 
@@ -175,8 +175,8 @@ When modifying the codebase:
 ## Project Structure
 
 ```
-statcode-ai/
-├── cmd/statcode-ai/          # Main entry point
+scriptschnell/
+├── cmd/scriptschnell/          # Main entry point
 ├── internal/
 │   ├── actor/                # Actor model implementation
 │   ├── cli/                  # CLI mode

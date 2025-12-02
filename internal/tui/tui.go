@@ -18,10 +18,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/statcode-ai/statcode-ai/internal/config"
-	"github.com/statcode-ai/statcode-ai/internal/fs"
-	"github.com/statcode-ai/statcode-ai/internal/htmlconv"
-	"github.com/statcode-ai/statcode-ai/internal/tools"
+	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/htmlconv"
+	"github.com/statcode-ai/scriptschnell/internal/tools"
 	"golang.org/x/term"
 )
 

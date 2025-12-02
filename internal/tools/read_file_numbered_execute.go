@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/fs"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 // ReadFileNumberedExecutor handles the actual execution of the read_file tool with specific runtime dependencies.

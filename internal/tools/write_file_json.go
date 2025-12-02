@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/fs"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 // WriteFileJSONToolSpec is the static specification for the write_file_json tool

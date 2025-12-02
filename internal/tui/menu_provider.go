@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/statcode-ai/statcode-ai/internal/provider"
+	"github.com/statcode-ai/scriptschnell/internal/provider"
 )
 
 const (

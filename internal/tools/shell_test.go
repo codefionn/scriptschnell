@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 func TestStatusProgramTool_ListAndDetail(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/llm"
-	"github.com/statcode-ai/statcode-ai/internal/progress"
-	"github.com/statcode-ai/statcode-ai/internal/session"
-	"github.com/statcode-ai/statcode-ai/internal/tools"
+	"github.com/statcode-ai/scriptschnell/internal/llm"
+	"github.com/statcode-ai/scriptschnell/internal/progress"
+	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/tools"
 )
 
 type CodebaseInvestigatorAgent struct {

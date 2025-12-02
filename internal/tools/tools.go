@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/statcode-ai/statcode-ai/internal/progress"
+	"github.com/statcode-ai/scriptschnell/internal/progress"
 )
 
 // ToolSpec represents the static specification of a tool (name, description, parameters).

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/secrets"
+	"github.com/statcode-ai/scriptschnell/internal/secrets"
 )
 
 // SearchConfig holds configuration for web search providers
@@ -115,16 +115,16 @@ func defaultConfigDir() string {
 	switch runtime.GOOS {
 	case "linux":
 		homeDir, _ := os.UserHomeDir()
-		return filepath.Join(homeDir, ".config", "statcode-ai")
+		return filepath.Join(homeDir, ".config", "scriptschnell")
 	case "windows":
 		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
-			return filepath.Join(appData, "statcode-ai")
+			return filepath.Join(appData, "scriptschnell")
 		}
 		homeDir, _ := os.UserHomeDir()
-		return filepath.Join(homeDir, "AppData", "Roaming", "statcode-ai")
+		return filepath.Join(homeDir, "AppData", "Roaming", "scriptschnell")
 	default:
 		homeDir, _ := os.UserHomeDir()
-		return filepath.Join(homeDir, ".config", "statcode-ai")
+		return filepath.Join(homeDir, ".config", "scriptschnell")
 	}
 }
 
@@ -132,19 +132,19 @@ func defaultStateDir() string {
 	switch runtime.GOOS {
 	case "linux":
 		if stateHome := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); stateHome != "" {
-			return filepath.Join(stateHome, "statcode-ai")
+			return filepath.Join(stateHome, "scriptschnell")
 		}
 		homeDir, _ := os.UserHomeDir()
-		return filepath.Join(homeDir, ".local", "state", "statcode-ai")
+		return filepath.Join(homeDir, ".local", "state", "scriptschnell")
 	case "windows":
 		if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
-			return filepath.Join(localAppData, "statcode-ai")
+			return filepath.Join(localAppData, "scriptschnell")
 		}
 		homeDir, _ := os.UserHomeDir()
-		return filepath.Join(homeDir, "AppData", "Local", "statcode-ai")
+		return filepath.Join(homeDir, "AppData", "Local", "scriptschnell")
 	default:
 		homeDir, _ := os.UserHomeDir()
-		return filepath.Join(homeDir, ".config", "statcode-ai")
+		return filepath.Join(homeDir, ".config", "scriptschnell")
 	}
 }
 
@@ -158,12 +158,12 @@ func DefaultConfig() *Config {
 		CacheTTL:           300,
 		MaxCacheEntries:    100,
 		DefaultTimeout:     30,
-		TempDir:            filepath.Join(os.TempDir(), "statcode-ai"),
+		TempDir:            filepath.Join(os.TempDir(), "scriptschnell"),
 		Temperature:        0.7,
 		MaxTokens:          4096,
 		ProviderConfigPath: filepath.Join(configDir, "providers.json"),
 		LogLevel:           "info",
-		LogPath:            filepath.Join(stateDir, "statcode-ai.log"),
+		LogPath:            filepath.Join(stateDir, "scriptschnell.log"),
 		AuthorizedDomains:  make(map[string]bool),
 		AuthorizedCommands: make(map[string]bool),
 		Search: SearchConfig{
@@ -202,7 +202,7 @@ func Load(path string) (*Config, error) {
 
 	// Ensure critical fields have defaults if still empty
 	if config.TempDir == "" {
-		config.TempDir = filepath.Join(os.TempDir(), "statcode-ai")
+		config.TempDir = filepath.Join(os.TempDir(), "scriptschnell")
 	}
 	if config.WorkingDir == "" {
 		config.WorkingDir = "."
@@ -216,7 +216,7 @@ func Load(path string) (*Config, error) {
 		config.LogLevel = "info"
 	}
 	if config.LogPath == "" {
-		config.LogPath = filepath.Join(stateDir, "statcode-ai.log")
+		config.LogPath = filepath.Join(stateDir, "scriptschnell.log")
 	}
 	if config.AuthorizedDomains == nil {
 		config.AuthorizedDomains = make(map[string]bool)

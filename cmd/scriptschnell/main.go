@@ -11,14 +11,14 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/statcode-ai/statcode-ai/internal/acp"
-	"github.com/statcode-ai/statcode-ai/internal/cli"
-	"github.com/statcode-ai/statcode-ai/internal/config"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
-	"github.com/statcode-ai/statcode-ai/internal/progress"
-	"github.com/statcode-ai/statcode-ai/internal/provider"
-	"github.com/statcode-ai/statcode-ai/internal/secrets"
-	"github.com/statcode-ai/statcode-ai/internal/tui"
+	"github.com/statcode-ai/scriptschnell/internal/acp"
+	"github.com/statcode-ai/scriptschnell/internal/cli"
+	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/progress"
+	"github.com/statcode-ai/scriptschnell/internal/provider"
+	"github.com/statcode-ai/scriptschnell/internal/secrets"
+	"github.com/statcode-ai/scriptschnell/internal/tui"
 	"golang.org/x/term"
 )
 
@@ -88,7 +88,7 @@ func run() (err error) {
 
 	// Load configuration
 	fmt.Fprintf(os.Stderr, "[Main] About to load config from: %s\n", config.GetConfigPath())
-	fmt.Fprintf(os.Stderr, "[Main] Environment vars: STATCODE_LOG_LEVEL=%q STATCODE_LOG_PATH=%q\n",
+	fmt.Fprintf(os.Stderr, "[Main] Environment vars: SCRIPTSCHNELL_LOG_LEVEL=%q SCRIPTSCHNELL_LOG_PATH=%q\n",
 		os.Getenv("STATCODE_LOG_LEVEL"), os.Getenv("STATCODE_LOG_PATH"))
 
 	cfg, err := config.Load(config.GetConfigPath())
@@ -99,11 +99,11 @@ func run() (err error) {
 	fmt.Fprintf(os.Stderr, "[Main] Config loaded successfully\n")
 
 	// Allow environment variables to override config file values for logging.
-	if envLevel := strings.TrimSpace(os.Getenv("STATCODE_LOG_LEVEL")); envLevel != "" {
+	if envLevel := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_LEVEL")); envLevel != "" {
 		fmt.Fprintf(os.Stderr, "[Main] Overriding log level from environment: %s\n", envLevel)
 		cfg.LogLevel = envLevel
 	}
-	if envPath := strings.TrimSpace(os.Getenv("STATCODE_LOG_PATH")); envPath != "" {
+	if envPath := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_PATH")); envPath != "" {
 		fmt.Fprintf(os.Stderr, "[Main] Overriding log path from environment: %s\n", envPath)
 		cfg.LogPath = envPath
 	}
@@ -126,7 +126,7 @@ func run() (err error) {
 	}
 	loggerInitialized = true
 
-	logger.Info("StatCode AI starting")
+	logger.Info("scriptschnell starting")
 	logger.Debug("Configuration loaded: working_dir=%s, log_level=%s, log_path=%s", cfg.WorkingDir, cfg.LogLevel, cfg.LogPath)
 
 	// Ensure temp directory exists
@@ -231,7 +231,7 @@ func promptForPassword(prompt string) (string, error) {
 }
 
 func runACPMode() error {
-	fmt.Fprintf(os.Stderr, "Starting StatCode AI in Agent Client Protocol (ACP) mode...\n")
+	fmt.Fprintf(os.Stderr, "Starting scriptschnell in Agent Client Protocol (ACP) mode...\n")
 
 	// Load configuration
 	cfg, err := config.Load(config.GetConfigPath())
@@ -240,10 +240,10 @@ func runACPMode() error {
 	}
 
 	// Override logging from environment if set
-	if envLevel := strings.TrimSpace(os.Getenv("STATCODE_LOG_LEVEL")); envLevel != "" {
+	if envLevel := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_LEVEL")); envLevel != "" {
 		cfg.LogLevel = envLevel
 	}
-	if envPath := strings.TrimSpace(os.Getenv("STATCODE_LOG_PATH")); envPath != "" {
+	if envPath := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_PATH")); envPath != "" {
 		cfg.LogPath = envPath
 	}
 
@@ -258,7 +258,7 @@ func runACPMode() error {
 		}
 	}()
 
-	logger.Info("StatCode AI starting in ACP mode")
+	logger.Info("scriptschnell starting in ACP mode")
 
 	// Ensure temp directory exists
 	if err := os.MkdirAll(cfg.TempDir, 0755); err != nil {
@@ -285,7 +285,7 @@ func runACPMode() error {
 }
 
 func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
-	fs := flag.NewFlagSet("statcode-ai", flag.ContinueOnError)
+	fs := flag.NewFlagSet("scriptschnell", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	var (

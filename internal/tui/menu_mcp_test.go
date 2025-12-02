@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/statcode-ai/statcode-ai/internal/actor"
-	"github.com/statcode-ai/statcode-ai/internal/config"
-	"github.com/statcode-ai/statcode-ai/internal/tools"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/statcode-ai/scriptschnell/internal/tools"
 )
 
 func TestMCPMenuOpenAPIInputDoesNotSkipKeystrokes(t *testing.T) {

@@ -12,13 +12,13 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	godiff "github.com/sourcegraph/go-diff/diff"
-	"github.com/statcode-ai/statcode-ai/internal/config"
-	"github.com/statcode-ai/statcode-ai/internal/fs"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
-	"github.com/statcode-ai/statcode-ai/internal/orchestrator"
-	"github.com/statcode-ai/statcode-ai/internal/progress"
-	"github.com/statcode-ai/statcode-ai/internal/provider"
-	"github.com/statcode-ai/statcode-ai/internal/tools"
+	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/orchestrator"
+	"github.com/statcode-ai/scriptschnell/internal/progress"
+	"github.com/statcode-ai/scriptschnell/internal/provider"
+	"github.com/statcode-ai/scriptschnell/internal/tools"
 )
 
 const maxLogSnippetLen = 256

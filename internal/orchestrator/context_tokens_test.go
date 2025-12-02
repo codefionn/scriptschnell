@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 func TestEstimateContextTokensUsesExactEncoding(t *testing.T) {

@@ -364,7 +364,7 @@ run_docker_compose_with_debug() {
 
     # Set debug log level
     export STATCODE_LOG_LEVEL="debug"
-    export STATCODE_LOG_PATH="/workspace/.logs/statcode-ai.log"
+    export STATCODE_LOG_PATH="/workspace/.logs/scriptschnell.log"
 
     # Run docker compose and capture exit code
     local exit_code=0
@@ -386,10 +386,10 @@ run_docker_compose_with_debug() {
 
     # If test failed, display the debug log
     if [ $exit_code -ne 0 ]; then
-        if [ -f "$log_dir/statcode-ai.log" ]; then
+        if [ -f "$log_dir/scriptschnell.log" ]; then
             echo "See logs for more details"
         else
-            print_warning "No debug log file found at $log_dir/statcode-ai.log"
+            print_warning "No debug log file found at $log_dir/scriptschnell.log"
         fi
     fi
 

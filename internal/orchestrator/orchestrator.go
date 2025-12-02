@@ -9,16 +9,16 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
-	"github.com/statcode-ai/statcode-ai/internal/config"
-	"github.com/statcode-ai/statcode-ai/internal/fs"
-	"github.com/statcode-ai/statcode-ai/internal/llm"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
-	"github.com/statcode-ai/statcode-ai/internal/mcp"
-	"github.com/statcode-ai/statcode-ai/internal/progress"
-	"github.com/statcode-ai/statcode-ai/internal/provider"
-	"github.com/statcode-ai/statcode-ai/internal/session"
-	"github.com/statcode-ai/statcode-ai/internal/tools"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/llm"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/mcp"
+	"github.com/statcode-ai/scriptschnell/internal/progress"
+	"github.com/statcode-ai/scriptschnell/internal/provider"
+	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/tools"
 )
 
 // AuthorizationCallback is called when a tool requires user authorization

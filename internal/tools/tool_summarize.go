@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/statcode-ai/statcode-ai/internal/llm"
+	"github.com/statcode-ai/scriptschnell/internal/llm"
 )
 
 // ToolSummarizeTool wraps another tool call and summarizes its output using LLM

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
 )
 
 func TestTodoActor(t *testing.T) {

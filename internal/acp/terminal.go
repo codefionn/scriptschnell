@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
-	"github.com/statcode-ai/statcode-ai/internal/actor"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
 )
 
 // Terminal represents a running terminal session

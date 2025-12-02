@@ -14,7 +14,7 @@ import (
 
 const (
 	openRouterAPIBaseURL = "https://openrouter.ai/api/v1"
-	openRouterReferer    = "https://github.com/statcode-ai/statcode-ai"
+	openRouterReferer    = "https://github.com/statcode-ai/scriptschnell"
 	openRouterAppTitle   = "StatCode AI"
 )
 

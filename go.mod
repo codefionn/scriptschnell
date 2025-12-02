@@ -1,4 +1,4 @@
-module github.com/statcode-ai/statcode-ai
+module github.com/statcode-ai/scriptschnell
 
 go 1.25.1
 

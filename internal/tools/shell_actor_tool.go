@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 // ShellToolWithActor is the shell tool implementation that uses ShellActor

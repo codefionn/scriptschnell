@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
 )
 
 const providerModelsCacheVersion uint32 = 2

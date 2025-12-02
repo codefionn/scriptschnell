@@ -6,22 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build the binary
-go build -o statcode-ai ./cmd/statcode-ai
+go build -o scriptschnell ./cmd/scriptschnell
 
 # Run simple tests
 go test ./... -short
 
 # Run in TUI mode
-./statcode-ai
+./scriptschnell
 
 # Run in CLI mode (single-shot)
-./statcode-ai "your prompt here"
+./scriptschnell "your prompt here"
 
 # Run in Agent Client Protocol (ACP) mode for code editor integration
-./statcode-ai --acp
+./scriptschnell --acp
 
 # Install globally
-go install ./cmd/statcode-ai
+go install ./cmd/scriptschnell
 ```
 
 ## Architecture Overview
@@ -130,9 +130,9 @@ Available tools:
     - Downloads TinyGo compiler on first use (no system Go installation required)
     - **TinyGo is REQUIRED** - standard Go only supports WASI P1, we need WASI P2
     - Platform-specific cache directories:
-      - Linux: `$XDG_CACHE_HOME/statcode-ai/tinygo/` (or `~/.cache/statcode-ai/tinygo/`)
-      - macOS: `~/Library/Caches/statcode-ai/tinygo/`
-      - Windows: `%LOCALAPPDATA%\statcode-ai\tinygo\`
+      - Linux: `$XDG_CACHE_HOME/scriptschnell/tinygo/` (or `~/.cache/scriptschnell/tinygo/`)
+      - macOS: `~/Library/Caches/scriptschnell/tinygo/`
+      - Windows: `%LOCALAPPDATA%\scriptschnell\tinygo\`
     - Cache persists across sessions for faster compilation
     - Download progress shown in TUI status bar
   - Compiles to WASI P2 target using TinyGo (Component Model support)
@@ -210,8 +210,8 @@ Available tools:
 
 Configuration files stored in platform-specific locations:
 
-- Linux: `~/.config/statcode-ai/`
-- Windows: `%APPDATA%\\statcode-ai\\`
+- Linux: `~/.config/scriptschnell/`
+- Windows: `%APPDATA%\\scriptschnell\\`
 
 - **config.json**: Application settings (working_dir, cache_ttl_seconds, temperature, log_level)
   - **Note**: `max_tokens` is deprecated and automatically retrieved from model metadata via `GetModelMaxOutputTokens()`
@@ -227,7 +227,7 @@ The application includes a comprehensive logging system ([internal/logger/logger
 
 - **Log Levels**: debug, info, warn, error, none
 - **Configuration**: Set `log_level` in config.json; log path is derived from the state directory and can be overridden via `STATCODE_LOG_PATH`
-- **Default**: INFO level; on Linux logs to `$XDG_STATE_HOME/statcode-ai/statcode-ai.log` (or `~/.local/state/statcode-ai/statcode-ai.log`), on Windows to `%LOCALAPPDATA%\\statcode-ai\\statcode-ai.log` (or `~/AppData/Local/statcode-ai/statcode-ai.log`), and on other platforms to `~/.config/statcode-ai/statcode-ai.log`
+- **Default**: INFO level; on Linux logs to `$XDG_STATE_HOME/scriptschnell/scriptschnell.log` (or `~/.local/state/scriptschnell/scriptschnell.log`), on Windows to `%LOCALAPPDATA%\\scriptschnell\\scriptschnell.log` (or `~/AppData/Local/scriptschnell/scriptschnell.log`), and on other platforms to `~/.config/scriptschnell/scriptschnell.log`
 - **Features**:
   - Timestamp and level for each log entry
   - Component-specific prefixes via `WithPrefix()`
@@ -238,7 +238,7 @@ See [LOGGING.md](LOGGING.md) for detailed logging documentation.
 
 Usage in code:
 ```go
-import "github.com/statcode-ai/statcode-ai/internal/logger"
+import "github.com/scriptschnell/scriptschnell/internal/logger"
 
 logger.Debug("detailed info: %s", value)
 logger.Info("normal operation: %s", value)
@@ -251,8 +251,8 @@ componentLogger := logger.Global().WithPrefix("mycomponent")
 
 ### Entry Points
 
-- **TUI Mode** ([cmd/statcode-ai/main.go](cmd/statcode-ai/main.go:61-116)): Interactive Bubbletea interface
-- **CLI Mode** ([cmd/statcode-ai/main.go](cmd/statcode-ai/main.go:53-59)): Single-shot prompt execution
+- **TUI Mode** ([cmd/scriptschnell/main.go](cmd/scriptschnell/main.go:61-116)): Interactive Bubbletea interface
+- **CLI Mode** ([cmd/scriptschnell/main.go](cmd/scriptschnell/main.go:53-59)): Single-shot prompt execution
 
 ### Provider System
 
@@ -290,8 +290,8 @@ When modifying the codebase:
 ## Project Structure
 
 ```
-statcode-ai/
-├── cmd/statcode-ai/          # Main entry point
+scriptschnell/
+├── cmd/scriptschnell/          # Main entry point
 ├── internal/
 │   ├── actor/                # Actor model implementation
 │   ├── cli/                  # CLI mode

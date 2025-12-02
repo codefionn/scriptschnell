@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 // TestStatusProgramTool_SandboxBackgroundJob tests status_program with sandbox background jobs

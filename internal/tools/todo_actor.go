@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
 )
 
 // TodoActorInterface defines the interface for todo actors

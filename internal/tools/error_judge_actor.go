@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
-	"github.com/statcode-ai/statcode-ai/internal/llm"
-	"github.com/statcode-ai/statcode-ai/internal/logger"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/llm"
+	"github.com/statcode-ai/scriptschnell/internal/logger"
 )
 
 // ErrorJudgeDecision represents the error judge's decision

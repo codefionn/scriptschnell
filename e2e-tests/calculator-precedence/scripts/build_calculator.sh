@@ -5,7 +5,7 @@ set -e
 trap 'touch /workspace/.build_failed' ERR
 
 echo "=========================================="
-echo "Building Calculator CLI with statcode-ai"
+echo "Building Calculator CLI with scriptschnell"
 echo "=========================================="
 echo "Scenario: Upgrade existing CLI to support operator precedence"
 echo "=========================================="
@@ -48,11 +48,11 @@ if [ ! -f "go.mod" ]; then
     exit 1
 fi
 
-# Use statcode-ai to upgrade the calculator implementation
+# Use scriptschnell to upgrade the calculator implementation
 # The --dangerous-allow-all flag bypasses authorization prompts for the e2e test
-echo "Prompting statcode-ai to implement operator precedence..."
+echo "Prompting scriptschnell to implement operator precedence..."
 echo ""
-statcode-ai --dangerous-allow-all "You are working inside an existing Go project for a CLI calculator. The current evaluate function in main.go walks the expression left-to-right and fails to respect operator precedence or parentheses.
+scriptschnell --dangerous-allow-all "You are working inside an existing Go project for a CLI calculator. The current evaluate function in main.go walks the expression left-to-right and fails to respect operator precedence or parentheses.
 
 YOUR OBJECTIVE:
   * Upgrade main.go so the CLI supports +, -, *, / with correct precedence and parentheses (standard arithmetic rules).

@@ -5,7 +5,7 @@ set -e
 trap 'touch /workspace/.build_failed' ERR
 
 echo "=========================================="
-echo "Building Calculator CLI with statcode-ai"
+echo "Building Calculator CLI with scriptschnell"
 echo "=========================================="
 echo "AGENTIC MODE: Full autonomy enabled"
 echo "=========================================="
@@ -38,7 +38,7 @@ else
 fi
 
 echo ""
-echo "Note: statcode-ai will auto-configure from environment variables"
+echo "Note: scriptschnell will auto-configure from environment variables"
 echo ""
 
 # Initialize go module if not exists
@@ -47,11 +47,11 @@ if [ ! -f "go.mod" ]; then
     go mod init calculator-cli
 fi
 
-# Use statcode-ai to build the calculator CLI with full autonomy
+# Use scriptschnell to build the calculator CLI with full autonomy
 # The --dangerous-allow-all flag bypasses authorization prompts for the e2e test
-echo "Running statcode-ai in agentic mode..."
+echo "Running scriptschnell in agentic mode..."
 echo ""
-statcode-ai --dangerous-allow-all "You are an autonomous software engineer. Build and test a Go command-line calculator.
+scriptschnell --dangerous-allow-all "You are an autonomous software engineer. Build and test a Go command-line calculator.
 
 REQUIREMENTS:
 - Accept math expressions as CLI args: ./calculator \"8 * 10 + 2\"

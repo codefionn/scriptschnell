@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/statcode-ai/statcode-ai/internal/provider"
+	"github.com/statcode-ai/scriptschnell/internal/provider"
 )
 
 // TestModelMenuItemV2 tests the modelMenuItemV2 implementation

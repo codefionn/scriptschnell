@@ -20,10 +20,10 @@ RUN go mod download
 COPY ./internal ./internal
 COPY ./cmd ./cmd
 
-# Build statcode-ai
-RUN go build -o statcode-ai ./cmd/statcode-ai
+# Build scriptschnell
+RUN go build -o scriptschnell ./cmd/scriptschnell
 
-# Final stage - use Go image since statcode-ai will build Go programs
+# Final stage - use Go image since scriptschnell will build Go programs
 FROM golang:1.25-bookworm
 
 # Install necessary tools
@@ -33,12 +33,12 @@ RUN apt-get update && apt-get install -y bash ca-certificates && rm -rf /var/lib
 COPY --from=tinygo /usr/local/tinygo /usr/local/tinygo
 ENV PATH="/usr/local/tinygo/bin:${PATH}"
 
-# Copy statcode-ai binary from builder
-COPY --from=builder /app/statcode-ai /usr/local/bin/statcode-ai
+# Copy scriptschnell binary from builder
+COPY --from=builder /app/scriptschnell /usr/local/bin/scriptschnell
 
 # Create config directory
-RUN mkdir -p /root/.config/statcode-ai
+RUN mkdir -p /root/.config/scriptschnell
 
 WORKDIR /workspace
 
-ENTRYPOINT ["/usr/local/bin/statcode-ai"]
+ENTRYPOINT ["/usr/local/bin/scriptschnell"]

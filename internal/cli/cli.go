@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/config"
-	"github.com/statcode-ai/statcode-ai/internal/htmlconv"
-	"github.com/statcode-ai/statcode-ai/internal/progress"
-	"github.com/statcode-ai/statcode-ai/internal/provider"
-	"github.com/statcode-ai/statcode-ai/internal/tui"
+	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/statcode-ai/scriptschnell/internal/htmlconv"
+	"github.com/statcode-ai/scriptschnell/internal/progress"
+	"github.com/statcode-ai/scriptschnell/internal/provider"
+	"github.com/statcode-ai/scriptschnell/internal/tui"
 )
 
 // Options represent CLI-specific authorization adjustments and model configuration.

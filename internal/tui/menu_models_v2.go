@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/statcode-ai/statcode-ai/internal/provider"
+	"github.com/statcode-ai/scriptschnell/internal/provider"
 )
 
 // modelMenuItemV2 implements MenuItem for model selection

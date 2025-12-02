@@ -4,7 +4,7 @@ version: '3.8'
 # The AI upgrades an existing calculator implementation to support operator precedence
 
 services:
-  statcode-ai:
+  scriptschnell:
     build:
       context: ../..
       dockerfile: e2e-tests/calculator-precedence/Dockerfile
@@ -20,7 +20,7 @@ services:
       - OLLAMA_HOST=${OLLAMA_HOST}
       - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
       - STATCODE_LOG_LEVEL=${STATCODE_LOG_LEVEL:-info}
-      - STATCODE_LOG_PATH=${STATCODE_LOG_PATH:-/workspace/.logs/statcode-ai.log}
+      - STATCODE_LOG_PATH=${STATCODE_LOG_PATH:-/workspace/.logs/scriptschnell.log}
       - STATCODE_MODEL=${STATCODE_MODEL}
       - STATCODE_TEMPERATURE=${STATCODE_TEMPERATURE}
       - STATCODE_TIMEOUT=${STATCODE_TIMEOUT}
@@ -36,7 +36,7 @@ services:
     image: golang:1.25-bookworm
     stop_grace_period: 30s
     depends_on:
-      statcode-ai:
+      scriptschnell:
         condition: service_completed_successfully
     environment:
       - MODULE_NAME=calculator

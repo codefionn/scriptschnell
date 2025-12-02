@@ -1,6 +1,6 @@
 # Calculator CLI E2E Test - Operator Precedence Upgrade
 
-This end-to-end test validates statcode-ai's ability to **understand and refactor existing code**. The AI is given a working Go CLI calculator that evaluates expressions strictly left-to-right (no operator precedence, no parentheses). The test prompt asks the AI to upgrade the implementation to support proper precedence and parentheses, prove the change with tests, and rebuild the binary.
+This end-to-end test validates scriptschnell's ability to **understand and refactor existing code**. The AI is given a working Go CLI calculator that evaluates expressions strictly left-to-right (no operator precedence, no parentheses). The test prompt asks the AI to upgrade the implementation to support proper precedence and parentheses, prove the change with tests, and rebuild the binary.
 
 ## Overview
 
@@ -35,8 +35,8 @@ cd e2e-tests/calculator-precedence
 ## What Happens During the Test
 
 1. `run.sh` resets `workspace/` to the baseline implementation from `workspace-template/`.
-2. Docker builds the statcode-ai image and runs `scripts/build_calculator.sh`.
-3. The script prompts statcode-ai to:
+2. Docker builds the scriptschnell image and runs `scripts/build_calculator.sh`.
+3. The script prompts scriptschnell to:
    - Inspect the existing calculator.
    - Implement operator precedence and parentheses.
    - Add/adjust Go tests as needed.
@@ -57,10 +57,10 @@ cd e2e-tests/calculator-precedence
 ```
 e2e-tests/calculator-precedence/
 ├── run.sh                   # Main orchestrator
-├── docker-compose.yml       # statcode-ai + test-runner services
-├── Dockerfile               # Builds statcode-ai binary
+├── docker-compose.yml       # scriptschnell + test-runner services
+├── Dockerfile               # Builds scriptschnell binary
 ├── scripts/
-│   ├── build_calculator.sh  # Prompts statcode-ai to upgrade calculator
+│   ├── build_calculator.sh  # Prompts scriptschnell to upgrade calculator
 │   └── test_calculator.sh   # Validates final binary
 ├── workspace-template/      # Baseline implementation without precedence
 │   ├── go.mod
@@ -73,10 +73,10 @@ e2e-tests/calculator-precedence/
 
 ```
 ==========================================
-Building Calculator CLI with statcode-ai
+Building Calculator CLI with scriptschnell
 ==========================================
 Baseline implementation detected (no operator precedence)
-Prompting statcode-ai to upgrade the calculator...
+Prompting scriptschnell to upgrade the calculator...
 ...
 go test ./...
 ok      calculator      0.XXXs

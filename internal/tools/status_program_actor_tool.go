@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/statcode-ai/statcode-ai/internal/actor"
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/actor"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 // StatusProgramToolWithActor is the status program tool that uses ShellActor

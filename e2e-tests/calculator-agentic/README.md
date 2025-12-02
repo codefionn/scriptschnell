@@ -1,13 +1,13 @@
 # Calculator CLI E2E Test - Agentic Version
 
-This end-to-end test demonstrates statcode-ai's **full agentic capabilities** - designing, implementing, testing, and validating a Go CLI calculator with complete autonomy.
+This end-to-end test demonstrates scriptschnell's **full agentic capabilities** - designing, implementing, testing, and validating a Go CLI calculator with complete autonomy.
 
 ## Overview
 
 **Key Difference**: This agentic version gives the AI **full agency** to design and test the calculator, unlike the standard version which provides the implementation.
 
 The test:
-1. Provides only high-level requirements to statcode-ai
+1. Provides only high-level requirements to scriptschnell
 2. The AI autonomously designs the implementation
 3. The AI writes comprehensive tests
 4. The AI runs tests and fixes any issues
@@ -36,7 +36,7 @@ The test:
 That's it! The script will:
 - Validate your API key is set
 - Build the Docker containers
-- Generate the calculator using statcode-ai
+- Generate the calculator using scriptschnell
 - Run all test cases
 - Report results
 
@@ -80,11 +80,11 @@ The test validates the calculator with these expressions:
 e2e-tests/calculator-cli/
 ├── run.sh                   # Main test runner script
 ├── docker-compose.yml       # Orchestrates the test
-├── Dockerfile               # Builds statcode-ai container
+├── Dockerfile               # Builds scriptschnell container
 ├── .env.example             # API key template
 ├── .gitignore               # Ignores workspace and .env
 ├── scripts/
-│   ├── build_calculator.sh  # Uses statcode-ai to generate the calculator
+│   ├── build_calculator.sh  # Uses scriptschnell to generate the calculator
 │   └── test_calculator.sh   # Tests the generated calculator
 └── workspace/               # Working directory (created during test)
     ├── main.go              # Generated calculator code
@@ -94,13 +94,13 @@ e2e-tests/calculator-cli/
 
 ## How It Works
 
-1. **statcode-ai service**:
-   - Builds the statcode-ai binary
-   - Runs `build_calculator.sh` which prompts statcode-ai to create a calculator CLI
-   - statcode-ai generates `main.go` and builds the `calculator` binary
+1. **scriptschnell service**:
+   - Builds the scriptschnell binary
+   - Runs `build_calculator.sh` which prompts scriptschnell to create a calculator CLI
+   - scriptschnell generates `main.go` and builds the `calculator` binary
 
 2. **test-runner service**:
-   - Waits for statcode-ai to complete successfully
+   - Waits for scriptschnell to complete successfully
    - Runs `test_calculator.sh` to validate the calculator with test expressions
    - Reports pass/fail results
 
@@ -108,7 +108,7 @@ e2e-tests/calculator-cli/
 
 ```
 ==========================================
-Building Calculator CLI with statcode-ai
+Building Calculator CLI with scriptschnell
 ==========================================
 ...
 ==========================================
@@ -156,6 +156,6 @@ rm -rf workspace/
 ## Troubleshooting
 
 - **API key not set**: The run.sh script will check and inform you if no API key is found
-- **Build failures**: Check that statcode-ai dependencies are correctly specified in go.mod
+- **Build failures**: Check that scriptschnell dependencies are correctly specified in go.mod
 - **Test failures**: Review the generated calculator code in `workspace/main.go`
 - **Clean start**: Use `./run.sh --clean` to remove all previous artifacts and start fresh

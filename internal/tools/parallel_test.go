@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/statcode-ai/statcode-ai/internal/fs"
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 func TestParallelTool_Name(t *testing.T) {

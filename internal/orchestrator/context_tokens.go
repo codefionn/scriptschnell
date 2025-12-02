@@ -5,7 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/pkoukk/tiktoken-go"
-	"github.com/statcode-ai/statcode-ai/internal/session"
+	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 const (

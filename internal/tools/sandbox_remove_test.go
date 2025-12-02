@@ -9,6 +9,10 @@ import (
 )
 
 func TestSandboxRemoveFile(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+
 	// Create mock filesystem and session
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test-session", "/tmp")
@@ -65,6 +69,10 @@ func main() {
 }
 
 func TestSandboxRemoveDir(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+
 	// Create mock filesystem and session
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test-session", "/tmp")
@@ -118,6 +126,10 @@ func main() {
 }
 
 func TestSandboxRemoveFileRequiresRead(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+
 	// Create mock filesystem and session
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test-session", "/tmp")

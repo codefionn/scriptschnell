@@ -392,7 +392,7 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 			},
 			"timeout": map[string]interface{}{
 				"type":        "integer",
-				"description": "Timeout in seconds (default 30, max 3600)",
+				"description": "Timeout in seconds (default 30, max 3600). When running testsuites or compute intensive tasks, consider increasing the timeout.",
 			},
 			"libraries": map[string]interface{}{
 				"type":        "array",

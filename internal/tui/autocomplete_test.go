@@ -595,22 +595,15 @@ func TestExtractFilepathContext(t *testing.T) {
 
 func TestFilepathAutocompleteSuggestions(t *testing.T) {
 	// Create a mock filesystem with some test files
-	mockFS := &MockFS{
-		files: map[string][]byte{
-			"/test/main.go":         []byte("package main"),
-			"/test/README.md":       []byte("# Test"),
-			"/test/internal/app.go": []byte("package internal"),
-			"/test/internal/tui.go": []byte("package internal"),
-			"/test/cmd/cli/main.go": []byte("package main"),
-			"/test/.gitignore":      []byte("*.log"),
-		},
-		dirs: map[string][]string{
-			"/test":          {"main.go", "README.md", "internal", "cmd", ".gitignore"},
-			"/test/internal": {"app.go", "tui.go"},
-			"/test/cmd":      {"cli"},
-			"/test/cmd/cli":  {"main.go"},
-		},
-	}
+	mockFS := fs.NewMockFS()
+	
+	// Write test files
+	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
+	mockFS.WriteFile(context.Background(), "/test/README.md", []byte("# Test"))
+	mockFS.WriteFile(context.Background(), "/test/internal/app.go", []byte("package internal"))
+	mockFS.WriteFile(context.Background(), "/test/internal/tui.go", []byte("package internal"))
+	mockFS.WriteFile(context.Background(), "/test/cmd/cli/main.go", []byte("package main"))
+	mockFS.WriteFile(context.Background(), "/test/.gitignore", []byte("*.log"))
 
 	m := New("test-model", "", false)
 	m.SetFilesystem(mockFS, "/test")
@@ -700,15 +693,11 @@ func TestFilepathAutocompleteSuggestions(t *testing.T) {
 }
 
 func TestFilepathAutocompleteIntegration(t *testing.T) {
-	mockFS := &MockFS{
-		files: map[string][]byte{
-			"/test/main.go":     []byte("package main"),
-			"/test/config.yaml": []byte("key: value"),
-		},
-		dirs: map[string][]string{
-			"/test": {"main.go", "config.yaml"},
-		},
-	}
+	mockFS := fs.NewMockFS()
+	
+	// Write test files
+	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
+	mockFS.WriteFile(context.Background(), "/test/config.yaml", []byte("key: value"))
 
 	m := New("test-model", "", false)
 	m.SetFilesystem(mockFS, "/test")
@@ -750,16 +739,12 @@ func TestFilepathAutocompleteIntegration(t *testing.T) {
 }
 
 func TestFilepathAutocompleteCycling(t *testing.T) {
-	mockFS := &MockFS{
-		files: map[string][]byte{
-			"/test/main.go":    []byte("package main"),
-			"/test/models.go":  []byte("package models"),
-			"/test/manager.go": []byte("package manager"),
-		},
-		dirs: map[string][]string{
-			"/test": {"main.go", "models.go", "manager.go"},
-		},
-	}
+	mockFS := fs.NewMockFS()
+	
+	// Write test files
+	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
+	mockFS.WriteFile(context.Background(), "/test/models.go", []byte("package models"))
+	mockFS.WriteFile(context.Background(), "/test/manager.go", []byte("package manager"))
 
 	m := New("test-model", "", false)
 	m.SetFilesystem(mockFS, "/test")
@@ -814,14 +799,10 @@ func TestFilepathAutocompleteCycling(t *testing.T) {
 }
 
 func TestEnterKeyAppliesSelectedSuggestion(t *testing.T) {
-	mockFS := &MockFS{
-		files: map[string][]byte{
-			"/test/main.go": []byte("package main"),
-		},
-		dirs: map[string][]string{
-			"/test": {"main.go"},
-		},
-	}
+	mockFS := fs.NewMockFS()
+	
+	// Write test files
+	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
 
 	m := New("test-model", "", false)
 	m.SetFilesystem(mockFS, "/test")

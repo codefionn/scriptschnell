@@ -126,6 +126,14 @@ flowchart TD
     orchestrator -->|LLM error| errorJudge[Error Judge Actor]
     errorJudge -->|Retry analysis| summarizer
     errorJudge -->|Retry / abort| orchestrator
+
+    orchestrator -->|Investigate codebase request| investigator[Codebase Investigator Agent]
+    investigator -->|Limited tool registry| invRegistry[Investigation Tool Registry]
+    invRegistry --> invTools["Read-only Tools<br/>(read_file, search_files, search_file_content, parallel_tools)"]
+    invTools -->|Tool outputs| investigator
+    investigator -->|Investigation queries| summarizer
+    summarizer -->|Tool calls + reasoning| investigator
+    investigator -->|Investigation results| orchestrator
 ```
 
 ## Providers

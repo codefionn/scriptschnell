@@ -506,16 +506,36 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 
 func (o *Orchestrator) getReadFileTool(modelFamily llm.ModelFamily, sess *session.Session) tools.Tool {
 	if o.shouldUseNumberedReadFileTool(modelFamily) {
-		return tools.NewReadFileNumberedTool(o.fs, sess)
+		// Create a tool that combines spec and executor for legacy compatibility
+		spec := &tools.ReadFileNumberedSpec{}
+		executor := tools.NewReadFileNumberedFactory(o.fs, sess)(nil)
+		return &combinedTool{spec: spec, executor: executor}
 	}
-	return tools.NewReadFileTool(o.fs, sess)
+	// Create a tool that combines spec and executor for legacy compatibility
+	spec := &tools.ReadFileToolSpec{}
+	executor := tools.NewReadFileToolFactory(o.fs, sess)(nil)
+	return &combinedTool{spec: spec, executor: executor}
+}
+
+// combinedTool wraps a spec and executor to implement the Tool interface for backward compatibility
+type combinedTool struct {
+	spec     tools.ToolSpec
+	executor tools.ToolExecutor
+}
+
+func (t *combinedTool) Name() string        { return t.spec.Name() }
+func (t *combinedTool) Description() string { return t.spec.Description() }
+func (t *combinedTool) Parameters() map[string]interface{} {
+	return t.spec.Parameters()
+}
+func (t *combinedTool) Execute(ctx context.Context, params map[string]interface{}) *tools.ToolResult {
+	return t.executor.Execute(ctx, params)
 }
 
 func (o *Orchestrator) getReadFileToolSpec(modelFamily llm.ModelFamily, sess *session.Session) (tools.ToolSpec, tools.ToolFactory) {
 	if o.shouldUseNumberedReadFileTool(modelFamily) {
-		// read_file_numbered hasn't been migrated yet, wrap legacy tool
-		tool := tools.NewReadFileNumberedTool(o.fs, sess)
-		return tools.WrapLegacyTool(tool)
+		// read_file_numbered has been migrated to new pattern
+		return &tools.ReadFileNumberedSpec{}, tools.NewReadFileNumberedFactory(o.fs, sess)
 	}
 	// read_file has been migrated to new pattern
 	return &tools.ReadFileToolSpec{}, tools.NewReadFileToolFactory(o.fs, sess)
@@ -526,7 +546,7 @@ func (o *Orchestrator) shouldUseShellTool(modelFamily llm.ModelFamily) bool {
 }
 
 func (o *Orchestrator) shouldUseNumberedReadFileTool(modelFamily llm.ModelFamily) bool {
-	return modelFamily != llm.FamilyZaiGLM
+	return false
 }
 
 func (o *Orchestrator) shouldUseNonDiffUpdateTool(modelFamily llm.ModelFamily) bool {

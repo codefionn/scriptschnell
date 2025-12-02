@@ -36,8 +36,10 @@ type FileSystem interface {
 	ListDir(ctx context.Context, path string) ([]*FileInfo, error)
 	// Exists checks if a file exists
 	Exists(ctx context.Context, path string) (bool, error)
-	// Delete removes a file
+	// Delete removes a file or empty directory
 	Delete(ctx context.Context, path string) error
+	// DeleteAll removes a directory and all its contents recursively
+	DeleteAll(ctx context.Context, path string) error
 	// MkdirAll creates a directory and all parent directories
 	MkdirAll(ctx context.Context, path string, perm os.FileMode) error
 }
@@ -311,6 +313,17 @@ func (cfs *CachedFS) Delete(ctx context.Context, path string) error {
 	return nil
 }
 
+func (cfs *CachedFS) DeleteAll(ctx context.Context, path string) error {
+	absPath := cfs.absPath(path)
+	if err := os.RemoveAll(absPath); err != nil {
+		return err
+	}
+
+	// Invalidate directory cache for parent directory
+	cfs.InvalidateDirCache(filepath.Dir(path))
+	return nil
+}
+
 func (cfs *CachedFS) MkdirAll(ctx context.Context, path string, perm os.FileMode) error {
 	absPath := cfs.absPath(path)
 	return os.MkdirAll(absPath, perm)
@@ -506,6 +519,30 @@ func (mfs *MockFS) Delete(ctx context.Context, path string) error {
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
 	delete(mfs.files, path)
+	delete(mfs.dirs, path)
+	return nil
+}
+
+func (mfs *MockFS) DeleteAll(ctx context.Context, path string) error {
+	mfs.mu.Lock()
+	defer mfs.mu.Unlock()
+
+	// Remove the directory itself
+	delete(mfs.dirs, path)
+
+	// Remove all files and subdirectories under this path
+	prefix := path + "/"
+	for filePath := range mfs.files {
+		if filePath == path || strings.HasPrefix(filePath, prefix) {
+			delete(mfs.files, filePath)
+		}
+	}
+	for dirPath := range mfs.dirs {
+		if dirPath == path || strings.HasPrefix(dirPath, prefix) {
+			delete(mfs.dirs, dirPath)
+		}
+	}
+
 	return nil
 }
 

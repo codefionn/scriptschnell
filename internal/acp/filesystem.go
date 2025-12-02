@@ -182,6 +182,11 @@ func (afs *ACPFileSystem) Delete(ctx context.Context, path string) error {
 	return afs.fallbackFS.Delete(ctx, path)
 }
 
+// DeleteAll implements fs.FileSystem - not supported via ACP
+func (afs *ACPFileSystem) DeleteAll(ctx context.Context, path string) error {
+	return afs.fallbackFS.DeleteAll(ctx, path)
+}
+
 // MkdirAll implements fs.FileSystem - not supported via ACP
 func (afs *ACPFileSystem) MkdirAll(ctx context.Context, path string, perm os.FileMode) error {
 	return afs.fallbackFS.MkdirAll(ctx, path, perm)

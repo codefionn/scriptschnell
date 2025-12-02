@@ -299,7 +299,52 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("             fmt.Println(f)\n")
 	b.WriteString("         }\n")
 	b.WriteString("     }\n")
-	b.WriteString("     ```\n")
+	b.WriteString("     ```\n\n")
+
+	b.WriteString("8. RemoveFile(path string) (errorMsg string)\n")
+	b.WriteString("   - Remove a file from the filesystem\n")
+	b.WriteString("   - Returns empty string on success, error message on failure\n")
+	b.WriteString("   - File must have been read earlier in the session (read-before-write rule)\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         // Read the file first (required by read-before-write rule)\n")
+	b.WriteString("         content := ReadFile(\"old_file.txt\", 0, 0)\n")
+	b.WriteString("         fmt.Println(\"File content:\", content)\n\n")
+	b.WriteString("         // Now we can remove it\n")
+	b.WriteString("         if err := RemoveFile(\"old_file.txt\"); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"remove error:\", err)\n")
+	b.WriteString("             return\n")
+	b.WriteString("         }\n")
+	b.WriteString("         fmt.Println(\"file removed successfully\")\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
+
+	b.WriteString("9. RemoveDir(path string, recursive bool) (errorMsg string)\n")
+	b.WriteString("   - Remove a directory from the filesystem\n")
+	b.WriteString("   - Returns empty string on success, error message on failure\n")
+	b.WriteString("   - If recursive is true, removes directory and all contents\n")
+	b.WriteString("   - If recursive is false, only removes empty directories\n")
+	b.WriteString("   - Example:\n")
+	b.WriteString("     ```go\n")
+	b.WriteString("     package main\n\n")
+	b.WriteString("     import \"fmt\"\n\n")
+	b.WriteString("     func main() {\n")
+	b.WriteString("         // Remove an empty directory\n")
+	b.WriteString("         if err := RemoveDir(\"empty_dir\", false); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"remove error:\", err)\n")
+	b.WriteString("             return\n")
+	b.WriteString("         }\n\n")
+	b.WriteString("         // Remove a directory and all its contents\n")
+	b.WriteString("         if err := RemoveDir(\"temp_dir\", true); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"remove error:\", err)\n")
+	b.WriteString("             return\n")
+	b.WriteString("         }\n")
+	b.WriteString("         fmt.Println(\"directories removed successfully\")\n")
+	b.WriteString("     }\n")
+	b.WriteString("     ```\n\n")
 
 	b.WriteString("Example Build Go Program:\n")
 	b.WriteString("package main\n")
@@ -317,7 +362,7 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("  }\n")
 	b.WriteString("}\n")
 
-	b.WriteString("8. GrepFile(pattern, path, glob string, context int) (content string)\n")
+	b.WriteString("10. GrepFile(pattern, path, glob string, context int) (content string)\n")
 	b.WriteString("   - Search for a regex pattern in files, returning matches with line numbers and context.\n")
 	b.WriteString("   - `pattern`: Regex pattern to search for.\n")
 	b.WriteString("   - `path`: Directory or file to search in (default: '.').\n")
@@ -1263,6 +1308,130 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 			return 0 // Success
 		}).
 		Export("list_files")
+
+	// remove_file(path_ptr, path_len, result_ptr, result_cap) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen, resultPtr, resultCap uint32) int32 {
+			memory := m.Memory()
+
+			// Read path from WASM memory
+			pathBytes, ok := memory.Read(pathPtr, pathLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			path := string(pathBytes)
+
+			// Check if filesystem is available
+			if t.filesystem == nil {
+				errMsg := []byte("Error: Filesystem not available")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -2 // Error: no filesystem
+			}
+
+			// Check if file exists
+			exists, err := t.filesystem.Exists(ctx, path)
+			if err != nil || !exists {
+				errMsg := []byte(fmt.Sprintf("Error: File not found: %s", path))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -3 // Error: file not found
+			}
+
+			// Check read-before-write rule
+			if t.session != nil && !t.session.WasFileRead(path) {
+				errMsg := []byte(fmt.Sprintf("Error: File %s was not read in this session", path))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -4 // Error: not read before write
+			}
+
+			// Remove the file
+			if err := t.filesystem.Delete(ctx, path); err != nil {
+				errMsg := []byte(fmt.Sprintf("Error: Failed to remove file: %v", err))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -5 // Error: remove failed
+			}
+
+			// Track file modification in session
+			if t.session != nil {
+				t.session.TrackFileModified(path)
+			}
+
+			callTracker.record("remove_file", path)
+
+			return 0 // Success
+		}).
+		Export("remove_file")
+
+	// remove_dir(path_ptr, path_len, recursive, result_ptr, result_cap) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, recursive int32, resultPtr, resultCap uint32) int32 {
+			memory := m.Memory()
+
+			// Read path from WASM memory
+			pathBytes, ok := memory.Read(pathPtr, pathLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			path := string(pathBytes)
+
+			// Check if filesystem is available
+			if t.filesystem == nil {
+				errMsg := []byte("Error: Filesystem not available")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -2 // Error: no filesystem
+			}
+
+			// Check if directory exists
+			exists, err := t.filesystem.Exists(ctx, path)
+			if err != nil || !exists {
+				errMsg := []byte(fmt.Sprintf("Error: Directory not found: %s", path))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -3 // Error: directory not found
+			}
+
+			// Determine the appropriate removal method
+			var removeErr error
+			if recursive == 1 {
+				// Recursive removal
+				removeErr = t.filesystem.DeleteAll(ctx, path)
+			} else {
+				// Non-recursive removal (only empty directories)
+				removeErr = t.filesystem.Delete(ctx, path)
+			}
+
+			if removeErr != nil {
+				errMsg := []byte(fmt.Sprintf("Error: Failed to remove directory: %v", removeErr))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -4 // Error: remove failed
+			}
+
+			// Track directory modification in session
+			if t.session != nil {
+				t.session.TrackFileModified(path)
+			}
+
+			detail := path
+			if recursive == 1 {
+				detail = fmt.Sprintf("%s (recursive)", path)
+			}
+			callTracker.record("remove_dir", detail)
+
+			return 0 // Success
+		}).
+		Export("remove_dir")
 
 	_, err = envBuilder.Instantiate(ctx)
 	if err != nil {

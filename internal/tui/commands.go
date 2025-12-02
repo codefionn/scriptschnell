@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/progress"
-	"github.com/statcode-ai/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/provider"
 )
 
 type commandHelpEntry struct {

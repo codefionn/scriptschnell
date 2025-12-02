@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"unicode/utf8"
 
+	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/pkoukk/tiktoken-go"
-	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 const (

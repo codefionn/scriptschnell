@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/llm"
-	"github.com/statcode-ai/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/provider"
 )
 
 // MockClient mocks the llm.Client interface

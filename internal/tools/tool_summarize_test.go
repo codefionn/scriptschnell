@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 func TestToolSummarizeTool_Name(t *testing.T) {

@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 func TestSelectCompactionPrefix(t *testing.T) {

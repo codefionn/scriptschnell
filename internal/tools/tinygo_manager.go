@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 const (
@@ -88,14 +88,14 @@ func getTinyGoCacheDir() (string, error) {
 			}
 			cacheHome = filepath.Join(homeDir, ".cache")
 		}
-		baseDir = filepath.Join(cacheHome, "statcode-ai", "tinygo")
+		baseDir = filepath.Join(cacheHome, "scriptschnell", "tinygo")
 	case "darwin":
 		// On macOS, use ~/Library/Caches/statcode-ai/tinygo
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		baseDir = filepath.Join(homeDir, "Library", "Caches", "statcode-ai", "tinygo")
+		baseDir = filepath.Join(homeDir, "Library", "Caches", "scriptschnell", "tinygo")
 	case "windows":
 		// On Windows, use %LOCALAPPDATA%\statcode-ai\tinygo
 		localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
@@ -106,7 +106,7 @@ func getTinyGoCacheDir() (string, error) {
 			}
 			localAppData = filepath.Join(homeDir, "AppData", "Local")
 		}
-		baseDir = filepath.Join(localAppData, "statcode-ai", "tinygo")
+		baseDir = filepath.Join(localAppData, "scriptschnell", "tinygo")
 	default:
 		return "", fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}

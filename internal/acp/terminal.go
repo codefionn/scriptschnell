@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/coder/acp-go-sdk"
-	"github.com/statcode-ai/scriptschnell/internal/actor"
-	"github.com/statcode-ai/scriptschnell/internal/logger"
 )
 
 // Terminal represents a running terminal session

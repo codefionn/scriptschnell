@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/statcode-ai/scriptschnell/internal/actor"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/tetratelabs/wazero/api"
 )
 

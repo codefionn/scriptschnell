@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/statcode-ai/scriptschnell/internal/actor"
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 func TestAuthorizationActorAuthorizeCreateFileNewFileAllowed(t *testing.T) {

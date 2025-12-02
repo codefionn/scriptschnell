@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 const (

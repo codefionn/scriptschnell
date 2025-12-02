@@ -1,6 +1,6 @@
 package tui
 
-import orchestratorpkg "github.com/statcode-ai/scriptschnell/internal/orchestrator"
+import orchestratorpkg "github.com/codefionn/scriptschnell/internal/orchestrator"
 
 type (
 	AuthorizationCallback = orchestratorpkg.AuthorizationCallback

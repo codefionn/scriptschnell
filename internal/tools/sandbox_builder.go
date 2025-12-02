@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // SandboxBuilder provides a fluent interface for building and executing sandboxed Go code.

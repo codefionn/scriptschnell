@@ -3,8 +3,8 @@ package tools
 import (
 	"context"
 
-	"github.com/statcode-ai/scriptschnell/internal/actor"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // WaitProgramToolWithActor is the wait program tool that uses ShellActor

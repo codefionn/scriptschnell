@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/fs"
 )
 
 func TestGetCommandSuggestions(t *testing.T) {

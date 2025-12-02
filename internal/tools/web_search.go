@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/search"
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/search"
 )
 
 // WebSearchToolSpec is the static specification for the web_search tool

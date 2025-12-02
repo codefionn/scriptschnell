@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
-	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"golang.org/x/net/html"
 )
 

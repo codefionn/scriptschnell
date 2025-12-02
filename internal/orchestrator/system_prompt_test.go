@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/provider"
 )
 
 func TestSystemPromptCaching(t *testing.T) {

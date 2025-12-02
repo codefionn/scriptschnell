@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 func TestReadFileTool_Name(t *testing.T) {

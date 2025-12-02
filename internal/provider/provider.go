@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/cloudflare/ahocorasick"
-	"github.com/statcode-ai/scriptschnell/internal/actor"
-	"github.com/statcode-ai/scriptschnell/internal/llm"
-	"github.com/statcode-ai/scriptschnell/internal/logger"
-	"github.com/statcode-ai/scriptschnell/internal/secrets"
+	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/secrets"
 )
 
 // Provider represents an LLM provider

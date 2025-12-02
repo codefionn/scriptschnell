@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/search"
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/search"
 )
 
 // MockSearchProvider is a mock search provider for testing

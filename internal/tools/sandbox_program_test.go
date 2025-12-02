@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // skipIfTinyGoUnavailable avoids triggering a TinyGo download during tests.

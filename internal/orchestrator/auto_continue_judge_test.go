@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 func TestCheckMessagesForLoops_NoLoop(t *testing.T) {

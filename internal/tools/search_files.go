@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/fs"
 )
 
 // SearchFilesToolSpec is the static specification for the search_files tool

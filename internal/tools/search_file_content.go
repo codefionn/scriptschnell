@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/fs"
 )
 
 // SearchFileContentToolSpec is the static specification for the search_file_content tool

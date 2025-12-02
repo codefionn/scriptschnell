@@ -11,14 +11,14 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/statcode-ai/scriptschnell/internal/acp"
-	"github.com/statcode-ai/scriptschnell/internal/cli"
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/logger"
-	"github.com/statcode-ai/scriptschnell/internal/progress"
-	"github.com/statcode-ai/scriptschnell/internal/provider"
-	"github.com/statcode-ai/scriptschnell/internal/secrets"
-	"github.com/statcode-ai/scriptschnell/internal/tui"
+	"github.com/codefionn/scriptschnell/internal/acp"
+	"github.com/codefionn/scriptschnell/internal/cli"
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/secrets"
+	"github.com/codefionn/scriptschnell/internal/tui"
 	"golang.org/x/term"
 )
 

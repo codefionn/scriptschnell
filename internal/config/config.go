@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/secrets"
+	"github.com/codefionn/scriptschnell/internal/secrets"
 )
 
 // SearchConfig holds configuration for web search providers
@@ -378,7 +378,7 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 	}
 
 	if copyCfg.Secrets.PasswordSet {
-		copyCfg.Secrets.Verifier, err = encryptField("statcode-ai", c.secretsPassword)
+		copyCfg.Secrets.Verifier, err = encryptField("scriptschnell", c.secretsPassword)
 		if err != nil {
 			return nil, err
 		}

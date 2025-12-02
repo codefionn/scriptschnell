@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/config"
 )
 
 // GooglePSEProvider implements SearchProvider for Google Programmable Search Engine

@@ -10,15 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/orchestrator"
+	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/tools"
 	"github.com/coder/acp-go-sdk"
 	godiff "github.com/sourcegraph/go-diff/diff"
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/logger"
-	"github.com/statcode-ai/scriptschnell/internal/orchestrator"
-	"github.com/statcode-ai/scriptschnell/internal/progress"
-	"github.com/statcode-ai/scriptschnell/internal/provider"
-	"github.com/statcode-ai/scriptschnell/internal/tools"
 )
 
 const maxLogSnippetLen = 256

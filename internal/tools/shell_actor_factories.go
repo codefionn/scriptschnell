@@ -1,8 +1,8 @@
 package tools
 
 import (
-	"github.com/statcode-ai/scriptschnell/internal/actor"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // NewShellToolWithActorFactory creates a factory for shell tools that use ShellActor

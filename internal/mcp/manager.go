@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/tools"
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/provider"
-	"github.com/statcode-ai/scriptschnell/internal/tools"
 )
 
 // Manager converts MCP server definitions into executable tools.

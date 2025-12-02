@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/sourcegraph/go-diff/diff"
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/logger"
-	"github.com/statcode-ai/scriptschnell/internal/session"
 )
 
 // WriteFileDiffToolSpec is the static specification for the write_file_diff tool

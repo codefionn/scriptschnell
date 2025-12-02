@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/statcode-ai/scriptschnell/internal/logger"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 type shellBackgroundKey struct{}

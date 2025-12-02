@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/llm"
-	"github.com/statcode-ai/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 func (o *Orchestrator) filterToolSpecs(specs []toolSpec) ([]toolSpec, error) {

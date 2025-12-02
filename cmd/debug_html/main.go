@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/htmlconv"
+	"github.com/codefionn/scriptschnell/internal/htmlconv"
 )
 
 func main() {

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/statcode-ai/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/actor"
 )
 
 const providerModelsCacheVersion uint32 = 2
@@ -152,14 +152,14 @@ func (a *providerModelsCacheActor) modelsPath(providerName string) string {
 
 func providerModelsCacheDir() (string, error) {
 	if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
-		return filepath.Join(cacheDir, "statcode-ai", "provider_models"), nil
+		return filepath.Join(cacheDir, "scriptschnell", "provider_models"), nil
 	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(homeDir, ".cache", "statcode-ai", "provider_models"), nil
+	return filepath.Join(homeDir, ".cache", "scriptschnell", "provider_models"), nil
 }
 
 func sanitizeProviderName(name string) string {

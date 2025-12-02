@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/config"
 )
 
 // ExaSearchProvider implements SearchProvider for Exa AI Search API

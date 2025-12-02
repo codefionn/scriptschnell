@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/statcode-ai/scriptschnell/internal/config"
-	"github.com/statcode-ai/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/fs"
 )
 
 const AgentsFileName = "AGENTS.md"

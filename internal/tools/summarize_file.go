@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/statcode-ai/scriptschnell/internal/fs"
-	"github.com/statcode-ai/scriptschnell/internal/llm"
-	"github.com/statcode-ai/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // SummarizeFileToolSpec is the static specification for the read_file_summarized tool

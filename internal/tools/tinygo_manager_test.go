@@ -46,7 +46,7 @@ func TestTinyGoManager_GetCacheDir(t *testing.T) {
 		}
 	}
 
-	if !contains(cacheDir, "statcode-ai") || !contains(cacheDir, "tinygo") {
+	if !contains(cacheDir, "scriptschnell") || !contains(cacheDir, "tinygo") {
 		t.Errorf("Expected cache dir to contain statcode-ai/tinygo, got: %s", cacheDir)
 	}
 }

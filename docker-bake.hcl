@@ -6,7 +6,7 @@ variable "REGISTRY" {
 }
 
 variable "IMAGE_NAME" {
-  default = "statcode-ai/scriptschnell"
+  default = "scriptschnell"
 }
 
 variable "TAG" {

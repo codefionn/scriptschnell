@@ -162,8 +162,8 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 	var wg sync.WaitGroup
 
 	// Read output in goroutines
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
@@ -171,8 +171,8 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		defer wg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {

@@ -22,12 +22,11 @@ type SecretsMenuModel struct {
 	inputs     []textinput.Model
 	focused    int
 	width      int
-	height     int
-	errMsg     string
-	confirmed  bool
-	password   string
-	quitting   bool
-	showHelper bool
+	height    int
+	errMsg    string
+	confirmed bool
+	password  string
+	quitting  bool
 }
 
 // NewSecretsMenu creates a password form.

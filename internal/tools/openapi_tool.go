@@ -167,7 +167,7 @@ func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}
 		}
 		if bodyValue == nil {
 			if o.requestBody.Required {
-				return &ToolResult{Error: fmt.Sprintf("body is required")}
+				return &ToolResult{Error: "body is required"}
 			}
 		} else {
 			switch v := bodyValue.(type) {

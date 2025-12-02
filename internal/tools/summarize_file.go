@@ -68,12 +68,12 @@ func (t *SummarizeFileTool) Parameters() map[string]interface{} {
 func (t *SummarizeFileTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return &ToolResult{Error: fmt.Sprintf("path is required")}
+		return &ToolResult{Error: "path is required"}
 	}
 
 	goal := GetStringParam(params, "goal", "")
 	if goal == "" {
-		return &ToolResult{Error: fmt.Sprintf("goal is required")}
+		return &ToolResult{Error: "goal is required"}
 	}
 
 	// Check if file exists

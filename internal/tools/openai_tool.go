@@ -112,12 +112,12 @@ func (o *OpenAITool) Execute(ctx context.Context, params map[string]interface{})
 	}
 
 	if o.client == nil {
-		return &ToolResult{Error: fmt.Sprintf("OpenAI client not configured; ensure API key and model are set")}
+		return &ToolResult{Error: "OpenAI client not configured; ensure API key and model are set"}
 	}
 
 	prompt := GetStringParam(params, "prompt", "")
 	if strings.TrimSpace(prompt) == "" {
-		return &ToolResult{Error: fmt.Sprintf("prompt parameter is required")}
+		return &ToolResult{Error: "prompt parameter is required"}
 	}
 
 	contextText := GetStringParam(params, "context", "")

@@ -90,7 +90,7 @@ func (c *CommandTool) Parameters() map[string]interface{} {
 // Execute runs the configured command with optional STDIN and extra arguments.
 func (c *CommandTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	if len(c.command) == 0 {
-		return &ToolResult{Error: fmt.Sprintf("command not configured")}
+		return &ToolResult{Error: "command not configured"}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)

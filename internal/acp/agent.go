@@ -230,12 +230,16 @@ func (a *StatCodeAIAgent) handleStatusCommand(session *statcodeSession) string {
 
 // handleClearCommand handles the /clear command
 func (a *StatCodeAIAgent) handleClearCommand(session *statcodeSession) string {
-	logger.Debug("handleClearCommand[%s]: clearing session", session.sessionID)
-
 	if session == nil || session.orchestrator == nil {
-		logger.Warn("handleClearCommand[%s]: session or orchestrator missing", session.sessionID)
+		if session != nil {
+			logger.Warn("handleClearCommand[%s]: session or orchestrator missing", session.sessionID)
+		} else {
+			logger.Warn("handleClearCommand: session is nil")
+		}
 		return "⚠️ Unable to clear session: orchestrator not available."
 	}
+
+	logger.Debug("handleClearCommand[%s]: clearing session", session.sessionID)
 
 	if err := session.orchestrator.ClearSession(); err != nil {
 		logger.Warn("handleClearCommand[%s]: failed to clear session: %v", session.sessionID, err)
@@ -965,12 +969,7 @@ func (a *StatCodeAIAgent) extractLocations(toolName string, parameters map[strin
 	case "shell", "go_sandbox":
 		// Shell commands might affect multiple files, but we can't easily predict them
 		// Could potentially parse command to extract file paths
-		if cmd, ok := parameters["command"].(string); ok {
-			// Simple heuristic: extract file paths from common commands
-			if strings.Contains(cmd, "cd ") || strings.Contains(cmd, "ls ") || strings.Contains(cmd, "cat ") {
-				// This is crude, could be improved with better parsing
-			}
-		}
+		// This is crude, could be improved with better parsing
 	}
 
 	return locations

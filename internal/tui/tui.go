@@ -951,7 +951,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if contentGrowth > 100 || (len(currentValue) > 200 && contentGrowth > 50) {
 			if converted, wasConverted := htmlconv.ConvertIfHTML(currentValue); wasConverted {
 				m.textarea.SetValue(converted)
-				currentValue = converted // Update currentValue to reflect the conversion
 				// Show conversion message with size info
 				m.AddSystemMessage(fmt.Sprintf("Converted HTML to markdown (%d → %d chars)", contentGrowth, len(converted)))
 			}
@@ -1519,10 +1518,10 @@ func (m *Model) renderTodoTree(content *strings.Builder, items []*tools.TodoItem
 			continue
 		}
 
-		marker := " "
+		var marker string
 		itemStyle := todoItemStyle
 
-		// Determine style based on status
+		// Determine style and marker based on status
 		switch item.Status {
 		case "completed":
 			marker = "✓"

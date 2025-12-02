@@ -68,7 +68,7 @@ func (a *shellActorImpl) Stop(ctx context.Context) error {
 	// Stop all running jobs
 	for _, job := range a.jobs {
 		if !job.Completed && job.Process != nil {
-			a.stopJobInternal(job, "SIGTERM")
+			_ = a.stopJobInternal(job, "SIGTERM")
 		}
 	}
 

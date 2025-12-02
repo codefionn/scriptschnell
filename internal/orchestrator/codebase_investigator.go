@@ -165,7 +165,7 @@ The requested logic is found in internal/module/file.go function DoWork().
 					// Parse arguments to extract relevant details
 					var args map[string]interface{}
 					if argsJSON != "" {
-						json.Unmarshal([]byte(argsJSON), &args)
+						_ = json.Unmarshal([]byte(argsJSON), &args)
 					}
 
 					// Format tool call message based on tool type

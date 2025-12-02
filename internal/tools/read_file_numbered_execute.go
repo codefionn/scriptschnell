@@ -35,7 +35,7 @@ func NewReadFileNumberedFactory(filesystem fs.FileSystem, sess *session.Session)
 func (e *ReadFileNumberedExecutor) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return &ToolResult{Error: fmt.Sprintf("path is required")}
+		return &ToolResult{Error: "path is required"}
 	}
 
 	// Check if file exists

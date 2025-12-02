@@ -67,7 +67,7 @@ func (t *SearchFilesTool) Parameters() map[string]interface{} {
 func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	pattern := GetStringParam(params, "pattern", "")
 	if pattern == "" {
-		return &ToolResult{Error: fmt.Sprintf("pattern is required")}
+		return &ToolResult{Error: "pattern is required"}
 	}
 
 	contentRegex := GetStringParam(params, "content_regex", "")

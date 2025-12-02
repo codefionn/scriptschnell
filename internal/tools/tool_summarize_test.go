@@ -194,7 +194,7 @@ func TestToolSummarizeTool_SuccessfulExecution(t *testing.T) {
 	tool := NewToolSummarizeTool(registry, client)
 
 	content := "line 1\nline 2\nline 3"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_name": "read_file",
@@ -224,7 +224,7 @@ func TestToolSummarizeTool_NoSummarizeClient(t *testing.T) {
 
 	tool := NewToolSummarizeTool(registry, nil)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_name": "read_file",
@@ -259,7 +259,7 @@ func TestToolSummarizeTool_SummarizationFailure(t *testing.T) {
 	client := &MockSummarizeClient{err: fmt.Errorf("LLM error")}
 	tool := NewToolSummarizeTool(registry, client)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_name": "read_file",
@@ -301,7 +301,7 @@ func TestToolSummarizeTool_PromptContainsAllInfo(t *testing.T) {
 
 	tool := NewToolSummarizeTool(registry, client)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("test content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("test content"))
 
 	tool.Execute(context.Background(), map[string]interface{}{
 		"tool_name": "read_file",
@@ -339,7 +339,7 @@ func TestToolSummarizeTool_ComplexToolArgs(t *testing.T) {
 	client := &MockSummarizeClient{response: "summary"}
 	tool := NewToolSummarizeTool(registry, client)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_name": "read_file",
@@ -433,7 +433,7 @@ func TestToolSummarizeTool_LongToolOutput(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line %d with content", i))
 	}
 	content := strings.Join(lines, "\n")
-	mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_name": "read_file",

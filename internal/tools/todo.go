@@ -90,7 +90,7 @@ func (t *TodoTool) Parameters() map[string]interface{} {
 func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	action := GetStringParam(params, "action", "")
 	if action == "" {
-		return &ToolResult{Error: fmt.Sprintf("action is required")}
+		return &ToolResult{Error: "action is required"}
 	}
 
 	switch action {
@@ -100,7 +100,7 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 	case "add":
 		text := GetStringParam(params, "text", "")
 		if text == "" {
-			return &ToolResult{Error: fmt.Sprintf("text is required for add action")}
+			return &ToolResult{Error: "text is required for add action"}
 		}
 		parentID := GetStringParam(params, "parent_id", "")
 		status := GetStringParam(params, "status", "pending")
@@ -114,7 +114,7 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 	case "check":
 		id := GetStringParam(params, "id", "")
 		if id == "" {
-			return &ToolResult{Error: fmt.Sprintf("id is required for check action")}
+			return &ToolResult{Error: "id is required for check action"}
 		}
 		result, err := t.checkTodo(id, true)
 		if err != nil {
@@ -125,7 +125,7 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 	case "uncheck":
 		id := GetStringParam(params, "id", "")
 		if id == "" {
-			return &ToolResult{Error: fmt.Sprintf("id is required for uncheck action")}
+			return &ToolResult{Error: "id is required for uncheck action"}
 		}
 		result, err := t.checkTodo(id, false)
 		if err != nil {
@@ -136,11 +136,11 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 	case "set_status":
 		id := GetStringParam(params, "id", "")
 		if id == "" {
-			return &ToolResult{Error: fmt.Sprintf("id is required for set_status action")}
+			return &ToolResult{Error: "id is required for set_status action"}
 		}
 		status := GetStringParam(params, "status", "")
 		if status == "" {
-			return &ToolResult{Error: fmt.Sprintf("status is required for set_status action")}
+			return &ToolResult{Error: "status is required for set_status action"}
 		}
 		if status != "pending" && status != "in_progress" && status != "completed" {
 			return &ToolResult{Error: fmt.Sprintf("invalid status: %s (must be 'pending', 'in_progress', or 'completed')", status)}
@@ -154,7 +154,7 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 	case "delete":
 		id := GetStringParam(params, "id", "")
 		if id == "" {
-			return &ToolResult{Error: fmt.Sprintf("id is required for delete action")}
+			return &ToolResult{Error: "id is required for delete action"}
 		}
 		result, err := t.deleteTodo(id)
 		if err != nil {

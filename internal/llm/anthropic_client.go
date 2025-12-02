@@ -212,25 +212,6 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 	return params, nil
 }
 
-func buildAnthropicCompletionResponse(msg *anthropic.BetaMessage) *CompletionResponse {
-	if msg == nil {
-		return &CompletionResponse{}
-	}
-
-	content := collectAnthropicText(msg.Content)
-	toolCalls := convertAnthropicToolCalls(msg.Content)
-	stopReason := string(msg.StopReason)
-	if stopReason == "" {
-		stopReason = msg.StopSequence
-	}
-
-	return &CompletionResponse{
-		Content:    content,
-		ToolCalls:  toolCalls,
-		StopReason: stopReason,
-	}
-}
-
 func convertMessagesToAnthropic(systemPrompt string, messages []*Message, enableCaching bool, cacheTTL string) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {
 	systemBlocks := make([]anthropic.BetaTextBlockParam, 0, 1)
 	if sys := strings.TrimSpace(systemPrompt); sys != "" {
@@ -440,54 +421,6 @@ func convertAnthropicTools(tools []map[string]interface{}, enableCaching bool, c
 		return nil
 	}
 	return result
-}
-
-func collectAnthropicText(blocks []anthropic.BetaContentBlockUnion) string {
-	if len(blocks) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	for _, block := range blocks {
-		if block.Type != "text" {
-			continue
-		}
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(block.Text)
-	}
-	return sb.String()
-}
-
-func convertAnthropicToolCalls(blocks []anthropic.BetaContentBlockUnion) []map[string]interface{} {
-	if len(blocks) == 0 {
-		return nil
-	}
-
-	var toolCalls []map[string]interface{}
-	for _, block := range blocks {
-		if block.Type != "tool_use" {
-			continue
-		}
-
-		arguments := "{}"
-		if len(block.Input) > 0 {
-			arguments = string(block.Input)
-		}
-
-		call := map[string]interface{}{
-			"id":   block.ID,
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":      block.Name,
-				"arguments": arguments,
-			},
-		}
-		toolCalls = append(toolCalls, call)
-	}
-
-	return toolCalls
 }
 
 func parseToolArguments(raw interface{}) any {

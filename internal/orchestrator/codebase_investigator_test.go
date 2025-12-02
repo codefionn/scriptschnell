@@ -99,7 +99,7 @@ func TestCodebaseInvestigator_ExtractAnswer(t *testing.T) {
 
 func TestCodebaseInvestigator_Investigate_Success(t *testing.T) {
 	mockFS := fs.NewMockFS()
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	mockLLM := &MockClient{
 		CompleteWithRequestFunc: func(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -137,7 +137,7 @@ func TestCodebaseInvestigator_Investigate_Success(t *testing.T) {
 
 func TestCodebaseInvestigator_Investigate_ToolUse(t *testing.T) {
 	mockFS := fs.NewMockFS()
-	mockFS.WriteFile(context.Background(), "target.go", []byte("package main\nfunc Target() {}"))
+	_ = mockFS.WriteFile(context.Background(), "target.go", []byte("package main\nfunc Target() {}"))
 
 	turn := 0
 	mockLLM := &MockClient{

@@ -157,7 +157,7 @@ func TestSummarizeFileTool_SuccessfulSummarization(t *testing.T) {
 	tool := NewSummarizeFileTool(mockFS, sess, client)
 
 	content := "line 1\nline 2\nline 3"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -190,7 +190,7 @@ func TestSummarizeFileTool_TracksFileInSession(t *testing.T) {
 	tool := NewSummarizeFileTool(mockFS, sess, client)
 
 	content := "test content"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -208,7 +208,7 @@ func TestSummarizeFileTool_LLMError(t *testing.T) {
 	client := &MockSummarizeClient{err: fmt.Errorf("LLM error")}
 	tool := NewSummarizeFileTool(mockFS, sess, client)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -241,7 +241,7 @@ func TestSummarizeFileTool_PromptContainsGoalAndContent(t *testing.T) {
 
 	content := "important content"
 	goal := "extract key points"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -266,7 +266,7 @@ func TestSummarizeFileTool_NilSession(t *testing.T) {
 	client := &MockSummarizeClient{response: "summary"}
 	tool := NewSummarizeFileTool(mockFS, nil, client)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	// Should not panic with nil session
 	result := tool.Execute(context.Background(), map[string]interface{}{
@@ -291,7 +291,7 @@ func TestSummarizeFileTool_LargeFile(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line %d with some content", i))
 	}
 	content := strings.Join(lines, "\n")
-	mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "large.txt",
@@ -314,7 +314,7 @@ func TestSummarizeFileTool_EmptyFile(t *testing.T) {
 	client := &MockSummarizeClient{response: "empty file summary"}
 	tool := NewSummarizeFileTool(mockFS, sess, client)
 
-	mockFS.WriteFile(context.Background(), "empty.txt", []byte(""))
+	_ = mockFS.WriteFile(context.Background(), "empty.txt", []byte(""))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "empty.txt",
@@ -332,7 +332,7 @@ func TestSummarizeFileTool_SpecialCharactersInGoal(t *testing.T) {
 	client := &MockSummarizeClient{response: "summary"}
 	tool := NewSummarizeFileTool(mockFS, sess, client)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	goal := "find all functions matching pattern: func.*Test"
 	result := tool.Execute(context.Background(), map[string]interface{}{

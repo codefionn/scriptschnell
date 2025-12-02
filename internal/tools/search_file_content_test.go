@@ -14,7 +14,7 @@ func TestSearchFileContentTool_Execute(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup files
-	mockFS.WriteFile(ctx, "main.go", []byte(`package main
+	_ = mockFS.WriteFile(ctx, "main.go", []byte(`package main
 
 import "fmt"
 
@@ -24,14 +24,14 @@ func main() {
 	fmt.Println("Foo")
 }
 `))
-	mockFS.WriteFile(ctx, "test.txt", []byte(`line 1
+	_ = mockFS.WriteFile(ctx, "test.txt", []byte(`line 1
 line 2
 line 3
 line 4
 line 5
 `))
 	// Binary file
-	mockFS.WriteFile(ctx, "bin.dat", []byte{0, 1, 2, 3})
+	_ = mockFS.WriteFile(ctx, "bin.dat", []byte{0, 1, 2, 3})
 
 	tests := []struct {
 		name         string

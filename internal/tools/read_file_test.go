@@ -22,7 +22,7 @@ func TestReadFileTool_ReadEntireFile(t *testing.T) {
 	tool := NewReadFileTool(mockFS, sess)
 
 	content := "line 1\nline 2\nline 3"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -49,7 +49,7 @@ func TestReadFileTool_ReadSingleSection(t *testing.T) {
 	tool := NewReadFileTool(mockFS, sess)
 
 	content := "line 1\nline 2\nline 3\nline 4\nline 5"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -94,7 +94,7 @@ func TestReadFileTool_ReadMultipleSections(t *testing.T) {
 		"line 9",
 		"line 10",
 	}, "\n")
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -146,7 +146,7 @@ func TestReadFileTool_TruncateLargeFile(t *testing.T) {
 		lines = append(lines, "line content")
 	}
 	content := strings.Join(lines, "\n")
-	mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "large.txt",
@@ -181,7 +181,7 @@ func TestReadFileTool_ExceedLineLimitAcrossSections(t *testing.T) {
 		lines = append(lines, "line content")
 	}
 	content := strings.Join(lines, "\n")
-	mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"path": "large.txt",
@@ -211,7 +211,7 @@ func TestReadFileTool_InvalidSections(t *testing.T) {
 	sess := session.NewSession("test-session", ".")
 	tool := NewReadFileTool(mockFS, sess)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("line 1\nline 2"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("line 1\nline 2"))
 
 	tests := []struct {
 		name     string
@@ -292,7 +292,7 @@ func TestReadFileTool_TracksFileInSession(t *testing.T) {
 	tool := NewReadFileTool(mockFS, sess)
 
 	content := "test content"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	tool.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",

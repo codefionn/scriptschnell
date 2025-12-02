@@ -60,17 +60,17 @@ func (t *ParallelTool) Parameters() map[string]interface{} {
 
 func (t *ParallelTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	if t.registry == nil {
-		return &ToolResult{Error: fmt.Sprintf("parallel tool registry is not configured")}
+		return &ToolResult{Error: "parallel tool registry is not configured"}
 	}
 
 	rawCalls, ok := params["tool_calls"]
 	if !ok {
-		return &ToolResult{Error: fmt.Sprintf("tool_calls is required")}
+		return &ToolResult{Error: "tool_calls is required"}
 	}
 
 	callSlice, ok := rawCalls.([]interface{})
 	if !ok {
-		return &ToolResult{Error: fmt.Sprintf("tool_calls must be an array")}
+		return &ToolResult{Error: "tool_calls must be an array"}
 	}
 
 	if len(callSlice) == 0 {

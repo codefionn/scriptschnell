@@ -71,7 +71,7 @@ func (t *SearchFileContentTool) Parameters() map[string]interface{} {
 func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	pattern := GetStringParam(params, "pattern", "")
 	if pattern == "" {
-		return &ToolResult{Error: fmt.Sprintf("pattern is required")}
+		return &ToolResult{Error: "pattern is required"}
 	}
 
 	searchPath := GetStringParam(params, "path", ".")
@@ -129,7 +129,7 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 		}
 
 		content := string(contentBytes)
-		strings.TrimSuffix(content, "\n")
+		content = strings.TrimSuffix(content, "\n")
 		lines := strings.Split(content, "\n")
 
 		// Find matches

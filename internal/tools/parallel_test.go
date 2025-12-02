@@ -195,7 +195,7 @@ func TestParallelTool_SingleToolCall(t *testing.T) {
 	tool := NewParallelTool(registry)
 
 	// Create test file
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_calls": []interface{}{
@@ -243,9 +243,9 @@ func TestParallelTool_MultipleToolCalls(t *testing.T) {
 	tool := NewParallelTool(registry)
 
 	// Create test files
-	mockFS.WriteFile(context.Background(), "file1.txt", []byte("content1"))
-	mockFS.WriteFile(context.Background(), "file2.txt", []byte("content2"))
-	mockFS.WriteFile(context.Background(), "file3.txt", []byte("content3"))
+	_ = mockFS.WriteFile(context.Background(), "file1.txt", []byte("content1"))
+	_ = mockFS.WriteFile(context.Background(), "file2.txt", []byte("content2"))
+	_ = mockFS.WriteFile(context.Background(), "file3.txt", []byte("content3"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_calls": []interface{}{
@@ -339,7 +339,7 @@ func TestParallelTool_MixedSuccessAndError(t *testing.T) {
 	tool := NewParallelTool(registry)
 
 	// Create only one file
-	mockFS.WriteFile(context.Background(), "exists.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "exists.txt", []byte("content"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_calls": []interface{}{
@@ -464,7 +464,7 @@ func TestParallelTool_DurationTracking(t *testing.T) {
 
 	tool := NewParallelTool(registry)
 
-	mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte("content"))
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"tool_calls": []interface{}{

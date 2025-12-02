@@ -22,7 +22,7 @@ func TestReadFileNumberedExecutor_ReadEntireFile(t *testing.T) {
 	executor := NewReadFileNumberedExecutor(mockFS, sess)
 
 	content := "line 1\nline 2\nline 3"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := executor.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -62,7 +62,7 @@ func TestReadFileNumberedExecutor_ReadSingleSection(t *testing.T) {
 	executor := NewReadFileNumberedExecutor(mockFS, sess)
 
 	content := "line 1\nline 2\nline 3\nline 4\nline 5"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := executor.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -122,7 +122,7 @@ func TestReadFileNumberedTool_ReadMultipleSections(t *testing.T) {
 		"line 9",
 		"line 10",
 	}, "\n")
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := executor.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -192,7 +192,7 @@ func TestReadFileNumberedTool_LinePadding(t *testing.T) {
 		lines = append(lines, "content")
 	}
 	content := strings.Join(lines, "\n")
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	result := executor.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",
@@ -233,7 +233,7 @@ func TestReadFileNumberedTool_TruncateLargeFile(t *testing.T) {
 		lines = append(lines, "line content")
 	}
 	content := strings.Join(lines, "\n")
-	mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "large.txt", []byte(content))
 
 	result := executor.Execute(context.Background(), map[string]interface{}{
 		"path": "large.txt",
@@ -263,7 +263,7 @@ func TestReadFileNumberedTool_TracksFileInSession(t *testing.T) {
 	executor := NewReadFileNumberedExecutor(mockFS, sess)
 
 	content := "test content"
-	mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
 
 	executor.Execute(context.Background(), map[string]interface{}{
 		"path": "test.txt",

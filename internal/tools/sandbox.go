@@ -855,11 +855,12 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			// Execute the command using the shell executor
 			var stdoutStr, stderrStr string
 			var exitCode int
-			var err error
 
 			if t.shellExecutor != nil {
 				// Use the shell executor (actor-based)
+				var err error
 				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandDisplay, "", 30*time.Second, string(stdinData))
+				_ = err // Error information is captured in exitCode and stderr
 			} else {
 				// Fallback to direct execution if no executor is set
 				cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -39,6 +39,18 @@ func skipIfTinyGoUnavailable(t *testing.T) {
 	t.Skip("TinyGo not installed or cached; skipping sandbox execution tests")
 }
 
+var sandboxConcurrencyLimit = make(chan struct{}, 1)
+
+// limitSandboxConcurrency ensures only one TinyGo-backed sandbox test runs at a time.
+// TinyGo builds are CPU-heavy; running them in parallel can exceed timeouts in CI.
+func limitSandboxConcurrency(t *testing.T) {
+	t.Helper()
+	sandboxConcurrencyLimit <- struct{}{}
+	t.Cleanup(func() {
+		<-sandboxConcurrencyLimit
+	})
+}
+
 // TestStatusProgramTool_SandboxBackgroundJob tests status_program with sandbox background jobs
 func TestStatusProgramTool_SandboxBackgroundJob(t *testing.T) {
 	t.Parallel()
@@ -207,6 +219,7 @@ func TestStatusProgramTool_CompletedSandboxJob(t *testing.T) {
 func TestWaitProgramTool_SandboxCompletion(t *testing.T) {
 	t.Parallel()
 	skipIfTinyGoUnavailable(t)
+	limitSandboxConcurrency(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -242,7 +255,7 @@ func main() {
 
 	// Wait for completion
 	waitTool := NewWaitProgramTool(sess)
-	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{
@@ -442,6 +455,7 @@ func TestWaitProgramTool_LineLimiting(t *testing.T) {
 func TestStopProgramTool_SandboxJob(t *testing.T) {
 	t.Parallel()
 	skipIfTinyGoUnavailable(t)
+	limitSandboxConcurrency(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -717,6 +731,7 @@ func TestIntegration_SandboxTimeout_Foreground(t *testing.T) {
 	}
 
 	t.Parallel()
+	limitSandboxConcurrency(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -801,6 +816,7 @@ func TestIntegration_SandboxTimeout_Background(t *testing.T) {
 	}
 
 	t.Parallel()
+	limitSandboxConcurrency(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -885,6 +901,7 @@ func TestIntegration_SandboxTimeout_StatusCheck(t *testing.T) {
 	}
 
 	t.Parallel()
+	limitSandboxConcurrency(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -969,6 +986,7 @@ func TestIntegration_SandboxTimeout_QuickCompletion(t *testing.T) {
 	}
 
 	t.Parallel()
+	limitSandboxConcurrency(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()

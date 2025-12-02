@@ -175,6 +175,7 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("Execute Go code in a strongly sandboxed WebAssembly environment. ")
 	b.WriteString("Standard library packages available (try to not use the `os` package instead, but methods provided below). Timeout enforced.\n")
 	b.WriteString("Every program **must** declare `package main`, define `func main()`, and print results (e.g., via `fmt.Println`) so the orchestrator receives the output.\n\n")
+	b.WriteString("Try to reduce the output of shell programs by e.g. only searching and outputting errors.\n\n")
 	b.WriteString("Seven custom functions are automatically available in your code:\n\n")
 
 	b.WriteString("1. Fetch(method, url, body string) (responseBody string, statusCode int)\n")

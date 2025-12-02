@@ -58,6 +58,9 @@ func TestWebSearchToolSpec_Description(t *testing.T) {
 	if !strings.Contains(desc, "Search the web") {
 		t.Error("description should mention web search")
 	}
+	if !strings.Contains(desc, "multiple queries") {
+		t.Error("description should mention multiple queries")
+	}
 }
 
 func TestWebSearchToolSpec_Parameters(t *testing.T) {
@@ -69,8 +72,27 @@ func TestWebSearchToolSpec_Parameters(t *testing.T) {
 		t.Fatal("expected properties in parameters")
 	}
 
-	if _, ok := props["query"]; !ok {
-		t.Error("expected 'query' in properties")
+	if _, ok := props["queries"]; !ok {
+		t.Error("expected 'queries' in properties")
+	}
+
+	// Check that queries property is an array with string items
+	queriesProp, ok := props["queries"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected queries to be an object with type and items")
+	}
+	
+	if queriesProp["type"] != "array" {
+		t.Errorf("expected queries type to be 'array', got %v", queriesProp["type"])
+	}
+	
+	items, ok := queriesProp["items"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected items in queries property")
+	}
+	
+	if items["type"] != "string" {
+		t.Errorf("expected items type to be 'string', got %v", items["type"])
 	}
 
 	if _, ok := props["num_results"]; !ok {
@@ -82,8 +104,8 @@ func TestWebSearchToolSpec_Parameters(t *testing.T) {
 		t.Fatal("expected required array")
 	}
 
-	if len(required) != 1 || required[0] != "query" {
-		t.Errorf("expected only 'query' in required, got %v", required)
+	if len(required) != 1 || required[0] != "queries" {
+		t.Errorf("expected only 'queries' in required, got %v", required)
 	}
 }
 
@@ -105,7 +127,7 @@ func TestWebSearchTool_NoProviderConfigured(t *testing.T) {
 	tool := NewWebSearchTool(cfg)
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"query": "test query",
+		"queries": []string{"test query"},
 	})
 
 	if result.Error == "" {
@@ -117,7 +139,7 @@ func TestWebSearchTool_NoProviderConfigured(t *testing.T) {
 	}
 }
 
-func TestWebSearchTool_MissingQuery(t *testing.T) {
+func TestWebSearchTool_MissingQueries(t *testing.T) {
 	cfg := &config.Config{
 		Search: config.SearchConfig{
 			Provider: "exa",
@@ -131,15 +153,15 @@ func TestWebSearchTool_MissingQuery(t *testing.T) {
 	result := tool.Execute(context.Background(), map[string]interface{}{})
 
 	if result.Error == "" {
-		t.Fatal("expected error when query is missing")
+		t.Fatal("expected error when queries is missing")
 	}
 
-	if !strings.Contains(result.Error, "missing required parameter 'query'") {
-		t.Errorf("expected query missing error, got: %s", result.Error)
+	if !strings.Contains(result.Error, "missing required parameter 'queries'") {
+		t.Errorf("expected queries missing error, got: %s", result.Error)
 	}
 }
 
-func TestWebSearchTool_EmptyQuery(t *testing.T) {
+func TestWebSearchTool_EmptyQueries(t *testing.T) {
 	cfg := &config.Config{
 		Search: config.SearchConfig{
 			Provider: "exa",
@@ -151,15 +173,15 @@ func TestWebSearchTool_EmptyQuery(t *testing.T) {
 	tool := NewWebSearchTool(cfg)
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"query": "",
+		"queries": []string{},
 	})
 
 	if result.Error == "" {
-		t.Fatal("expected error when query is empty")
+		t.Fatal("expected error when queries array is empty")
 	}
 
-	if !strings.Contains(result.Error, "missing required parameter 'query'") {
-		t.Errorf("expected query missing error, got: %s", result.Error)
+	if !strings.Contains(result.Error, "queries array cannot be empty") {
+		t.Errorf("expected empty queries error, got: %s", result.Error)
 	}
 }
 
@@ -177,7 +199,7 @@ func TestWebSearchTool_DefaultNumResults(t *testing.T) {
 	// The tool will try to validate the provider, which will fail with a real provider
 	// but we're just testing parameter parsing here
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"query": "test query",
+		"queries": []string{"test query"},
 	})
 
 	// Should get a validation error, not a parameter error
@@ -237,7 +259,7 @@ func TestWebSearchTool_CustomNumResults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tool.Execute(context.Background(), map[string]interface{}{
-				"query":       "test",
+				"queries":      []string{"test"},
 				"num_results": tt.numResults,
 			})
 
@@ -262,7 +284,7 @@ func TestWebSearchTool_UnsupportedProvider(t *testing.T) {
 	tool := NewWebSearchTool(cfg)
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"query": "test query",
+		"queries": []string{"test query"},
 	})
 
 	if result.Error == "" {
@@ -550,7 +572,7 @@ func TestWebSearchTool_ProviderValidationExaConfig(t *testing.T) {
 	tool := NewWebSearchTool(cfg)
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"query": "test query",
+		"queries": []string{"test query"},
 	})
 
 	if result.Error == "" {
@@ -575,7 +597,7 @@ func TestWebSearchTool_ProviderValidationGooglePSEConfig(t *testing.T) {
 	tool := NewWebSearchTool(cfg)
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"query": "test query",
+		"queries": []string{"test query"},
 	})
 
 	if result.Error == "" {
@@ -599,7 +621,7 @@ func TestWebSearchTool_ProviderValidationPerplexityConfig(t *testing.T) {
 	tool := NewWebSearchTool(cfg)
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"query": "test query",
+		"queries": []string{"test query"},
 	})
 
 	if result.Error == "" {
@@ -636,5 +658,137 @@ func TestFormatSearchResults_SpecialCharacters(t *testing.T) {
 
 	if !strings.Contains(formatted, "'apostrophes'") {
 		t.Error("expected apostrophes to be preserved")
+	}
+}
+
+func TestWebSearchTool_MultipleQueries(t *testing.T) {
+	cfg := &config.Config{
+		Search: config.SearchConfig{
+			Provider: "exa",
+			Exa: config.ExaConfig{
+				APIKey: "test-key",
+			},
+		},
+	}
+	tool := NewWebSearchTool(cfg)
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"queries": []string{"first query", "second query", "third query"},
+	})
+
+	// Should get a validation error (since we're using a mock config), 
+	// but not a parameter parsing error
+	if result.Error == "" {
+		t.Fatal("expected error")
+	}
+
+	// Should not be a queries parameter error
+	if strings.Contains(result.Error, "queries") {
+		t.Error("should parse queries parameter correctly, not error")
+	}
+}
+
+func TestWebSearchTool_InvalidQueriesTypes(t *testing.T) {
+	cfg := &config.Config{
+		Search: config.SearchConfig{
+			Provider: "exa",
+			Exa: config.ExaConfig{
+				APIKey: "test-key",
+			},
+		},
+	}
+	tool := NewWebSearchTool(cfg)
+
+	tests := []struct {
+		name       string
+		queries    interface{}
+		expectErr  string
+	}{
+		{
+			name:      "string instead of array",
+			queries:   "not an array",
+			expectErr: "queries must be an array of strings",
+		},
+		{
+			name:      "array with non-string items",
+			queries:   []interface{}{"valid", 123, "another valid"},
+			expectErr: "all queries must be strings",
+		},
+		{
+			name:      "nil",
+			queries:   nil,
+			expectErr: "missing required parameter 'queries'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tool.Execute(context.Background(), map[string]interface{}{
+				"queries": tt.queries,
+			})
+
+			if result.Error == "" {
+				t.Fatal("expected error")
+			}
+
+			if !strings.Contains(result.Error, tt.expectErr) {
+				t.Errorf("expected error '%s', got: %s", tt.expectErr, result.Error)
+			}
+		})
+	}
+}
+
+func TestWebSearchTool_SingleQuery(t *testing.T) {
+	cfg := &config.Config{
+		Search: config.SearchConfig{
+			Provider: "exa",
+			Exa: config.ExaConfig{
+				APIKey: "test-key",
+			},
+		},
+	}
+	tool := NewWebSearchTool(cfg)
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"queries": []string{"single query"},
+	})
+
+	// Should get a validation error (since we're using a mock config), 
+	// but not a parameter parsing error
+	if result.Error == "" {
+		t.Fatal("expected error")
+	}
+
+	// Should not be a queries parameter error
+	if strings.Contains(result.Error, "queries") {
+		t.Error("should parse single query in array correctly")
+	}
+}
+
+func TestWebSearchTool_QueriesAsInterfaceArray(t *testing.T) {
+	cfg := &config.Config{
+		Search: config.SearchConfig{
+			Provider: "exa",
+			Exa: config.ExaConfig{
+				APIKey: "test-key",
+			},
+		},
+	}
+	tool := NewWebSearchTool(cfg)
+
+	// Test with []interface{} instead of []string
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"queries": []interface{}{"query 1", "query 2"},
+	})
+
+	// Should get a validation error (since we're using a mock config), 
+	// but not a parameter parsing error
+	if result.Error == "" {
+		t.Fatal("expected error")
+	}
+
+	// Should not be a queries parameter error
+	if strings.Contains(result.Error, "queries") {
+		t.Error("should parse []interface{} queries correctly")
 	}
 }

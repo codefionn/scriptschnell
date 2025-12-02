@@ -17,24 +17,27 @@ func (s *WebSearchToolSpec) Name() string {
 }
 
 func (s *WebSearchToolSpec) Description() string {
-	return "Search the web using the configured search provider (Exa, Google PSE, or Perplexity). Returns titles, URLs, and snippets from search results."
+	return "Search the web using the configured search provider (Exa, Google PSE, or Perplexity). Accepts multiple queries and returns titles, URLs, and snippets from search results for each query."
 }
 
 func (s *WebSearchToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
-			"query": map[string]interface{}{
-				"type":        "string",
-				"description": "The search query to execute",
+			"queries": map[string]interface{}{
+				"type":        "array",
+				"description": "Array of search queries to execute",
+				"items": map[string]interface{}{
+					"type": "string",
+				},
 			},
 			"num_results": map[string]interface{}{
 				"type":        "integer",
-				"description": "Number of results to return (default: 10, max varies by provider)",
+				"description": "Number of results to return per query (default: 10, max varies by provider)",
 				"default":     10,
 			},
 		},
-		"required": []string{"query"},
+		"required": []string{"queries"},
 	}
 }
 
@@ -61,10 +64,32 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 		return &ToolResult{Error: "no search provider configured - please configure a search provider in settings"}
 	}
 
-	// Get query parameter
-	query := GetStringParam(params, "query", "")
-	if query == "" {
-		return &ToolResult{Error: "missing required parameter 'query'"}
+	// Get queries parameter
+	queriesInterface, ok := params["queries"]
+	if !ok {
+		return &ToolResult{Error: "missing required parameter 'queries'"}
+	}
+
+	// Convert to slice of strings
+	var queries []string
+	switch v := queriesInterface.(type) {
+	case []interface{}:
+		queries = make([]string, len(v))
+		for i, item := range v {
+			if str, ok := item.(string); ok {
+				queries[i] = str
+			} else {
+				return &ToolResult{Error: "all queries must be strings"}
+			}
+		}
+	case []string:
+		queries = v
+	default:
+		return &ToolResult{Error: "queries must be an array of strings"}
+	}
+
+	if len(queries) == 0 {
+		return &ToolResult{Error: "queries array cannot be empty"}
 	}
 
 	// Get num_results parameter (optional, default 10)
@@ -102,14 +127,23 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 		return &ToolResult{Error: fmt.Sprintf("search provider validation failed: %v", err)}
 	}
 
-	// Perform the search
-	response, err := provider.Search(ctx, query, numResults)
-	if err != nil {
-		return &ToolResult{Error: fmt.Sprintf("search failed: %v", err)}
+	// Perform multiple searches and collect results
+	var allResults strings.Builder
+	for i, query := range queries {
+		response, err := provider.Search(ctx, query, numResults)
+		if err != nil {
+			return &ToolResult{Error: fmt.Sprintf("search failed for query '%s': %v", query, err)}
+		}
+
+		// Format results for this query
+		if i > 0 {
+			allResults.WriteString("\n" + strings.Repeat("-", 80) + "\n\n")
+		}
+		allResults.WriteString(formatSearchResults(response))
 	}
 
-	// Format results for LLM consumption
-	return &ToolResult{Result: formatSearchResults(response)}
+	// Return all formatted results
+	return &ToolResult{Result: allResults.String()}
 }
 
 func formatSearchResults(response *search.SearchResponse) string {

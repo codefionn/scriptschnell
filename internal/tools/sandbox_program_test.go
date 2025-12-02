@@ -2,12 +2,42 @@ package tools
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/statcode-ai/scriptschnell/internal/session"
 )
+
+// skipIfTinyGoUnavailable avoids triggering a TinyGo download during tests.
+// These sandbox tests require TinyGo to already be installed or cached.
+func skipIfTinyGoUnavailable(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("tinygo"); err == nil {
+		return
+	}
+
+	cacheDir, err := getTinyGoCacheDir()
+	if err != nil {
+		t.Skipf("TinyGo cache dir unavailable: %v", err)
+	}
+
+	binary := filepath.Join(cacheDir, tinyGoVersion, "bin", "tinygo")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+
+	if _, err := os.Stat(binary); err == nil {
+		return
+	}
+
+	t.Skip("TinyGo not installed or cached; skipping sandbox execution tests")
+}
 
 // TestStatusProgramTool_SandboxBackgroundJob tests status_program with sandbox background jobs
 func TestStatusProgramTool_SandboxBackgroundJob(t *testing.T) {
@@ -176,6 +206,7 @@ func TestStatusProgramTool_CompletedSandboxJob(t *testing.T) {
 // TestWaitProgramTool_SandboxCompletion tests wait_program with sandbox background execution
 func TestWaitProgramTool_SandboxCompletion(t *testing.T) {
 	t.Parallel()
+	skipIfTinyGoUnavailable(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -410,6 +441,7 @@ func TestWaitProgramTool_LineLimiting(t *testing.T) {
 // TestStopProgramTool_SandboxJob tests stop_program with sandbox background jobs
 func TestStopProgramTool_SandboxJob(t *testing.T) {
 	t.Parallel()
+	skipIfTinyGoUnavailable(t)
 
 	workingDir := t.TempDir()
 	tempDir := t.TempDir()

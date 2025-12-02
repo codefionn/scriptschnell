@@ -1,4 +1,4 @@
-FROM tinygo/tinygo:0.39.0 AS tinygo
+FROM docker.io/tinygo/tinygo:0.39.0 AS tinygo
 
 FROM golang:1.25-bookworm AS builder
 

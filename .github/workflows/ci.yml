@@ -1,0 +1,109 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
+
+jobs:
+  # Linting job using Docker Bake
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Run linting with Docker Bake
+      run: |
+        set -euo pipefail
+        docker buildx bake \
+          --set "*.cache-from=type=gha" \
+          --set "*.cache-to=type=gha,mode=max" \
+          lint
+
+  # Testing job using Docker Bake
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Run tests with Docker Bake
+      run: |
+        set -euo pipefail
+        docker buildx bake \
+          --set "*.cache-from=type=gha" \
+          --set "*.cache-to=type=gha,mode=max" \
+          test
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: coverage-reports
+        path: |
+          coverage.out
+          coverage.html
+
+  # Build job using Docker Bake
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: read
+    env:
+      VERSION: ${{ github.sha }}
+      COMMIT: ${{ github.sha }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build with Docker Bake
+      run: |
+        set -euo pipefail
+        BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        docker buildx bake \
+          --set "*.cache-from=type=gha" \
+          --set "*.cache-to=type=gha,mode=max" \
+          --set "*.args.VERSION=${VERSION}" \
+          --set "*.args.COMMIT=${COMMIT}" \
+          --set "*.args.BUILD_TIME=${BUILD_TIME}" \
+          build
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: bin/

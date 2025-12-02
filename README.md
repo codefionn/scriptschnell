@@ -10,7 +10,7 @@ On first run, it will download tinygo (if not in PATH).
 
 - Multiple providers supported
 - Native search engine support
-- Golang WASM wasip1 sandbox (compiled with TinyGo)
+- Golang WASM sandbox (compiled with TinyGo, which is downloaded on startup)
 - Auto-continue for long-running sessions
 - Auto-compaction during generation for longer sessions
 - Two separate LLM models for orchestration and summarization
@@ -143,59 +143,3 @@ Supported providers:
 
 Recommended are `Cerebras` with `zai-glm-4.6` for the orchestration model and
 `gpt-5-nano` or `gemini-2.5-flash` for the summarization model.
-
-### Provider Rate Limits
-
-If you frequently hit HTTP 429 errors, add a `rate_limit` block to a provider entry in `~/.config/scriptschnell/providers.json` to slow requests:
-
-```json
-{
-  "providers": {
-    "anthropic": {
-      "name": "anthropic",
-      "api_key": "sk-live...",
-      "models": [/* ... */],
-      "rate_limit": {
-        "requests_per_minute": 30,
-        "min_interval_ms": 2000,
-        "tokens_per_minute": 10000
-      }
-    }
-  }
-}
-```
-
-Both fields are optional; the slowest effective interval wins (e.g., `requests_per_minute: 30` becomes a 2s delay, and `min_interval_ms` adds a fixed delay between requests).
-Add `tokens_per_minute` when you need to throttle large tool outputs being sent back through the LLM.
-## Build and Run
-
-### Prerequisites
-
-- Go 1.21 or later
-
-### Building
-
-```bash
-# Build the binary
-go build -o scriptschnell ./cmd/scriptschnell
-```
-
-### Running
-
-```bash
-# Run in TUI mode (interactive)
-./scriptschnell
-
-# Run in CLI mode (single-shot)
-./scriptschnell "your prompt here"
-
-# Install globally
-go install ./cmd/scriptschnell
-```
-
-### Testing
-
-```bash
-# Run simple tests
-go test ./... -short
-```

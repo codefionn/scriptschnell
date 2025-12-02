@@ -75,6 +75,8 @@ type Orchestrator struct {
 	lastPreconnectAttempt time.Time
 	preconnectCompleted   bool
 	clientInitMu          sync.Mutex
+	cachedSystemPrompt    string
+	systemPromptMu        sync.RWMutex
 }
 
 const (
@@ -771,10 +773,9 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 	o.loopDetector.Reset()
 	logger.Debug("Loop detector reset for new prompt")
 
-	// Build system prompt
+	// Get or build system prompt (cached for the session)
 	modelID := o.providerMgr.GetOrchestrationModel()
-	promptBuilder := llm.NewPromptBuilder(o.fs, o.workingDir, o.config)
-	systemPrompt, err := promptBuilder.BuildSystemPrompt(ctx, modelID, o.cliMode)
+	systemPrompt, err := o.getOrBuildSystemPrompt(ctx, modelID)
 	if err != nil {
 		return fmt.Errorf("failed to build system prompt: %w", err)
 	}
@@ -2000,5 +2001,48 @@ func (o *Orchestrator) ClearSession() error {
 		}
 	}
 
+	// Clear cached system prompt so it gets regenerated for the new session
+	o.systemPromptMu.Lock()
+	o.cachedSystemPrompt = ""
+	o.systemPromptMu.Unlock()
+	logger.Debug("System prompt cache cleared for new session")
+
 	return nil
+}
+
+// getOrBuildSystemPrompt returns the cached system prompt or builds a new one if not cached
+func (o *Orchestrator) getOrBuildSystemPrompt(ctx context.Context, modelID string) (string, error) {
+	// Try to read from cache first
+	o.systemPromptMu.RLock()
+	if o.cachedSystemPrompt != "" {
+		cached := o.cachedSystemPrompt
+		o.systemPromptMu.RUnlock()
+		logger.Debug("Using cached system prompt (%d chars)", len(cached))
+		return cached, nil
+	}
+	o.systemPromptMu.RUnlock()
+
+	// Need to build it - acquire write lock
+	o.systemPromptMu.Lock()
+	defer o.systemPromptMu.Unlock()
+
+	// Check again in case another goroutine built it while we waited for the lock
+	if o.cachedSystemPrompt != "" {
+		logger.Debug("Using cached system prompt built by another goroutine (%d chars)", len(o.cachedSystemPrompt))
+		return o.cachedSystemPrompt, nil
+	}
+
+	// Build the system prompt
+	logger.Debug("Building new system prompt for session")
+	promptBuilder := llm.NewPromptBuilder(o.fs, o.workingDir, o.config)
+	systemPrompt, err := promptBuilder.BuildSystemPrompt(ctx, modelID, o.cliMode)
+	if err != nil {
+		return "", err
+	}
+
+	// Cache it
+	o.cachedSystemPrompt = systemPrompt
+	logger.Info("System prompt built and cached for session (%d chars)", len(systemPrompt))
+
+	return systemPrompt, nil
 }

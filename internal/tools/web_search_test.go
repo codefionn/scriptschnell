@@ -81,16 +81,16 @@ func TestWebSearchToolSpec_Parameters(t *testing.T) {
 	if !ok {
 		t.Fatal("expected queries to be an object with type and items")
 	}
-	
+
 	if queriesProp["type"] != "array" {
 		t.Errorf("expected queries type to be 'array', got %v", queriesProp["type"])
 	}
-	
+
 	items, ok := queriesProp["items"].(map[string]interface{})
 	if !ok {
 		t.Fatal("expected items in queries property")
 	}
-	
+
 	if items["type"] != "string" {
 		t.Errorf("expected items type to be 'string', got %v", items["type"])
 	}
@@ -259,7 +259,7 @@ func TestWebSearchTool_CustomNumResults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tool.Execute(context.Background(), map[string]interface{}{
-				"queries":      []string{"test"},
+				"queries":     []string{"test"},
 				"num_results": tt.numResults,
 			})
 
@@ -676,7 +676,7 @@ func TestWebSearchTool_MultipleQueries(t *testing.T) {
 		"queries": []string{"first query", "second query", "third query"},
 	})
 
-	// Should get a validation error (since we're using a mock config), 
+	// Should get a validation error (since we're using a mock config),
 	// but not a parameter parsing error
 	if result.Error == "" {
 		t.Fatal("expected error")
@@ -700,9 +700,9 @@ func TestWebSearchTool_InvalidQueriesTypes(t *testing.T) {
 	tool := NewWebSearchTool(cfg)
 
 	tests := []struct {
-		name       string
-		queries    interface{}
-		expectErr  string
+		name      string
+		queries   interface{}
+		expectErr string
 	}{
 		{
 			name:      "string instead of array",
@@ -753,7 +753,7 @@ func TestWebSearchTool_SingleQuery(t *testing.T) {
 		"queries": []string{"single query"},
 	})
 
-	// Should get a validation error (since we're using a mock config), 
+	// Should get a validation error (since we're using a mock config),
 	// but not a parameter parsing error
 	if result.Error == "" {
 		t.Fatal("expected error")
@@ -781,7 +781,7 @@ func TestWebSearchTool_QueriesAsInterfaceArray(t *testing.T) {
 		"queries": []interface{}{"query 1", "query 2"},
 	})
 
-	// Should get a validation error (since we're using a mock config), 
+	// Should get a validation error (since we're using a mock config),
 	// but not a parameter parsing error
 	if result.Error == "" {
 		t.Fatal("expected error")

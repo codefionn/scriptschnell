@@ -19,9 +19,9 @@ var (
 
 // SecretsMenuModel collects a new encryption password from the user.
 type SecretsMenuModel struct {
-	inputs     []textinput.Model
-	focused    int
-	width      int
+	inputs    []textinput.Model
+	focused   int
+	width     int
 	height    int
 	errMsg    string
 	confirmed bool

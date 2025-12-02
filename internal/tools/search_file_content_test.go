@@ -49,7 +49,7 @@ line 5
 				"## Content Search Results",
 				"### `main.go`",
 				"*1 match(es)*",
-				"  7: \tfmt.Println(\"World\") // match me",
+				" 7: \tfmt.Println(\"World\") // match me",
 			},
 		},
 		{

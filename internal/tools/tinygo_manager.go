@@ -54,6 +54,7 @@ func (m *TinyGoManager) SetStatusCallback(callback func(string)) {
 }
 
 // updateStatus sends a status update if callback is set
+// This acquires the lock internally, so it should NOT be called while holding the lock
 func (m *TinyGoManager) updateStatus(status string) {
 	m.mu.Lock()
 	callback := m.statusCallback
@@ -61,6 +62,14 @@ func (m *TinyGoManager) updateStatus(status string) {
 
 	if callback != nil {
 		callback(status)
+	}
+}
+
+// updateStatusLocked sends a status update if callback is set
+// This should be called while already holding the lock (e.g., from within GetTinyGoBinary)
+func (m *TinyGoManager) updateStatusLocked(status string) {
+	if m.statusCallback != nil {
+		m.statusCallback(status)
 	}
 }
 
@@ -189,15 +198,15 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 
 	// Download and extract TinyGo
 	m.logger.Info("TinyGo not found in cache, downloading version %s...", tinyGoVersion)
-	m.updateStatus(fmt.Sprintf("Downloading TinyGo %s (first use only, ~50MB)...", tinyGoVersion))
+	m.updateStatusLocked(fmt.Sprintf("Downloading TinyGo %s (first use only, ~50MB)...", tinyGoVersion))
 
 	if err := m.downloadTinyGo(ctx); err != nil {
-		m.updateStatus("")
+		m.updateStatusLocked("")
 		return "", fmt.Errorf("failed to download TinyGo: %w", err)
 	}
 
 	m.logger.Info("TinyGo downloaded and cached successfully")
-	m.updateStatus("TinyGo download complete")
+	m.updateStatusLocked("TinyGo download complete")
 
 	// Clear status after a brief moment
 	go func() {
@@ -261,10 +270,10 @@ func (m *TinyGoManager) downloadTinyGo(ctx context.Context) error {
 				lastUpdate = time.Now()
 				if totalBytes > 0 {
 					percent := float64(downloaded) / float64(totalBytes) * 100
-					m.updateStatus(fmt.Sprintf("Downloading TinyGo %s... %.0f%%", tinyGoVersion, percent))
+					m.updateStatusLocked(fmt.Sprintf("Downloading TinyGo %s... %.0f%%", tinyGoVersion, percent))
 				} else {
 					mb := float64(downloaded) / (1024 * 1024)
-					m.updateStatus(fmt.Sprintf("Downloading TinyGo %s... %.1f MB", tinyGoVersion, mb))
+					m.updateStatusLocked(fmt.Sprintf("Downloading TinyGo %s... %.1f MB", tinyGoVersion, mb))
 				}
 			}
 		},
@@ -277,7 +286,7 @@ func (m *TinyGoManager) downloadTinyGo(ctx context.Context) error {
 
 	// Extract to cache directory
 	m.logger.Info("Extracting TinyGo...")
-	m.updateStatus(fmt.Sprintf("Extracting TinyGo %s...", tinyGoVersion))
+	m.updateStatusLocked(fmt.Sprintf("Extracting TinyGo %s...", tinyGoVersion))
 	extractDir := filepath.Join(m.cacheDir, tinyGoVersion)
 	if err := os.MkdirAll(extractDir, 0755); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)

@@ -596,7 +596,7 @@ func TestExtractFilepathContext(t *testing.T) {
 func TestFilepathAutocompleteSuggestions(t *testing.T) {
 	// Create a mock filesystem with some test files
 	mockFS := fs.NewMockFS()
-	
+
 	// Write test files
 	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
 	mockFS.WriteFile(context.Background(), "/test/README.md", []byte("# Test"))
@@ -694,7 +694,7 @@ func TestFilepathAutocompleteSuggestions(t *testing.T) {
 
 func TestFilepathAutocompleteIntegration(t *testing.T) {
 	mockFS := fs.NewMockFS()
-	
+
 	// Write test files
 	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
 	mockFS.WriteFile(context.Background(), "/test/config.yaml", []byte("key: value"))
@@ -740,7 +740,7 @@ func TestFilepathAutocompleteIntegration(t *testing.T) {
 
 func TestFilepathAutocompleteCycling(t *testing.T) {
 	mockFS := fs.NewMockFS()
-	
+
 	// Write test files
 	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
 	mockFS.WriteFile(context.Background(), "/test/models.go", []byte("package models"))
@@ -800,7 +800,7 @@ func TestFilepathAutocompleteCycling(t *testing.T) {
 
 func TestEnterKeyAppliesSelectedSuggestion(t *testing.T) {
 	mockFS := fs.NewMockFS()
-	
+
 	// Write test files
 	mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
 

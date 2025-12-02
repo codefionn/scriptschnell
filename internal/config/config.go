@@ -176,8 +176,8 @@ func DefaultConfig() *Config {
 			Servers: make(map[string]*MCPServerConfig),
 		},
 		Secrets:           SecretsSettings{},
-		EnablePromptCache: true,  // Enable by default for cost savings
-		PromptCacheTTL:    "1h",  // Default to 1 hour for longer sessions
+		EnablePromptCache: true, // Enable by default for cost savings
+		PromptCacheTTL:    "1h", // Default to 1 hour for longer sessions
 	}
 }
 

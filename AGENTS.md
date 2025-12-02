@@ -19,6 +19,9 @@ go test ./... -short
 
 # Install globally
 go install ./cmd/scriptschnell
+
+# Format files
+gofmt -s -w .
 ```
 
 Test the codebase with `-short` flag to skip slow integration tests.

@@ -15,13 +15,13 @@ type Message struct {
 
 // CompletionRequest represents a completion request
 type CompletionRequest struct {
-	Messages       []*Message               `json:"messages"`
-	Tools          []map[string]interface{} `json:"tools,omitempty"`
-	Temperature    float64                  `json:"temperature"`
-	MaxTokens      int                      `json:"max_tokens,omitempty"`
-	SystemPrompt   string                   `json:"system_prompt,omitempty"`
-	EnableCaching  bool                     `json:"enable_caching,omitempty"`   // Enable prompt caching (Anthropic, OpenAI, OpenRouter)
-	CacheTTL       string                   `json:"cache_ttl,omitempty"`        // Cache TTL: "5m" or "1h" (Anthropic only, others use provider defaults)
+	Messages      []*Message               `json:"messages"`
+	Tools         []map[string]interface{} `json:"tools,omitempty"`
+	Temperature   float64                  `json:"temperature"`
+	MaxTokens     int                      `json:"max_tokens,omitempty"`
+	SystemPrompt  string                   `json:"system_prompt,omitempty"`
+	EnableCaching bool                     `json:"enable_caching,omitempty"` // Enable prompt caching (Anthropic, OpenAI, OpenRouter)
+	CacheTTL      string                   `json:"cache_ttl,omitempty"`      // Cache TTL: "5m" or "1h" (Anthropic only, others use provider defaults)
 }
 
 // CompletionResponse represents a completion response

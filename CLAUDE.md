@@ -22,6 +22,9 @@ go test ./... -short
 
 # Install globally
 go install ./cmd/scriptschnell
+
+# Format files
+gofmt -s -w .
 ```
 
 ## Architecture Overview

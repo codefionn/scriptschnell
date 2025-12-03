@@ -161,6 +161,66 @@ func (t *SandboxTool) SetShellExecutor(executor ShellExecutor) {
 	t.shellExecutor = executor
 }
 
+// ListFilesInDir returns the entries inside the provided directory.
+// Paths are returned relative to the supplied dir (or working directory if dir is empty).
+func (t *SandboxTool) ListFilesInDir(dir string) ([]string, error) {
+	if dir == "" {
+		dir = "."
+	}
+
+	if t.filesystem == nil {
+		return nil, fmt.Errorf("filesystem not available")
+	}
+
+	entries, err := t.filesystem.ListDir(context.Background(), dir)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Path
+		results = append(results, name)
+	}
+
+	return results, nil
+}
+
+// Mkdir creates a directory, optionally recursively.
+func (t *SandboxTool) Mkdir(dir string, recursive bool) error {
+	if dir == "" {
+		return fmt.Errorf("directory path is required")
+	}
+	if t.filesystem == nil {
+		return fmt.Errorf("filesystem not available")
+	}
+
+	if !recursive {
+		parent := filepath.Dir(dir)
+		exists, err := t.filesystem.Exists(context.Background(), parent)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("parent directory does not exist: %s", parent)
+		}
+	}
+
+	return t.filesystem.MkdirAll(context.Background(), dir, 0755)
+}
+
+// Move renames or moves a file or directory.
+func (t *SandboxTool) Move(src, dst string) error {
+	if src == "" || dst == "" {
+		return fmt.Errorf("source and destination paths are required")
+	}
+	if t.filesystem == nil {
+		return fmt.Errorf("filesystem not available")
+	}
+
+	return t.filesystem.Move(context.Background(), src, dst)
+}
+
 // GetTinyGoManager returns the TinyGo manager instance (can be nil)
 func (t *SandboxTool) GetTinyGoManager() *TinyGoManager {
 	return t.tinygoManager
@@ -347,6 +407,33 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("     }\n")
 	b.WriteString("     ```\n\n")
 
+	b.WriteString("10. Mkdir(path string, recursive bool) (errorMsg string)\n")
+	b.WriteString("    - Create a directory (set recursive true to create parents)\n")
+	b.WriteString("    - Returns empty string on success, error message on failure\n")
+	b.WriteString("    - Example:\n")
+	b.WriteString("      ```go\n")
+	b.WriteString("      package main\n\n")
+	b.WriteString("      func main() {\n")
+	b.WriteString("          if err := Mkdir(\"tmp/nested\", true); err != \"\" {\n")
+	b.WriteString("              println(err)\n")
+	b.WriteString("          }\n")
+	b.WriteString("      }\n")
+	b.WriteString("      ```\n\n")
+
+	b.WriteString("11. Move(src string, dst string) (errorMsg string)\n")
+	b.WriteString("    - Move or rename a file or directory\n")
+	b.WriteString("    - For files, the read-before-write rule applies (must be read first)\n")
+	b.WriteString("    - Example:\n")
+	b.WriteString("      ```go\n")
+	b.WriteString("      package main\n\n")
+	b.WriteString("      func main() {\n")
+	b.WriteString("          _ = ReadFile(\"a.txt\", 0, 0)\n")
+	b.WriteString("          if err := Move(\"a.txt\", \"archive/a.txt\"); err != \"\" {\n")
+	b.WriteString("              println(err)\n")
+	b.WriteString("          }\n")
+	b.WriteString("      }\n")
+	b.WriteString("      ```\n\n")
+
 	b.WriteString("Example Build Go Program:\n")
 	b.WriteString("package main\n")
 	b.WriteString("\n")
@@ -363,7 +450,7 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("  }\n")
 	b.WriteString("}\n")
 
-	b.WriteString("10. GrepFile(pattern, path, glob string, context int) (content string)\n")
+	b.WriteString("12. GrepFile(pattern, path, glob string, context int) (content string)\n")
 	b.WriteString("   - Search for a regex pattern in files, returning matches with line numbers and context.\n")
 	b.WriteString("   - `pattern`: Regex pattern to search for.\n")
 	b.WriteString("   - `path`: Directory or file to search in (default: '.').\n")
@@ -1201,6 +1288,156 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 			return 0 // Success
 		}).
 		Export("write_file")
+
+	// mkdir(path_ptr, path_len, recursive, result_ptr, result_cap) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, recursive int32, resultPtr, resultCap uint32) int32 {
+			memory := m.Memory()
+
+			pathBytes, ok := memory.Read(pathPtr, pathLen)
+			if !ok {
+				return -1
+			}
+			path := string(pathBytes)
+
+			if t.filesystem == nil {
+				errMsg := []byte("Error: Filesystem not available")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -2
+			}
+
+			if path == "" {
+				errMsg := []byte("Error: Path is required")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -3
+			}
+
+			if recursive != 1 {
+				parent := filepath.Dir(path)
+				exists, err := t.filesystem.Exists(ctx, parent)
+				if err != nil || !exists {
+					errMsg := []byte(fmt.Sprintf("Error: Parent directory not found: %s", parent))
+					if uint32(len(errMsg)) <= resultCap {
+						memory.Write(resultPtr, errMsg)
+					}
+					return -4
+				}
+			}
+
+			if err := t.filesystem.MkdirAll(ctx, path, 0755); err != nil {
+				errMsg := []byte(fmt.Sprintf("Error: Failed to create directory: %v", err))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -5
+			}
+
+			if t.session != nil {
+				t.session.TrackFileModified(path)
+			}
+
+			detail := path
+			if recursive == 1 {
+				detail = fmt.Sprintf("%s (recursive)", path)
+			}
+			callTracker.record("mkdir", detail)
+
+			return 0
+		}).
+		Export("mkdir")
+
+	// move(src_ptr, src_len, dst_ptr, dst_len, result_ptr, result_cap) -> status_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, srcPtr, srcLen, dstPtr, dstLen, resultPtr, resultCap uint32) int32 {
+			memory := m.Memory()
+
+			srcBytes, ok := memory.Read(srcPtr, srcLen)
+			if !ok {
+				return -1
+			}
+			dstBytes, ok := memory.Read(dstPtr, dstLen)
+			if !ok {
+				return -1
+			}
+
+			src := string(srcBytes)
+			dst := string(dstBytes)
+
+			if t.filesystem == nil {
+				errMsg := []byte("Error: Filesystem not available")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -2
+			}
+
+			if src == "" || dst == "" {
+				errMsg := []byte("Error: Source and destination are required")
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -3
+			}
+
+			info, err := t.filesystem.Stat(ctx, src)
+			if err != nil || info == nil {
+				errMsg := []byte(fmt.Sprintf("Error: Source not found: %s", src))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -4
+			}
+
+			if info.IsDir {
+				cleanSrc := filepath.Clean(src)
+				cleanDst := filepath.Clean(dst)
+				if cleanDst == cleanSrc || strings.HasPrefix(cleanDst, cleanSrc+string(os.PathSeparator)) {
+					errMsg := []byte("Error: Cannot move a directory into itself")
+					if uint32(len(errMsg)) <= resultCap {
+						memory.Write(resultPtr, errMsg)
+					}
+					return -5
+				}
+			} else if t.session != nil && !t.session.WasFileRead(src) {
+				errMsg := []byte(fmt.Sprintf("Error: File %s was not read in this session", src))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -6
+			}
+
+			parent := filepath.Dir(dst)
+			exists, err := t.filesystem.Exists(ctx, parent)
+			if err != nil || !exists {
+				errMsg := []byte(fmt.Sprintf("Error: Destination parent not found: %s", parent))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -7
+			}
+
+			if err := t.filesystem.Move(ctx, src, dst); err != nil {
+				errMsg := []byte(fmt.Sprintf("Error: Failed to move: %v", err))
+				if uint32(len(errMsg)) <= resultCap {
+					memory.Write(resultPtr, errMsg)
+				}
+				return -8
+			}
+
+			if t.session != nil {
+				t.session.TrackFileModified(src)
+				t.session.TrackFileModified(dst)
+			}
+
+			callTracker.record("move", fmt.Sprintf("%s -> %s", src, dst))
+
+			return 0
+		}).
+		Export("move")
 
 	// list_files(pattern_ptr, pattern_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().

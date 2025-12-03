@@ -47,7 +47,7 @@ type SlashCommand struct {
 }
 
 // GetAvailableCommands returns the list of available slash commands
-func (a *StatCodeAIAgent) GetAvailableCommands() []acp.AvailableCommand {
+func (a *ScriptschnellAIAgent) GetAvailableCommands() []acp.AvailableCommand {
 	commands := []acp.AvailableCommand{
 		{
 			Name:        "init",
@@ -85,7 +85,7 @@ func (a *StatCodeAIAgent) GetAvailableCommands() []acp.AvailableCommand {
 }
 
 // parseSlashCommand parses a prompt to detect and extract slash commands
-func (a *StatCodeAIAgent) parseSlashCommand(promptText string) (command, args string, isCommand bool) {
+func (a *ScriptschnellAIAgent) parseSlashCommand(promptText string) (command, args string, isCommand bool) {
 	// Trim leading whitespace
 	original := promptText
 	promptText = strings.TrimSpace(promptText)
@@ -114,7 +114,7 @@ func (a *StatCodeAIAgent) parseSlashCommand(promptText string) (command, args st
 }
 
 // executeSlashCommand executes a slash command and returns the response
-func (a *StatCodeAIAgent) executeSlashCommand(sessionID, command, args string) (string, error) {
+func (a *ScriptschnellAIAgent) executeSlashCommand(sessionID, command, args string) (string, error) {
 	logger.Debug("executeSlashCommand[%s]: command=%q args=%q", sessionID, command, truncateForLog(args))
 
 	// Get the session
@@ -157,7 +157,7 @@ func (a *StatCodeAIAgent) executeSlashCommand(sessionID, command, args string) (
 }
 
 // handleInitCommand handles the /init command
-func (a *StatCodeAIAgent) handleInitCommand(sessionID, args string) (string, error) {
+func (a *ScriptschnellAIAgent) handleInitCommand(sessionID, args string) (string, error) {
 	logger.Debug("handleInitCommand[%s]: args=%q", sessionID, truncateForLog(args))
 
 	response := "🚀 Initializing project...\n\n"
@@ -188,7 +188,7 @@ func (a *StatCodeAIAgent) handleInitCommand(sessionID, args string) (string, err
 }
 
 // handleHelpCommand handles the /help command
-func (a *StatCodeAIAgent) handleHelpCommand() string {
+func (a *ScriptschnellAIAgent) handleHelpCommand() string {
 	logger.Debug("handleHelpCommand: generating command list")
 
 	commands := a.GetAvailableCommands()
@@ -211,7 +211,7 @@ func (a *StatCodeAIAgent) handleHelpCommand() string {
 }
 
 // handleStatusCommand handles the /status command
-func (a *StatCodeAIAgent) handleStatusCommand(session *statcodeSession) string {
+func (a *ScriptschnellAIAgent) handleStatusCommand(session *statcodeSession) string {
 	logger.Debug("handleStatusCommand[%s]: rendering status", session.sessionID)
 
 	response := "📊 Current Status:\n\n"
@@ -240,7 +240,7 @@ func (a *StatCodeAIAgent) handleStatusCommand(session *statcodeSession) string {
 }
 
 // handleClearCommand handles the /clear command
-func (a *StatCodeAIAgent) handleClearCommand(session *statcodeSession) string {
+func (a *ScriptschnellAIAgent) handleClearCommand(session *statcodeSession) string {
 	if session == nil || session.orchestrator == nil {
 		if session != nil {
 			logger.Warn("handleClearCommand[%s]: session or orchestrator missing", session.sessionID)
@@ -264,7 +264,7 @@ func (a *StatCodeAIAgent) handleClearCommand(session *statcodeSession) string {
 }
 
 // handleContextCommand handles the /context command
-func (a *StatCodeAIAgent) handleContextCommand(args string) (string, error) {
+func (a *ScriptschnellAIAgent) handleContextCommand(args string) (string, error) {
 	logger.Debug("handleContextCommand: args=%q", truncateForLog(args))
 
 	args = strings.TrimSpace(args)
@@ -295,7 +295,7 @@ func (a *StatCodeAIAgent) handleContextCommand(args string) (string, error) {
 	}
 }
 
-func (a *StatCodeAIAgent) contextHelp() string {
+func (a *ScriptschnellAIAgent) contextHelp() string {
 	return `📁 Context Directory Commands:
 
 /context list
@@ -319,7 +319,7 @@ Examples:
 `
 }
 
-func (a *StatCodeAIAgent) handleContextList() (string, error) {
+func (a *ScriptschnellAIAgent) handleContextList() (string, error) {
 	contextDirs := a.config.GetContextDirectories(a.config.WorkingDir)
 	if len(contextDirs) == 0 {
 		return "No context directories configured for this workspace.\n\nUse /context add <directory> to add context directories.", nil
@@ -346,7 +346,7 @@ func (a *StatCodeAIAgent) handleContextList() (string, error) {
 	return sb.String(), nil
 }
 
-func (a *StatCodeAIAgent) handleContextAdd(dir string) (string, error) {
+func (a *ScriptschnellAIAgent) handleContextAdd(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return "", fmt.Errorf("directory path cannot be empty")
@@ -365,7 +365,7 @@ func (a *StatCodeAIAgent) handleContextAdd(dir string) (string, error) {
 	return fmt.Sprintf("✓ Added context directory: %s\n\nThe AI can now search and read files in this directory using:\n- search_context_files\n- grep_context_files\n- read_context_file", dir), nil
 }
 
-func (a *StatCodeAIAgent) handleContextRemove(dir string) (string, error) {
+func (a *ScriptschnellAIAgent) handleContextRemove(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return "", fmt.Errorf("directory path cannot be empty")
@@ -387,8 +387,8 @@ func (a *StatCodeAIAgent) handleContextRemove(dir string) (string, error) {
 	return fmt.Sprintf("✓ Removed context directory: %s", dir), nil
 }
 
-// StatCodeAIAgent implements the acp.Agent interface to expose statcode-ai functionality via ACP
-type StatCodeAIAgent struct {
+// ScriptschnellAIAgent implements the acp.Agent interface to expose statcode-ai functionality via ACP
+type ScriptschnellAIAgent struct {
 	conn         *acp.AgentSideConnection
 	config       *config.Config
 	providerMgr  *provider.Manager
@@ -411,7 +411,7 @@ type statcodeSession struct {
 	mu            sync.Mutex
 }
 
-func (a *StatCodeAIAgent) rememberToolContext(session *statcodeSession, toolID string, params map[string]interface{}, locations []acp.ToolCallLocation) {
+func (a *ScriptschnellAIAgent) rememberToolContext(session *statcodeSession, toolID string, params map[string]interface{}, locations []acp.ToolCallLocation) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
@@ -428,7 +428,7 @@ func (a *StatCodeAIAgent) rememberToolContext(session *statcodeSession, toolID s
 	}
 }
 
-func (a *StatCodeAIAgent) getToolLocations(session *statcodeSession, toolID string) []acp.ToolCallLocation {
+func (a *ScriptschnellAIAgent) getToolLocations(session *statcodeSession, toolID string) []acp.ToolCallLocation {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
@@ -442,7 +442,7 @@ func (a *StatCodeAIAgent) getToolLocations(session *statcodeSession, toolID stri
 	return out
 }
 
-func (a *StatCodeAIAgent) popToolContext(session *statcodeSession, toolID string) (map[string]interface{}, []acp.ToolCallLocation) {
+func (a *ScriptschnellAIAgent) popToolContext(session *statcodeSession, toolID string) (map[string]interface{}, []acp.ToolCallLocation) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
@@ -456,26 +456,26 @@ func (a *StatCodeAIAgent) popToolContext(session *statcodeSession, toolID string
 }
 
 var (
-	_ acp.Agent             = (*StatCodeAIAgent)(nil)
-	_ acp.AgentLoader       = (*StatCodeAIAgent)(nil)
-	_ acp.AgentExperimental = (*StatCodeAIAgent)(nil)
+	_ acp.Agent             = (*ScriptschnellAIAgent)(nil)
+	_ acp.AgentLoader       = (*ScriptschnellAIAgent)(nil)
+	_ acp.AgentExperimental = (*ScriptschnellAIAgent)(nil)
 )
 
-// NewStatCodeAIAgent creates a new ACP agent that wraps statcode-ai functionality
-func NewStatCodeAIAgent(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager) (*StatCodeAIAgent, error) {
-	logger.Info("Creating StatCode AI ACP Agent")
-	logger.Debug("NewStatCodeAIAgent: workingDir=%q providerConfigured=%t", cfg.WorkingDir, providerMgr != nil)
+// NewScriptschnellAIAgent creates a new ACP agent that wraps statcode-ai functionality
+func NewScriptschnellAIAgent(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager) (*ScriptschnellAIAgent, error) {
+	logger.Info("Creating scriptschnell ACP Agent")
+	logger.Debug("NewScriptschnellAIAgent: workingDir=%q providerConfigured=%t", cfg.WorkingDir, providerMgr != nil)
 
 	// Create orchestrator for ACP mode (non-interactive)
 	orch, err := orchestrator.NewOrchestrator(cfg, providerMgr, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
 	}
-	logger.Debug("NewStatCodeAIAgent: base orchestrator created (%T)", orch)
+	logger.Debug("NewScriptschnellAIAgent: base orchestrator created (%T)", orch)
 
 	agentCtx, agentCancel := context.WithCancel(ctx)
 
-	agent := &StatCodeAIAgent{
+	agent := &ScriptschnellAIAgent{
 		config:       cfg,
 		providerMgr:  providerMgr,
 		orchestrator: orch,
@@ -489,13 +489,13 @@ func NewStatCodeAIAgent(ctx context.Context, cfg *config.Config, providerMgr *pr
 }
 
 // SetAgentConnection implements acp.AgentConnAware to receive the connection after construction
-func (a *StatCodeAIAgent) SetAgentConnection(conn *acp.AgentSideConnection) {
+func (a *ScriptschnellAIAgent) SetAgentConnection(conn *acp.AgentSideConnection) {
 	logger.Debug("SetAgentConnection: binding ACP connection %p", conn)
 	a.conn = conn
 }
 
 // Initialize implements acp.Agent
-func (a *StatCodeAIAgent) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
+func (a *ScriptschnellAIAgent) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
 	logger.Info("Initializing ACP agent connection")
 	logger.Debug("Initialize: client meta=%+v", params.ClientInfo)
 
@@ -526,7 +526,7 @@ func (a *StatCodeAIAgent) Initialize(ctx context.Context, params acp.InitializeR
 }
 
 // createTodoPlanUpdateCallback creates a callback function that sends todo plan updates via ACP
-func (a *StatCodeAIAgent) createTodoPlanUpdateCallback(sessionID string) tools.TodoChangeCallback {
+func (a *ScriptschnellAIAgent) createTodoPlanUpdateCallback(sessionID string) tools.TodoChangeCallback {
 	return func(todos *tools.TodoList) {
 		// Format the plan as text
 		planText := tools.FormatTodoPlanAsText(todos)
@@ -548,7 +548,7 @@ func (a *StatCodeAIAgent) createTodoPlanUpdateCallback(sessionID string) tools.T
 }
 
 // NewSession implements acp.Agent
-func (a *StatCodeAIAgent) NewSession(ctx context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *ScriptschnellAIAgent) NewSession(ctx context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sessionID := fmt.Sprintf("statcode_%d", time.Now().UnixNano())
 
 	logger.Info("Creating new ACP session: %s", sessionID)
@@ -650,19 +650,19 @@ func (a *StatCodeAIAgent) NewSession(ctx context.Context, params acp.NewSessionR
 }
 
 // Authenticate implements acp.Agent
-func (a *StatCodeAIAgent) Authenticate(ctx context.Context, params acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
+func (a *ScriptschnellAIAgent) Authenticate(ctx context.Context, params acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
 	// No authentication required for now
 	return acp.AuthenticateResponse{}, nil
 }
 
 // LoadSession implements acp.Agent
-func (a *StatCodeAIAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+func (a *ScriptschnellAIAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	// Session loading not supported
 	return acp.LoadSessionResponse{}, fmt.Errorf("session loading not supported")
 }
 
 // Cancel implements acp.Agent
-func (a *StatCodeAIAgent) Cancel(ctx context.Context, params acp.CancelNotification) error {
+func (a *ScriptschnellAIAgent) Cancel(ctx context.Context, params acp.CancelNotification) error {
 	sessionID := string(params.SessionId)
 	logger.Info("Cancelling ACP session: %s", sessionID)
 	logger.Debug("Cancel[%s]: request=%+v", sessionID, params)
@@ -693,7 +693,7 @@ func (a *StatCodeAIAgent) Cancel(ctx context.Context, params acp.CancelNotificat
 }
 
 // Prompt implements acp.Agent - this is the main method where we process user prompts
-func (a *StatCodeAIAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
+func (a *ScriptschnellAIAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
 	sessionID := string(params.SessionId)
 	logger.Info("Processing prompt for ACP session: %s", sessionID)
 	logger.Debug("Prompt[%s]: received %d blocks", sessionID, len(params.Prompt))
@@ -795,17 +795,17 @@ func (a *StatCodeAIAgent) Prompt(ctx context.Context, params acp.PromptRequest) 
 }
 
 // SetSessionMode implements acp.Agent
-func (a *StatCodeAIAgent) SetSessionMode(ctx context.Context, params acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+func (a *ScriptschnellAIAgent) SetSessionMode(ctx context.Context, params acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	return acp.SetSessionModeResponse{}, nil
 }
 
 // SetSessionModel implements acp.AgentExperimental
-func (a *StatCodeAIAgent) SetSessionModel(ctx context.Context, params acp.SetSessionModelRequest) (acp.SetSessionModelResponse, error) {
+func (a *ScriptschnellAIAgent) SetSessionModel(ctx context.Context, params acp.SetSessionModelRequest) (acp.SetSessionModelResponse, error) {
 	return acp.SetSessionModelResponse{}, nil
 }
 
 // processPromptWithStreaming processes a prompt using the orchestrator and streams updates via ACP
-func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, promptText string) error {
+func (a *ScriptschnellAIAgent) processPromptWithStreaming(session *statcodeSession, promptText string) error {
 	logger.Debug("processPromptWithStreaming[%s]: prompt=%q", session.sessionID, truncateForLog(promptText))
 
 	// Buffer for handling line boundaries properly
@@ -1005,7 +1005,7 @@ func (a *StatCodeAIAgent) processPromptWithStreaming(session *statcodeSession, p
 }
 
 // handleACPAuthorization handles permission requests via ACP
-func (a *StatCodeAIAgent) handleACPAuthorization(session *statcodeSession, toolName string, params map[string]interface{}, reason string) (bool, error) {
+func (a *ScriptschnellAIAgent) handleACPAuthorization(session *statcodeSession, toolName string, params map[string]interface{}, reason string) (bool, error) {
 	// Request permission from the client
 	logger.Debug("handleACPAuthorization[%s]: requesting permission for tool=%s", session.sessionID, toolName)
 	permResp, err := a.conn.RequestPermission(session.promptCtx, acp.RequestPermissionRequest{
@@ -1053,7 +1053,7 @@ func (a *StatCodeAIAgent) handleACPAuthorization(session *statcodeSession, toolN
 }
 
 // getToolKind determines the appropriate tool kind based on tool name and parameters
-func (a *StatCodeAIAgent) getToolKind(toolName string, parameters map[string]interface{}) acp.ToolKind {
+func (a *ScriptschnellAIAgent) getToolKind(toolName string, parameters map[string]interface{}) acp.ToolKind {
 	switch toolName {
 	case "read_file", "read_file_summarized":
 		return acp.ToolKindRead
@@ -1077,7 +1077,7 @@ func (a *StatCodeAIAgent) getToolKind(toolName string, parameters map[string]int
 }
 
 // extractLocations extracts file locations from tool parameters
-func (a *StatCodeAIAgent) extractLocations(toolName string, parameters map[string]interface{}) []acp.ToolCallLocation {
+func (a *ScriptschnellAIAgent) extractLocations(toolName string, parameters map[string]interface{}) []acp.ToolCallLocation {
 	var locations []acp.ToolCallLocation
 
 	switch toolName {
@@ -1111,7 +1111,7 @@ func (a *StatCodeAIAgent) extractLocations(toolName string, parameters map[strin
 }
 
 // shouldCreateTerminal determines if a shell command should create a terminal
-func (a *StatCodeAIAgent) shouldCreateTerminal(toolName string, parameters map[string]interface{}) bool {
+func (a *ScriptschnellAIAgent) shouldCreateTerminal(toolName string, parameters map[string]interface{}) bool {
 	if toolName != "shell" && toolName != "go_sandbox" {
 		return false
 	}
@@ -1154,7 +1154,7 @@ func (a *StatCodeAIAgent) shouldCreateTerminal(toolName string, parameters map[s
 }
 
 // createTerminalForToolCall creates a terminal for the given tool call if appropriate
-func (a *StatCodeAIAgent) createTerminalForToolCall(session *statcodeSession, toolName, toolID string, parameters map[string]interface{}) (string, error) {
+func (a *ScriptschnellAIAgent) createTerminalForToolCall(session *statcodeSession, toolName, toolID string, parameters map[string]interface{}) (string, error) {
 	if !a.shouldCreateTerminal(toolName, parameters) {
 		return "", nil
 	}
@@ -1177,7 +1177,7 @@ func (a *StatCodeAIAgent) createTerminalForToolCall(session *statcodeSession, to
 }
 
 // handleToolCallStart handles the start of a tool call
-func (a *StatCodeAIAgent) handleToolCallStart(session *statcodeSession, toolName, toolID string, parameters map[string]interface{}) error {
+func (a *ScriptschnellAIAgent) handleToolCallStart(session *statcodeSession, toolName, toolID string, parameters map[string]interface{}) error {
 	toolKind := a.getToolKind(toolName, parameters)
 	locations := a.extractLocations(toolName, parameters)
 	a.rememberToolContext(session, toolID, parameters, locations)
@@ -1264,7 +1264,7 @@ func (a *StatCodeAIAgent) handleToolCallStart(session *statcodeSession, toolName
 }
 
 // formatToolResultContent formats the tool result into appropriate ACP content types
-func (a *StatCodeAIAgent) formatToolResultContent(toolName string, result string, params map[string]interface{}) []acp.ToolCallContent {
+func (a *ScriptschnellAIAgent) formatToolResultContent(toolName string, result string, params map[string]interface{}) []acp.ToolCallContent {
 	if strings.TrimSpace(result) == "" {
 		return nil
 	}
@@ -1279,7 +1279,7 @@ func (a *StatCodeAIAgent) formatToolResultContent(toolName string, result string
 	return []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(result))}
 }
 
-func (a *StatCodeAIAgent) parseDiffContent(diffText string, params map[string]interface{}) []acp.ToolCallContent {
+func (a *ScriptschnellAIAgent) parseDiffContent(diffText string, params map[string]interface{}) []acp.ToolCallContent {
 	fileDiffs, err := godiff.ParseMultiFileDiff([]byte(diffText))
 	if err != nil {
 		return nil
@@ -1317,7 +1317,7 @@ func (a *StatCodeAIAgent) parseDiffContent(diffText string, params map[string]in
 	return contents
 }
 
-func (a *StatCodeAIAgent) resolveDiffPath(fd *godiff.FileDiff, params map[string]interface{}) string {
+func (a *ScriptschnellAIAgent) resolveDiffPath(fd *godiff.FileDiff, params map[string]interface{}) string {
 	if fd == nil {
 		return ""
 	}
@@ -1349,7 +1349,7 @@ func (a *StatCodeAIAgent) resolveDiffPath(fd *godiff.FileDiff, params map[string
 }
 
 // sendToolCallProgress sends intermediate progress updates for long-running tools
-func (a *StatCodeAIAgent) sendToolCallProgress(session *statcodeSession, toolID string, message string) error {
+func (a *ScriptschnellAIAgent) sendToolCallProgress(session *statcodeSession, toolID string, message string) error {
 	opts := []acp.ToolCallUpdateOpt{
 		acp.WithUpdateContent([]acp.ToolCallContent{
 			acp.ToolContent(acp.TextBlock(message)),
@@ -1374,7 +1374,7 @@ func (a *StatCodeAIAgent) sendToolCallProgress(session *statcodeSession, toolID 
 }
 
 // handleToolCallResult handles the completion of a tool call
-func (a *StatCodeAIAgent) handleToolCallResult(session *statcodeSession, toolName, toolID, result, errorMsg string) error {
+func (a *ScriptschnellAIAgent) handleToolCallResult(session *statcodeSession, toolName, toolID, result, errorMsg string) error {
 	params, locations := a.popToolContext(session, toolID)
 
 	status := acp.ToolCallStatusCompleted
@@ -1418,7 +1418,7 @@ func (a *StatCodeAIAgent) handleToolCallResult(session *statcodeSession, toolNam
 }
 
 // supportsFilesystemProtocol checks if the client supports the filesystem protocol
-func (a *StatCodeAIAgent) supportsFilesystemProtocol() bool {
+func (a *ScriptschnellAIAgent) supportsFilesystemProtocol() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1430,7 +1430,7 @@ func (a *StatCodeAIAgent) supportsFilesystemProtocol() bool {
 }
 
 // supportsTerminalProtocol checks if the client supports terminal methods
-func (a *StatCodeAIAgent) supportsTerminalProtocol() bool {
+func (a *ScriptschnellAIAgent) supportsTerminalProtocol() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1442,7 +1442,7 @@ func (a *StatCodeAIAgent) supportsTerminalProtocol() bool {
 }
 
 // createFilesystemForSession creates a filesystem implementation for the session
-func (a *StatCodeAIAgent) createFilesystemForSession(sessionID string, clientSupportsFS bool) (fs.FileSystem, error) {
+func (a *ScriptschnellAIAgent) createFilesystemForSession(sessionID string, clientSupportsFS bool) (fs.FileSystem, error) {
 	if clientSupportsFS {
 		// Create a filesystem that uses the client's filesystem protocol
 		return NewACPFileSystem(a.conn, sessionID, a.config.WorkingDir), nil
@@ -1457,7 +1457,7 @@ func (a *StatCodeAIAgent) createFilesystemForSession(sessionID string, clientSup
 }
 
 // Close cleans up the agent and all its sessions
-func (a *StatCodeAIAgent) Close() error {
+func (a *ScriptschnellAIAgent) Close() error {
 	logger.Info("Closing ACP agent")
 
 	a.cancel()
@@ -1488,9 +1488,9 @@ func (a *StatCodeAIAgent) Close() error {
 
 // RunACPAgent starts an ACP agent server using stdio
 func RunACPAgent(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager) error {
-	logger.Info("Starting StatCode AI ACP Agent")
+	logger.Info("Starting scriptschnell ACP Agent")
 
-	agent, err := NewStatCodeAIAgent(ctx, cfg, providerMgr)
+	agent, err := NewScriptschnellAIAgent(ctx, cfg, providerMgr)
 	if err != nil {
 		return fmt.Errorf("failed to create ACP agent: %w", err)
 	}

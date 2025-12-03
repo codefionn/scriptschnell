@@ -29,14 +29,14 @@ func newNoopConnection(t *testing.T, agent acp.Agent) *acp.AgentSideConnection {
 	return acp.NewAgentSideConnection(agent, io.Discard, strings.NewReader(""))
 }
 
-// newTestAgent builds a StatCodeAIAgent with a discard ACP connection.
-func newTestAgent(t *testing.T) *StatCodeAIAgent {
+// newTestAgent builds a ScriptschnellAIAgent with a discard ACP connection.
+func newTestAgent(t *testing.T) *ScriptschnellAIAgent {
 	t.Helper()
 	cfg := &config.Config{WorkingDir: t.TempDir()}
 	mgr := newTestProviderManager(t)
-	agent, err := NewStatCodeAIAgent(context.Background(), cfg, mgr)
+	agent, err := NewScriptschnellAIAgent(context.Background(), cfg, mgr)
 	if err != nil {
-		t.Fatalf("NewStatCodeAIAgent returned error: %v", err)
+		t.Fatalf("NewScriptschnellAIAgent returned error: %v", err)
 	}
 	conn := newNoopConnection(t, agent)
 	agent.SetAgentConnection(conn)

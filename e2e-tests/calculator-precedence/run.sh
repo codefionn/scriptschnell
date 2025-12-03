@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 source ../lib.sh
 
 # Print test header
-print_header "StatCode AI - Calculator CLI E2E Test" "OPERATOR PRECEDENCE UPGRADE SCENARIO"
+print_header "scriptschnell - Calculator CLI E2E Test" "OPERATOR PRECEDENCE UPGRADE SCENARIO"
 
 # Initialize environment (API keys, workspace, Docker cleanup)
 init_e2e_test "$@"

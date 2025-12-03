@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 source ../lib.sh
 
 # Print test header
-print_header "StatCode AI - Calculator CLI E2E Test" "AGENTIC VERSION - Full Autonomy Mode"
+print_header "scriptschnell - Calculator CLI E2E Test" "AGENTIC VERSION - Full Autonomy Mode"
 
 # Initialize environment (API keys, workspace, Docker cleanup)
 init_e2e_test "$@"

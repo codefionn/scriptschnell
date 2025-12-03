@@ -181,7 +181,7 @@ fi
 echo ""
 
 # Print master header
-print_header "StatCode AI - E2E Test Suite" "Running all tests with $PROVIDER provider"
+print_header "scriptschnell - E2E Test Suite" "Running all tests with $PROVIDER provider"
 
 # Track test results
 PASSED_TESTS=()

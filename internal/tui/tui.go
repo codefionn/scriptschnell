@@ -1284,7 +1284,7 @@ func (m *Model) View() string {
 	var sb strings.Builder
 
 	// Title
-	title := titleStyle.Render("StatCode AI - AI-Powered Coding Assistant")
+	title := titleStyle.Render("scriptschnell - AI-Powered Coding Assistant")
 	status := statusStyle.Render(fmt.Sprintf("Model: %s | Ctrl+X: Commands | Ctrl+B: Background shell | ESC: Stop | Ctrl+D/Ctrl+C×2: Quit", m.currentModel))
 
 	sb.WriteString(title)

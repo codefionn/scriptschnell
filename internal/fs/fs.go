@@ -42,6 +42,8 @@ type FileSystem interface {
 	DeleteAll(ctx context.Context, path string) error
 	// MkdirAll creates a directory and all parent directories
 	MkdirAll(ctx context.Context, path string, perm os.FileMode) error
+	// Move renames or moves a file or directory to a new path
+	Move(ctx context.Context, src, dst string) error
 }
 
 // CachedFS is a filesystem implementation with directory listing cache
@@ -329,6 +331,25 @@ func (cfs *CachedFS) MkdirAll(ctx context.Context, path string, perm os.FileMode
 	return os.MkdirAll(absPath, perm)
 }
 
+func (cfs *CachedFS) Move(ctx context.Context, src, dst string) error {
+	absSrc := cfs.absPath(src)
+	absDst := cfs.absPath(dst)
+
+	// Ensure destination parent exists to match typical mv behavior
+	if err := os.MkdirAll(filepath.Dir(absDst), 0755); err != nil {
+		return err
+	}
+
+	if err := os.Rename(absSrc, absDst); err != nil {
+		return err
+	}
+
+	// Invalidate caches for source and destination parents
+	cfs.InvalidateDirCache(filepath.Dir(src))
+	cfs.InvalidateDirCache(filepath.Dir(dst))
+	return nil
+}
+
 // MockFS is a mock filesystem for testing
 type MockFS struct {
 	files map[string][]byte
@@ -339,7 +360,7 @@ type MockFS struct {
 func NewMockFS() *MockFS {
 	return &MockFS{
 		files: make(map[string][]byte),
-		dirs:  make(map[string]bool),
+		dirs:  map[string]bool{".": true},
 	}
 }
 
@@ -547,7 +568,82 @@ func (mfs *MockFS) DeleteAll(ctx context.Context, path string) error {
 }
 
 func (mfs *MockFS) MkdirAll(ctx context.Context, path string, perm os.FileMode) error {
+	mfs.mu.Lock()
+	defer mfs.mu.Unlock()
+
+	if path == "" {
+		path = "."
+	}
+
+	dir := path
+	for {
+		mfs.dirs[dir] = true
+		parent := filepath.Dir(dir)
+		if parent == dir || parent == "." || parent == "" {
+			mfs.dirs["."] = true
+			break
+		}
+		dir = parent
+	}
+
 	return nil
+}
+
+func (mfs *MockFS) Move(ctx context.Context, src, dst string) error {
+	mfs.mu.Lock()
+	defer mfs.mu.Unlock()
+
+	// Helper to ensure destination directories exist
+	ensureDirs := func(path string) {
+		dir := filepath.Dir(path)
+		for dir != "." && dir != "/" && dir != "" {
+			mfs.dirs[dir] = true
+			dir = filepath.Dir(dir)
+		}
+		mfs.dirs["."] = true
+	}
+
+	// Move file if it exists
+	if data, ok := mfs.files[src]; ok {
+		delete(mfs.files, src)
+		mfs.files[dst] = data
+		ensureDirs(dst)
+		return nil
+	}
+
+	// Move directory (and all children) if it exists
+	if mfs.dirs[src] {
+		newDirs := make(map[string]bool)
+		for dirPath := range mfs.dirs {
+			if dirPath == src || strings.HasPrefix(dirPath, src+"/") {
+				suffix := strings.TrimPrefix(dirPath, src)
+				suffix = strings.TrimPrefix(suffix, "/")
+				newPath := filepath.Join(dst, suffix)
+				newDirs[newPath] = true
+			} else {
+				newDirs[dirPath] = true
+			}
+		}
+
+		newFiles := make(map[string][]byte)
+		for filePath, data := range mfs.files {
+			if filePath == src || strings.HasPrefix(filePath, src+"/") {
+				suffix := strings.TrimPrefix(filePath, src)
+				suffix = strings.TrimPrefix(suffix, "/")
+				newPath := filepath.Join(dst, suffix)
+				newFiles[newPath] = data
+			} else {
+				newFiles[filePath] = data
+			}
+		}
+
+		mfs.files = newFiles
+		mfs.dirs = newDirs
+		ensureDirs(dst)
+		return nil
+	}
+
+	return os.ErrNotExist
 }
 
 // Helper function to copy a file

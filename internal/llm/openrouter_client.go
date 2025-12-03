@@ -15,7 +15,7 @@ import (
 const (
 	openRouterAPIBaseURL = "https://openrouter.ai/api/v1"
 	openRouterReferer    = "https://github.com/codefionn/scriptschnell"
-	openRouterAppTitle   = "StatCode AI"
+	openRouterAppTitle   = "scriptschnell"
 )
 
 // OpenRouterClient implements the Client interface using the native OpenRouter API.

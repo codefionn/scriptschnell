@@ -36,7 +36,7 @@ export ANTHROPIC_API_KEY="sk-ant-xxxxx"
 
 ## Supported Providers
 
-The master script supports all StatCode AI providers:
+The master script supports all scriptschnell providers:
 
 | Provider | Example Command | Notes |
 |----------|----------------|-------|
@@ -128,7 +128,7 @@ The script provides detailed output:
 
 ```
 ==========================================
-StatCode AI - E2E Test Suite
+scriptschnell - E2E Test Suite
 Running all tests with anthropic provider
 ==========================================
 
@@ -187,7 +187,7 @@ Passed tests:
 
 ### Multi-Provider Support (Latest)
 
-The library and master script now support **all 9 StatCode AI providers**:
+The library and master script now support **all 9 scriptschnell providers**:
 - All provider API keys are recognized by `check_api_keys()`
 - All provider keys are displayed by `display_api_keys()`
 - Master script ensures provider isolation (unsets conflicting keys)
@@ -282,7 +282,7 @@ cd "$(dirname "$0")"
 source ../lib.sh
 
 # Print header
-print_header "StatCode AI - My Test" "Optional subtitle"
+print_header "scriptschnell - My Test" "Optional subtitle"
 
 # Initialize (handles API keys, workspace, Docker cleanup)
 init_e2e_test "$@"

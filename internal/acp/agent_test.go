@@ -11,12 +11,12 @@ import (
 	"github.com/coder/acp-go-sdk"
 )
 
-// TestNewStatCodeAIAgent tests the creation of a new ACP agent.
-func TestNewStatCodeAIAgent(t *testing.T) {
+// TestNewScriptschnellAIAgent tests the creation of a new ACP agent.
+func TestNewScriptschnellAIAgent(t *testing.T) {
 	agent := newTestAgent(t)
 
 	if agent == nil {
-		t.Fatal("NewStatCodeAIAgent returned nil agent")
+		t.Fatal("NewScriptschnellAIAgent returned nil agent")
 	}
 
 	if agent.config == nil || agent.config.WorkingDir == "" {
@@ -74,7 +74,7 @@ func TestInitialize(t *testing.T) {
 
 // TestSupportsFilesystemProtocol tests filesystem protocol detection.
 func TestSupportsFilesystemProtocol(t *testing.T) {
-	agent := &StatCodeAIAgent{}
+	agent := &ScriptschnellAIAgent{}
 
 	// Test with nil capabilities
 	if agent.supportsFilesystemProtocol() {

@@ -192,6 +192,24 @@ func (afs *ACPFileSystem) MkdirAll(ctx context.Context, path string, perm os.Fil
 	return afs.fallbackFS.MkdirAll(ctx, path, perm)
 }
 
+// Move implements fs.FileSystem - uses fallback filesystem behavior
+func (afs *ACPFileSystem) Move(ctx context.Context, src, dst string) error {
+	resolvedSrc, useFallbackSrc, err := afs.resolvePath(src)
+	if err != nil {
+		return err
+	}
+	resolvedDst, useFallbackDst, err := afs.resolvePath(dst)
+	if err != nil {
+		return err
+	}
+
+	if useFallbackSrc || useFallbackDst {
+		return afs.fallbackFS.Move(ctx, resolvedSrc, resolvedDst)
+	}
+
+	return afs.fallbackFS.Move(ctx, resolvedSrc, resolvedDst)
+}
+
 // Close implements fs.FileSystem - no-op for ACP
 func (afs *ACPFileSystem) Close() error {
 	// No cleanup needed for ACP filesystem

@@ -42,7 +42,7 @@ When running in ACP mode, scriptschnell communicates via stdio using the ACP pro
 ### ACP Features
 
 - **Streaming Responses**: Real-time text generation as the LLM processes your request
-- **Tool Integration**: All StatCode AI tools (file operations, shell commands, web search, etc.) are available via ACP
+- **Tool Integration**: All scriptschnell tools (file operations, shell commands, web search, etc.) are available via ACP
 - **Permission Management**: Secure control over sensitive operations through the client's authorization UI
 - **Session Management**: Persistent conversation context across multiple interactions
 - **Error Handling**: Comprehensive error reporting and recovery

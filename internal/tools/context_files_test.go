@@ -83,7 +83,6 @@ func (m *mockContextFS) ListDir(ctx context.Context, path string) ([]*fs.FileInf
 	return nil, os.ErrNotExist
 }
 
-
 func newTestSession() *session.Session {
 	return &session.Session{
 		WorkingDir: "/test/workspace",
@@ -102,6 +101,22 @@ func (m *mockContextFS) DeleteAll(ctx context.Context, path string) error {
 func (m *mockContextFS) MkdirAll(ctx context.Context, path string, perm os.FileMode) error {
 	m.dirs[path] = []fs.FileInfo{}
 	return nil
+}
+
+func (m *mockContextFS) Move(ctx context.Context, src, dst string) error {
+	if data, ok := m.files[src]; ok {
+		m.files[dst] = data
+		delete(m.files, src)
+		return nil
+	}
+
+	if entries, ok := m.dirs[src]; ok {
+		m.dirs[dst] = entries
+		delete(m.dirs, src)
+		return nil
+	}
+
+	return os.ErrNotExist
 }
 
 func TestDecompressData(t *testing.T) {

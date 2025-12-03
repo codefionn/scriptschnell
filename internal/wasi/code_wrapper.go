@@ -30,7 +30,7 @@ func WrapGoCodeWithAuthorization(userCode string) string {
 	}
 	wrapped.WriteString(")\n\n")
 	wrapped.WriteString(`// STATCODE_AI_INTERNAL: Authorization system
-// This is injected by StatCode AI to enforce network authorization
+// This is injected by scriptschnell to enforce network authorization
 
 //go:wasmimport env authorize_domain
 func authorizeDomainHost(domainPtr *byte, domainLen int32) int32
@@ -479,6 +479,111 @@ func ListFiles(pattern string) string {
 		return result // Error message from host
 	}
 
+	return result
+}
+
+//go:wasmimport env mkdir
+func mkdirHost(pathPtr *byte, pathLen int32, recursive int32, resultPtr *byte, resultCap int32) int32
+
+// Mkdir creates a directory. When recursive is true, parent directories are created as needed.
+// Returns empty string on success, or an error message on failure.
+func Mkdir(path string, recursive bool) string {
+	pathBytes := []byte(path)
+	var pathPtr *byte
+	if len(pathBytes) > 0 {
+		pathPtr = &pathBytes[0]
+	}
+
+	recFlag := int32(0)
+	if recursive {
+		recFlag = 1
+	}
+
+	resultBuffer := make([]byte, 1024)
+	var resultPtr *byte
+	if len(resultBuffer) > 0 {
+		resultPtr = &resultBuffer[0]
+	}
+
+	statusCode := mkdirHost(
+		pathPtr, int32(len(pathBytes)),
+		recFlag,
+		resultPtr, int32(len(resultBuffer)),
+	)
+
+	resultLen := 0
+	for i, b := range resultBuffer {
+		if b == 0 {
+			resultLen = i
+			break
+		}
+	}
+	if resultLen == 0 && len(resultBuffer) > 0 && resultBuffer[0] != 0 {
+		resultLen = len(resultBuffer)
+	}
+
+	result := string(resultBuffer[:resultLen])
+
+	if statusCode == 0 {
+		return ""
+	}
+
+	if result == "" {
+		return fmt.Sprintf("Error: Failed to create directory (status %d)", statusCode)
+	}
+	return result
+}
+
+//go:wasmimport env move
+func moveHost(srcPtr *byte, srcLen int32, dstPtr *byte, dstLen int32, resultPtr *byte, resultCap int32) int32
+
+// Move renames or moves a file or directory to a new path.
+// Returns empty string on success, or an error message on failure.
+func Move(src, dst string) string {
+	srcBytes := []byte(src)
+	var srcPtr *byte
+	if len(srcBytes) > 0 {
+		srcPtr = &srcBytes[0]
+	}
+
+	dstBytes := []byte(dst)
+	var dstPtr *byte
+	if len(dstBytes) > 0 {
+		dstPtr = &dstBytes[0]
+	}
+
+	resultBuffer := make([]byte, 1024)
+	var resultPtr *byte
+	if len(resultBuffer) > 0 {
+		resultPtr = &resultBuffer[0]
+	}
+
+	statusCode := moveHost(
+		srcPtr, int32(len(srcBytes)),
+		dstPtr, int32(len(dstBytes)),
+		resultPtr, int32(len(resultBuffer)),
+	)
+
+	resultLen := 0
+	for i, b := range resultBuffer {
+		if b == 0 {
+			resultLen = i
+			break
+		}
+	}
+	if resultLen == 0 && len(resultBuffer) > 0 && resultBuffer[0] != 0 {
+		resultLen = len(resultBuffer)
+	}
+
+	result := string(resultBuffer[:resultLen])
+
+	if statusCode == 0 {
+		return ""
+	}
+
+	if result == "" {
+		return fmt.Sprintf("Error: Failed to move (status %d)", statusCode)
+	}
 	return result
 }
 

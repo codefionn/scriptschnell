@@ -28,7 +28,7 @@ Test the codebase with `-short` flag to skip slow integration tests.
 
 ## Architecture Overview
 
-StatCode AI is an AI-assisted programming TUI built with Go, using the **actor model** for concurrent, isolated component communication. The application supports both TUI and CLI modes.
+scriptschnell is an AI-assisted programming TUI built with Go, using the **actor model** for concurrent, isolated component communication. The application supports both TUI and CLI modes.
 
 ### Core Architectural Patterns
 

@@ -137,13 +137,13 @@ func Fetch(method, url, body string) (string, int) {
 	return string(responseBuffer[:responseLen]), int(statusCode)
 }
 
-//go:wasmimport env shell
-func shellHost(cmdPtr *byte, cmdLen int32, stdinPtr *byte, stdinLen int32, stdoutPtr *byte, stdoutCap int32, stderrPtr *byte, stderrCap int32) int32
+//go:wasmimport env command
+func commandHost(cmdPtr *byte, cmdLen int32, stdinPtr *byte, stdinLen int32, stdoutPtr *byte, stdoutCap int32, stderrPtr *byte, stderrCap int32) int32
 
-// Shell executes a shell command with stdin input using the host's shell function.
+// Command executes a shell command with stdin input using the host's shell function.
 // The command must be provided as a slice where the first element is the binary
 // and the remaining elements are arguments. Returns stdout, stderr, and exit code.
-func Shell(command []string, stdin string) (stdout string, stderr string, exitCode int) {
+func ExecuteCommand(command []string, stdin string) (stdout string, stderr string, exitCode int) {
 	if len(command) == 0 {
 		return "", "Error: command must include at least one argument", -1
 	}
@@ -180,8 +180,8 @@ func Shell(command []string, stdin string) (stdout string, stderr string, exitCo
 		stderrPtr = &stderrBuffer[0]
 	}
 
-	// Call host shell function
-	exitCodeRaw := shellHost(
+	// Call host command function
+	exitCodeRaw := commandHost(
 		cmdPtr, int32(len(cmdBytes)),
 		stdinPtr, int32(len(stdinBytes)),
 		stdoutPtr, int32(len(stdoutBuffer)),

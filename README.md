@@ -16,6 +16,8 @@ On first run, it will download tinygo (if not in PATH).
 - Two separate LLM models for orchestration and summarization
 - **Agent Client Protocol (ACP) support** for integration with code editors
 
+![Screenshot of scriptschnell after prompting ls](docs/Screenshot_TUI_ls.png)
+
 ## Agent Client Protocol (ACP) Mode
 
 scriptschnell supports the [Agent Client Protocol](https://agentclientprotocol.com/), enabling seamless integration with code editors that support ACP. This allows you to use scriptschnell's capabilities directly within your preferred development environment.

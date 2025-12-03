@@ -372,7 +372,9 @@ func TestReadContextFileTool_CompressedFile(t *testing.T) {
 	original := []byte("NAME\n    test - a test man page\n\nDESCRIPTION\n    This is a test.")
 	var buf bytes.Buffer
 	gzWriter := gzip.NewWriter(&buf)
-	gzWriter.Write(original)
+	if _, err := gzWriter.Write(original); err != nil {
+		t.Fatalf("failed to write to gzip writer: %v", err)
+	}
 	gzWriter.Close()
 
 	filePath := contextDir + "/test.1.gz"

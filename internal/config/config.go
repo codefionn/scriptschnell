@@ -83,21 +83,21 @@ type MCPOpenAIConfig struct {
 
 // Config represents application configuration
 type Config struct {
-	WorkingDir         string          `json:"working_dir"`
-	CacheTTL           int             `json:"cache_ttl_seconds"`
-	MaxCacheEntries    int             `json:"max_cache_entries"`
-	DefaultTimeout     int             `json:"default_timeout_seconds"`
-	TempDir            string          `json:"-"`
-	Temperature        float64         `json:"temperature"`
-	MaxTokens          int             `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
-	ProviderConfigPath string          `json:"-"`
-	DisableAnimations  bool            `json:"disable_animations"`
-	LogLevel           string          `json:"log_level"` // debug, info, warn, error, none
-	LogPath            string          `json:"-"`
-	AuthorizedDomains  map[string]bool `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
-	AuthorizedCommands map[string]bool `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
-	Search             SearchConfig    `json:"search"`                        // Web search provider configuration
-	MCP                MCPConfig       `json:"mcp,omitempty"`                 // Custom MCP server configuration
+	WorkingDir         string              `json:"working_dir"`
+	CacheTTL           int                 `json:"cache_ttl_seconds"`
+	MaxCacheEntries    int                 `json:"max_cache_entries"`
+	DefaultTimeout     int                 `json:"default_timeout_seconds"`
+	TempDir            string              `json:"-"`
+	Temperature        float64             `json:"temperature"`
+	MaxTokens          int                 `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
+	ProviderConfigPath string              `json:"-"`
+	DisableAnimations  bool                `json:"disable_animations"`
+	LogLevel           string              `json:"log_level"` // debug, info, warn, error, none
+	LogPath            string              `json:"-"`
+	AuthorizedDomains  map[string]bool     `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
+	AuthorizedCommands map[string]bool     `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
+	Search             SearchConfig        `json:"search"`                        // Web search provider configuration
+	MCP                MCPConfig           `json:"mcp,omitempty"`                 // Custom MCP server configuration
 	Secrets            SecretsSettings     `json:"secrets,omitempty"`             // Encryption settings
 	EnablePromptCache  bool                `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
 	PromptCacheTTL     string              `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
@@ -177,8 +177,8 @@ func DefaultConfig() *Config {
 			Servers: make(map[string]*MCPServerConfig),
 		},
 		Secrets:            SecretsSettings{},
-		EnablePromptCache:  true,                       // Enable by default for cost savings
-		PromptCacheTTL:     "1h",                       // Default to 1 hour for longer sessions
+		EnablePromptCache:  true,                      // Enable by default for cost savings
+		PromptCacheTTL:     "1h",                      // Default to 1 hour for longer sessions
 		ContextDirectories: make(map[string][]string), // No context directories by default
 	}
 }

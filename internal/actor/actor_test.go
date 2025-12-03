@@ -203,7 +203,9 @@ func TestActorRefSendReceive(t *testing.T) {
 	// Stop the actor
 	stopCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
-	ref.Stop(stopCtx)
+	if err := ref.Stop(stopCtx); err != nil {
+		t.Fatalf("failed to stop actor: %v", err)
+	}
 }
 
 // TestActorRefSendMultiple tests sending multiple messages
@@ -238,7 +240,9 @@ func TestActorRefSendMultiple(t *testing.T) {
 	// Stop the actor
 	stopCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
-	ref.Stop(stopCtx)
+	if err := ref.Stop(stopCtx); err != nil {
+		t.Fatalf("failed to stop actor: %v", err)
+	}
 }
 
 // TestActorRefSendAfterStop tests sending to a stopped actor
@@ -326,7 +330,9 @@ func TestActorRefReceiveError(t *testing.T) {
 	// Stop the actor
 	stopCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
-	ref.Stop(stopCtx)
+	if err := ref.Stop(stopCtx); err != nil {
+		t.Fatalf("failed to stop actor: %v", err)
+	}
 }
 
 // TestActorRefContextCancellation tests context cancellation during message processing
@@ -403,7 +409,9 @@ func TestSystemSpawn(t *testing.T) {
 	}
 
 	// Clean up
-	system.StopAll(context.Background())
+	if err := system.StopAll(context.Background()); err != nil {
+		t.Fatalf("failed to stop all actors: %v", err)
+	}
 }
 
 // TestSystemGet tests retrieving actors from the system
@@ -434,7 +442,9 @@ func TestSystemGet(t *testing.T) {
 	}
 
 	// Clean up
-	system.StopAll(context.Background())
+	if err := system.StopAll(context.Background()); err != nil {
+		t.Fatalf("failed to stop all actors: %v", err)
+	}
 }
 
 // TestSystemStop tests stopping individual actors
@@ -550,7 +560,9 @@ func TestSystemConcurrentAccess(t *testing.T) {
 	// Clean up
 	stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	system.StopAll(stopCtx)
+	if err := system.StopAll(stopCtx); err != nil {
+		t.Fatalf("failed to stop all actors: %v", err)
+	}
 }
 
 // TestActorCommunication tests communication between actors
@@ -599,7 +611,9 @@ func TestActorCommunication(t *testing.T) {
 	// Clean up
 	stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	system.StopAll(stopCtx)
+	if err := system.StopAll(stopCtx); err != nil {
+		t.Fatalf("failed to stop all actors: %v", err)
+	}
 }
 
 // BenchmarkActorSend benchmarks sending messages to an actor
@@ -617,14 +631,18 @@ func BenchmarkActorSend(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ref.Send(msg)
+		if err := ref.Send(msg); err != nil {
+			b.Fatalf("failed to send message: %v", err)
+		}
 	}
 	b.StopTimer()
 
 	// Clean up
 	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	ref.Stop(stopCtx)
+	if err := ref.Stop(stopCtx); err != nil {
+		b.Fatalf("failed to stop actor: %v", err)
+	}
 }
 
 // BenchmarkActorSpawn benchmarks spawning actors
@@ -635,7 +653,11 @@ func BenchmarkActorSpawn(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		system := NewSystem()
 		actor := NewTestActor("bench-actor")
-		system.Spawn(ctx, "bench-actor", actor, 10)
-		system.StopAll(context.Background())
+		if _, err := system.Spawn(ctx, "bench-actor", actor, 10); err != nil {
+			b.Fatalf("failed to spawn actor: %v", err)
+		}
+		if err := system.StopAll(context.Background()); err != nil {
+			b.Fatalf("failed to stop all actors: %v", err)
+		}
 	}
 }

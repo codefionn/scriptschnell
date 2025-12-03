@@ -63,8 +63,10 @@ func NewSearchContextFilesTool(filesystem fs.FileSystem, cfg *config.Config, ses
 	}
 }
 
-func (t *SearchContextFilesTool) Name() string        { return "search_context_files" }
-func (t *SearchContextFilesTool) Description() string { return (&SearchContextFilesToolSpec{}).Description() }
+func (t *SearchContextFilesTool) Name() string { return "search_context_files" }
+func (t *SearchContextFilesTool) Description() string {
+	return (&SearchContextFilesToolSpec{}).Description()
+}
 func (t *SearchContextFilesTool) Parameters() map[string]interface{} {
 	return (&SearchContextFilesToolSpec{}).Parameters()
 }
@@ -414,8 +416,10 @@ func NewGrepContextFilesTool(filesystem fs.FileSystem, cfg *config.Config, sess 
 	}
 }
 
-func (t *GrepContextFilesTool) Name() string        { return "grep_context_files" }
-func (t *GrepContextFilesTool) Description() string { return (&GrepContextFilesToolSpec{}).Description() }
+func (t *GrepContextFilesTool) Name() string { return "grep_context_files" }
+func (t *GrepContextFilesTool) Description() string {
+	return (&GrepContextFilesToolSpec{}).Description()
+}
 func (t *GrepContextFilesTool) Parameters() map[string]interface{} {
 	return (&GrepContextFilesToolSpec{}).Parameters()
 }

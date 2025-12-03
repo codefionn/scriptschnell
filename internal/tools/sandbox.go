@@ -233,7 +233,7 @@ func (t *SandboxTool) Name() string {
 func (t *SandboxTool) Description() string {
 	var b strings.Builder
 	b.WriteString("Execute Go code in a strongly sandboxed WebAssembly environment. ")
-	b.WriteString("Basic standard library packages available (don't use the `os`, `ioutil, `net` package instead use methods provided below). Timeout enforced.\n")
+	b.WriteString("Basic standard library packages available (don't use the `os`, `ioutil, `net`, `exec` package instead use methods provided below). Timeout enforced.\n")
 	b.WriteString("Every program **must** declare `package main`, define `func main()`, and print results (e.g., via `fmt.Println`) so the orchestrator receives the output.\n\n")
 	b.WriteString("Try to reduce the output of shell programs by e.g. only searching and outputting errors.\n\n")
 	b.WriteString("Seven custom functions are automatically available in your code:\n\n")
@@ -1644,7 +1644,19 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 	// Instantiate the module with stdout/stderr configuration
 	config := wazero.NewModuleConfig().
 		WithStdout(outFile).
-		WithStderr(errFile)
+		WithStderr(errFile).
+		WithSysWalltime().
+		WithSysNanotime()
+
+	// Pass all environment variables to the WASM module
+	// This allows sandboxed code to access environment variables via os.Getenv()
+	for _, envVar := range os.Environ() {
+		// Split into key=value
+		parts := strings.SplitN(envVar, "=", 2)
+		if len(parts) == 2 {
+			config = config.WithEnv(parts[0], parts[1])
+		}
+	}
 
 	// Mount our filesystem into the WASM module if available
 	// Wrap it with authorization to enforce read-before-write rules

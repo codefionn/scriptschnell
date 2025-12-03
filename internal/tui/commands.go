@@ -883,9 +883,9 @@ Examples:
 }
 
 func (ch *CommandHandler) handleContextList() (MenuResult, error) {
-	contextDirs := ch.config.GetContextDirectories()
+	contextDirs := ch.config.GetContextDirectories(ch.config.WorkingDir)
 	if len(contextDirs) == 0 {
-		return NewMenuResult("No context directories configured."), nil
+		return NewMenuResult("No context directories configured for this workspace."), nil
 	}
 
 	var sb strings.Builder
@@ -918,8 +918,8 @@ func (ch *CommandHandler) handleContextAdd(args []string) (MenuResult, error) {
 		return MenuResult{}, fmt.Errorf("directory path cannot be empty")
 	}
 
-	// Add to config
-	ch.config.AddContextDirectory(dir)
+	// Add to config for current workspace
+	ch.config.AddContextDirectory(ch.config.WorkingDir, dir)
 
 	// Save config
 	if err := ch.config.Save(config.GetConfigPath()); err != nil {
@@ -942,8 +942,8 @@ func (ch *CommandHandler) handleContextRemove(args []string) (MenuResult, error)
 		return MenuResult{}, fmt.Errorf("directory path cannot be empty")
 	}
 
-	// Remove from config
-	removed := ch.config.RemoveContextDirectory(dir)
+	// Remove from config for current workspace
+	removed := ch.config.RemoveContextDirectory(ch.config.WorkingDir, dir)
 	if !removed {
 		return MenuResult{}, fmt.Errorf("context directory not found: %s", dir)
 	}

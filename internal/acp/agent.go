@@ -320,9 +320,9 @@ Examples:
 }
 
 func (a *StatCodeAIAgent) handleContextList() (string, error) {
-	contextDirs := a.config.GetContextDirectories()
+	contextDirs := a.config.GetContextDirectories(a.config.WorkingDir)
 	if len(contextDirs) == 0 {
-		return "No context directories configured.\n\nUse /context add <directory> to add context directories.", nil
+		return "No context directories configured for this workspace.\n\nUse /context add <directory> to add context directories.", nil
 	}
 
 	var sb strings.Builder
@@ -352,15 +352,15 @@ func (a *StatCodeAIAgent) handleContextAdd(dir string) (string, error) {
 		return "", fmt.Errorf("directory path cannot be empty")
 	}
 
-	// Add to config
-	a.config.AddContextDirectory(dir)
+	// Add to config for current workspace
+	a.config.AddContextDirectory(a.config.WorkingDir, dir)
 
 	// Save config
 	if err := a.config.Save(config.GetConfigPath()); err != nil {
 		return "", fmt.Errorf("failed to save config: %w", err)
 	}
 
-	logger.Debug("handleContextAdd: added context directory %s", dir)
+	logger.Debug("handleContextAdd: added context directory %s for workspace %s", dir, a.config.WorkingDir)
 
 	return fmt.Sprintf("✓ Added context directory: %s\n\nThe AI can now search and read files in this directory using:\n- search_context_files\n- grep_context_files\n- read_context_file", dir), nil
 }
@@ -371,8 +371,8 @@ func (a *StatCodeAIAgent) handleContextRemove(dir string) (string, error) {
 		return "", fmt.Errorf("directory path cannot be empty")
 	}
 
-	// Remove from config
-	removed := a.config.RemoveContextDirectory(dir)
+	// Remove from config for current workspace
+	removed := a.config.RemoveContextDirectory(a.config.WorkingDir, dir)
 	if !removed {
 		return "", fmt.Errorf("context directory not found: %s", dir)
 	}

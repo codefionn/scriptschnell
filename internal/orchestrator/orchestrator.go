@@ -376,9 +376,9 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(&tools.WebSearchToolSpec{}, false, tools.NewWebSearchToolFactory(o.config), false, "")
 
 	// Context directory tools
-	addSpec(&tools.SearchContextFilesToolSpec{}, false, tools.NewSearchContextFilesToolFactory(o.fs, o.config), false, "")
-	addSpec(&tools.GrepContextFilesToolSpec{}, false, tools.NewGrepContextFilesToolFactory(o.fs, o.config), false, "")
-	addSpec(&tools.ReadContextFileToolSpec{}, false, tools.NewReadContextFileToolFactory(o.fs, o.config), false, "")
+	addSpec(&tools.SearchContextFilesToolSpec{}, false, tools.NewSearchContextFilesToolFactory(o.fs, o.config, o.session), false, "")
+	addSpec(&tools.GrepContextFilesToolSpec{}, false, tools.NewGrepContextFilesToolFactory(o.fs, o.config, o.session), false, "")
+	addSpec(&tools.ReadContextFileToolSpec{}, false, tools.NewReadContextFileToolFactory(o.fs, o.config, o.session), false, "")
 
 	// Task management
 	addSpec(&tools.TodoToolSpec{}, false, tools.NewTodoToolFactory(o.todoClient), false, "")

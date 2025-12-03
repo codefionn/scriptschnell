@@ -10,6 +10,7 @@ import (
 
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // MockFS for testing
@@ -82,6 +83,12 @@ func (m *mockContextFS) ListDir(ctx context.Context, path string) ([]*fs.FileInf
 	return nil, os.ErrNotExist
 }
 
+
+func newTestSession() *session.Session {
+	return &session.Session{
+		WorkingDir: "/test/workspace",
+	}
+}
 func (m *mockContextFS) Delete(ctx context.Context, path string) error {
 	delete(m.files, path)
 	delete(m.dirs, path)
@@ -163,7 +170,7 @@ func TestSearchContextFilesTool_NoContextDirs(t *testing.T) {
 	mockFS := newMockContextFS()
 	cfg := config.DefaultConfig()
 
-	tool := NewSearchContextFilesTool(mockFS, cfg)
+	tool := NewSearchContextFilesTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"pattern": "*.txt",
@@ -186,7 +193,7 @@ func TestSearchContextFilesTool_BasicSearch(t *testing.T) {
 
 	// Set up mock filesystem
 	contextDir := "/usr/share/doc"
-	cfg.AddContextDirectory(contextDir)
+	cfg.AddContextDirectory("/test/workspace", contextDir)
 
 	mockFS.dirs[contextDir] = []fs.FileInfo{
 		{Path: contextDir + "/readme.txt", IsDir: false, Size: 100},
@@ -197,7 +204,7 @@ func TestSearchContextFilesTool_BasicSearch(t *testing.T) {
 	mockFS.files[contextDir+"/manual.txt"] = []byte("This is a manual")
 	mockFS.files[contextDir+"/image.png"] = []byte{0x89, 0x50, 0x4E, 0x47} // PNG header
 
-	tool := NewSearchContextFilesTool(mockFS, cfg)
+	tool := NewSearchContextFilesTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"pattern": "*.txt",
@@ -226,7 +233,7 @@ func TestReadContextFileTool_NoContextDirs(t *testing.T) {
 	mockFS := newMockContextFS()
 	cfg := config.DefaultConfig()
 
-	tool := NewReadContextFileTool(mockFS, cfg)
+	tool := NewReadContextFileTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"path": "/some/file.txt",
@@ -246,9 +253,9 @@ func TestReadContextFileTool_NoContextDirs(t *testing.T) {
 func TestReadContextFileTool_FileNotInContextDir(t *testing.T) {
 	mockFS := newMockContextFS()
 	cfg := config.DefaultConfig()
-	cfg.AddContextDirectory("/usr/share/doc")
+	cfg.AddContextDirectory("/test/workspace", "/usr/share/doc")
 
-	tool := NewReadContextFileTool(mockFS, cfg)
+	tool := NewReadContextFileTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"path": "/etc/passwd",
@@ -270,13 +277,13 @@ func TestReadContextFileTool_Success(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	contextDir := "/usr/share/doc"
-	cfg.AddContextDirectory(contextDir)
+	cfg.AddContextDirectory("/test/workspace", contextDir)
 
 	filePath := contextDir + "/readme.txt"
 	fileContent := "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
 	mockFS.files[filePath] = []byte(fileContent)
 
-	tool := NewReadContextFileTool(mockFS, cfg)
+	tool := NewReadContextFileTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"path": filePath,
@@ -302,13 +309,13 @@ func TestReadContextFileTool_WithLineRange(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	contextDir := "/usr/share/doc"
-	cfg.AddContextDirectory(contextDir)
+	cfg.AddContextDirectory("/test/workspace", contextDir)
 
 	filePath := contextDir + "/readme.txt"
 	fileContent := "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
 	mockFS.files[filePath] = []byte(fileContent)
 
-	tool := NewReadContextFileTool(mockFS, cfg)
+	tool := NewReadContextFileTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"path":      filePath,
@@ -344,7 +351,7 @@ func TestReadContextFileTool_CompressedFile(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	contextDir := "/usr/share/man"
-	cfg.AddContextDirectory(contextDir)
+	cfg.AddContextDirectory("/test/workspace", contextDir)
 
 	// Create compressed content
 	original := []byte("NAME\n    test - a test man page\n\nDESCRIPTION\n    This is a test.")
@@ -356,7 +363,7 @@ func TestReadContextFileTool_CompressedFile(t *testing.T) {
 	filePath := contextDir + "/test.1.gz"
 	mockFS.files[filePath] = buf.Bytes()
 
-	tool := NewReadContextFileTool(mockFS, cfg)
+	tool := NewReadContextFileTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"path": filePath,
@@ -381,7 +388,7 @@ func TestGrepContextFilesTool_NoContextDirs(t *testing.T) {
 	mockFS := newMockContextFS()
 	cfg := config.DefaultConfig()
 
-	tool := NewGrepContextFilesTool(mockFS, cfg)
+	tool := NewGrepContextFilesTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"pattern": "test",
@@ -403,7 +410,7 @@ func TestGrepContextFilesTool_BasicGrep(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	contextDir := "/usr/share/doc"
-	cfg.AddContextDirectory(contextDir)
+	cfg.AddContextDirectory("/test/workspace", contextDir)
 
 	// Set up files
 	mockFS.dirs[contextDir] = []fs.FileInfo{
@@ -413,7 +420,7 @@ func TestGrepContextFilesTool_BasicGrep(t *testing.T) {
 	mockFS.files[contextDir+"/readme.txt"] = []byte("This is a test file.\nIt contains test data.\nNothing special here.")
 	mockFS.files[contextDir+"/manual.txt"] = []byte("Manual content.\nNo matches here.\nJust documentation.")
 
-	tool := NewGrepContextFilesTool(mockFS, cfg)
+	tool := NewGrepContextFilesTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"pattern": "test",
@@ -445,14 +452,14 @@ func TestGrepContextFilesTool_WithContextLines(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	contextDir := "/usr/share/doc"
-	cfg.AddContextDirectory(contextDir)
+	cfg.AddContextDirectory("/test/workspace", contextDir)
 
 	mockFS.dirs[contextDir] = []fs.FileInfo{
 		{Path: contextDir + "/test.txt", IsDir: false, Size: 100},
 	}
 	mockFS.files[contextDir+"/test.txt"] = []byte("Line 1\nLine 2\nMATCH HERE\nLine 4\nLine 5")
 
-	tool := NewGrepContextFilesTool(mockFS, cfg)
+	tool := NewGrepContextFilesTool(mockFS, cfg, newTestSession())
 
 	params := map[string]interface{}{
 		"pattern":       "MATCH",
@@ -487,10 +494,10 @@ func TestGrepContextFilesTool_WithContextLines(t *testing.T) {
 func TestToolParameterValidation(t *testing.T) {
 	mockFS := newMockContextFS()
 	cfg := config.DefaultConfig()
-	cfg.AddContextDirectory("/test")
+	cfg.AddContextDirectory("/test/workspace", "/test")
 
 	t.Run("SearchContextFiles missing pattern", func(t *testing.T) {
-		tool := NewSearchContextFilesTool(mockFS, cfg)
+		tool := NewSearchContextFilesTool(mockFS, cfg, newTestSession())
 		params := map[string]interface{}{}
 		result := tool.Execute(context.Background(), params)
 
@@ -503,7 +510,7 @@ func TestToolParameterValidation(t *testing.T) {
 	})
 
 	t.Run("GrepContextFiles missing pattern", func(t *testing.T) {
-		tool := NewGrepContextFilesTool(mockFS, cfg)
+		tool := NewGrepContextFilesTool(mockFS, cfg, newTestSession())
 		params := map[string]interface{}{}
 		result := tool.Execute(context.Background(), params)
 
@@ -516,7 +523,7 @@ func TestToolParameterValidation(t *testing.T) {
 	})
 
 	t.Run("ReadContextFile missing path", func(t *testing.T) {
-		tool := NewReadContextFileTool(mockFS, cfg)
+		tool := NewReadContextFileTool(mockFS, cfg, newTestSession())
 		params := map[string]interface{}{}
 		result := tool.Execute(context.Background(), params)
 

@@ -98,10 +98,10 @@ type Config struct {
 	AuthorizedCommands map[string]bool `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
 	Search             SearchConfig    `json:"search"`                        // Web search provider configuration
 	MCP                MCPConfig       `json:"mcp,omitempty"`                 // Custom MCP server configuration
-	Secrets            SecretsSettings `json:"secrets,omitempty"`             // Encryption settings
-	EnablePromptCache  bool            `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
-	PromptCacheTTL     string          `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
-	ContextDirectories []string        `json:"context_directories,omitempty"` // Additional directories for context (e.g., external library docs)
+	Secrets            SecretsSettings     `json:"secrets,omitempty"`             // Encryption settings
+	EnablePromptCache  bool                `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
+	PromptCacheTTL     string              `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
+	ContextDirectories map[string][]string `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
 
 	secretsPassword string `json:"-"`
 }
@@ -177,9 +177,9 @@ func DefaultConfig() *Config {
 			Servers: make(map[string]*MCPServerConfig),
 		},
 		Secrets:            SecretsSettings{},
-		EnablePromptCache:  true,     // Enable by default for cost savings
-		PromptCacheTTL:     "1h",     // Default to 1 hour for longer sessions
-		ContextDirectories: []string{}, // No context directories by default
+		EnablePromptCache:  true,                       // Enable by default for cost savings
+		PromptCacheTTL:     "1h",                       // Default to 1 hour for longer sessions
+		ContextDirectories: make(map[string][]string), // No context directories by default
 	}
 }
 
@@ -230,7 +230,7 @@ func Load(path string) (*Config, error) {
 		config.MCP.Servers = make(map[string]*MCPServerConfig)
 	}
 	if config.ContextDirectories == nil {
-		config.ContextDirectories = []string{}
+		config.ContextDirectories = make(map[string][]string)
 	}
 
 	return config, nil
@@ -268,41 +268,85 @@ func (c *Config) IsCommandAuthorized(commandPrefix string) bool {
 	return c.AuthorizedCommands[commandPrefix]
 }
 
-// AddContextDirectory adds a directory to the context directories list
-func (c *Config) AddContextDirectory(dir string) {
+// AddContextDirectory adds a directory to the context directories list for a specific workspace
+// The workspace parameter should be an absolute path to the workspace directory
+func (c *Config) AddContextDirectory(workspace, dir string) {
 	if c.ContextDirectories == nil {
-		c.ContextDirectories = []string{}
+		c.ContextDirectories = make(map[string][]string)
 	}
+
+	// Resolve workspace to absolute path if it's relative
+	absWorkspace := workspace
+	if !filepath.IsAbs(workspace) {
+		if abs, err := filepath.Abs(workspace); err == nil {
+			absWorkspace = abs
+		}
+	}
+	absWorkspace = filepath.Clean(absWorkspace)
+
+	// Get or create the list for this workspace
+	dirs := c.ContextDirectories[absWorkspace]
 	// Check if already exists
-	for _, existing := range c.ContextDirectories {
+	for _, existing := range dirs {
 		if existing == dir {
 			return
 		}
 	}
-	c.ContextDirectories = append(c.ContextDirectories, dir)
+	c.ContextDirectories[absWorkspace] = append(dirs, dir)
 }
 
-// RemoveContextDirectory removes a directory from the context directories list
-func (c *Config) RemoveContextDirectory(dir string) bool {
+// RemoveContextDirectory removes a directory from the context directories list for a specific workspace
+// The workspace parameter should be an absolute path to the workspace directory
+func (c *Config) RemoveContextDirectory(workspace, dir string) bool {
 	if c.ContextDirectories == nil {
 		return false
 	}
-	for i, existing := range c.ContextDirectories {
+
+	// Resolve workspace to absolute path if it's relative
+	absWorkspace := workspace
+	if !filepath.IsAbs(workspace) {
+		if abs, err := filepath.Abs(workspace); err == nil {
+			absWorkspace = abs
+		}
+	}
+	absWorkspace = filepath.Clean(absWorkspace)
+
+	dirs := c.ContextDirectories[absWorkspace]
+	for i, existing := range dirs {
 		if existing == dir {
-			c.ContextDirectories = append(c.ContextDirectories[:i], c.ContextDirectories[i+1:]...)
+			c.ContextDirectories[absWorkspace] = append(dirs[:i], dirs[i+1:]...)
+			// If workspace has no more directories, remove the workspace key
+			if len(c.ContextDirectories[absWorkspace]) == 0 {
+				delete(c.ContextDirectories, absWorkspace)
+			}
 			return true
 		}
 	}
 	return false
 }
 
-// GetContextDirectories returns a copy of the context directories list
-func (c *Config) GetContextDirectories() []string {
+// GetContextDirectories returns a copy of the context directories list for a specific workspace
+// The workspace parameter should be an absolute path to the workspace directory
+func (c *Config) GetContextDirectories(workspace string) []string {
 	if c.ContextDirectories == nil {
 		return []string{}
 	}
-	result := make([]string, len(c.ContextDirectories))
-	copy(result, c.ContextDirectories)
+
+	// Resolve workspace to absolute path if it's relative
+	absWorkspace := workspace
+	if !filepath.IsAbs(workspace) {
+		if abs, err := filepath.Abs(workspace); err == nil {
+			absWorkspace = abs
+		}
+	}
+	absWorkspace = filepath.Clean(absWorkspace)
+
+	dirs := c.ContextDirectories[absWorkspace]
+	if dirs == nil {
+		return []string{}
+	}
+	result := make([]string, len(dirs))
+	copy(result, dirs)
 	return result
 }
 

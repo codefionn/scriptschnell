@@ -90,15 +90,15 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	if len(a.orch.config.ContextDirectories) > 0 {
 		registry.RegisterSpec(
 			&tools.SearchContextFilesToolSpec{},
-			tools.NewSearchContextFilesToolFactory(a.orch.fs, a.orch.config),
+			tools.NewSearchContextFilesToolFactory(a.orch.fs, a.orch.config, a.orch.session),
 		)
 		registry.RegisterSpec(
 			&tools.GrepContextFilesToolSpec{},
-			tools.NewGrepContextFilesToolFactory(a.orch.fs, a.orch.config),
+			tools.NewGrepContextFilesToolFactory(a.orch.fs, a.orch.config, a.orch.session),
 		)
 		registry.RegisterSpec(
 			&tools.ReadContextFileToolSpec{},
-			tools.NewReadContextFileToolFactory(a.orch.fs, a.orch.config),
+			tools.NewReadContextFileToolFactory(a.orch.fs, a.orch.config, a.orch.session),
 		)
 	}
 

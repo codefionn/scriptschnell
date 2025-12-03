@@ -13,6 +13,7 @@ import (
 
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // SearchContextFilesToolSpec is the static specification for the search_context_files tool
@@ -49,14 +50,16 @@ func (s *SearchContextFilesToolSpec) Parameters() map[string]interface{} {
 
 // SearchContextFilesTool searches files in context directories
 type SearchContextFilesTool struct {
-	fs     fs.FileSystem
-	config *config.Config
+	fs      fs.FileSystem
+	config  *config.Config
+	session *session.Session
 }
 
-func NewSearchContextFilesTool(filesystem fs.FileSystem, cfg *config.Config) *SearchContextFilesTool {
+func NewSearchContextFilesTool(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) *SearchContextFilesTool {
 	return &SearchContextFilesTool{
-		fs:     filesystem,
-		config: cfg,
+		fs:      filesystem,
+		config:  cfg,
+		session: sess,
 	}
 }
 
@@ -72,9 +75,15 @@ func (t *SearchContextFilesTool) Execute(ctx context.Context, params map[string]
 		return &ToolResult{Error: "pattern is required"}
 	}
 
-	contextDirs := t.config.GetContextDirectories()
+	// Get workspace from session
+	workspace := t.session.WorkingDir
+	if workspace == "" {
+		workspace = "."
+	}
+
+	contextDirs := t.config.GetContextDirectories(workspace)
 	if len(contextDirs) == 0 {
-		return &ToolResult{Error: "No context directories configured. Use /context add <directory> to add context directories."}
+		return &ToolResult{Error: "No context directories configured for this workspace. Use /context add <directory> to add context directories."}
 	}
 
 	contentRegex := GetStringParam(params, "content_regex", "")
@@ -348,9 +357,9 @@ func decompressData(data []byte, filename string) ([]byte, error) {
 }
 
 // NewSearchContextFilesToolFactory creates a factory for SearchContextFilesTool
-func NewSearchContextFilesToolFactory(filesystem fs.FileSystem, cfg *config.Config) ToolFactory {
+func NewSearchContextFilesToolFactory(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) ToolFactory {
 	return func(reg *Registry) ToolExecutor {
-		return NewSearchContextFilesTool(filesystem, cfg)
+		return NewSearchContextFilesTool(filesystem, cfg, sess)
 	}
 }
 
@@ -392,14 +401,16 @@ func (s *GrepContextFilesToolSpec) Parameters() map[string]interface{} {
 
 // GrepContextFilesTool searches content in context directories
 type GrepContextFilesTool struct {
-	fs     fs.FileSystem
-	config *config.Config
+	fs      fs.FileSystem
+	config  *config.Config
+	session *session.Session
 }
 
-func NewGrepContextFilesTool(filesystem fs.FileSystem, cfg *config.Config) *GrepContextFilesTool {
+func NewGrepContextFilesTool(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) *GrepContextFilesTool {
 	return &GrepContextFilesTool{
-		fs:     filesystem,
-		config: cfg,
+		fs:      filesystem,
+		config:  cfg,
+		session: sess,
 	}
 }
 
@@ -415,9 +426,15 @@ func (t *GrepContextFilesTool) Execute(ctx context.Context, params map[string]in
 		return &ToolResult{Error: "pattern is required"}
 	}
 
-	contextDirs := t.config.GetContextDirectories()
+	// Get workspace from session
+	workspace := t.session.WorkingDir
+	if workspace == "" {
+		workspace = "."
+	}
+
+	contextDirs := t.config.GetContextDirectories(workspace)
 	if len(contextDirs) == 0 {
-		return &ToolResult{Error: "No context directories configured. Use /context add <directory> to add context directories."}
+		return &ToolResult{Error: "No context directories configured for this workspace. Use /context add <directory> to add context directories."}
 	}
 
 	filePattern := GetStringParam(params, "file_pattern", "")
@@ -690,9 +707,9 @@ func (t *GrepContextFilesTool) matchGlobPattern(path, pattern string) (bool, err
 }
 
 // NewGrepContextFilesToolFactory creates a factory for GrepContextFilesTool
-func NewGrepContextFilesToolFactory(filesystem fs.FileSystem, cfg *config.Config) ToolFactory {
+func NewGrepContextFilesToolFactory(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) ToolFactory {
 	return func(reg *Registry) ToolExecutor {
-		return NewGrepContextFilesTool(filesystem, cfg)
+		return NewGrepContextFilesTool(filesystem, cfg, sess)
 	}
 }
 
@@ -730,14 +747,16 @@ func (s *ReadContextFileToolSpec) Parameters() map[string]interface{} {
 
 // ReadContextFileTool reads files from context directories
 type ReadContextFileTool struct {
-	fs     fs.FileSystem
-	config *config.Config
+	fs      fs.FileSystem
+	config  *config.Config
+	session *session.Session
 }
 
-func NewReadContextFileTool(filesystem fs.FileSystem, cfg *config.Config) *ReadContextFileTool {
+func NewReadContextFileTool(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) *ReadContextFileTool {
 	return &ReadContextFileTool{
-		fs:     filesystem,
-		config: cfg,
+		fs:      filesystem,
+		config:  cfg,
+		session: sess,
 	}
 }
 
@@ -753,9 +772,15 @@ func (t *ReadContextFileTool) Execute(ctx context.Context, params map[string]int
 		return &ToolResult{Error: "path is required"}
 	}
 
-	contextDirs := t.config.GetContextDirectories()
+	// Get workspace from session
+	workspace := t.session.WorkingDir
+	if workspace == "" {
+		workspace = "."
+	}
+
+	contextDirs := t.config.GetContextDirectories(workspace)
 	if len(contextDirs) == 0 {
-		return &ToolResult{Error: "No context directories configured. Use /context add <directory> to add context directories."}
+		return &ToolResult{Error: "No context directories configured for this workspace. Use /context add <directory> to add context directories."}
 	}
 
 	// Check if path is within any context directory
@@ -834,8 +859,8 @@ func (t *ReadContextFileTool) Execute(ctx context.Context, params map[string]int
 }
 
 // NewReadContextFileToolFactory creates a factory for ReadContextFileTool
-func NewReadContextFileToolFactory(filesystem fs.FileSystem, cfg *config.Config) ToolFactory {
+func NewReadContextFileToolFactory(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) ToolFactory {
 	return func(reg *Registry) ToolExecutor {
-		return NewReadContextFileTool(filesystem, cfg)
+		return NewReadContextFileTool(filesystem, cfg, sess)
 	}
 }

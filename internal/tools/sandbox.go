@@ -251,7 +251,7 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("     }\n")
 	b.WriteString("     ```\n\n")
 
-	b.WriteString("2. Shell(command []string, stdin string) (stdout string, stderr string, exitCode int)\n")
+	b.WriteString("2. Command(command []string, stdin string) (stdout string, stderr string, exitCode int)\n")
 	b.WriteString("   - Execute shell commands with optional stdin input\n")
 	b.WriteString("   - Requires command authorization\n")
 	b.WriteString("   - Pass empty string for stdin if not needed\n")
@@ -260,13 +260,13 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("     package main\n\n")
 	b.WriteString("     import \"fmt\"\n\n")
 	b.WriteString("     func main() {\n")
-	b.WriteString("         out, err, code := Shell([]string{\"ls\", \"-la\"}, \"\")\n")
+	b.WriteString("         out, err, code := Command([]string{\"ls\", \"-la\"}, \"\")\n")
 	b.WriteString("         fmt.Printf(\"ls output: %s, stderr: %s, exit: %d\\n\", out, err, code)\n\n")
-	b.WriteString("         out, err, code = Shell([]string{\"grep\", \"pattern\"}, \"line1\\nline2\\npattern here\\n\")\n")
+	b.WriteString("         out, err, code = Command([]string{\"grep\", \"pattern\"}, \"line1\\nline2\\npattern here\\n\")\n")
 	b.WriteString("         fmt.Printf(\"grep output: %s, stderr: %s, exit: %d\\n\", out, err, code)\n\n")
-	b.WriteString("         out, err, code = Shell([]string{\"go\", \"build\", \"./cmd/statcode-ai\"}, \"\")\n")
+	b.WriteString("         out, err, code = Command([]string{\"go\", \"build\", \"./cmd/statcode-ai\"}, \"\")\n")
 	b.WriteString("         fmt.Printf(\"go build output: %s, stderr: %s, exit: %d\\n\", out, err, code)\n\n")
-	b.WriteString("         _, err, code = Shell([]string{\"mkdir\", \"-p\", \"tmp/build/cache\"}, \"\")\n")
+	b.WriteString("         _, err, code = Command([]string{\"mkdir\", \"-p\", \"tmp/build/cache\"}, \"\")\n")
 	b.WriteString("         fmt.Printf(\"mkdir stderr: %s, exit: %d\\n\", err, code)\n")
 	b.WriteString("     }\n")
 	b.WriteString("     ```\n\n")
@@ -442,7 +442,7 @@ func (t *SandboxTool) Description() string {
 	b.WriteString(")\n")
 	b.WriteString("\n")
 	b.WriteString("func main() {\n")
-	b.WriteString("  stdout, stderr, code := Shell([]string{\"go\", \"build\", \"./...\"}, \"\")\n")
+	b.WriteString("  stdout, stderr, code := Command([]string{\"go\", \"build\", \"./...\"}, \"\")\n")
 	b.WriteString("  if err == 0 {\n")
 	b.WriteString("    fmt.Println(\"Compiled successfully\")\n")
 	b.WriteString("  } else {\n")
@@ -937,7 +937,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 
 			// Check authorization for command
 			if adapter != nil && adapter.authorizer != nil {
-				decision, err := adapter.Authorize(ctx, ToolNameShell, map[string]interface{}{
+				decision, err := adapter.Authorize(ctx, ToolNameCommand, map[string]interface{}{
 					"command":      commandDisplay,
 					"command_args": commandArgs,
 				})
@@ -1011,7 +1011,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 
 			return int32(exitCode)
 		}).
-		Export(ToolNameShell)
+		Export(ToolNameCommand)
 
 	// summarize(prompt_ptr, prompt_len, text_ptr, text_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().

@@ -7,6 +7,7 @@ const (
 	ToolNameWriteFileDiff        = "write_file_diff"
 	ToolNameWriteFileJSON        = "write_file_json"
 	ToolNameShell                = "shell"
+	ToolNameCommand              = "command"
 	ToolNameStatusProgram        = "status_program"
 	ToolNameWaitProgram          = "wait_program"
 	ToolNameStopProgram          = "stop_program"

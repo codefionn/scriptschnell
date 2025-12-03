@@ -14,8 +14,7 @@ var (
 	domainDialogStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("214")).
-				Padding(1, 2).
-				Width(80)
+				Padding(1, 2)
 
 	domainTitleStyle = lipgloss.NewStyle().
 				Bold(true).
@@ -29,6 +28,13 @@ var (
 
 	domainChoiceItemStyle         = lipgloss.NewStyle().PaddingLeft(2)
 	domainChoiceSelectedItemStyle = lipgloss.NewStyle().PaddingLeft(0).Foreground(lipgloss.Color("214")).Bold(true)
+)
+
+const (
+	domainDialogDefaultWidth  = 80
+	domainDialogDefaultHeight = 24
+	domainDialogListPadding   = 4
+	domainDialogHeightPadding = 14
 )
 
 type domainChoiceItem struct {
@@ -85,6 +91,24 @@ type DomainAuthorizationChoiceMsg struct {
 	Permanent bool
 }
 
+func (m DomainAuthorizationDialog) dialogWidth() int {
+	if m.width > 0 {
+		return min(domainDialogDefaultWidth, m.width)
+	}
+	return domainDialogDefaultWidth
+}
+
+func (m DomainAuthorizationDialog) listSize() (int, int) {
+	width := max(10, m.dialogWidth()-domainDialogListPadding)
+
+	height := m.height
+	if height <= 0 {
+		height = domainDialogDefaultHeight
+	}
+
+	return width, max(5, height-domainDialogHeightPadding)
+}
+
 // NewDomainAuthorizationDialog constructs a dialog for domain authorization
 func NewDomainAuthorizationDialog(req DomainAuthorizationRequest) DomainAuthorizationDialog {
 	items := []list.Item{
@@ -105,10 +129,15 @@ func NewDomainAuthorizationDialog(req DomainAuthorizationRequest) DomainAuthoriz
 		},
 	}
 
-	const width = 80
-	const height = 24
+	dialog := DomainAuthorizationDialog{
+		request: req,
+		width:   domainDialogDefaultWidth,
+		height:  domainDialogDefaultHeight,
+	}
 
-	l := list.New(items, domainChoiceDelegate{}, width, height-4)
+	listWidth, listHeight := dialog.listSize()
+
+	l := list.New(items, domainChoiceDelegate{}, listWidth, listHeight)
 	l.Title = "Network Access Authorization"
 	l.Styles.Title = domainTitleStyle
 	l.DisableQuitKeybindings()
@@ -119,12 +148,9 @@ func NewDomainAuthorizationDialog(req DomainAuthorizationRequest) DomainAuthoriz
 	// Default to Deny for safety
 	l.Select(2)
 
-	return DomainAuthorizationDialog{
-		request: req,
-		list:    l,
-		width:   width,
-		height:  height,
-	}
+	dialog.list = l
+
+	return dialog
 }
 
 func (m DomainAuthorizationDialog) Init() tea.Cmd {
@@ -136,7 +162,8 @@ func (m DomainAuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width-4, msg.Height-14)
+		listWidth, listHeight := m.listSize()
+		m.list.SetSize(listWidth, listHeight)
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -229,7 +256,8 @@ func (m DomainAuthorizationDialog) View() string {
 	help := roleDescStyle.Render("↑/↓: Navigate • Enter: Confirm • ESC: Deny and close")
 	sb.WriteString(help)
 
-	return domainDialogStyle.Render(sb.String())
+	dialogWidth := m.dialogWidth()
+	return domainDialogStyle.Width(dialogWidth).Render(sb.String())
 }
 
 // GetChoice returns the user's choice

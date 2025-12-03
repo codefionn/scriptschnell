@@ -111,7 +111,11 @@ func (a *shellActorImpl) Receive(ctx context.Context, msg Message) error {
 	return nil
 }
 
-func (a *shellActorImpl) ExecuteCommand(ctx context.Context, command, workingDir string, timeout time.Duration, stdin string) (string, string, int, error) {
+func (a *shellActorImpl) ExecuteCommand(ctx context.Context, args []string, workingDir string, timeout time.Duration, stdin string) (string, string, int, error) {
+	if len(args) == 0 {
+		return "", "", -1, fmt.Errorf("no command provided")
+	}
+
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -119,7 +123,7 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, command, workingDir
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "sh", "-c", command)
+	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
 	cmd.Dir = workingDir
 	cmd.Env = os.Environ()
 
@@ -132,22 +136,24 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, command, workingDir
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	var exitCode int
+	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = -1
 		}
-	} else {
-		exitCode = 0
 	}
 
 	return stdout.String(), stderr.String(), exitCode, err
 }
 
-func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, command, workingDir string) (string, int, error) {
-	cmd := exec.Command("sh", "-c", command)
+func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, args []string, workingDir string) (string, int, error) {
+	if len(args) == 0 {
+		return "", 0, fmt.Errorf("no command provided")
+	}
+
+	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = workingDir
 	cmd.Env = os.Environ()
 	configureProcessGroup(cmd)
@@ -167,7 +173,8 @@ func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, command, 
 	}
 
 	startedAt := time.Now()
-	jobID, job := a.registerBackgroundJob(cmd, command, workingDir, startedAt)
+	commandDisplay := strings.Join(args, " ")
+	jobID, job := a.registerBackgroundJob(cmd, commandDisplay, workingDir, startedAt)
 
 	// Read output in goroutines
 	go a.readOutput(stdout, job, false)
@@ -237,7 +244,11 @@ func (a *shellActorImpl) StopJob(ctx context.Context, jobID string, signal strin
 // Message handlers
 func (a *shellActorImpl) handleExecuteRequest(ctx context.Context, req ShellExecuteRequest) ShellExecuteResponse {
 	if req.Background {
-		jobID, pid, err := a.ExecuteCommandBackground(ctx, req.Command, req.WorkingDir)
+		var jobID string
+		var pid int
+		var err error
+
+		jobID, pid, err = a.ExecuteCommandBackground(ctx, req.Command, req.WorkingDir)
 		if err != nil {
 			return ShellExecuteResponse{Error: err.Error()}
 		}
@@ -248,7 +259,14 @@ func (a *shellActorImpl) handleExecuteRequest(ctx context.Context, req ShellExec
 		}
 	}
 
-	stdout, stderr, exitCode, err := a.ExecuteCommand(ctx, req.Command, req.WorkingDir, req.Timeout, req.Stdin)
+	var (
+		stdout   string
+		stderr   string
+		exitCode int
+		err      error
+	)
+
+	stdout, stderr, exitCode, err = a.ExecuteCommand(ctx, req.Command, req.WorkingDir, req.Timeout, req.Stdin)
 	if err != nil {
 		return ShellExecuteResponse{
 			ExitCode: exitCode,

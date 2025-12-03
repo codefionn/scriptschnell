@@ -78,7 +78,7 @@ func (t *SandboxToolWithActor) shellHostFunction(ctx context.Context, m api.Modu
 	}
 
 	// Execute the command using ShellActor
-	stdout, stderr, exitCode, err := t.shellActor.ExecuteCommand(ctx, commandDisplay, "", 30*time.Second, stdinData)
+	stdout, stderr, exitCode, err := t.shellActor.ExecuteCommand(ctx, commandArgs, "", 30*time.Second, stdinData)
 	if err != nil {
 		// Even if there's an error, we might still have output
 		if exitCode == 0 {

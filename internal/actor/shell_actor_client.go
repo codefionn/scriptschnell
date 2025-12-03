@@ -16,12 +16,16 @@ func NewShellActorClient(ref *ActorRef) *ShellActorClient {
 	return &ShellActorClient{ref: ref}
 }
 
-// ExecuteCommand executes a shell command synchronously
-func (c *ShellActorClient) ExecuteCommand(ctx context.Context, command, workingDir string, timeout time.Duration, stdin string) (string, string, int, error) {
+// ExecuteCommand executes a command synchronously using argv (no shell parsing).
+func (c *ShellActorClient) ExecuteCommand(ctx context.Context, args []string, workingDir string, timeout time.Duration, stdin string) (string, string, int, error) {
+	if len(args) == 0 {
+		return "", "", -1, fmt.Errorf("command args are required")
+	}
+
 	responseCh := make(chan ShellExecuteResponse, 1)
 
 	msg := ShellExecuteRequest{
-		Command:    command,
+		Command:    append([]string(nil), args...),
 		WorkingDir: workingDir,
 		Timeout:    timeout,
 		Background: false,
@@ -44,12 +48,16 @@ func (c *ShellActorClient) ExecuteCommand(ctx context.Context, command, workingD
 	}
 }
 
-// ExecuteCommandBackground executes a shell command in background and returns job ID
-func (c *ShellActorClient) ExecuteCommandBackground(ctx context.Context, command, workingDir string) (string, int, error) {
+// ExecuteCommandBackground executes a command in background using argv and returns job ID
+func (c *ShellActorClient) ExecuteCommandBackground(ctx context.Context, args []string, workingDir string) (string, int, error) {
+	if len(args) == 0 {
+		return "", 0, fmt.Errorf("command args are required")
+	}
+
 	responseCh := make(chan ShellExecuteResponse, 1)
 
 	msg := ShellExecuteRequest{
-		Command:    command,
+		Command:    append([]string(nil), args...),
 		WorkingDir: workingDir,
 		Background: true,
 		ResponseCh: responseCh,

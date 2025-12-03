@@ -23,11 +23,11 @@ func (s *stubShellActor) Start(context.Context) error                  { return 
 func (s *stubShellActor) Stop(context.Context) error                   { return nil }
 func (s *stubShellActor) ID() string                                   { return "stub-shell" }
 
-func (s *stubShellActor) ExecuteCommand(ctx context.Context, command, workingDir string, timeout time.Duration, stdin string) (string, string, int, error) {
+func (s *stubShellActor) ExecuteCommand(ctx context.Context, command []string, workingDir string, timeout time.Duration, stdin string) (string, string, int, error) {
 	return "", "", 0, nil
 }
 
-func (s *stubShellActor) ExecuteCommandBackground(ctx context.Context, command, workingDir string) (string, int, error) {
+func (s *stubShellActor) ExecuteCommandBackground(ctx context.Context, command []string, workingDir string) (string, int, error) {
 	jobID := fmt.Sprintf("job-%d", len(s.jobs)+1)
 	s.jobs[jobID] = true
 	return jobID, 1234, nil

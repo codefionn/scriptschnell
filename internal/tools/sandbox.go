@@ -32,7 +32,7 @@ import (
 // This allows the sandbox to use either direct execution or actor-based execution
 type ShellExecutor interface {
 	// ExecuteCommand executes a shell command and returns stdout, stderr, and exit code
-	ExecuteCommand(ctx context.Context, command string, workingDir string, timeout time.Duration, stdin string) (stdout string, stderr string, exitCode int, err error)
+	ExecuteCommand(ctx context.Context, args []string, workingDir string, timeout time.Duration, stdin string) (stdout string, stderr string, exitCode int, err error)
 }
 
 // Note: The actor.ShellActor interface already matches this signature perfectly,
@@ -953,9 +953,9 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			var exitCode int
 
 			if t.shellExecutor != nil {
-				// Use the shell executor (actor-based)
+				// Use the shell executor (actor-based) with direct argv execution
 				var err error
-				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandDisplay, "", 30*time.Second, string(stdinData))
+				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandArgs, "", 30*time.Second, string(stdinData))
 				_ = err // Error information is captured in exitCode and stderr
 			} else {
 				// Fallback to direct execution if no executor is set

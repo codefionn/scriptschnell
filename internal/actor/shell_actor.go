@@ -12,7 +12,7 @@ type ShellMessage interface {
 
 // ShellExecuteRequest is a message to execute a shell command
 type ShellExecuteRequest struct {
-	Command    string
+	Command    []string
 	WorkingDir string
 	Timeout    time.Duration
 	Background bool
@@ -98,11 +98,11 @@ type ShellStopResponse struct {
 type ShellActor interface {
 	Actor
 
-	// ExecuteCommand executes a shell command (synchronous)
-	ExecuteCommand(ctx context.Context, command, workingDir string, timeout time.Duration, stdin string) (string, string, int, error)
+	// ExecuteCommand executes a command using argv (synchronous, no shell parsing)
+	ExecuteCommand(ctx context.Context, args []string, workingDir string, timeout time.Duration, stdin string) (string, string, int, error)
 
-	// ExecuteCommandBackground executes a shell command in background and returns job ID
-	ExecuteCommandBackground(ctx context.Context, command, workingDir string) (string, int, error)
+	// ExecuteCommandBackground executes a command in background using argv and returns job ID
+	ExecuteCommandBackground(ctx context.Context, args []string, workingDir string) (string, int, error)
 
 	// GetJobStatus returns the status of a background job
 	GetJobStatus(ctx context.Context, jobID string) (running bool, exitCode int, stdout, stderr string, completed bool, err error)

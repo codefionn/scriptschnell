@@ -42,20 +42,16 @@ func NewTerminalManager(shellActor actor.ShellActor) *TerminalManager {
 
 // Create creates a new terminal and starts the command
 func (tm *TerminalManager) Create(ctx context.Context, req acp.CreateTerminalRequest) (*acp.CreateTerminalResponse, error) {
-	// Build command string from command + args
-	cmdStr := req.Command
-	for _, arg := range req.Args {
-		cmdStr += " " + shellEscape(arg)
-	}
-
 	// Set working directory (default to current if not specified)
 	cwd := "."
 	if req.Cwd != nil && *req.Cwd != "" {
 		cwd = *req.Cwd
 	}
 
+	commandArgs := append([]string{req.Command}, req.Args...)
+
 	// Start command in background using shell actor
-	jobID, pid, err := tm.shellActor.ExecuteCommandBackground(ctx, cmdStr, cwd)
+	jobID, pid, err := tm.shellActor.ExecuteCommandBackground(ctx, commandArgs, cwd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start terminal command: %w", err)
 	}
@@ -224,20 +220,6 @@ func (tm *TerminalManager) getTerminal(terminalID string) (*Terminal, error) {
 	}
 
 	return terminal, nil
-}
-
-// shellEscape escapes a shell argument (basic implementation)
-func shellEscape(arg string) string {
-	// Simple escaping: wrap in single quotes and escape existing single quotes
-	escaped := ""
-	for _, c := range arg {
-		if c == '\'' {
-			escaped += "'\\''"
-		} else {
-			escaped += string(c)
-		}
-	}
-	return "'" + escaped + "'"
 }
 
 // truncateAtCharBoundary truncates a string to the specified byte limit

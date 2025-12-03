@@ -14,8 +14,7 @@ var (
 	authDialogStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("170")).
-			Padding(1, 2).
-			Width(80)
+			Padding(1, 2)
 
 	authTitleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -33,6 +32,13 @@ var (
 
 	authChoiceItemStyle         = lipgloss.NewStyle().PaddingLeft(2)
 	authChoiceSelectedItemStyle = lipgloss.NewStyle().PaddingLeft(0).Foreground(lipgloss.Color("170")).Bold(true)
+)
+
+const (
+	authDialogDefaultWidth  = 80
+	authDialogDefaultHeight = 20
+	authDialogListPadding   = 4
+	authDialogHeightPadding = 12
 )
 
 type authChoiceItem struct {
@@ -88,6 +94,24 @@ type AuthorizationApprovedMsg struct {
 	Approved bool
 }
 
+func (m AuthorizationDialog) dialogWidth() int {
+	if m.width > 0 {
+		return min(authDialogDefaultWidth, m.width)
+	}
+	return authDialogDefaultWidth
+}
+
+func (m AuthorizationDialog) listSize() (int, int) {
+	width := max(10, m.dialogWidth()-authDialogListPadding)
+
+	height := m.height
+	if height <= 0 {
+		height = authDialogDefaultHeight
+	}
+
+	return width, max(5, height-authDialogHeightPadding)
+}
+
 // NewAuthorizationDialog constructs a dialog for authorization approval
 func NewAuthorizationDialog(req AuthorizationRequest) AuthorizationDialog {
 	items := []list.Item{
@@ -103,10 +127,15 @@ func NewAuthorizationDialog(req AuthorizationRequest) AuthorizationDialog {
 		},
 	}
 
-	const width = 80
-	const height = 20
+	dialog := AuthorizationDialog{
+		request: req,
+		width:   authDialogDefaultWidth,
+		height:  authDialogDefaultHeight,
+	}
 
-	l := list.New(items, authChoiceDelegate{}, width, height-4)
+	listWidth, listHeight := dialog.listSize()
+
+	l := list.New(items, authChoiceDelegate{}, listWidth, listHeight)
 	l.Title = "Authorization Required"
 	l.Styles.Title = authTitleStyle
 	l.DisableQuitKeybindings()
@@ -117,12 +146,9 @@ func NewAuthorizationDialog(req AuthorizationRequest) AuthorizationDialog {
 	// Default to Deny for safety
 	l.Select(1)
 
-	return AuthorizationDialog{
-		request: req,
-		list:    l,
-		width:   width,
-		height:  height,
-	}
+	dialog.list = l
+
+	return dialog
 }
 
 func (m AuthorizationDialog) Init() tea.Cmd {
@@ -134,7 +160,8 @@ func (m AuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width-4, msg.Height-12)
+		listWidth, listHeight := m.listSize()
+		m.list.SetSize(listWidth, listHeight)
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -210,7 +237,8 @@ func (m AuthorizationDialog) View() string {
 	help := roleDescStyle.Render("↑/↓: Navigate • Enter: Confirm • ESC: Deny and close")
 	sb.WriteString(help)
 
-	return authDialogStyle.Render(sb.String())
+	dialogWidth := m.dialogWidth()
+	return authDialogStyle.Width(dialogWidth).Render(sb.String())
 }
 
 // GetApproved returns whether the user approved the authorization

@@ -568,6 +568,9 @@ func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
 	if sandboxTool == nil {
 		return
 	}
+	if o.authorizer != nil {
+		sandboxTool.SetAuthorizer(o.authorizer)
+	}
 	sandboxTool.SetSummarizeClient(o.summarizeClient)
 	sandboxTool.SetProgressCallback(o.GetCurrentProgressCallback())
 	if sandboxTool.GetTinyGoManager() != nil {

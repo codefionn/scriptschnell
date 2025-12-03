@@ -80,7 +80,8 @@ func (t *ShellToolWithActor) executeForeground(ctx context.Context, cmdStr, work
 		timeout = 0
 	}
 
-	stdout, stderr, exitCode, err := t.shellActor.ExecuteCommand(ctx, cmdStr, workingDir, timeout, "")
+	args := []string{"sh", "-c", cmdStr}
+	stdout, stderr, exitCode, err := t.shellActor.ExecuteCommand(ctx, args, workingDir, timeout, "")
 	if err != nil {
 		return &ToolResult{
 			Result: map[string]interface{}{
@@ -104,7 +105,8 @@ func (t *ShellToolWithActor) executeForeground(ctx context.Context, cmdStr, work
 func (t *ShellToolWithActor) executeBackground(ctx context.Context, cmdStr, workingDir string) *ToolResult {
 	logger.Debug("shell: starting background job (explicit request)")
 
-	jobID, pid, err := t.shellActor.ExecuteCommandBackground(ctx, cmdStr, workingDir)
+	args := []string{"sh", "-c", cmdStr}
+	jobID, pid, err := t.shellActor.ExecuteCommandBackground(ctx, args, workingDir)
 	if err != nil {
 		logger.Error("shell: failed to start background command: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("failed to start command: %v", err)}

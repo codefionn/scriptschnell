@@ -839,6 +839,7 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 
 	buildOutput, err := buildCmd.CombinedOutput()
 	if err != nil {
+		logger.Debug("TinyGo build failed: %v, output: %s", err, string(buildOutput))
 		return map[string]interface{}{
 			"stdout":    string(buildOutput),
 			"exit_code": 1,
@@ -1630,6 +1631,7 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 	// Compile the module
 	mod, err := r.CompileModule(ctx, wasmBytes)
 	if err != nil {
+		logger.Debug("WASM compilation failed for sandbox: %v", err)
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
 			"stderr":    fmt.Sprintf("WASM compilation failed: %v", err),
@@ -1644,8 +1646,17 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 		WithStdout(outFile).
 		WithStderr(errFile)
 
+	// Mount our filesystem into the WASM module if available
+	// Wrap it with authorization to enforce read-before-write rules
+	if t.filesystem != nil {
+		authorizedFS := NewAuthorizedFS(t.filesystem, t.session, t.workingDir)
+		fsAdapter := NewFSAdapter(ctx, authorizedFS)
+		config = config.WithFS(fsAdapter)
+	}
+
 	modInstance, err := r.InstantiateModule(ctx, mod, config)
 	if err != nil {
+		logger.Debug("WASM instantiation failed for sandbox: %v", err)
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
 			"stderr":    fmt.Sprintf("WASM instantiation failed: %v", err),
@@ -1665,6 +1676,7 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 	// Get the _start function and execute
 	startFn := modInstance.ExportedFunction("_start")
 	if startFn == nil {
+		logger.Debug("WASM module does not export _start function")
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
 			"stderr":    "WASM module does not export _start function",
@@ -1697,6 +1709,7 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 	case err := <-resultChan:
 		runtimeErr = err
 	case <-ctx.Done():
+		logger.Debug("WASM execution timeout after %d seconds", timeoutSeconds)
 		// Close files before reading on timeout
 		outFile.Close()
 		errFile.Close()
@@ -1730,7 +1743,11 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 			if finalExitCode == 0 {
 				// Normal exit (exit code 0), not an error
 				runtimeErr = nil
+			} else {
+				logger.Debug("WASM execution exited with code %d: %v", finalExitCode, runtimeErr)
 			}
+		} else {
+			logger.Debug("WASM runtime error: %v", runtimeErr)
 		}
 	}
 

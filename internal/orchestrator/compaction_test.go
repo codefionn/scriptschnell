@@ -54,3 +54,34 @@ func TestBuildUserCompactionSection_CondenseOverThreshold(t *testing.T) {
 		t.Fatalf("expected continuation directive, got: %s", section)
 	}
 }
+
+func TestAdjustCompactionBoundaryForTools_Backward(t *testing.T) {
+	messages := []*session.Message{
+		{Role: "assistant", ToolCalls: []map[string]interface{}{{"id": "call-1"}}},
+		{Role: "tool", ToolID: "call-1", Content: "result"},
+		{Role: "user", Content: "latest instructions"},
+	}
+
+	adjusted := adjustCompactionBoundaryForTools(messages, 1)
+
+	if adjusted != 0 {
+		t.Fatalf("expected boundary to move backward to keep tool exchange intact, got %d", adjusted)
+	}
+}
+
+func TestAdjustCompactionBoundaryForTools_Forward(t *testing.T) {
+	messages := []*session.Message{
+		{Role: "assistant", Content: "older"},
+		{Role: "user", Content: "more older"},
+		{Role: "assistant", ToolCalls: []map[string]interface{}{{"id": "call-2"}}},
+		{Role: "tool", ToolID: "call-2", Content: "tool output"},
+		{Role: "user", Content: "recent prompt"},
+		{Role: "assistant", Content: "latest reply"},
+	}
+
+	adjusted := adjustCompactionBoundaryForTools(messages, 3)
+
+	if adjusted != 4 {
+		t.Fatalf("expected boundary to move forward to fully compact tool exchange, got %d", adjusted)
+	}
+}

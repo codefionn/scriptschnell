@@ -1395,6 +1395,11 @@ func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, session
 		}
 	}
 
+	prefixCount = adjustCompactionBoundaryForTools(sessionMessages, prefixCount)
+	if prefixCount <= 0 {
+		return
+	}
+
 	messagesCopy := append([]*session.Message(nil), sessionMessages[:prefixCount]...)
 
 	o.compactionMu.Lock()
@@ -1540,6 +1545,49 @@ func selectCompactionPrefix(perMessageTokens []int, totalTokens int) int {
 	}
 
 	return len(perMessageTokens)
+}
+
+// adjustCompactionBoundaryForTools ensures we never compact one half of a tool
+// exchange and leave the other half dangling in the un-compacted tail.
+func adjustCompactionBoundaryForTools(messages []*session.Message, prefixCount int) int {
+	if prefixCount <= 0 || prefixCount >= len(messages) {
+		return prefixCount
+	}
+
+	minUncompacted := 2
+	maxPrefix := len(messages) - minUncompacted
+	if maxPrefix < 0 {
+		return prefixCount
+	}
+	if prefixCount > maxPrefix {
+		prefixCount = maxPrefix
+	}
+
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
+		if msg == nil || !strings.EqualFold(msg.Role, "assistant") || len(msg.ToolCalls) == 0 {
+			continue
+		}
+
+		start := i
+		end := i
+		for end+1 < len(messages) && strings.EqualFold(messages[end+1].Role, "tool") {
+			end++
+		}
+
+		if start < prefixCount && prefixCount <= end {
+			forward := end + 1
+			if forward > maxPrefix {
+				prefixCount = start
+			} else {
+				prefixCount = forward
+			}
+			// Restart scan because the boundary moved and may intersect earlier blocks.
+			i = -1
+		}
+	}
+
+	return prefixCount
 }
 
 func buildUserCompactionSection(messages []*session.Message, perMessageTokens []int, contextWindow int, latestUserPrompt string) string {

@@ -91,6 +91,12 @@ func getDefaultCommandDefinitions() []commandDefinition {
 			Suggestions: []string{"/mcp"},
 			Handler:     (*CommandHandler).handleMCP,
 		},
+		{
+			Name:        "/context",
+			Description: "Manage context directories (/context help for subcommands)",
+			Suggestions: []string{"/context"},
+			Handler:     (*CommandHandler).handleContext,
+		},
 	}
 }
 
@@ -828,6 +834,126 @@ func (ch *CommandHandler) handleClear(_ []string) (MenuResult, error) {
 	}
 
 	return NewClearSessionResult(), nil
+}
+
+func (ch *CommandHandler) handleContext(args []string) (MenuResult, error) {
+	if ch.config == nil {
+		return MenuResult{}, fmt.Errorf("configuration unavailable")
+	}
+
+	if len(args) == 0 || args[0] == "help" {
+		return NewMenuResult(ch.contextHelp()), nil
+	}
+
+	subCmd := strings.ToLower(args[0])
+	switch subCmd {
+	case "list":
+		return ch.handleContextList()
+	case "add":
+		return ch.handleContextAdd(args[1:])
+	case "remove":
+		return ch.handleContextRemove(args[1:])
+	default:
+		return MenuResult{}, fmt.Errorf("unknown /context subcommand: %s", subCmd)
+	}
+}
+
+func (ch *CommandHandler) contextHelp() string {
+	return `Context Directory Commands:
+
+/context list
+    Show configured context directories.
+
+/context add <directory>
+    Add a directory to the context directories list. This makes external documentation
+    or library sources available to the AI via search_context_files, grep_context_files,
+    and read_context_file tools.
+
+/context remove <directory>
+    Remove a directory from the context directories list.
+
+Context directories are stored per-project and persist across sessions.
+Use absolute paths or paths relative to the working directory.
+
+Examples:
+  /context add /usr/share/doc/python3
+  /context add ~/projects/my-library/docs
+  /context remove /usr/share/doc/python3
+`
+}
+
+func (ch *CommandHandler) handleContextList() (MenuResult, error) {
+	contextDirs := ch.config.GetContextDirectories()
+	if len(contextDirs) == 0 {
+		return NewMenuResult("No context directories configured."), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Configured context directories:\n\n")
+
+	for i, dir := range contextDirs {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, dir))
+	}
+
+	sb.WriteString(fmt.Sprintf("\nTotal: %d context director", len(contextDirs)))
+	if len(contextDirs) == 1 {
+		sb.WriteString("y")
+	} else {
+		sb.WriteString("ies")
+	}
+
+	return NewMenuResult(sb.String()), nil
+}
+
+func (ch *CommandHandler) handleContextAdd(args []string) (MenuResult, error) {
+	if len(args) == 0 {
+		return MenuResult{}, fmt.Errorf("usage: /context add <directory>")
+	}
+
+	// Join all args to support paths with spaces
+	dir := strings.Join(args, " ")
+	dir = strings.TrimSpace(dir)
+
+	if dir == "" {
+		return MenuResult{}, fmt.Errorf("directory path cannot be empty")
+	}
+
+	// Add to config
+	ch.config.AddContextDirectory(dir)
+
+	// Save config
+	if err := ch.config.Save(config.GetConfigPath()); err != nil {
+		return MenuResult{}, fmt.Errorf("failed to save config: %w", err)
+	}
+
+	return NewMenuResult(fmt.Sprintf("Added context directory: %s\n\nThe AI can now search and read files in this directory using:\n- search_context_files\n- grep_context_files\n- read_context_file", dir)), nil
+}
+
+func (ch *CommandHandler) handleContextRemove(args []string) (MenuResult, error) {
+	if len(args) == 0 {
+		return MenuResult{}, fmt.Errorf("usage: /context remove <directory>")
+	}
+
+	// Join all args to support paths with spaces
+	dir := strings.Join(args, " ")
+	dir = strings.TrimSpace(dir)
+
+	if dir == "" {
+		return MenuResult{}, fmt.Errorf("directory path cannot be empty")
+	}
+
+	// Remove from config
+	removed := ch.config.RemoveContextDirectory(dir)
+	if !removed {
+		return MenuResult{}, fmt.Errorf("context directory not found: %s", dir)
+	}
+
+	// Save config
+	if err := ch.config.Save(config.GetConfigPath()); err != nil {
+		return MenuResult{}, fmt.Errorf("failed to save config: %w", err)
+	}
+
+	return NewMenuResult(fmt.Sprintf("Removed context directory: %s", dir)), nil
 }
 
 // GetKeyMap returns keyboard shortcut help

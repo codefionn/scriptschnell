@@ -101,6 +101,7 @@ type Config struct {
 	Secrets            SecretsSettings `json:"secrets,omitempty"`             // Encryption settings
 	EnablePromptCache  bool            `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
 	PromptCacheTTL     string          `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
+	ContextDirectories []string        `json:"context_directories,omitempty"` // Additional directories for context (e.g., external library docs)
 
 	secretsPassword string `json:"-"`
 }
@@ -175,9 +176,10 @@ func DefaultConfig() *Config {
 		MCP: MCPConfig{
 			Servers: make(map[string]*MCPServerConfig),
 		},
-		Secrets:           SecretsSettings{},
-		EnablePromptCache: true, // Enable by default for cost savings
-		PromptCacheTTL:    "1h", // Default to 1 hour for longer sessions
+		Secrets:            SecretsSettings{},
+		EnablePromptCache:  true,     // Enable by default for cost savings
+		PromptCacheTTL:     "1h",     // Default to 1 hour for longer sessions
+		ContextDirectories: []string{}, // No context directories by default
 	}
 }
 
@@ -227,6 +229,9 @@ func Load(path string) (*Config, error) {
 	if config.MCP.Servers == nil {
 		config.MCP.Servers = make(map[string]*MCPServerConfig)
 	}
+	if config.ContextDirectories == nil {
+		config.ContextDirectories = []string{}
+	}
 
 	return config, nil
 }
@@ -261,6 +266,44 @@ func (c *Config) IsCommandAuthorized(commandPrefix string) bool {
 		return false
 	}
 	return c.AuthorizedCommands[commandPrefix]
+}
+
+// AddContextDirectory adds a directory to the context directories list
+func (c *Config) AddContextDirectory(dir string) {
+	if c.ContextDirectories == nil {
+		c.ContextDirectories = []string{}
+	}
+	// Check if already exists
+	for _, existing := range c.ContextDirectories {
+		if existing == dir {
+			return
+		}
+	}
+	c.ContextDirectories = append(c.ContextDirectories, dir)
+}
+
+// RemoveContextDirectory removes a directory from the context directories list
+func (c *Config) RemoveContextDirectory(dir string) bool {
+	if c.ContextDirectories == nil {
+		return false
+	}
+	for i, existing := range c.ContextDirectories {
+		if existing == dir {
+			c.ContextDirectories = append(c.ContextDirectories[:i], c.ContextDirectories[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// GetContextDirectories returns a copy of the context directories list
+func (c *Config) GetContextDirectories() []string {
+	if c.ContextDirectories == nil {
+		return []string{}
+	}
+	result := make([]string, len(c.ContextDirectories))
+	copy(result, c.ContextDirectories)
+	return result
 }
 
 // Save saves configuration to file

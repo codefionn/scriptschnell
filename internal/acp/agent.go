@@ -70,6 +70,15 @@ func (a *StatCodeAIAgent) GetAvailableCommands() []acp.AvailableCommand {
 			Name:        "clear",
 			Description: "Clear the current conversation context",
 		},
+		{
+			Name:        "context",
+			Description: "Manage context directories for external documentation",
+			Input: &acp.AvailableCommandInput{
+				UnstructuredCommandInput: &acp.AvailableCommandUnstructuredCommandInput{
+					Hint: "list | add <directory> | remove <directory>",
+				},
+			},
+		},
 	}
 
 	return commands
@@ -132,6 +141,8 @@ func (a *StatCodeAIAgent) executeSlashCommand(sessionID, command, args string) (
 		resp, err = a.handleStatusCommand(session), nil
 	case "clear":
 		resp, err = a.handleClearCommand(session), nil
+	case "context":
+		resp, err = a.handleContextCommand(args)
 	default:
 		err = fmt.Errorf("unknown command: /%s", command)
 	}
@@ -250,6 +261,130 @@ func (a *StatCodeAIAgent) handleClearCommand(session *statcodeSession) string {
 	response += "Ready for a fresh start! What would you like to work on?\n"
 
 	return response
+}
+
+// handleContextCommand handles the /context command
+func (a *StatCodeAIAgent) handleContextCommand(args string) (string, error) {
+	logger.Debug("handleContextCommand: args=%q", truncateForLog(args))
+
+	args = strings.TrimSpace(args)
+	parts := strings.Fields(args)
+
+	if len(parts) == 0 || parts[0] == "help" {
+		return a.contextHelp(), nil
+	}
+
+	subCmd := strings.ToLower(parts[0])
+	switch subCmd {
+	case "list":
+		return a.handleContextList()
+	case "add":
+		if len(parts) < 2 {
+			return "", fmt.Errorf("usage: /context add <directory>")
+		}
+		dir := strings.Join(parts[1:], " ")
+		return a.handleContextAdd(dir)
+	case "remove":
+		if len(parts) < 2 {
+			return "", fmt.Errorf("usage: /context remove <directory>")
+		}
+		dir := strings.Join(parts[1:], " ")
+		return a.handleContextRemove(dir)
+	default:
+		return "", fmt.Errorf("unknown /context subcommand: %s", subCmd)
+	}
+}
+
+func (a *StatCodeAIAgent) contextHelp() string {
+	return `📁 Context Directory Commands:
+
+/context list
+    Show configured context directories.
+
+/context add <directory>
+    Add a directory to the context directories list. This makes external documentation
+    or library sources available to the AI via search_context_files, grep_context_files,
+    and read_context_file tools.
+
+/context remove <directory>
+    Remove a directory from the context directories list.
+
+Context directories are stored per-project and persist across sessions.
+Use absolute paths or paths relative to the working directory.
+
+Examples:
+  /context add /usr/share/doc/python3
+  /context add ~/projects/my-library/docs
+  /context remove /usr/share/doc/python3
+`
+}
+
+func (a *StatCodeAIAgent) handleContextList() (string, error) {
+	contextDirs := a.config.GetContextDirectories()
+	if len(contextDirs) == 0 {
+		return "No context directories configured.\n\nUse /context add <directory> to add context directories.", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📁 Configured context directories:\n\n")
+
+	for i, dir := range contextDirs {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, dir))
+	}
+
+	sb.WriteString(fmt.Sprintf("\nTotal: %d context director", len(contextDirs)))
+	if len(contextDirs) == 1 {
+		sb.WriteString("y")
+	} else {
+		sb.WriteString("ies")
+	}
+	sb.WriteString("\n\nThe AI can search and read files in these directories using:\n")
+	sb.WriteString("- search_context_files\n")
+	sb.WriteString("- grep_context_files\n")
+	sb.WriteString("- read_context_file\n")
+
+	return sb.String(), nil
+}
+
+func (a *StatCodeAIAgent) handleContextAdd(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", fmt.Errorf("directory path cannot be empty")
+	}
+
+	// Add to config
+	a.config.AddContextDirectory(dir)
+
+	// Save config
+	if err := a.config.Save(config.GetConfigPath()); err != nil {
+		return "", fmt.Errorf("failed to save config: %w", err)
+	}
+
+	logger.Debug("handleContextAdd: added context directory %s", dir)
+
+	return fmt.Sprintf("✓ Added context directory: %s\n\nThe AI can now search and read files in this directory using:\n- search_context_files\n- grep_context_files\n- read_context_file", dir), nil
+}
+
+func (a *StatCodeAIAgent) handleContextRemove(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", fmt.Errorf("directory path cannot be empty")
+	}
+
+	// Remove from config
+	removed := a.config.RemoveContextDirectory(dir)
+	if !removed {
+		return "", fmt.Errorf("context directory not found: %s", dir)
+	}
+
+	// Save config
+	if err := a.config.Save(config.GetConfigPath()); err != nil {
+		return "", fmt.Errorf("failed to save config: %w", err)
+	}
+
+	logger.Debug("handleContextRemove: removed context directory %s", dir)
+
+	return fmt.Sprintf("✓ Removed context directory: %s", dir), nil
 }
 
 // StatCodeAIAgent implements the acp.Agent interface to expose statcode-ai functionality via ACP

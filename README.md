@@ -14,6 +14,7 @@ On first run, it will download tinygo (if not in PATH).
 - Auto-continue for long-running sessions
 - Auto-compaction during generation for longer sessions
 - Two separate LLM models for orchestration and summarization
+- Read only contexts like external documentation, library sources, etc.
 - **Agent Client Protocol (ACP) support** for integration with code editors
 
 ![Screenshot of scriptschnell after prompting ls](docs/Screenshot_TUI_ls.png)

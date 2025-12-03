@@ -363,29 +363,26 @@ func CreateFile(path, content string) string {
 }
 
 //go:wasmimport env write_file
-func writeFileHost(pathPtr *byte, pathLen int32, operationPtr *byte, operationLen int32, lineNum int32, contentPtr *byte, contentLen int32, resultPtr *byte, resultCap int32) int32
+func writeFileHost(pathPtr *byte, pathLen int32, appendMode int32, contentPtr *byte, contentLen int32, resultPtr *byte, resultCap int32) int32
 
-// WriteFile modifies an existing file with line-based operations
+// WriteFile writes or appends content to an existing file
 // The file must have been read earlier in the session (read-before-write rule)
-// Operations: "insert_after", "insert_before", "update", "replace_all"
+// If append is true, content is appended to the file; otherwise the file is overwritten
 // Returns empty string on success, error message on failure
 //
 // Examples:
-//   WriteFile("file.txt", "insert_after", 5, "new line content")  // Insert after line 5
-//   WriteFile("file.txt", "insert_before", 1, "new first line")   // Insert before line 1
-//   WriteFile("file.txt", "update", 3, "updated line 3")          // Replace line 3
-//   WriteFile("file.txt", "replace_all", 0, "entire new content") // Replace entire file
-func WriteFile(path, operation string, lineNum int, content string) string {
+//   WriteFile("file.txt", false, "new content")       // Overwrite file with new content
+//   WriteFile("file.txt", true, "additional content") // Append content to file
+func WriteFile(path string, append bool, content string) string {
 	pathBytes := []byte(path)
 	var pathPtr *byte
 	if len(pathBytes) > 0 {
 		pathPtr = &pathBytes[0]
 	}
 
-	operationBytes := []byte(operation)
-	var operationPtr *byte
-	if len(operationBytes) > 0 {
-		operationPtr = &operationBytes[0]
+	appendMode := int32(0)
+	if append {
+		appendMode = 1
 	}
 
 	contentBytes := []byte(content)
@@ -404,8 +401,7 @@ func WriteFile(path, operation string, lineNum int, content string) string {
 	// Call host write_file function
 	statusCode := writeFileHost(
 		pathPtr, int32(len(pathBytes)),
-		operationPtr, int32(len(operationBytes)),
-		int32(lineNum),
+		appendMode,
 		contentPtr, int32(len(contentBytes)),
 		resultPtr, int32(len(resultBuffer)),
 	)

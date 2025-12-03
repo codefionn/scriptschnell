@@ -51,6 +51,7 @@ type BackgroundJob struct {
 	StopRequested  bool
 	LastSignal     string
 	Done           chan struct{}
+	Mu             sync.RWMutex
 }
 
 // NewSession creates a new session

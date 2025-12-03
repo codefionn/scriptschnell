@@ -294,7 +294,9 @@ func (o *shellOutput) processChunk(chunk []byte, isStdout bool) {
 		if len(lines) > 0 {
 			o.stdoutLines = append(o.stdoutLines, lines...)
 			if o.job != nil {
+				o.job.Mu.Lock()
 				o.job.Stdout = append(o.job.Stdout, lines...)
+				o.job.Mu.Unlock()
 			}
 		}
 	} else {
@@ -304,7 +306,9 @@ func (o *shellOutput) processChunk(chunk []byte, isStdout bool) {
 		if len(lines) > 0 {
 			o.stderrLines = append(o.stderrLines, lines...)
 			if o.job != nil {
+				o.job.Mu.Lock()
 				o.job.Stderr = append(o.job.Stderr, lines...)
+				o.job.Mu.Unlock()
 			}
 		}
 	}
@@ -319,8 +323,10 @@ func (o *shellOutput) convertToBackground(sess *session.Session, cmd *exec.Cmd, 
 	}
 
 	job, jobID := registerShellBackgroundJob(sess, cmd, command, workingDir, startedAt)
+	job.Mu.Lock()
 	job.Stdout = append(job.Stdout, o.stdoutLines...)
 	job.Stderr = append(job.Stderr, o.stderrLines...)
+	job.Mu.Unlock()
 	o.job = job
 	return job, jobID
 }
@@ -330,21 +336,29 @@ func (o *shellOutput) finalizeBackgroundJob(job *session.BackgroundJob, exitCode
 	defer o.mu.Unlock()
 
 	if o.stdoutPending != "" {
+		job.Mu.Lock()
 		job.Stdout = append(job.Stdout, trimTrailingCarriage(o.stdoutPending))
+		job.Mu.Unlock()
 		o.stdoutPending = ""
 	}
 	if o.stderrPending != "" {
+		job.Mu.Lock()
 		job.Stderr = append(job.Stderr, trimTrailingCarriage(o.stderrPending))
+		job.Mu.Unlock()
 		o.stderrPending = ""
 	}
 
 	if err != nil && exitCode == -1 {
+		job.Mu.Lock()
 		job.Stderr = append(job.Stderr, fmt.Sprintf("command error: %v", err))
+		job.Mu.Unlock()
 	}
 
+	job.Mu.Lock()
 	job.ExitCode = exitCode
 	job.Completed = true
 	job.Process = nil
+	job.Mu.Unlock()
 	close(job.Done)
 }
 

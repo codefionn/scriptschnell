@@ -173,7 +173,7 @@ func (t *SandboxTool) Name() string {
 func (t *SandboxTool) Description() string {
 	var b strings.Builder
 	b.WriteString("Execute Go code in a strongly sandboxed WebAssembly environment. ")
-	b.WriteString("Standard library packages available (try to not use the `os` package instead, but methods provided below). Timeout enforced.\n")
+	b.WriteString("Basic standard library packages available (don't use the `os`, `ioutil, `net` package instead use methods provided below). Timeout enforced.\n")
 	b.WriteString("Every program **must** declare `package main`, define `func main()`, and print results (e.g., via `fmt.Println`) so the orchestrator receives the output.\n\n")
 	b.WriteString("Try to reduce the output of shell programs by e.g. only searching and outputting errors.\n\n")
 	b.WriteString("Seven custom functions are automatically available in your code:\n\n")
@@ -257,10 +257,9 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("     }\n")
 	b.WriteString("     ```\n\n")
 
-	b.WriteString("6. WriteFile(path, operation string, lineNum int, content string) (errorMsg string)\n")
-	b.WriteString("   - Modify existing file with line-based operations (must be read first)\n")
-	b.WriteString("   - Operations: \"insert_after\", \"insert_before\", \"update\", \"replace_all\"\n")
-	b.WriteString("   - lineNum is 1-indexed (ignored for \"replace_all\")\n")
+	b.WriteString("6. WriteFile(path string, append bool, content string) (errorMsg string)\n")
+	b.WriteString("   - Write or append content to existing file (must be read first)\n")
+	b.WriteString("   - If append is true, content is appended; otherwise file is overwritten\n")
 	b.WriteString("   - Enforces read-before-write safety rule\n")
 	b.WriteString("   - Returns empty string on success, error message on failure\n")
 	b.WriteString("   - Examples:\n")
@@ -268,14 +267,15 @@ func (t *SandboxTool) Description() string {
 	b.WriteString("     package main\n\n")
 	b.WriteString("     import \"fmt\"\n\n")
 	b.WriteString("     func main() {\n")
-	b.WriteString("         if err := WriteFile(\"file.txt\", \"insert_after\", 5, \"new line\"); err != \"\" {\n")
-	b.WriteString("             fmt.Println(\"insert error:\", err)\n")
+	b.WriteString("         // Read file first (required)\n")
+	b.WriteString("         _ = ReadFile(\"file.txt\", 0, 0)\n\n")
+	b.WriteString("         // Overwrite file with new content\n")
+	b.WriteString("         if err := WriteFile(\"file.txt\", false, \"new content\"); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"write error:\", err)\n")
 	b.WriteString("         }\n\n")
-	b.WriteString("         if err := WriteFile(\"file.txt\", \"update\", 3, \"updated line 3\"); err != \"\" {\n")
-	b.WriteString("             fmt.Println(\"update error:\", err)\n")
-	b.WriteString("         }\n\n")
-	b.WriteString("         if err := WriteFile(\"file.txt\", \"replace_all\", 0, \"new content\"); err != \"\" {\n")
-	b.WriteString("             fmt.Println(\"replace error:\", err)\n")
+	b.WriteString("         // Append content to file\n")
+	b.WriteString("         if err := WriteFile(\"file.txt\", true, \"\\nadditional line\"); err != \"\" {\n")
+	b.WriteString("             fmt.Println(\"append error:\", err)\n")
 	b.WriteString("         }\n")
 	b.WriteString("     }\n")
 	b.WriteString("     ```\n\n")
@@ -578,6 +578,7 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 		defer close(job.Done)
 
 		result, err := t.executeWithBuilder(execCtx, code, timeout, libraries)
+		job.Mu.Lock()
 		job.Completed = true
 
 		if err != nil {
@@ -587,6 +588,7 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 				job.Stderr = append(job.Stderr, fmt.Sprintf("sandbox error: %v", err))
 			}
 			job.ExitCode = -1
+			job.Mu.Unlock()
 			return
 		}
 
@@ -611,6 +613,7 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 		} else if result != nil {
 			job.Stdout = append(job.Stdout, fmt.Sprintf("result: %v", result))
 		}
+		job.Mu.Unlock()
 	}()
 
 	return map[string]interface{}{
@@ -700,20 +703,25 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 		return nil, fmt.Errorf("failed to write code file: %w", err)
 	}
 
-	// Create context with timeout
-	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer cancel()
-
 	// Get TinyGo binary path (downloads if necessary)
 	// TinyGo is REQUIRED for wasip2 support - standard Go only supports wasip1
+	// Use a separate context with longer timeout for downloading TinyGo (~50MB)
 	if t.tinygoManager == nil {
 		return nil, fmt.Errorf("TinyGo manager not initialized - cannot compile WASM code")
 	}
 
-	tinyGoBinary, err := t.tinygoManager.GetTinyGoBinary(execCtx)
+	// Use parent context for TinyGo download (not the execution timeout)
+	// TinyGo download can take time on slow connections and should not be limited by sandbox timeout
+	downloadCtx, downloadCancel := context.WithTimeout(ctx, 10*time.Minute)
+	tinyGoBinary, err := t.tinygoManager.GetTinyGoBinary(downloadCtx)
+	downloadCancel()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get TinyGo binary (required for WASI P2 compilation): %w", err)
 	}
+
+	// Create context with timeout for actual compilation and execution
+	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
 
 	// WASM execution (maximum isolation, controlled network access)
 	// Using WASI P1 target because wazero currently exposes mature Preview1 support.
@@ -1102,9 +1110,9 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 		}).
 		Export("create_file")
 
-	// write_file(path_ptr, path_len, operation_ptr, operation_len, line_num, content_ptr, content_len, result_ptr, result_cap) -> status_code
+	// write_file(path_ptr, path_len, append_mode, content_ptr, content_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
-		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen, operationPtr, operationLen uint32, lineNum int32, contentPtr, contentLen, resultPtr, resultCap uint32) int32 {
+		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, appendMode int32, contentPtr, contentLen, resultPtr, resultCap uint32) int32 {
 			memory := m.Memory()
 
 			// Read path from WASM memory
@@ -1113,13 +1121,6 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				return -1 // Error: invalid memory access
 			}
 			path := string(pathBytes)
-
-			// Read operation from WASM memory
-			operationBytes, ok := memory.Read(operationPtr, operationLen)
-			if !ok {
-				return -1 // Error: invalid memory access
-			}
-			operation := string(operationBytes)
 
 			// Read content from WASM memory
 			var content string
@@ -1159,77 +1160,22 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				return -4 // Error: not read before write
 			}
 
-			// Read current file content
-			currentData, err := t.filesystem.ReadFile(ctx, path)
-			if err != nil {
-				errMsg := []byte(fmt.Sprintf("Error: Failed to read file: %v", err))
-				if uint32(len(errMsg)) <= resultCap {
-					memory.Write(resultPtr, errMsg)
+			var finalContent string
+			if appendMode == 1 {
+				// Append mode: read current content and append
+				currentData, err := t.filesystem.ReadFile(ctx, path)
+				if err != nil {
+					errMsg := []byte(fmt.Sprintf("Error: Failed to read file: %v", err))
+					if uint32(len(errMsg)) <= resultCap {
+						memory.Write(resultPtr, errMsg)
+					}
+					return -5 // Error: read failed
 				}
-				return -5 // Error: read failed
+				finalContent = string(currentData) + content
+			} else {
+				// Overwrite mode: use content as-is
+				finalContent = content
 			}
-
-			// Parse file into lines
-			lines := strings.Split(string(currentData), "\n")
-
-			// Perform operation
-			var finalLines []string
-			switch operation {
-			case "replace_all":
-				// Replace entire file content
-				finalLines = strings.Split(content, "\n")
-
-			case "insert_after":
-				// Insert content after specified line (1-indexed)
-				if lineNum < 1 || int(lineNum) > len(lines) {
-					errMsg := []byte(fmt.Sprintf("Error: Line number %d out of range (1-%d)", lineNum, len(lines)))
-					if uint32(len(errMsg)) <= resultCap {
-						memory.Write(resultPtr, errMsg)
-					}
-					return -6 // Error: invalid line number
-				}
-				newLines := strings.Split(content, "\n")
-				finalLines = append(finalLines, lines[:lineNum]...)
-				finalLines = append(finalLines, newLines...)
-				finalLines = append(finalLines, lines[lineNum:]...)
-
-			case "insert_before":
-				// Insert content before specified line (1-indexed)
-				if lineNum < 1 || int(lineNum) > len(lines) {
-					errMsg := []byte(fmt.Sprintf("Error: Line number %d out of range (1-%d)", lineNum, len(lines)))
-					if uint32(len(errMsg)) <= resultCap {
-						memory.Write(resultPtr, errMsg)
-					}
-					return -6 // Error: invalid line number
-				}
-				newLines := strings.Split(content, "\n")
-				finalLines = append(finalLines, lines[:lineNum-1]...)
-				finalLines = append(finalLines, newLines...)
-				finalLines = append(finalLines, lines[lineNum-1:]...)
-
-			case "update":
-				// Replace specified line (1-indexed)
-				if lineNum < 1 || int(lineNum) > len(lines) {
-					errMsg := []byte(fmt.Sprintf("Error: Line number %d out of range (1-%d)", lineNum, len(lines)))
-					if uint32(len(errMsg)) <= resultCap {
-						memory.Write(resultPtr, errMsg)
-					}
-					return -6 // Error: invalid line number
-				}
-				finalLines = make([]string, len(lines))
-				copy(finalLines, lines)
-				finalLines[lineNum-1] = content
-
-			default:
-				errMsg := []byte(fmt.Sprintf("Error: Unknown operation: %s", operation))
-				if uint32(len(errMsg)) <= resultCap {
-					memory.Write(resultPtr, errMsg)
-				}
-				return -7 // Error: unknown operation
-			}
-
-			// Join lines back into content
-			finalContent := strings.Join(finalLines, "\n")
 
 			// Write file
 			if err := t.filesystem.WriteFile(ctx, path, []byte(finalContent)); err != nil {
@@ -1237,7 +1183,7 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				if uint32(len(errMsg)) <= resultCap {
 					memory.Write(resultPtr, errMsg)
 				}
-				return -8 // Error: write failed
+				return -6 // Error: write failed
 			}
 
 			// Track file modification in session
@@ -1246,7 +1192,11 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 				t.session.TrackFileRead(path, finalContent)
 			}
 
-			callTracker.record("write_file", fmt.Sprintf("%s (%s at %d)", path, operation, lineNum))
+			mode := "write"
+			if appendMode == 1 {
+				mode = "append"
+			}
+			callTracker.record("write_file", fmt.Sprintf("%s (%s)", path, mode))
 
 			return 0 // Success
 		}).

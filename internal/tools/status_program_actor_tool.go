@@ -78,16 +78,24 @@ func (t *StatusProgramToolWithActor) listAllJobs(ctx context.Context) *ToolResul
 		// Get fresh status from shell actor
 		running, exitCode, stdout, stderr, completed, err := t.shellActor.GetJobStatus(ctx, job.ID)
 		if err != nil {
+			job.Mu.RLock()
+			command := job.Command
+			pid := job.PID
+			completedVal := job.Completed
+			exit := job.ExitCode
+			stdoutLines := strings.Join(job.Stdout, "\n")
+			stderrLines := strings.Join(job.Stderr, "\n")
+			job.Mu.RUnlock()
 			// Fallback to session data if actor doesn't have the job
 			result[job.ID] = map[string]interface{}{
 				"job_id":    job.ID,
-				"command":   job.Command,
-				"pid":       job.PID,
-				"running":   !job.Completed,
-				"completed": job.Completed,
-				"exit_code": job.ExitCode,
-				"stdout":    strings.Join(job.Stdout, "\n"),
-				"stderr":    strings.Join(job.Stderr, "\n"),
+				"command":   command,
+				"pid":       pid,
+				"running":   !completedVal,
+				"completed": completedVal,
+				"exit_code": exit,
+				"stdout":    stdoutLines,
+				"stderr":    stderrLines,
 			}
 		} else {
 			result[job.ID] = map[string]interface{}{

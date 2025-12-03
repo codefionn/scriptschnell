@@ -167,7 +167,10 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			job.Stdout = append(job.Stdout, scanner.Text())
+			line := scanner.Text()
+			job.Mu.Lock()
+			job.Stdout = append(job.Stdout, line)
+			job.Mu.Unlock()
 		}
 	}()
 
@@ -176,7 +179,10 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 		defer wg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			job.Stderr = append(job.Stderr, scanner.Text())
+			line := scanner.Text()
+			job.Mu.Lock()
+			job.Stderr = append(job.Stderr, line)
+			job.Mu.Unlock()
 		}
 	}()
 
@@ -185,6 +191,7 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 		defer close(job.Done)
 		err := cmd.Wait()
 		wg.Wait()
+		job.Mu.Lock()
 		job.Completed = true
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
@@ -197,6 +204,7 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 			job.ExitCode = 0
 		}
 		job.Process = nil
+		job.Mu.Unlock()
 	}()
 
 	return &ToolResult{
@@ -350,26 +358,30 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 		return &ToolResult{Error: fmt.Sprintf("job not found: %s", jobID)}
 	}
 
-	if !job.Completed {
-		done := job.Done
-		if done != nil {
+	jobCompleted := func() bool {
+		job.Mu.RLock()
+		defer job.Mu.RUnlock()
+		return job.Completed
+	}
+
+	done := job.Done
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return &ToolResult{Error: ctx.Err().Error()}
+		}
+	} else if !jobCompleted() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if jobCompleted() {
+				break
+			}
 			select {
-			case <-done:
 			case <-ctx.Done():
 				return &ToolResult{Error: ctx.Err().Error()}
-			}
-		} else {
-			ticker := time.NewTicker(100 * time.Millisecond)
-			defer ticker.Stop()
-			for {
-				if job.Completed {
-					break
-				}
-				select {
-				case <-ctx.Done():
-					return &ToolResult{Error: ctx.Err().Error()}
-				case <-ticker.C:
-				}
+			case <-ticker.C:
 			}
 		}
 	}
@@ -380,6 +392,20 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 }
 
 func buildJobSnapshot(ctx context.Context, job *session.BackgroundJob, lastNLines int) map[string]interface{} {
+	job.Mu.RLock()
+	stdoutLines := append([]string(nil), job.Stdout...)
+	stderrLines := append([]string(nil), job.Stderr...)
+	completed := job.Completed
+	exitCode := job.ExitCode
+	startTime := job.StartTime
+	pid := job.PID
+	processGroup := job.ProcessGroupID
+	jobType := job.Type
+	stopRequested := job.StopRequested
+	lastSignal := job.LastSignal
+	command := job.Command
+	job.Mu.RUnlock()
+
 	computeStart := func(length int) int {
 		if lastNLines <= 0 || length <= lastNLines {
 			return 0
@@ -387,29 +413,29 @@ func buildJobSnapshot(ctx context.Context, job *session.BackgroundJob, lastNLine
 		return length - lastNLines
 	}
 
-	combined := make([]string, 0, len(job.Stdout)+len(job.Stderr))
-	combined = append(combined, job.Stdout...)
-	combined = append(combined, job.Stderr...)
+	combined := make([]string, 0, len(stdoutLines)+len(stderrLines))
+	combined = append(combined, stdoutLines...)
+	combined = append(combined, stderrLines...)
 
 	start := computeStart(len(combined))
-	stdoutStart := computeStart(len(job.Stdout))
-	stderrStart := computeStart(len(job.Stderr))
+	stdoutStart := computeStart(len(stdoutLines))
+	stderrStart := computeStart(len(stderrLines))
 
 	output := strings.Join(combined[start:], "\n")
-	stdout := strings.Join(job.Stdout[stdoutStart:], "\n")
-	stderr := strings.Join(job.Stderr[stderrStart:], "\n")
+	stdout := strings.Join(stdoutLines[stdoutStart:], "\n")
+	stderr := strings.Join(stderrLines[stderrStart:], "\n")
 
 	snapshot := map[string]interface{}{
 		"job_id":         job.ID,
-		"command":        job.Command,
-		"completed":      job.Completed,
-		"exit_code":      job.ExitCode,
-		"runtime":        time.Since(job.StartTime).String(),
-		"pid":            job.PID,
-		"process_group":  job.ProcessGroupID,
-		"type":           job.Type,
-		"stop_requested": job.StopRequested,
-		"last_signal":    job.LastSignal,
+		"command":        command,
+		"completed":      completed,
+		"exit_code":      exitCode,
+		"runtime":        time.Since(startTime).String(),
+		"pid":            pid,
+		"process_group":  processGroup,
+		"type":           jobType,
+		"stop_requested": stopRequested,
+		"last_signal":    lastSignal,
 		"output":         output,
 		"stdout":         stdout,
 		"stderr":         stderr,
@@ -582,33 +608,41 @@ func registerShellBackgroundJob(sess *session.Session, cmd *exec.Cmd, cmdStr, wo
 }
 
 func sendSignalToBackgroundJob(job *session.BackgroundJob, sig syscall.Signal, signalName string) error {
+	job.Mu.RLock()
+	processGroupID := job.ProcessGroupID
+	proc := job.Process
+	pid := job.PID
+	cancel := job.CancelFunc
+	jobID := job.ID
+	job.Mu.RUnlock()
+
 	var groupErr error
 
-	if job.ProcessGroupID > 0 {
-		if err := signalProcessGroup(job.ProcessGroupID, sig); err == nil || isIgnorableSignalError(err) {
+	if processGroupID > 0 {
+		if err := signalProcessGroup(processGroupID, sig); err == nil || isIgnorableSignalError(err) {
 			if err == nil {
 				return nil
 			}
 		} else {
-			groupErr = fmt.Errorf("failed to signal process group %d: %w", job.ProcessGroupID, err)
+			groupErr = fmt.Errorf("failed to signal process group %d: %w", processGroupID, err)
 		}
 	}
 
-	if job.Process != nil {
+	if proc != nil {
 		var err error
 		if signalName == "SIGKILL" {
-			err = job.Process.Kill()
+			err = proc.Kill()
 		} else {
-			err = job.Process.Signal(sig)
+			err = proc.Signal(sig)
 		}
 		if err == nil || isIgnorableSignalError(err) {
 			return nil
 		}
-		return fmt.Errorf("failed to signal process %d: %w", job.PID, err)
+		return fmt.Errorf("failed to signal process %d: %w", pid, err)
 	}
 
-	if job.CancelFunc != nil {
-		job.CancelFunc()
+	if cancel != nil {
+		cancel()
 		return nil
 	}
 
@@ -616,7 +650,7 @@ func sendSignalToBackgroundJob(job *session.BackgroundJob, sig syscall.Signal, s
 		return groupErr
 	}
 
-	return fmt.Errorf("no active process to signal for job %s", job.ID)
+	return fmt.Errorf("no active process to signal for job %s", jobID)
 }
 
 func isIgnorableSignalError(err error) bool {
@@ -694,12 +728,17 @@ func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interfa
 		return &ToolResult{Error: fmt.Sprintf("unsupported signal: %s", signalInput)}
 	}
 
-	if job.Completed {
+	job.Mu.RLock()
+	alreadyCompleted := job.Completed
+	exitCode := job.ExitCode
+	job.Mu.RUnlock()
+
+	if alreadyCompleted {
 		return &ToolResult{Result: map[string]interface{}{
 			"job_id":    job.ID,
 			"message":   "Job already completed.",
 			"completed": true,
-			"exit_code": job.ExitCode,
+			"exit_code": exitCode,
 		}}
 	}
 
@@ -708,8 +747,10 @@ func (t *StopProgramTool) Execute(ctx context.Context, params map[string]interfa
 		return &ToolResult{Error: err.Error()}
 	}
 
+	job.Mu.Lock()
 	job.StopRequested = true
 	job.LastSignal = signalName
+	job.Mu.Unlock()
 
 	logger.Info("stop_program: sent %s to job %s (pid=%d)", signalName, job.ID, job.PID)
 

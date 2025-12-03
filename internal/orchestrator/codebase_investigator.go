@@ -86,6 +86,22 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	// Parallel execution tool (allows the investigator to speed up by running multiple tools concurrently)
 	registry.Register(tools.NewParallelTool(registry))
 
+	// Context tools (if context directories are configured)
+	if len(a.orch.config.ContextDirectories) > 0 {
+		registry.RegisterSpec(
+			&tools.SearchContextFilesToolSpec{},
+			tools.NewSearchContextFilesToolFactory(a.orch.fs, a.orch.config),
+		)
+		registry.RegisterSpec(
+			&tools.GrepContextFilesToolSpec{},
+			tools.NewGrepContextFilesToolFactory(a.orch.fs, a.orch.config),
+		)
+		registry.RegisterSpec(
+			&tools.ReadContextFileToolSpec{},
+			tools.NewReadContextFileToolFactory(a.orch.fs, a.orch.config),
+		)
+	}
+
 	// System prompt for investigator
 	systemPrompt := `You are a Codebase Investigator agent.:
 Your goal is to explore the codebase to answer the user's objective.
@@ -93,6 +109,8 @@ You have access to tools to search and read files.
 You should systematically explore relevant files.
 
 Use the parallel_tool to execute multiple tools (e.g. multiple search_files, search_file_content, read_file) concurrently.
+
+If context directories are configured, you also have access to context tools (search_context_files, grep_context_files, read_context_file) for searching external documentation or library sources.
 
 Exit early (e.g. 5 tool calls) if you have not sufficient information to answer the objective.
 

@@ -136,6 +136,7 @@ You are an interactive CLI agent specializing in software engineering tasks. You
 
 ## Caution
 - You cannot test tui programs directly by default
+- Do not use 'exec.Command' or 'os/exec' to execute commands in the sandbox
 `
 
 var systemPrompt = template.Must(template.New("systemPrompt").Parse(systemPromptTemplate))

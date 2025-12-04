@@ -151,6 +151,11 @@ func (o *OpenAPITool) Parameters() map[string]interface{} {
 	return result
 }
 
+// HTTPMethod returns the HTTP method used by the OpenAPI tool.
+func (o *OpenAPITool) HTTPMethod() string {
+	return o.method
+}
+
 // Execute performs the HTTP request defined by the tool configuration.
 func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	reqURL, err := o.buildURL(params)

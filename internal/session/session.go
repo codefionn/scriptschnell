@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // Message represents a conversation message
@@ -28,6 +30,9 @@ type Session struct {
 	BackgroundJobs     map[string]*BackgroundJob
 	AuthorizedDomains  map[string]bool // domain -> authorized (session-level)
 	AuthorizedCommands []string        // command prefixes that are authorized (session-level)
+	PlanningActive     bool            // whether planning phase is currently running
+	PlanningObjective  string          // objective of current planning phase
+	PlanningStartTime  time.Time       // when current planning phase started
 	mu                 sync.RWMutex
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -151,6 +156,33 @@ func (s *Session) ListBackgroundJobs() []*BackgroundJob {
 	return jobs
 }
 
+// SetPlanningActive marks planning as active/inactive
+func (s *Session) SetPlanningActive(active bool, objective string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.PlanningActive = active
+	if active {
+		s.PlanningObjective = objective
+		s.PlanningStartTime = time.Now()
+		logger.Debug("Planning phase started: %s", objective)
+	} else {
+		if s.PlanningObjective != "" {
+			duration := time.Since(s.PlanningStartTime)
+			logger.Debug("Planning phase completed: %s (duration: %v)", s.PlanningObjective, duration)
+		}
+		s.PlanningObjective = ""
+		s.PlanningStartTime = time.Time{}
+	}
+	s.UpdatedAt = time.Now()
+}
+
+// GetPlanningStatus returns the current planning status
+func (s *Session) GetPlanningStatus() (active bool, objective string, startTime time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.PlanningActive, s.PlanningObjective, s.PlanningStartTime
+}
+
 // Clear clears the session but keeps working directory
 func (s *Session) Clear() {
 	s.mu.Lock()
@@ -161,6 +193,9 @@ func (s *Session) Clear() {
 	s.BackgroundJobs = make(map[string]*BackgroundJob)
 	s.AuthorizedDomains = make(map[string]bool)
 	s.AuthorizedCommands = make([]string, 0)
+	s.PlanningActive = false
+	s.PlanningObjective = ""
+	s.PlanningStartTime = time.Time{}
 	s.UpdatedAt = time.Now()
 }
 

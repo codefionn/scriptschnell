@@ -23,9 +23,13 @@ func TestWriteFileReplaceTool_EmptyFile(t *testing.T) {
 	// Test 1: Empty file with non-empty old_string (old_string is ignored)
 	newContent := "This is the new content"
 	result := tool.Execute(ctx, map[string]interface{}{
-		"path":       "empty.txt",
-		"old_string": "irrelevant_old_string",
-		"new_string": newContent,
+		"path": "empty.txt",
+		"edits": []map[string]interface{}{
+			{
+				"old_string": "irrelevant_old_string",
+				"new_string": newContent,
+			},
+		},
 	})
 
 	if result.Error != "" {
@@ -65,9 +69,13 @@ func TestWriteFileReplaceTool_EmptyFileEmptyOldString(t *testing.T) {
 	// Test 2: Empty file with empty old_string (this is the bug fix)
 	newContent := "New content from empty old_string"
 	result := tool.Execute(ctx, map[string]interface{}{
-		"path":       "empty2.txt",
-		"old_string": "", // Empty old_string should work for empty files
-		"new_string": newContent,
+		"path": "empty2.txt",
+		"edits": []map[string]interface{}{
+			{
+				"old_string": "", // Empty old_string should work for empty files
+				"new_string": newContent,
+			},
+		},
 	})
 
 	if result.Error != "" {

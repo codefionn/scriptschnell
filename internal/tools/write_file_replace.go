@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -14,12 +15,12 @@ import (
 type WriteFileReplaceToolSpec struct{}
 
 func (s *WriteFileReplaceToolSpec) Name() string {
-	return ToolNameWriteFileDiff
+	return ToolNameWriteFileReplace
 }
 
 func (s *WriteFileReplaceToolSpec) Description() string {
-	return `Update an existing file by replacing a specific string with a new string. 
-Ensure the old_string matches exactly (including whitespace and indentation). 
+	return `Update an existing file by replacing text. Either provide a single old_string/new_string pair, or supply an edits array to batch multiple replacements in the same file. 
+Ensure every old_string matches exactly (including whitespace and indentation). 
 Be careful around opening and closing brackets (e.g. '{' and '}' in C like languages) when editing code.`
 }
 
@@ -31,28 +32,43 @@ func (s *WriteFileReplaceToolSpec) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "Path to the file to update (relative to working directory)",
 			},
-			"old_string": map[string]interface{}{
-				"type":        "string",
-				"description": "The exact literal text to replace. Must be unique in the file or expected_replacements must be specified.",
-			},
-			"new_string": map[string]interface{}{
-				"type":        "string",
-				"description": "The text to replace old_string with.",
-			},
-			"expected_replacements": map[string]interface{}{
-				"type":        "integer",
-				"description": "Number of replacements expected. Defaults to 1 if not specified.",
+			"edits": map[string]interface{}{
+				"type":        "array",
+				"description": "Optional list of replacements to apply in order. Use this to perform multiple edits in one call.",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"old_string": map[string]interface{}{
+							"type":        "string",
+							"description": "Exact text to replace. Must be present in the file for this edit.",
+						},
+						"new_string": map[string]interface{}{
+							"type":        "string",
+							"description": "Replacement text. Empty string deletes the match.",
+						},
+						"expected_replacements": map[string]interface{}{
+							"type":        "integer",
+							"description": "How many times old_string should appear for this edit. Defaults to 1 if omitted.",
+						},
+					},
+					"required": []string{"old_string", "new_string"},
+				},
 			},
 		},
-		"required": []string{"path", "old_string", "new_string"},
+		"required": []string{"path", "edits"},
 	}
 }
 
-// WriteFileReplaceTool is the executor with runtime dependencies
-// This is a variation of the write_file_diff tool that uses exact string replacement.
+// WriteFileReplaceTool is the executor with runtime dependencies.
 type WriteFileReplaceTool struct {
 	fs      fs.FileSystem
 	session *session.Session
+}
+
+type replacementEdit struct {
+	OldString            string `json:"old_string"`
+	NewString            string `json:"new_string"`
+	ExpectedReplacements int    `json:"expected_replacements"`
 }
 
 func NewWriteFileReplaceTool(filesystem fs.FileSystem, sess *session.Session) *WriteFileReplaceTool {
@@ -62,8 +78,7 @@ func NewWriteFileReplaceTool(filesystem fs.FileSystem, sess *session.Session) *W
 	}
 }
 
-// Legacy interface implementation for backward compatibility
-func (t *WriteFileReplaceTool) Name() string { return ToolNameWriteFileDiff }
+func (t *WriteFileReplaceTool) Name() string { return ToolNameWriteFileReplace }
 func (t *WriteFileReplaceTool) Description() string {
 	return (&WriteFileReplaceToolSpec{}).Description()
 }
@@ -77,13 +92,12 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 		return &ToolResult{Error: "path is required"}
 	}
 
-	oldString := GetStringParam(params, "old_string", "")
-	newString := GetStringParam(params, "new_string", "")
-	// newString can be empty (deletion)
+	edits, err := parseReplacementEdits(params)
+	if err != nil {
+		return &ToolResult{Error: err.Error()}
+	}
 
-	expectedReplacements := GetIntParam(params, "expected_replacements", 1)
-
-	logger.Debug("write_file_diff(replace): path=%s replacements=%d", path, expectedReplacements)
+	logger.Debug("write_file_diff(replace): path=%s replacements_requested=%d", path, len(edits))
 
 	if t.fs == nil {
 		return &ToolResult{Error: "file system is not configured"}
@@ -110,10 +124,12 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 
 	content := string(currentData)
 
-	// Special case: if the file is empty, we just write the new content.
-	// This allows initializing or overwriting empty files without needing to match an old_string.
 	if len(content) == 0 {
-		if err := t.fs.WriteFile(ctx, path, []byte(newString)); err != nil {
+		if len(edits) != 1 {
+			return &ToolResult{Error: "cannot apply multiple edits to an empty file"}
+		}
+
+		if err := t.fs.WriteFile(ctx, path, []byte(edits[0].NewString)); err != nil {
 			logger.Error("write_file_diff(replace): error writing file: %v", err)
 			return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 		}
@@ -126,30 +142,41 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 
 		return &ToolResult{
 			Result: map[string]interface{}{
-				"path":         path,
-				"replacements": 0,
-				"updated":      true,
+				"path":          path,
+				"replacements":  0,
+				"edits_applied": len(edits),
+				"updated":       true,
 			},
-			UIResult: generateGitDiff(path, "", newString),
+			UIResult: generateGitDiff(path, "", edits[0].NewString),
 		}
 	}
 
-	// For non-empty files, old_string is required
-	if oldString == "" {
-		return &ToolResult{Error: "old_string is required for non-empty files"}
+	for i, edit := range edits {
+		if edit.OldString == "" {
+			return &ToolResult{Error: fmt.Sprintf("old_string is required for non-empty files (edit %d)", i+1)}
+		}
 	}
 
-	count := strings.Count(content, oldString)
+	finalContent := content
+	totalReplacements := 0
 
-	if count == 0 {
-		return &ToolResult{Error: "old_string not found in file"}
+	for i, edit := range edits {
+		expected := edit.ExpectedReplacements
+		if expected == 0 {
+			expected = 1
+		}
+
+		count := strings.Count(finalContent, edit.OldString)
+		if count == 0 {
+			return &ToolResult{Error: fmt.Sprintf("old_string not found in file (edit %d). Try to read the file again and redo the edit.", i+1)}
+		}
+		if count != expected {
+			return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string in edit %d, but expected %d. Try to read more surrounding text and redo the edit.", count, i+1, expected)}
+		}
+
+		finalContent = strings.Replace(finalContent, edit.OldString, edit.NewString, -1)
+		totalReplacements += count
 	}
-
-	if count != expectedReplacements {
-		return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string, but expected %d", count, expectedReplacements)}
-	}
-
-	finalContent := strings.Replace(content, oldString, newString, -1)
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
 		logger.Error("write_file_diff(replace): error writing file: %v", err)
@@ -160,16 +187,52 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 		t.session.TrackFileModified(path)
 	}
 
-	logger.Info("write_file_diff(replace): updated %s (%d replacements)", path, count)
+	logger.Info("write_file_diff(replace): updated %s (%d replacements)", path, totalReplacements)
 
 	return &ToolResult{
 		Result: map[string]interface{}{
-			"path":         path,
-			"replacements": count,
-			"updated":      true,
+			"path":          path,
+			"replacements":  totalReplacements,
+			"edits_applied": len(edits),
+			"updated":       true,
 		},
 		UIResult: generateGitDiff(path, content, finalContent),
 	}
+}
+
+func parseReplacementEdits(params map[string]interface{}) ([]replacementEdit, error) {
+	rawEdits, hasEdits := params["edits"]
+	if !hasEdits || rawEdits == nil {
+		return nil, fmt.Errorf("edits is required")
+	}
+
+	data, err := json.Marshal(rawEdits)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal edits: %v", err)
+	}
+
+	var edits []replacementEdit
+	if err := json.Unmarshal(data, &edits); err != nil {
+		if str, ok := rawEdits.(string); ok {
+			if err := json.Unmarshal([]byte(str), &edits); err != nil {
+				return nil, fmt.Errorf("failed to parse edits: %v", err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to parse edits: %v", err)
+		}
+	}
+
+	if len(edits) == 0 {
+		return nil, fmt.Errorf("edits cannot be empty")
+	}
+
+	for i := range edits {
+		if edits[i].ExpectedReplacements == 0 {
+			edits[i].ExpectedReplacements = 1
+		}
+	}
+
+	return edits, nil
 }
 
 // NewWriteFileReplaceToolFactory creates a factory for WriteFileReplaceTool

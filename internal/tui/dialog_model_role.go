@@ -70,10 +70,15 @@ func NewModelRoleDialog(modelName, defaultRole string) ModelRoleDialog {
 			value: "summarize",
 			desc:  "Use for fast file summaries and quick context refreshes.",
 		},
+		roleItem{
+			label: fmt.Sprintf("Set %s as planning model", modelName),
+			value: "planning",
+			desc:  "Use for creating detailed plans and asking clarification questions.",
+		},
 	}
 
 	const width = 80
-	const height = 10
+	const height = 12
 
 	l := list.New(items, roleItemDelegate{}, width, height-4)
 	l.Title = "Choose model role"
@@ -86,6 +91,8 @@ func NewModelRoleDialog(modelName, defaultRole string) ModelRoleDialog {
 	switch defaultRole {
 	case "summarize":
 		l.Select(1)
+	case "planning":
+		l.Select(2)
 	default:
 		l.Select(0)
 	}

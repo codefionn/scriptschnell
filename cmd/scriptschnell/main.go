@@ -610,6 +610,15 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 									modelType = "orchestration"
 								}
 
+							case "planning":
+								if err := providerMgr.SetPlanningModel(selectedModel.ID); err != nil {
+									return fmt.Errorf("failed to set planning model: %w", err)
+								}
+								model.AddSystemMessage(fmt.Sprintf("✓ Planning model set to: %s", selectedModel.Name))
+								if modelType == "planning" {
+									modelType = "orchestration"
+								}
+
 							default:
 								model.AddSystemMessage("Model assignment cancelled")
 								continue

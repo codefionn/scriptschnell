@@ -5,6 +5,7 @@ const (
 	ToolNameReadFileSummarized   = "read_file_summarized"
 	ToolNameCreateFile           = "create_file"
 	ToolNameWriteFileDiff        = "write_file_diff"
+	ToolNameWriteFileReplace     = "write_file_replace"
 	ToolNameWriteFileJSON        = "write_file_json"
 	ToolNameShell                = "shell"
 	ToolNameCommand              = "command"

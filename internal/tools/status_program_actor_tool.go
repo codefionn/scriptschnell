@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
@@ -23,7 +25,7 @@ func NewStatusProgramToolWithActor(sess *session.Session, shellActor actor.Shell
 
 func (t *StatusProgramToolWithActor) Name() string { return ToolNameStatusProgram }
 func (t *StatusProgramToolWithActor) Description() string {
-	return "Check status of background programs launched by the shell tool."
+	return "Check status of background programs launched by the shell tool and any active planning phase."
 }
 func (t *StatusProgramToolWithActor) Parameters() map[string]interface{} {
 	return map[string]interface{}{
@@ -108,6 +110,21 @@ func (t *StatusProgramToolWithActor) listAllJobs(ctx context.Context) *ToolResul
 				"stdout":    stdout,
 				"stderr":    stderr,
 			}
+		}
+	}
+
+	// Add planning status if active
+	active, objective, startTime := t.session.GetPlanningStatus()
+	if active {
+		duration := time.Since(startTime)
+		logger.Debug("Status tool: planning is active (objective: %s, duration: %v)", objective, duration)
+		result["planning"] = map[string]interface{}{
+			"type":      "planning",
+			"objective": objective,
+			"started":   startTime.Format(time.RFC3339),
+			"duration":  duration.String(),
+			"running":   true,
+			"completed": false,
 		}
 	}
 

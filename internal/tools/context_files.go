@@ -24,7 +24,7 @@ func (s *SearchContextFilesToolSpec) Name() string {
 }
 
 func (s *SearchContextFilesToolSpec) Description() string {
-	return "Search for files by name pattern (glob) in configured context directories (external documentation, library sources, etc.). Supports searching compressed files (.gz, .bz2). Returns list of matching file paths. Use this to find files in context directories before reading them."
+	return "Search for files by name pattern (glob) in configured context directories (external documentation, external library sources, etc.). Supports searching compressed files (.gz, .bz2). Returns list of matching file paths. Use this to find files in context directories before reading them."
 }
 
 func (s *SearchContextFilesToolSpec) Parameters() map[string]interface{} {

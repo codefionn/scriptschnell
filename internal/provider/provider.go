@@ -78,6 +78,7 @@ type Config struct {
 	Providers          map[string]*Provider `json:"providers"`
 	OrchestrationModel string               `json:"orchestration_model"`
 	SummarizeModel     string               `json:"summarize_model"`
+	PlanningModel      string               `json:"planning_model"`
 }
 
 // Manager manages LLM providers
@@ -189,6 +190,7 @@ func (m *Manager) save() error {
 		Providers:          make(map[string]*Provider, len(m.config.Providers)),
 		OrchestrationModel: m.config.OrchestrationModel,
 		SummarizeModel:     m.config.SummarizeModel,
+		PlanningModel:      m.config.PlanningModel,
 	}
 	for name, provider := range m.config.Providers {
 		if provider == nil {
@@ -518,6 +520,14 @@ func (m *Manager) SetSummarizeModel(modelID string) error {
 	return m.save()
 }
 
+// SetPlanningModel sets the planning model
+func (m *Manager) SetPlanningModel(modelID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config.PlanningModel = modelID
+	return m.save()
+}
+
 // GetOrchestrationModel gets the orchestration model ID
 func (m *Manager) GetOrchestrationModel() string {
 	m.mu.RLock()
@@ -530,6 +540,13 @@ func (m *Manager) GetSummarizeModel() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.SummarizeModel
+}
+
+// GetPlanningModel gets the planning model ID
+func (m *Manager) GetPlanningModel() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.PlanningModel
 }
 
 // SearchModels searches for models using Aho-Corasick algorithm

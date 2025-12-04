@@ -11,8 +11,8 @@ import (
 
 func TestWriteFileReplaceTool_Name(t *testing.T) {
 	tool := NewWriteFileReplaceTool(nil, nil)
-	if tool.Name() != ToolNameWriteFileDiff {
-		t.Fatalf("expected name '%s', got '%s'", ToolNameWriteFileDiff, tool.Name())
+	if tool.Name() != ToolNameWriteFileReplace {
+		t.Fatalf("expected name '%s', got '%s'", ToolNameWriteFileReplace, tool.Name())
 	}
 }
 
@@ -32,11 +32,8 @@ func TestWriteFileReplaceTool_Parameters(t *testing.T) {
 	if _, ok := properties["path"]; !ok {
 		t.Fatalf("expected path property")
 	}
-	if _, ok := properties["old_string"]; !ok {
-		t.Fatalf("expected old_string property")
-	}
-	if _, ok := properties["new_string"]; !ok {
-		t.Fatalf("expected new_string property")
+	if _, ok := properties["edits"]; !ok {
+		t.Fatalf("expected edits property")
 	}
 
 	required, ok := params["required"].([]string)
@@ -44,23 +41,8 @@ func TestWriteFileReplaceTool_Parameters(t *testing.T) {
 		t.Fatalf("expected required slice")
 	}
 
-	// Check required fields presence
-	hasPath := false
-	hasOld := false
-	hasNew := false
-	for _, r := range required {
-		if r == "path" {
-			hasPath = true
-		}
-		if r == "old_string" {
-			hasOld = true
-		}
-		if r == "new_string" {
-			hasNew = true
-		}
-	}
-	if !hasPath || !hasOld || !hasNew {
-		t.Fatalf("expected required [path old_string new_string], got %v", required)
+	if len(required) != 2 || required[0] != "path" || required[1] != "edits" {
+		t.Fatalf("expected required [path edits], got %v", required)
 	}
 }
 
@@ -77,9 +59,10 @@ func TestWriteFileReplaceTool_AppliesReplacement(t *testing.T) {
 	sess.TrackFileRead("file.txt", original)
 
 	result := tool.Execute(ctx, map[string]interface{}{
-		"path":       "file.txt",
-		"old_string": "line 2",
-		"new_string": "line 2 modified",
+		"path": "file.txt",
+		"edits": []map[string]interface{}{
+			{"old_string": "line 2", "new_string": "line 2 modified"},
+		},
 	})
 	if result.Error != "" {
 		t.Fatalf("unexpected error: %s", result.Error)
@@ -91,6 +74,9 @@ func TestWriteFileReplaceTool_AppliesReplacement(t *testing.T) {
 	}
 	if updated, _ := resultMap["updated"].(bool); !updated {
 		t.Fatalf("expected updated=true, got %v", resultMap["updated"])
+	}
+	if editsApplied, _ := resultMap["edits_applied"].(int); editsApplied != 1 {
+		t.Fatalf("expected edits_applied=1, got %v", resultMap["edits_applied"])
 	}
 
 	data, err := mockFS.ReadFile(ctx, "file.txt")
@@ -107,13 +93,62 @@ func TestWriteFileReplaceTool_AppliesReplacement(t *testing.T) {
 	}
 }
 
+func TestWriteFileReplaceTool_AppliesMultipleEdits(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	tool := NewWriteFileReplaceTool(mockFS, sess)
+
+	original := "alpha\nbeta\ngamma"
+	if err := mockFS.WriteFile(ctx, "file.txt", []byte(original)); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+	sess.TrackFileRead("file.txt", original)
+
+	result := tool.Execute(ctx, map[string]interface{}{
+		"path": "file.txt",
+		"edits": []map[string]interface{}{
+			{"old_string": "alpha", "new_string": "ALPHA"},
+			{"old_string": "gamma", "new_string": "GAMMA"},
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	data, err := mockFS.ReadFile(ctx, "file.txt")
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+
+	expected := "ALPHA\nbeta\nGAMMA"
+	if string(data) != expected {
+		t.Fatalf("unexpected file content: %s", data)
+	}
+
+	if resultMap, ok := result.Result.(map[string]interface{}); ok {
+		if applied, _ := resultMap["edits_applied"].(int); applied != 2 {
+			t.Fatalf("expected edits_applied=2, got %v", resultMap["edits_applied"])
+		}
+		if reps, _ := resultMap["replacements"].(int); reps != 2 {
+			t.Fatalf("expected replacements=2, got %v", resultMap["replacements"])
+		}
+	}
+
+	modified := sess.GetModifiedFiles()
+	if len(modified) != 1 || modified[0] != "file.txt" {
+		t.Fatalf("expected file.txt to be tracked as modified, got %v", modified)
+	}
+}
+
 func TestWriteFileReplaceTool_RequiresFields(t *testing.T) {
 	ctx := context.Background()
 	mockFS := fs.NewMockFS()
 	tool := NewWriteFileReplaceTool(mockFS, nil)
 
 	// Test missing path
-	result := tool.Execute(ctx, map[string]interface{}{"old_string": "a", "new_string": "b"})
+	result := tool.Execute(ctx, map[string]interface{}{"edits": []map[string]interface{}{{"old_string": "a", "new_string": "b"}}})
 	if result.Error == "" || !strings.Contains(result.Error, "path is required") {
 		t.Fatalf("expected path required error, got %s", result.Error)
 	}
@@ -123,19 +158,11 @@ func TestWriteFileReplaceTool_RequiresFields(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	// Test missing old_string on non-empty file
-	result = tool.Execute(ctx, map[string]interface{}{"path": "f.txt", "new_string": "b"})
-	if result.Error == "" || !strings.Contains(result.Error, "old_string is required") {
-		t.Fatalf("expected old_string required error, got %s", result.Error)
+	// Test missing edits
+	result = tool.Execute(ctx, map[string]interface{}{"path": "f.txt"})
+	if result.Error == "" || !strings.Contains(result.Error, "edits is required") {
+		t.Fatalf("expected edits required error, got %s", result.Error)
 	}
-
-	// new_string is technically optional in GetStringParam default if we treated it strictly,
-	// but the tool definition says required. However, Execute uses GetStringParam which defaults to empty string.
-	// My implementation logic handles empty new_string as deletion, so technically it's not "required" for logic execution if passed as empty string,
-	// but the JSON schema says required.
-	// But in Go map, if key is missing, GetStringParam returns default.
-	// Wait, I didn't check for new_string existence in Execute, just GetStringParam.
-	// So missing new_string becomes empty string.
 }
 
 func TestWriteFileReplaceTool_FailsIfNotRead(t *testing.T) {
@@ -149,9 +176,10 @@ func TestWriteFileReplaceTool_FailsIfNotRead(t *testing.T) {
 	}
 
 	result := tool.Execute(ctx, map[string]interface{}{
-		"path":       "file.txt",
-		"old_string": "content",
-		"new_string": "new",
+		"path": "file.txt",
+		"edits": []map[string]interface{}{
+			{"old_string": "content", "new_string": "new"},
+		},
 	})
 	if result.Error == "" || !strings.Contains(result.Error, "was not read") {
 		t.Fatalf("expected unread error, got %s", result.Error)
@@ -170,9 +198,10 @@ func TestWriteFileReplaceTool_FailsIfOldStringNotFound(t *testing.T) {
 	sess.TrackFileRead("file.txt", "content")
 
 	result := tool.Execute(ctx, map[string]interface{}{
-		"path":       "file.txt",
-		"old_string": "missing",
-		"new_string": "new",
+		"path": "file.txt",
+		"edits": []map[string]interface{}{
+			{"old_string": "missing", "new_string": "new"},
+		},
 	})
 	if result.Error == "" || !strings.Contains(result.Error, "old_string not found") {
 		t.Fatalf("expected not found error, got %s", result.Error)
@@ -192,10 +221,10 @@ func TestWriteFileReplaceTool_FailsIfCountMismatch(t *testing.T) {
 	sess.TrackFileRead("file.txt", original)
 
 	result := tool.Execute(ctx, map[string]interface{}{
-		"path":                  "file.txt",
-		"old_string":            "foo",
-		"new_string":            "bar",
-		"expected_replacements": 1, // There are 2
+		"path": "file.txt",
+		"edits": []map[string]interface{}{
+			{"old_string": "foo", "new_string": "bar", "expected_replacements": 1}, // There are 2
+		},
 	})
 	if result.Error == "" || !strings.Contains(result.Error, "but expected 1") {
 		t.Fatalf("expected mismatch error, got %s", result.Error)

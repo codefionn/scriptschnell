@@ -261,6 +261,17 @@ func TestSandboxBuilder_Validate(t *testing.T) {
 			},
 			expectErr: true,
 		},
+		{
+			name: "exec.Command usage rejected",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+import "os/exec"
+func main() {
+	exec.Command("ls")
+}`)
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {

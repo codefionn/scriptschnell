@@ -15,6 +15,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/mcp"
+	"github.com/codefionn/scriptschnell/internal/planning"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/session"
@@ -42,6 +43,7 @@ type Orchestrator struct {
 	toolRegistry          *tools.Registry
 	orchestrationClient   llm.Client
 	summarizeClient       llm.Client
+	planningClient        llm.Client
 	config                *config.Config
 	workingDir            string
 	ctx                   context.Context
@@ -77,6 +79,8 @@ type Orchestrator struct {
 	clientInitMu          sync.Mutex
 	cachedSystemPrompt    string
 	systemPromptMu        sync.RWMutex
+	planningAgent         *planning.PlanningAgent
+	planningAgentCancel   context.CancelFunc
 }
 
 const (
@@ -272,6 +276,7 @@ func (o *Orchestrator) initializeClients() error {
 
 	orchModelID := o.providerMgr.GetOrchestrationModel()
 	summModelID := o.providerMgr.GetSummarizeModel()
+	planModelID := o.providerMgr.GetPlanningModel()
 
 	if orchModelID != "" {
 		client, err := o.providerMgr.CreateClient(orchModelID)
@@ -291,12 +296,36 @@ func (o *Orchestrator) initializeClients() error {
 		}
 	}
 
-	// Fallback to the orchestration client when no separate summarize client is configured.
+	var planningErr error
+	if planModelID != "" {
+		client, err := o.providerMgr.CreateClient(planModelID)
+		if err != nil {
+			planningErr = fmt.Errorf("failed to create planning client: %w", err)
+		} else {
+			o.planningClient = client
+		}
+	}
+
+	// Fallbacks when no separate clients are configured
 	if o.summarizeClient == nil && o.orchestrationClient != nil {
 		o.summarizeClient = o.orchestrationClient
 	}
+	if o.planningClient == nil && o.summarizeClient != nil {
+		o.planningClient = o.summarizeClient
+	} else if o.planningClient == nil && o.orchestrationClient != nil {
+		o.planningClient = o.orchestrationClient
+	}
 
-	return summarizeErr
+	// Initialize planning agent if planning client is available
+	if o.planningClient != nil && o.planningAgent == nil {
+		o.initializePlanningAgent()
+	}
+
+	// Return first error encountered
+	if summarizeErr != nil {
+		return summarizeErr
+	}
+	return planningErr
 }
 
 func (o *Orchestrator) getSummarizeModelID() string {
@@ -305,6 +334,29 @@ func (o *Orchestrator) getSummarizeModelID() string {
 		modelID = o.providerMgr.GetOrchestrationModel()
 	}
 	return modelID
+}
+
+func (o *Orchestrator) getPlanningModelID() string {
+	modelID := o.providerMgr.GetPlanningModel()
+	if modelID == "" {
+		modelID = o.getSummarizeModelID()
+	}
+	return modelID
+}
+
+// initializePlanningAgent creates and initializes the planning agent
+func (o *Orchestrator) initializePlanningAgent() {
+	if o.planningClient == nil {
+		logger.Debug("Cannot initialize planning agent: no planning client available")
+		return
+	}
+
+	_, planningCancel := context.WithCancel(context.Background())
+	investigator := NewCodebaseInvestigatorAgent(o)
+	o.planningAgent = planning.NewPlanningAgent("planning", o.fs, o.session, o.planningClient, investigator)
+	o.planningAgentCancel = planningCancel
+
+	logger.Debug("Planning agent initialized")
 }
 
 // toolSpec holds tool registration information
@@ -732,6 +784,351 @@ func dispatchProgress(cb progress.Callback, update progress.Update) {
 	}
 }
 
+// planningToolAdapter bridges a standard tool into the planning tool interface.
+type planningToolAdapter struct {
+	tool tools.Tool
+}
+
+func (a *planningToolAdapter) Name() string {
+	if a.tool == nil {
+		return ""
+	}
+	return a.tool.Name()
+}
+
+func (a *planningToolAdapter) Description() string {
+	if a.tool == nil {
+		return "Unavailable planning tool"
+	}
+	return a.tool.Description()
+}
+
+func (a *planningToolAdapter) Parameters() map[string]interface{} {
+	if a.tool == nil {
+		return map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}
+	}
+	return a.tool.Parameters()
+}
+
+func (a *planningToolAdapter) Execute(ctx context.Context, params map[string]interface{}) *planning.PlanningToolResult {
+	if a.tool == nil {
+		return &planning.PlanningToolResult{Error: "tool is not available"}
+	}
+	res := a.tool.Execute(ctx, params)
+	if res == nil {
+		return &planning.PlanningToolResult{Error: "tool returned nil result"}
+	}
+	if res.Error != "" {
+		return &planning.PlanningToolResult{Error: res.Error}
+	}
+	return &planning.PlanningToolResult{Result: res.Result}
+}
+
+// buildReadOnlyPlanningTools returns planning-safe MCP tools filtered to read-only capabilities.
+func (o *Orchestrator) buildReadOnlyPlanningTools() ([]planning.PlanningTool, []error) {
+	if o == nil || o.mcpManager == nil || o.config == nil {
+		return nil, nil
+	}
+
+	mcpTools, errs := o.mcpManager.BuildTools()
+	if len(mcpTools) == 0 {
+		return nil, errs
+	}
+
+	var adapters []planning.PlanningTool
+	for _, tool := range mcpTools {
+		if tool == nil {
+			continue
+		}
+		serverKey := extractMCPSanitizedServer(tool.Name())
+		if serverKey == "" {
+			continue
+		}
+
+		serverName := o.lookupServerBySanitizedKey(serverKey)
+		if serverName == "" {
+			continue
+		}
+
+		serverCfg := o.config.MCP.Servers[serverName]
+		if !o.isReadOnlyMCPTool(serverName, serverCfg, tool) {
+			continue
+		}
+
+		adapters = append(adapters, &planningToolAdapter{tool: tool})
+	}
+
+	return adapters, errs
+}
+
+// isReadOnlyMCPTool determines whether a given MCP tool should be exposed to the planning agent.
+func (o *Orchestrator) isReadOnlyMCPTool(serverName string, serverCfg *config.MCPServerConfig, tool tools.Tool) bool {
+	if serverCfg == nil || tool == nil {
+		return false
+	}
+
+	// Explicit metadata override
+	if flag, ok := parseMetadataBool(serverCfg.Metadata, "read_only"); ok {
+		return flag
+	}
+
+	switch strings.ToLower(serverCfg.Type) {
+	case "openapi":
+		if openapiTool, ok := tool.(*tools.OpenAPITool); ok {
+			method := strings.ToUpper(openapiTool.HTTPMethod())
+			return method == "GET" || method == "HEAD" || method == "OPTIONS"
+		}
+	case "openai":
+		// Calling a hosted model is effectively read-only
+		return true
+	case "command":
+		// Command MCPs are only allowed when explicitly marked read-only
+		return false
+	default:
+		return false
+	}
+
+	return false
+}
+
+func parseMetadataBool(metadata map[string]string, key string) (bool, bool) {
+	if len(metadata) == 0 {
+		return false, false
+	}
+	raw, ok := metadata[key]
+	if !ok {
+		return false, false
+	}
+
+	val := strings.ToLower(strings.TrimSpace(raw))
+	switch val {
+	case "1", "true", "yes", "y", "on":
+		return true, true
+	case "0", "false", "no", "n", "off":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// classifyPromptSimplicity uses the summarization model (when available) to decide if planning is needed.
+func (o *Orchestrator) classifyPromptSimplicity(ctx context.Context, prompt string) (bool, string) {
+	if strings.TrimSpace(prompt) == "" {
+		return true, "empty prompt"
+	}
+
+	if o.summarizeClient != nil {
+		req := &llm.CompletionRequest{
+			Messages: []*llm.Message{
+				{
+					Role: "system",
+					Content: "Decide if the user's request is simple (single small change, no research) or complex. " +
+						"Respond ONLY with JSON: {\"simple\":true|false,\"reason\":\"short reason\"}.",
+				},
+				{
+					Role:    "user",
+					Content: prompt,
+				},
+			},
+			Temperature: 0,
+			MaxTokens:   128,
+		}
+
+		resp, err := o.summarizeClient.CompleteWithRequest(ctx, req)
+		if err == nil && resp != nil {
+			if simple, reason, ok := parseSimplicityResponse(resp.Content); ok {
+				return simple, reason
+			}
+		}
+	}
+
+	return heuristicPromptSimplicity(prompt)
+}
+
+func parseSimplicityResponse(content string) (bool, string, bool) {
+	type payload struct {
+		Simple interface{} `json:"simple"`
+		Reason string      `json:"reason"`
+	}
+
+	tryParse := func(raw string) (bool, string, bool) {
+		var p payload
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			return false, "", false
+		}
+		switch v := p.Simple.(type) {
+		case bool:
+			return v, strings.TrimSpace(p.Reason), true
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "true", "yes", "simple":
+				return true, strings.TrimSpace(p.Reason), true
+			case "false", "no", "complex":
+				return false, strings.TrimSpace(p.Reason), true
+			}
+		}
+		return false, strings.TrimSpace(p.Reason), false
+	}
+
+	if simple, reason, ok := tryParse(content); ok {
+		return simple, reason, true
+	}
+
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+	if start >= 0 && end > start {
+		return tryParse(content[start : end+1])
+	}
+
+	trimmed := strings.ToLower(strings.TrimSpace(content))
+	switch {
+	case strings.HasPrefix(trimmed, "simple"):
+		return true, content, true
+	case strings.HasPrefix(trimmed, "complex"), strings.HasPrefix(trimmed, "not simple"):
+		return false, content, true
+	default:
+		return false, "", false
+	}
+}
+
+func heuristicPromptSimplicity(prompt string) (bool, string) {
+	words := strings.Fields(prompt)
+	if len(words) <= 12 && strings.Count(prompt, "\n") == 0 {
+		return true, "short single-line prompt"
+	}
+
+	lower := strings.ToLower(prompt)
+	complexKeywords := []string{"migrate", "architecture", "multi-step", "refactor", "design", "plan", "roadmap", "debug multiple"}
+	for _, kw := range complexKeywords {
+		if strings.Contains(lower, kw) {
+			return false, fmt.Sprintf("contains complex keyword '%s'", kw)
+		}
+	}
+
+	if strings.Count(prompt, "\n") > 3 || len(words) > 60 {
+		return false, "long prompt suggests complexity"
+	}
+
+	return len(words) < 30, "fallback heuristic"
+}
+
+func formatPlanForDisplay(plan []string) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\nPlanning pass (read-only):\n")
+	for i, step := range plan {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, strings.TrimSpace(step)))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// runPlanningPhaseIfNeeded executes a planning pass before entering the main orchestration loop.
+func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt string, progressCallback progress.Callback) error {
+	if o.planningClient == nil {
+		return nil
+	}
+	if o.planningAgent == nil {
+		o.initializePlanningAgent()
+	}
+	if o.planningAgent == nil {
+		return nil
+	}
+
+	simple, reason := o.classifyPromptSimplicity(ctx, prompt)
+	if simple {
+		logger.Debug("Skipping planning phase: prompt marked simple (%s)", reason)
+		return nil
+	}
+
+	if reason != "" {
+		logger.Debug("Planning phase triggered: %s", reason)
+	}
+
+	statusMsg := "Running planning pass..."
+	if reason != "" {
+		statusMsg = fmt.Sprintf("Running planning pass (%s)...", reason)
+	}
+
+	dispatchProgress(progressCallback, progress.Update{
+		Message:   statusMsg,
+		Mode:      progress.ReportJustStatus,
+		Ephemeral: true,
+	})
+
+	extraTools, errs := o.buildReadOnlyPlanningTools()
+	for _, err := range errs {
+		if err != nil {
+			logger.Warn("Planning MCP tool build warning: %v", err)
+		}
+	}
+	o.planningAgent.SetExternalTools(extraTools)
+
+	allowQuestions := !o.cliMode
+	maxQuestions := 0
+	if allowQuestions {
+		maxQuestions = 3
+	}
+
+	req := &planning.PlanningRequest{
+		Objective:      prompt,
+		AllowQuestions: allowQuestions,
+		MaxQuestions:   maxQuestions,
+	}
+
+	var questionsAsked []string
+	userInputCb := func(question string) (string, error) {
+		questionsAsked = append(questionsAsked, question)
+		return fmt.Sprintf("Question noted: %s (Please answer this question)", question), nil
+	}
+
+	// Set planning active before starting
+	o.session.SetPlanningActive(true, req.Objective)
+	defer o.session.SetPlanningActive(false, "")
+
+	response, err := o.planningAgent.PlanWithProgress(ctx, req, userInputCb, progressCallback)
+	if err != nil {
+		return fmt.Errorf("planning failed: %w", err)
+	}
+
+	if len(response.Plan) > 0 {
+		planJSON, _ := json.Marshal(response.Plan)
+		o.session.AddMessage(&session.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("Planning agent generated plan for '%s': %s", prompt, string(planJSON)),
+		})
+
+		dispatchProgress(progressCallback, progress.Update{
+			Message:    formatPlanForDisplay(response.Plan),
+			AddNewLine: false,
+			Mode:       progress.ReportNoStatus,
+		})
+	}
+
+	if response.NeedsInput && len(response.Questions) > 0 {
+		o.session.AddMessage(&session.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("Planning agent needs user input: %s", strings.Join(response.Questions, "; ")),
+		})
+	}
+
+	if len(questionsAsked) > 0 {
+		logger.Debug("Planning questions captured for user: %v", questionsAsked)
+	}
+
+	dispatchProgress(progressCallback, progress.Update{
+		Message:   "",
+		Mode:      progress.ReportJustStatus,
+		Ephemeral: true,
+	})
+
+	return nil
+}
+
 // ProcessPrompt processes a user prompt
 func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progressCallback progress.Callback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback, toolCallCallback ToolCallCallback, toolResultCallback ToolResultCallback) error {
 	combinedCtx, cancel := combineContexts(ctx, o.ctx)
@@ -780,6 +1177,10 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 	// Reset loop detector for new prompt
 	o.loopDetector.Reset()
 	logger.Debug("Loop detector reset for new prompt")
+
+	if err := o.runPlanningPhaseIfNeeded(ctx, prompt, progressCallback); err != nil {
+		logger.Warn("Pre-loop planning failed: %v", err)
+	}
 
 	// Get or build system prompt (cached for the session)
 	modelID := o.providerMgr.GetOrchestrationModel()
@@ -1829,7 +2230,19 @@ func (o *Orchestrator) Close() error {
 		o.toolExecutorCancel()
 	}
 
+	if o.planningAgentCancel != nil {
+		o.planningAgentCancel()
+	}
+
 	var firstErr error
+
+	if o.planningAgent != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := o.planningAgent.Close(shutdownCtx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	if o.actorSystem != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)

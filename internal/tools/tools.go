@@ -399,15 +399,7 @@ func extractErrorContext(err error) string {
 	return ""
 }
 
-// CalculateOutputStats computes statistics for output content
-func CalculateOutputStats(content string) (bytes int, lines int) {
-	if content == "" {
-		return 0, 0
-	}
-	bytes = len(content)
-	lines = strings.Count(content, "\n") + 1
-	return bytes, lines
-}
+
 
 // Execute executes a tool call
 func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {

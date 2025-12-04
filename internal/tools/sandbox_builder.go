@@ -694,6 +694,9 @@ func (b *SandboxBuilder) Validate() error {
 	if b.code == "" {
 		return fmt.Errorf("code is required")
 	}
+	if execCommandPattern.MatchString(b.code) {
+		return fmt.Errorf("direct exec.Command usage is blocked; use ExecuteCommand instead")
+	}
 	return nil
 }
 
@@ -741,6 +744,7 @@ func (b *SandboxBuilder) Clone() *SandboxBuilder {
 
 var (
 	stringLiteralPattern = regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"`)
+	execCommandPattern   = regexp.MustCompile(`\bexec\s*\.?\s*Command`)
 )
 
 // extractDomainsFromCode scans Go code for domain strings

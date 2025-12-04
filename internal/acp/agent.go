@@ -1057,7 +1057,7 @@ func (a *ScriptschnellAIAgent) getToolKind(toolName string, parameters map[strin
 	switch toolName {
 	case "read_file", "read_file_summarized":
 		return acp.ToolKindRead
-	case "create_file", "write_file_diff":
+	case "create_file", "write_file_diff", "write_file_replace":
 		return acp.ToolKindEdit // Use Edit instead of Write
 	case "shell", "go_sandbox":
 		return acp.ToolKindExecute
@@ -1081,7 +1081,7 @@ func (a *ScriptschnellAIAgent) extractLocations(toolName string, parameters map[
 	var locations []acp.ToolCallLocation
 
 	switch toolName {
-	case "read_file", "create_file", "write_file_diff":
+	case "read_file", "create_file", "write_file_diff", "write_file_replace":
 		if path, ok := parameters["path"].(string); ok {
 			// Convert relative paths to absolute for better client display
 			if !strings.HasPrefix(path, "/") {

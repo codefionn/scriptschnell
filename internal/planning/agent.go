@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/fs"
@@ -308,7 +309,7 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		})
 	}
 
-	maxIterations := 5 // Prevent infinite loops
+	maxIterations := 96 // Prevent infinite loops
 	questionsAsked := 0
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
@@ -464,7 +465,7 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 				}
 			}
 
-		case "read_file", "search_files", "search_file_content", "codebase_investigator":
+		default:
 			// Execute through planning tool registry
 			result := p.toolRegistry.Execute(ctx, toolName, args)
 			if result.Error != "" {
@@ -480,9 +481,6 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 					toolResult = fmt.Sprintf("%v", result.Result)
 				}
 			}
-
-		default:
-			toolResult = fmt.Sprintf("Unknown tool: %s", toolName)
 		}
 
 		results = append(results, &llm.Message{
@@ -496,6 +494,33 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 	return results, needsInput, questionsAsked, nil
 }
 
+// buildFileList creates a formatted list of files in the working directory
+func (p *PlanningAgent) buildFileList(workingDir string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	entries, err := p.fs.ListDir(ctx, workingDir)
+	if err != nil {
+		logger.Debug("Failed to list working directory: %v", err)
+		return ""
+	}
+
+	if len(entries) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir {
+			sb.WriteString(fmt.Sprintf("  [DIR]  %s/\n", entry.Path))
+		} else {
+			sb.WriteString(fmt.Sprintf("  [FILE] %s\n", entry.Path))
+		}
+	}
+
+	return sb.String()
+}
+
 // buildSystemPrompt creates the system prompt for the planning agent
 func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 	var prompt strings.Builder
@@ -506,6 +531,25 @@ func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 	prompt.WriteString("2. Create a detailed, step-by-step plan\n")
 	prompt.WriteString("3. Ask clarifying questions if needed (when allowed)\n")
 	prompt.WriteString("4. Use available tools to gather information\n\n")
+
+	// Add working directory context if available
+	if p.session != nil && p.session.WorkingDir != "" {
+		prompt.WriteString(fmt.Sprintf("Working Directory: %s\n\n", p.session.WorkingDir))
+
+		// List files in the working directory
+		if p.fs != nil {
+			if fileList := p.buildFileList(p.session.WorkingDir); fileList != "" {
+				prompt.WriteString("Files in working directory:\n")
+				prompt.WriteString(fileList)
+				prompt.WriteString("\n")
+			}
+		}
+	}
+
+	// Add context files if provided
+	if len(req.ContextFiles) > 0 {
+		prompt.WriteString("Context files have been provided with the task. Review them to understand the current state.\n\n")
+	}
 
 	prompt.WriteString("Guidelines:\n")
 	prompt.WriteString("- Break down complex tasks into manageable steps\n")
@@ -732,8 +776,8 @@ func NewRealToolAdapter(spec realtools.ToolSpec, executor realtools.ToolExecutor
 	return &RealToolAdapter{spec: spec, executor: executor}
 }
 
-func (a *RealToolAdapter) Name() string                   { return a.spec.Name() }
-func (a *RealToolAdapter) Description() string            { return a.spec.Description() }
+func (a *RealToolAdapter) Name() string                       { return a.spec.Name() }
+func (a *RealToolAdapter) Description() string                { return a.spec.Description() }
 func (a *RealToolAdapter) Parameters() map[string]interface{} { return a.spec.Parameters() }
 
 func (a *RealToolAdapter) Execute(ctx context.Context, params map[string]interface{}) *PlanningToolResult {

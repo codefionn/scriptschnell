@@ -16,13 +16,13 @@ import (
 // TestPlanningAgent_ErrorHandling tests comprehensive error handling scenarios
 func TestPlanningAgent_ErrorHandling(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupMock      func() llm.Client
-		setupContext   func() context.Context
-		request        *PlanningRequest
-		expectedError  string
-		expectedSteps  int
-		expectPartial  bool
+		name          string
+		setupMock     func() llm.Client
+		setupContext  func() context.Context
+		request       *PlanningRequest
+		expectedError string
+		expectedSteps int
+		expectPartial bool
 	}{
 		{
 			name: "LLM client returns error",
@@ -96,12 +96,12 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 		{
 			name: "max iterations reached",
 			setupMock: func() llm.Client {
-				// Return responses that will trigger multiple iterations
-				responses := make([]string, 10)
-				for i := 0; i < 9; i++ {
+				// Return responses that will trigger max iterations (96)
+				// All responses are unhelpful to force max iterations
+				responses := make([]string, 100)
+				for i := 0; i < 100; i++ {
 					responses[i] = "Do you need more information?"
 				}
-				responses[9] = `{"plan": ["final step"], "complete": true}`
 				return NewMockLLMClient(responses...)
 			},
 			request: &PlanningRequest{
@@ -109,7 +109,7 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 				AllowQuestions: false,
 			},
 			expectedSteps: 0, // Should get partial plan after max iterations
-			expectPartial:  true,
+			expectPartial: true,
 		},
 		{
 			name: "empty tool call array",
@@ -129,15 +129,15 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 			mockFS := NewMockFileSystem()
 			sess := session.NewSession("test", ".")
 			mockLLM := tt.setupMock()
-			
+
 			agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-			
+
 			ctx := context.Background()
 			if tt.setupContext != nil {
 				ctx = tt.setupContext()
 			}
 			response, err := agent.Plan(ctx, tt.request, nil)
-			
+
 			if tt.expectedError != "" {
 				if err == nil {
 					t.Errorf("Expected error containing '%s', got no error", tt.expectedError)
@@ -146,21 +146,21 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
 			}
-			
+
 			if response == nil {
 				t.Error("Expected non-nil response")
 				return
 			}
-			
+
 			if tt.expectedSteps >= 0 && len(response.Plan) != tt.expectedSteps {
 				t.Errorf("Expected %d plan steps, got %d", tt.expectedSteps, len(response.Plan))
 			}
-			
+
 			if tt.expectPartial && response.Complete {
 				t.Error("Expected partial plan (complete=false)")
 			}
@@ -171,12 +171,12 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 // TestPlanningAgent_ContextCancellationErrorHandling tests various cancellation scenarios
 func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupContext   func() context.Context
-		setupMock      func() llm.Client
-		request        *PlanningRequest
-		expectError    bool
-		errorContains  string
+		name          string
+		setupContext  func() context.Context
+		setupMock     func() llm.Client
+		request       *PlanningRequest
+		expectError   bool
+		errorContains string
 	}{
 		{
 			name: "context cancelled before planning",
@@ -242,12 +242,12 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 			mockFS := NewMockFileSystem()
 			sess := session.NewSession("test", ".")
 			mockLLM := tt.setupMock()
-			
+
 			agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-			
+
 			ctx := tt.setupContext()
 			response, err := agent.Plan(ctx, tt.request, nil)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error containing '%s', got no error", tt.errorContains)
@@ -258,7 +258,7 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
 				}
-				
+
 				if response == nil {
 					t.Error("Expected non-nil response")
 				}
@@ -271,7 +271,7 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 	mockFS := NewMockFileSystem()
 	sess := session.NewSession("test", ".")
-	
+
 	// Create a mock that sometimes fails
 	errorRate := 0.5 // 50% chance of error
 	mockLLM := &MockLLMClientWithRandomErrors{
@@ -281,12 +281,12 @@ func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 		},
 		errorRate: errorRate,
 	}
-	
+
 	agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-	
+
 	const numGoroutines = 10
 	results := make(chan error, numGoroutines)
-	
+
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
 			ctx := context.Background()
@@ -298,7 +298,7 @@ func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 			results <- err
 		}(i)
 	}
-	
+
 	// Collect results
 	var successCount, errorCount int
 	for i := 0; i < numGoroutines; i++ {
@@ -313,9 +313,9 @@ func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 			t.Fatal("Timeout waiting for concurrent planning results")
 		}
 	}
-	
+
 	t.Logf("Concurrent planning results: %d successes, %d errors", successCount, errorCount)
-	
+
 	// Should have some mix of successes and errors due to random error rate
 	if successCount == 0 && errorCount == 0 {
 		t.Error("Expected some results from concurrent planning")
@@ -325,10 +325,10 @@ func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 // TestPlanningAgent_ResourceExhaustion tests behavior under resource pressure
 func TestPlanningAgent_ResourceExhaustion(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupMock      func() llm.Client
-		request        *PlanningRequest
-		expectedError  string
+		name          string
+		setupMock     func() llm.Client
+		request       *PlanningRequest
+		expectedError string
 	}{
 		{
 			name: "very large response",
@@ -384,12 +384,12 @@ func TestPlanningAgent_ResourceExhaustion(t *testing.T) {
 			mockFS := NewMockFileSystem()
 			sess := session.NewSession("test", ".")
 			mockLLM := tt.setupMock()
-			
+
 			agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-			
+
 			ctx := context.Background()
 			response, err := agent.Plan(ctx, tt.request, nil)
-			
+
 			if tt.expectedError != "" {
 				if err == nil {
 					t.Errorf("Expected error containing '%s', got no error", tt.expectedError)
@@ -398,12 +398,12 @@ func TestPlanningAgent_ResourceExhaustion(t *testing.T) {
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
 			}
-			
+
 			if response == nil {
 				t.Error("Expected non-nil response")
 				return
@@ -415,11 +415,11 @@ func TestPlanningAgent_ResourceExhaustion(t *testing.T) {
 // TestPlanningAgent_RecoveryScenarios tests various recovery scenarios
 func TestPlanningAgent_RecoveryScenarios(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupMock      func() llm.Client
-		request        *PlanningRequest
-		expectedSteps  int
-		expectPartial  bool
+		name          string
+		setupMock     func() llm.Client
+		request       *PlanningRequest
+		expectedSteps int
+		expectPartial bool
 	}{
 		{
 			name: "recover from tool execution error",
@@ -462,7 +462,7 @@ func TestPlanningAgent_RecoveryScenarios(t *testing.T) {
 				AllowQuestions: false, // Don't allow questions, so we skip the first response
 			},
 			expectedSteps: 1,
-			expectPartial:  true,
+			expectPartial: true,
 		},
 	}
 
@@ -471,26 +471,26 @@ func TestPlanningAgent_RecoveryScenarios(t *testing.T) {
 			mockFS := NewMockFileSystem()
 			sess := session.NewSession("test", ".")
 			mockLLM := tt.setupMock()
-			
+
 			agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-			
+
 			ctx := context.Background()
 			response, err := agent.Plan(ctx, tt.request, nil)
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
 			}
-			
+
 			if response == nil {
 				t.Error("Expected non-nil response")
 				return
 			}
-			
+
 			if len(response.Plan) != tt.expectedSteps {
 				t.Errorf("Expected %d plan steps, got %d", tt.expectedSteps, len(response.Plan))
 			}
-			
+
 			if tt.expectPartial && response.Complete {
 				t.Error("Expected partial plan")
 			}
@@ -585,8 +585,8 @@ func (m *MockLLMClientWithDelay) GetModelName() string {
 
 // MockLLMClientWithContextCancellation simulates context cancellation during tool calls
 type MockLLMClientWithContextCancellation struct {
-	responses       []string
-	index           int
+	responses        []string
+	index            int
 	cancelOnToolCall bool
 }
 
@@ -594,11 +594,11 @@ func (m *MockLLMClientWithContextCancellation) Complete(ctx context.Context, pro
 	if m.index >= len(m.responses) {
 		return "default response", nil
 	}
-	
+
 	if m.cancelOnToolCall && strings.Contains(m.responses[m.index], "tool_calls") {
 		return "", context.Canceled
 	}
-	
+
 	response := m.responses[m.index]
 	m.index++
 	return response, nil
@@ -609,7 +609,7 @@ func (m *MockLLMClientWithContextCancellation) CompleteWithRequest(ctx context.C
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var toolCallResponse struct {
 		ToolCalls []map[string]interface{} `json:"tool_calls"`
 	}
@@ -620,7 +620,7 @@ func (m *MockLLMClientWithContextCancellation) CompleteWithRequest(ctx context.C
 			StopReason: "tool_calls",
 		}, nil
 	}
-	
+
 	return &llm.CompletionResponse{Content: content}, nil
 }
 
@@ -647,7 +647,7 @@ func (m *MockLLMClientWithRandomErrors) Complete(ctx context.Context, prompt str
 	if len(prompt)%2 == 0 {
 		return "", errors.New("random simulated error")
 	}
-	
+
 	if len(m.responses) > 0 {
 		resp := m.responses[0]
 		return resp, nil

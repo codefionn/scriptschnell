@@ -221,7 +221,7 @@ func (p *AnthropicProvider) CreateClient(modelID string) (Client, error) {
 
 func (p *AnthropicProvider) ValidateAPIKey(ctx context.Context) error {
 	// Create a test client and make a minimal request
-	client, err := p.CreateClient("claude-3-5-haiku-latest")
+	client, err := p.CreateClient("claude-haiku-4-5")
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}

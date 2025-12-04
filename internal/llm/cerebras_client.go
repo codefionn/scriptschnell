@@ -30,7 +30,7 @@ func NewCerebrasClient(apiKey, modelID string) (Client, error) {
 
 	model := strings.TrimSpace(modelID)
 	if model == "" {
-		model = "llama3.1-8b"
+		model = "llama-3.3-70b"
 	}
 
 	return &CerebrasClient{

@@ -3,12 +3,14 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 // MenuItem represents a generic menu item that can be displayed in a list
@@ -28,6 +30,7 @@ type MenuConfig struct {
 	ShowStatusBar     bool
 	DisableQuitKeys   bool
 	HelpText          string
+	MaxDescLines      int // Maximum lines for description (0 = unlimited, recommended: 2-3)
 	TitleStyle        lipgloss.Style
 	ItemStyle         lipgloss.Style
 	SelectedItemStyle lipgloss.Style
@@ -45,6 +48,7 @@ func DefaultMenuConfig() MenuConfig {
 		ShowStatusBar:     true,
 		DisableQuitKeys:   false,
 		HelpText:          "↑/↓: Navigate • Enter: Select • Esc: Cancel",
+		MaxDescLines:      2, // Limit descriptions to 2 lines to prevent overflow
 		TitleStyle:        lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).MarginBottom(1),
 		ItemStyle:         lipgloss.NewStyle().PaddingLeft(4),
 		SelectedItemStyle: lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170")),
@@ -58,9 +62,18 @@ type genericItemDelegate struct {
 	itemStyle         lipgloss.Style
 	selectedItemStyle lipgloss.Style
 	descStyle         lipgloss.Style
+	width             int
+	maxDescLines      int // Maximum lines for description (0 = unlimited)
 }
 
-func (d genericItemDelegate) Height() int  { return 2 }
+// Height returns fixed height - we truncate descriptions to fit this height
+func (d genericItemDelegate) Height() int {
+	if d.maxDescLines > 0 {
+		return 1 + d.maxDescLines // 1 for title + maxDescLines for description
+	}
+	return 2 // Default: 1 for title + 1 for description
+}
+
 func (d genericItemDelegate) Spacing() int { return 1 }
 func (d genericItemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
 	return nil
@@ -79,14 +92,46 @@ func (d genericItemDelegate) Render(w io.Writer, m list.Model, index int, listIt
 		title = d.itemStyle.Render(fmt.Sprintf("  %s", item.Title()))
 	}
 
-	desc := d.itemStyle.Render(d.descStyle.Render(item.Description()))
-	fmt.Fprintf(w, "%s\n%s", title, desc)
+	// Wrap and truncate description to prevent overflow
+	desc := item.Description()
+
+	// Calculate available width for description (account for padding)
+	availableWidth := d.width - 6 // 4 for left padding + 2 for margins
+	if availableWidth < 20 {
+		availableWidth = 20 // Minimum width
+	}
+
+	// Wrap the description text
+	wrappedDesc := wordwrap.String(desc, availableWidth)
+
+	// Truncate to maxDescLines if set
+	if d.maxDescLines > 0 {
+		lines := strings.Split(wrappedDesc, "\n")
+		if len(lines) > d.maxDescLines {
+			lines = lines[:d.maxDescLines]
+			// Add ellipsis to last line if truncated
+			if len(lines) > 0 {
+				lastLine := lines[len(lines)-1]
+				if len(lastLine) > availableWidth-3 {
+					lastLine = lastLine[:availableWidth-3] + "..."
+				} else {
+					lastLine = lastLine + "..."
+				}
+				lines[len(lines)-1] = lastLine
+			}
+			wrappedDesc = strings.Join(lines, "\n")
+		}
+	}
+
+	renderedDesc := d.itemStyle.Render(d.descStyle.Render(wrappedDesc))
+	fmt.Fprintf(w, "%s\n%s", title, renderedDesc)
 }
 
 // GenericMenu is a reusable menu component
 type GenericMenu struct {
 	list         list.Model
 	config       MenuConfig
+	delegate     genericItemDelegate
 	selectedItem MenuItem
 	quitting     bool
 	startFilter  bool
@@ -114,6 +159,8 @@ func NewGenericMenu(items []MenuItem, config MenuConfig) *GenericMenu {
 		itemStyle:         config.ItemStyle,
 		selectedItemStyle: config.SelectedItemStyle,
 		descStyle:         config.DescStyle,
+		width:             config.Width,
+		maxDescLines:      config.MaxDescLines,
 	}
 
 	// Create list
@@ -140,6 +187,7 @@ func NewGenericMenu(items []MenuItem, config MenuConfig) *GenericMenu {
 	return &GenericMenu{
 		list:         l,
 		config:       config,
+		delegate:     delegate,
 		startFilter:  config.StartFiltering,
 		customKeyMap: make(map[string]func() tea.Msg),
 	}
@@ -175,6 +223,9 @@ func (m *GenericMenu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
 		m.list.SetHeight(msg.Height - 4)
+		// Update delegate width for proper text wrapping
+		m.delegate.width = msg.Width
+		m.list.SetDelegate(m.delegate)
 
 	case tea.KeyMsg:
 		key := msg.String()
@@ -266,4 +317,7 @@ func (m *GenericMenu) SetSize(width, height int) {
 	m.config.Height = height
 	m.list.SetWidth(width)
 	m.list.SetHeight(height - 4)
+	// Update delegate width for proper text wrapping
+	m.delegate.width = width
+	m.list.SetDelegate(m.delegate)
 }

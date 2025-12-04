@@ -850,17 +850,17 @@ func (m *Manager) loadProviderModels(providerName string) ([]*Model, error) {
 
 // PreferredModels contains the list of preferred models for each provider, ordered by preference
 var PreferredModels = map[string][]string{
-	"anthropic": {"claude-4-5-sonnet-20250514", "claude-sonnet-4.5", "claude-3-5-sonnet-20241022"},
-	"openai":    {"gpt-5.1-codex", "gpt-5.1", "gpt-5-codex", "gpt-5", "gpt-5-chat-latest", "gpt-4o"},
-	"google":    {"models/gemini-2.5-pro", "models/gemini-2.0-pro-exp"},
-	"mistral":   {"codestral-latest"},
+	"anthropic": {"claude-haiku-4-5", "claude-3-5-sonnet-20241022"},
+	"openai":    {"gpt-5.1-codex-max", "gpt-5.1-codex", "o3-mini", "gpt-5", "gpt-4o"},
+	"google":    {"models/gemini-2.0-flash", "models/gemini-2.0-pro-exp"},
+	"mistral":   {"mistral-large-latest", "codestral-latest"},
 	"openrouter": {
-		"minimax/minimax-m2",
-		"anthropic/claude-3.5-sonnet",
-		"meta-llama/llama-3.1-70b-instruct",
+		"anthropic/claude-haiku-4.5",
+		"google/gemini-2.0-flash-001",
+		"meta-llama/llama-3.3-70b-instruct",
 		"openrouter/auto",
 	},
-	"cerebras": {"zai-glm-4.6"},
+	"cerebras": {"llama-3.3-70b"},
 	"groq":     {"llama-3.3-70b-versatile", "mixtral-8x7b-32768"},
 }
 

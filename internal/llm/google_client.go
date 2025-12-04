@@ -356,7 +356,7 @@ func convertToolsToGenAI(tools []map[string]interface{}) []*genai.Tool {
 func normalizeGoogleModelName(modelName string) string {
 	trimmed := strings.TrimSpace(modelName)
 	if trimmed == "" {
-		return "models/gemini-1.5-flash"
+		return "models/gemini-2.0-flash"
 	}
 
 	lowered := strings.ToLower(trimmed)

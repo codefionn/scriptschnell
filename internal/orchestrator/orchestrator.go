@@ -829,39 +829,49 @@ func (a *planningToolAdapter) Execute(ctx context.Context, params map[string]int
 
 // buildReadOnlyPlanningTools returns planning-safe MCP tools filtered to read-only capabilities.
 func (o *Orchestrator) buildReadOnlyPlanningTools() ([]planning.PlanningTool, []error) {
-	if o == nil || o.mcpManager == nil || o.config == nil {
+	if o == nil || o.config == nil {
 		return nil, nil
 	}
 
-	mcpTools, errs := o.mcpManager.BuildTools()
-	if len(mcpTools) == 0 {
-		return nil, errs
-	}
-
 	var adapters []planning.PlanningTool
-	for _, tool := range mcpTools {
-		if tool == nil {
-			continue
-		}
-		serverKey := extractMCPSanitizedServer(tool.Name())
-		if serverKey == "" {
-			continue
-		}
+	var allErrs []error
 
-		serverName := o.lookupServerBySanitizedKey(serverKey)
-		if serverName == "" {
-			continue
-		}
-
-		serverCfg := o.config.MCP.Servers[serverName]
-		if !o.isReadOnlyMCPTool(serverName, serverCfg, tool) {
-			continue
-		}
-
-		adapters = append(adapters, &planningToolAdapter{tool: tool})
+	// Add Web Search tool if configured
+	if o.config.Search.Provider != "" {
+		webSearchTool := tools.NewWebSearchTool(o.config)
+		adapters = append(adapters, &planningToolAdapter{tool: webSearchTool})
 	}
 
-	return adapters, errs
+	if o.mcpManager != nil {
+		mcpTools, errs := o.mcpManager.BuildTools()
+		if len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
+		}
+
+		for _, tool := range mcpTools {
+			if tool == nil {
+				continue
+			}
+			serverKey := extractMCPSanitizedServer(tool.Name())
+			if serverKey == "" {
+				continue
+			}
+
+			serverName := o.lookupServerBySanitizedKey(serverKey)
+			if serverName == "" {
+				continue
+			}
+
+			serverCfg := o.config.MCP.Servers[serverName]
+			if !o.isReadOnlyMCPTool(serverName, serverCfg, tool) {
+				continue
+			}
+
+			adapters = append(adapters, &planningToolAdapter{tool: tool})
+		}
+	}
+
+	return adapters, allErrs
 }
 
 // isReadOnlyMCPTool determines whether a given MCP tool should be exposed to the planning agent.

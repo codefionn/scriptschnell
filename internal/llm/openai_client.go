@@ -37,7 +37,7 @@ func NewOpenAIClient(apiKey, modelName string) (Client, error) {
 
 	model := strings.TrimSpace(modelName)
 	if model == "" {
-		model = "gpt-4o-mini"
+		model = "gpt-5.1-codex"
 	}
 
 	client := &OpenAIClient{

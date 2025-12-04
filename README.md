@@ -13,7 +13,10 @@ On first run, it will download tinygo (if not in PATH).
 - Golang WASM sandbox (compiled with TinyGo, which is downloaded on startup)
 - Auto-continue for long-running sessions
 - Auto-compaction during generation for longer sessions
-- Two separate LLM models for orchestration and summarization
+- Separate LLM models:
+    - Orchestrator: writes the actual code
+    - Summarization: summarizes and makes *small* choices
+    - Planning: Plans the next steps
 - Read only contexts like external documentation, library sources, etc.
 - **Agent Client Protocol (ACP) support** for integration with code editors
 
@@ -139,7 +142,7 @@ flowchart TD
     investigator -->|Investigation results| orchestrator
 ```
 
-## Providers
+## Providersl
 
 Supported providers:
 
@@ -152,5 +155,7 @@ Supported providers:
 - Ollama
 - OpenAI-compatible
 
-Recommended are `Cerebras` with `zai-glm-4.6` for the orchestration model and
-`gpt-5-nano` or `gemini-2.5-flash` for the summarization model.
+Recommended since 2025-12-04:
+- Orchestrator model: Google Gemini 3 Pro
+- Summarization model: Mistral Codestral 2508
+- Planning model: Claude Opus 4.5

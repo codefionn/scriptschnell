@@ -34,7 +34,7 @@ func NewOpenRouterClient(apiKey, modelID string) (Client, error) {
 
 	model := strings.TrimSpace(modelID)
 	if model == "" {
-		model = "openai/gpt-4o-mini"
+		model = "openai/o3-mini"
 	}
 
 	return &OpenRouterClient{

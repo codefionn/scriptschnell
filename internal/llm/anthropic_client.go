@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultAnthropicModel     = "claude-3-5-haiku-latest"
+	defaultAnthropicModel     = "claude-haiku-4-5"
 	defaultAnthropicMaxTokens = 1024
 )
 

@@ -118,3 +118,29 @@ func TestIsReadOnlyMCPTool(t *testing.T) {
 		t.Fatal("metadata override should disable openai MCP for planning")
 	}
 }
+
+func TestBuildReadOnlyPlanningToolsIncludesWebSearch(t *testing.T) {
+	cfg := &config.Config{
+		Search: config.SearchConfig{
+			Provider: "exa",
+		},
+	}
+	orch := &Orchestrator{config: cfg}
+
+	tools, errs := orch.buildReadOnlyPlanningTools()
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	found := false
+	for _, tool := range tools {
+		if tool.Name() == "web_search" {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatal("expected web_search tool to be included when configured")
+	}
+}

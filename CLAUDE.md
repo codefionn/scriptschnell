@@ -52,8 +52,8 @@ Key actors in the system:
 
 The application uses two separate LLM models ([internal/llm/client.go](internal/llm/client.go:1-49)):
 
-1. **Orchestration Model**: Main conversation, tool calls, reasoning (e.g., Claude 3.5 Sonnet, GPT-4)
-2. **Summarization Model**: Fast summarization of large files (e.g., Claude 3 Haiku, GPT-3.5)
+1. **Orchestration Model**: Main conversation, tool calls, reasoning (e.g., Claude 3.5 Sonnet, GPT-4o, o3-mini)
+2. **Summarization Model**: Fast summarization of large files (e.g., Claude Haiku 4.5, Gemini 2.0 Flash)
 
 This separation optimizes cost and performance - expensive models only where needed.
 

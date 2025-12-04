@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -170,6 +171,12 @@ func convertToolCallsFromContent(content *genai.Content) []map[string]interface{
 		if part.FunctionCall.ID != "" {
 			toolCall["id"] = part.FunctionCall.ID
 		}
+		if part.Thought {
+			toolCall["thought"] = true
+		}
+		if len(part.ThoughtSignature) > 0 {
+			toolCall["thought_signature"] = base64.StdEncoding.EncodeToString(part.ThoughtSignature)
+		}
 
 		toolCalls = append(toolCalls, toolCall)
 	}
@@ -245,6 +252,16 @@ func convertAssistantMessage(msg *Message) (*genai.Content, error) {
 		part := genai.NewPartFromFunctionCall(name, argsMap)
 		if id, _ := tc["id"].(string); id != "" {
 			part.FunctionCall.ID = id
+		}
+		if thought, _ := tc["thought"].(bool); thought {
+			part.Thought = true
+		}
+		if sigStr, _ := tc["thought_signature"].(string); sigStr != "" {
+			if sig, err := base64.StdEncoding.DecodeString(sigStr); err == nil {
+				part.ThoughtSignature = sig
+			}
+		} else if sigBytes, ok := tc["thought_signature"].([]byte); ok && len(sigBytes) > 0 {
+			part.ThoughtSignature = sigBytes
 		}
 		parts = append(parts, part)
 	}

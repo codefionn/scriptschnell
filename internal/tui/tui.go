@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -132,6 +133,9 @@ type Model struct {
 	lastUpdateHeight     int
 	renderer             *glamour.TermRenderer
 	renderWrapWidth      int
+	rendererCache        map[int]*glamour.TermRenderer // Cache renderers by width
+	rendererInitInFlight bool                          // Track if async init is running
+	rendererInitMutex    sync.Mutex                    // Protect cache and flag
 	contextFile          string
 	suggestions          []string
 	selectedSuggIndex    int
@@ -200,6 +204,13 @@ type ProcessingStatusMsg struct {
 	Status string
 }
 
+// RendererReadyMsg is sent when async renderer creation completes
+type RendererReadyMsg struct {
+	Renderer *glamour.TermRenderer
+	Width    int
+	Err      error
+}
+
 func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your prompt here... (@ for files, Shift+Enter (or Alt+Enter) for newline, Ctrl+X for commands, Ctrl+B to background shell, Ctrl+D or Ctrl+C×2 to quit)"
@@ -229,6 +240,12 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		spinner.WithStyle(statusStyle.MarginLeft(0)),
 	)
 
+	// Initialize renderer cache
+	rendererCache := make(map[int]*glamour.TermRenderer)
+	if renderer != nil {
+		rendererCache[80] = renderer
+	}
+
 	m := &Model{
 		textarea:           ta,
 		viewport:           vp,
@@ -236,6 +253,7 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		currentModel:       currentModel,
 		contextFile:        contextFile,
 		renderer:           renderer,
+		rendererCache:      rendererCache,
 		spinner:            sp,
 		animationsDisabled: disableAnimations,
 		contextFreePercent: 100,
@@ -310,6 +328,21 @@ func (m *Model) scheduleViewportRefresh() tea.Cmd {
 	})
 }
 
+func (m *Model) createRendererAsync(wrapWidth int) tea.Cmd {
+	return func() tea.Msg {
+		renderer, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(wrapWidth),
+			glamour.WithPreservedNewLines(),
+		)
+		return RendererReadyMsg{
+			Renderer: renderer,
+			Width:    wrapWidth,
+			Err:      err,
+		}
+	}
+}
+
 func (m *Model) Init() tea.Cmd {
 	initialWindowSize := func() tea.Msg {
 		fd := int(os.Stdout.Fd())
@@ -331,9 +364,9 @@ func (m *Model) Init() tea.Cmd {
 	)
 }
 
-func (m *Model) applyWindowSize(width, height int) (bool, bool) {
+func (m *Model) applyWindowSize(width, height int) (bool, bool, tea.Cmd) {
 	if width <= 0 || height <= 0 {
-		return false, false
+		return false, false, nil
 	}
 
 	widthChanged := !m.ready || width != m.width
@@ -384,14 +417,26 @@ func (m *Model) applyWindowSize(width, height int) (bool, bool) {
 		wrapWidth = 10
 	}
 
-	if wrapWidth != m.renderWrapWidth || m.renderer == nil {
-		if renderer, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithWordWrap(wrapWidth),
-			glamour.WithPreservedNewLines(),
-		); err == nil {
-			m.renderer = renderer
+	// Check if we need a different renderer
+	var rendererCmd tea.Cmd
+	needsNewRenderer := wrapWidth != m.renderWrapWidth || m.renderer == nil
+
+	if needsNewRenderer {
+		m.rendererInitMutex.Lock()
+
+		// Check cache first
+		if cachedRenderer, exists := m.rendererCache[wrapWidth]; exists {
+			m.renderer = cachedRenderer
 			m.renderWrapWidth = wrapWidth
+			m.rendererInitMutex.Unlock()
+		} else if !m.rendererInitInFlight {
+			// Mark that initialization is in flight and create renderer async
+			m.rendererInitInFlight = true
+			m.rendererInitMutex.Unlock()
+			rendererCmd = m.createRendererAsync(wrapWidth)
+		} else {
+			// Renderer init already in flight, don't start another
+			m.rendererInitMutex.Unlock()
 		}
 	}
 
@@ -399,7 +444,7 @@ func (m *Model) applyWindowSize(width, height int) (bool, bool) {
 		m.ready = true
 	}
 
-	return widthChanged, heightChanged
+	return widthChanged, heightChanged, rendererCmd
 }
 
 type ansiSeqMode int
@@ -1124,18 +1169,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, baseCmd
 
 	case tea.WindowSizeMsg:
-		widthChanged, heightChanged := m.applyWindowSize(msg.Width, msg.Height)
+		widthChanged, heightChanged, rendererCmd := m.applyWindowSize(msg.Width, msg.Height)
 		if !widthChanged && heightChanged && m.viewport.AtBottom() {
 			m.viewport.GotoBottom()
+		}
+
+		var extraCmds []tea.Cmd
+		if rendererCmd != nil {
+			extraCmds = append(extraCmds, rendererCmd)
 		}
 
 		if widthChanged || wasReady != m.ready {
 			m.viewportDirty = true
 			if cmd := m.scheduleViewportRefresh(); cmd != nil {
-				return m, tea.Batch(baseCmd, cmd)
+				extraCmds = append(extraCmds, cmd)
 			}
 		}
 
+		if len(extraCmds) > 0 {
+			return m, tea.Batch(append([]tea.Cmd{baseCmd}, extraCmds...)...)
+		}
 		return m, baseCmd
 
 	case viewportRefreshMsg:
@@ -1144,6 +1197,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.viewportDirty {
 			m.updateViewport()
+		}
+		return m, baseCmd
+
+	case RendererReadyMsg:
+		m.rendererInitMutex.Lock()
+		if msg.Err == nil && msg.Renderer != nil {
+			// Cache the new renderer
+			m.rendererCache[msg.Width] = msg.Renderer
+
+			// If this is the current width, update active renderer
+			if msg.Width == m.renderWrapWidth || m.renderer == nil {
+				m.renderer = msg.Renderer
+				m.renderWrapWidth = msg.Width
+				m.viewportDirty = true
+			}
+		}
+		m.rendererInitInFlight = false
+		m.rendererInitMutex.Unlock()
+
+		// Refresh viewport if needed
+		if m.viewportDirty {
+			return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
 		}
 		return m, baseCmd
 

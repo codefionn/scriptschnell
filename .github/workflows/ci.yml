@@ -31,12 +31,21 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Cache Docker layers - Lint
+      uses: actions/cache@v4
+      with:
+        path: .cache/lint
+        key: ${{ runner.os }}-docker-cache-lint-${{ hashFiles('**/Dockerfile', '**/docker-bake.hcl', 'go.mod', 'go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-docker-cache-lint-
+          ${{ runner.os }}-docker-cache-
+
     - name: Run linting with Docker Bake
       run: |
         set -euo pipefail
         docker buildx bake \
-          --set "*.cache-from=type=gha" \
-          --set "*.cache-to=type=gha,mode=max" \
+          --set "*.cache-from=type=local,src=.cache/lint" \
+          --set "*.cache-to=type=local,dest=.cache/lint" \
           lint
 
   # Testing job using Docker Bake
@@ -54,12 +63,21 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Cache Docker layers - Test
+      uses: actions/cache@v4
+      with:
+        path: .cache/test
+        key: ${{ runner.os }}-docker-cache-test-${{ hashFiles('**/Dockerfile', '**/docker-bake.hcl', 'go.mod', 'go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-docker-cache-test-
+          ${{ runner.os }}-docker-cache-
+
     - name: Run tests with Docker Bake
       run: |
         set -euo pipefail
         docker buildx bake \
-          --set "*.cache-from=type=gha" \
-          --set "*.cache-to=type=gha,mode=max" \
+          --set "*.cache-from=type=local,src=.cache/test" \
+          --set "*.cache-to=type=local,dest=.cache/test" \
           test
 
     - name: Upload coverage reports
@@ -90,13 +108,22 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Cache Docker layers - Build
+      uses: actions/cache@v4
+      with:
+        path: .cache/build
+        key: ${{ runner.os }}-docker-cache-build-${{ hashFiles('**/Dockerfile', '**/docker-bake.hcl', 'go.mod', 'go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-docker-cache-build-
+          ${{ runner.os }}-docker-cache-
+
     - name: Build with Docker Bake
       run: |
         set -euo pipefail
         BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         docker buildx bake \
-          --set "*.cache-from=type=gha" \
-          --set "*.cache-to=type=gha,mode=max" \
+          --set "*.cache-from=type=local,src=.cache/build" \
+          --set "*.cache-to=type=local,dest=.cache/build" \
           --set "*.args.VERSION=${VERSION}" \
           --set "*.args.COMMIT=${COMMIT}" \
           --set "*.args.BUILD_TIME=${BUILD_TIME}" \

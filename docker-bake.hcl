@@ -20,6 +20,8 @@ target "lint" {
   target = "lint"
   tags = ["${IMAGE_NAME}:lint"]
   output = ["type=cacheonly"]
+  cache-from = ["type=local,src=.cache/lint"]
+  cache-to = ["type=local,dest=.cache/lint"]
 }
 
 # Target for running tests (simplified)
@@ -29,8 +31,8 @@ target "test" {
   target = "test"
   tags = ["${IMAGE_NAME}:test"]
   output = ["type=cacheonly"]
-  cache-from = ["type=gha"]
-  cache-to = ["type=gha,mode=max"]
+  cache-from = ["type=local,src=.cache/test"]
+  cache-to = ["type=local,dest=.cache/test"]
 }
 
 # Target for building the main application
@@ -40,6 +42,8 @@ target "build" {
   target = "build"
   tags = ["${IMAGE_NAME}:build"]
   output = ["type=local,dest=./bin"]
+  cache-from = ["type=local,src=.cache/build"]
+  cache-to = ["type=local,dest=.cache/build"]
 }
 
 # CI pipeline target (lint -> test -> build)
@@ -49,6 +53,8 @@ target "ci" {
   target = "build"
   tags = ["${IMAGE_NAME}:ci"]
   output = ["type=local,dest=./bin"]
+  cache-from = ["type=local,src=.cache/build"]
+  cache-to = ["type=local,dest=.cache/build"]
 }
 
 # Target for building debug HTML tool
@@ -58,6 +64,8 @@ target "build-debug" {
   target = "build-debug"
   tags = ["${IMAGE_NAME}:build-debug"]
   output = ["type=local,dest=./bin"]
+  cache-from = ["type=local,src=.cache/build-debug"]
+  cache-to = ["type=local,dest=.cache/build-debug"]
 }
 
 # Default target
@@ -67,6 +75,8 @@ target "default" {
   target = "build"
   tags = ["${IMAGE_NAME}:latest"]
   output = ["type=local,dest=./bin"]
+  cache-from = ["type=local,src=.cache/build"]
+  cache-to = ["type=local,dest=.cache/build"]
 }
 
 # Group for CI pipeline (lint -> test -> build)

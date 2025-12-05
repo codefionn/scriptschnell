@@ -1707,6 +1707,12 @@ func (m *Model) summarizeLastToolResult() {
 }
 
 func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[string]interface{}) {
+	isPlanning := strings.HasPrefix(toolName, "Planning: ")
+	realToolName := toolName
+	if isPlanning {
+		realToolName = strings.TrimPrefix(toolName, "Planning: ")
+	}
+
 	// Format parameters as JSON for display
 	var paramsBuf strings.Builder
 	if len(parameters) > 0 {
@@ -1719,7 +1725,7 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 
 	// Create more descriptive content based on tool type
 	var content string
-	switch toolName {
+	switch realToolName {
 	case tools.ToolNameReadFile:
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("📖 **Reading file:** `%s`", path)
@@ -1745,7 +1751,11 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 			content = "💻 **Executing command**"
 		}
 	default:
-		content = fmt.Sprintf("🔧 **Calling tool:** `%s`", toolName)
+		content = fmt.Sprintf("🔧 **Calling tool:** `%s`", realToolName)
+	}
+
+	if isPlanning {
+		content = "📋 **Planning:** " + content
 	}
 
 	content += paramsBuf.String()
@@ -1754,28 +1764,46 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 }
 
 func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) {
+	isPlanning := strings.HasPrefix(toolName, "Planning: ")
+	realToolName := toolName
+	if isPlanning {
+		realToolName = strings.TrimPrefix(toolName, "Planning: ")
+	}
+
 	var content string
 	if errorMsg != "" {
 		content = fmt.Sprintf("❌ **Error:** %s", errorMsg)
-		m.addToolMessage(toolName, toolID, content, "", false)
+		if isPlanning {
+			content = "📋 **Planning Error:** " + errorMsg
+		}
+		m.addToolMessage(realToolName, toolID, content, "", false)
 	} else if result == "" {
-		content = m.generateToolSummary(toolName, result, true)
-		m.addToolMessage(toolName, toolID, content, "", true)
+		content = m.generateToolSummary(realToolName, result, true)
+		if isPlanning {
+			content = "📋 **Planning:** " + content
+		}
+		m.addToolMessage(realToolName, toolID, content, "", true)
 	} else {
 		// Check if this is a git diff format (starts with --- and +++)
 		isGitDiff := strings.HasPrefix(result, "---") || strings.HasPrefix(result, "diff --git")
 
 		if isGitDiff {
 			// For write file operations, show a nice summary with the diff
-			summary := m.generateToolSummary(toolName, result, false)
+			summary := m.generateToolSummary(realToolName, result, false)
+			if isPlanning {
+				summary = "📋 **Planning:** " + summary
+			}
 			displayResult := m.truncateToolResult(result)
 			fullContent := fmt.Sprintf("%s\n```diff\n%s\n```", summary, displayResult)
-			m.addToolMessage(toolName, toolID, fullContent, result, false)
+			m.addToolMessage(realToolName, toolID, fullContent, result, false)
 		} else {
 			// Create the full result display
 			displayResult := m.truncateToolResult(result)
 			fullContent := fmt.Sprintf("✓ **Result:**\n```\n%s\n```", displayResult)
-			m.addToolMessage(toolName, toolID, fullContent, result, false)
+			if isPlanning {
+				fullContent = "📋 **Planning Result:**\n```\n" + displayResult + "\n```"
+			}
+			m.addToolMessage(realToolName, toolID, fullContent, result, false)
 		}
 	}
 }

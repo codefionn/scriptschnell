@@ -292,6 +292,8 @@ func parseToolSelectionResponse(text string) ([]string, error) {
 		return names, nil
 	}
 
+	logger.Warn("Summary model decision does not equal exactly what was asked for: %q", text)
+
 	start := strings.Index(trimmed, "[")
 	end := strings.LastIndex(trimmed, "]")
 	if start >= 0 && end > start {

@@ -73,6 +73,10 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 		return false, ""
 	}
 
+	if decision != "CONTINUE" && decision != "STOP" {
+		logger.Warn("Summary model decision does not equal exactly what was asked for: %q", decision)
+	}
+
 	// For Mistral models, be more conservative - only continue if explicitly requested
 	if llm.IsMistralModel(modelID) {
 		upper := strings.ToUpper(decision)

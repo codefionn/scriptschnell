@@ -120,6 +120,11 @@ Respond ONLY with a JSON object in the following format:
 	decision := &PlanningDecision{}
 	content := resp.Content
 
+	var jsonCheck interface{}
+	if err := json.Unmarshal([]byte(content), &jsonCheck); err != nil {
+		logger.Warn("Summary model decision does not equal exactly what was asked for: %q", content)
+	}
+
 	// Try to extract JSON if wrapped in markdown code blocks
 	if start := strings.Index(content, "```json"); start != -1 {
 		content = content[start+7:]

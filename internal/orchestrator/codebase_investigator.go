@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
@@ -302,6 +303,9 @@ func extractAnswer(content string) string {
 	endTag := "</answer>"
 	start := strings.Index(content, startTag)
 	if start == -1 {
+		if strings.TrimSpace(content) != "" {
+			logger.Warn("Summary model decision does not equal exactly what was asked for (missing <answer> tags): %s", content)
+		}
 		return content
 	}
 	content = content[start+len(startTag):]

@@ -118,6 +118,12 @@ type PlanningResponse struct {
 // UserInputCallback is called when the planning agent needs user input
 type UserInputCallback func(question string) (string, error)
 
+// ToolCallCallback is called when a planning tool is being executed
+type ToolCallCallback func(toolName, toolID string, parameters map[string]interface{}) error
+
+// ToolResultCallback is called when a planning tool execution completes
+type ToolResultCallback func(toolName, toolID, result, errorMsg string) error
+
 // NewPlanningAgent creates a new planning agent
 func NewPlanningAgent(id string, filesystem fs.FileSystem, sess *session.Session, client llm.Client, investigator realtools.Investigator) *PlanningAgent {
 	agent := &PlanningAgent{
@@ -241,15 +247,15 @@ func (p *PlanningAgent) collectContextFiles(ctx context.Context, paths []string)
 
 // Plan generates a plan for the given objective
 func (p *PlanningAgent) Plan(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback) (*PlanningResponse, error) {
-	return p.PlanWithProgress(ctx, req, userInputCb, nil)
+	return p.PlanWithProgress(ctx, req, userInputCb, nil, nil, nil)
 }
 
 // PlanWithProgress generates a plan and streams planning output via the provided progress callback.
-func (p *PlanningAgent) PlanWithProgress(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback) (*PlanningResponse, error) {
-	return p.plan(ctx, req, userInputCb, progressCb)
+func (p *PlanningAgent) PlanWithProgress(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*PlanningResponse, error) {
+	return p.plan(ctx, req, userInputCb, progressCb, toolCallCb, toolResultCb)
 }
 
-func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback) (*PlanningResponse, error) {
+func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*PlanningResponse, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -393,7 +399,7 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 
 		// Process tool calls if any
 		if len(response.ToolCalls) > 0 {
-			toolResults, needsInput, askedCount, err := p.processToolCalls(ctx, response.ToolCalls, userInputCb, req, questionsAsked, updateStatus)
+			toolResults, needsInput, askedCount, err := p.processToolCalls(ctx, response.ToolCalls, userInputCb, req, questionsAsked, updateStatus, toolCallCb, toolResultCb)
 			if err != nil {
 				return nil, fmt.Errorf("tool execution failed: %w", err)
 			}
@@ -454,7 +460,7 @@ type toolCallResult struct {
 }
 
 // processToolCalls executes the planning agent's tool calls
-func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[string]interface{}, userInputCb UserInputCallback, req *PlanningRequest, currentQuestionsAsked int, statusCb func(string)) ([]*llm.Message, bool, int, error) {
+func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[string]interface{}, userInputCb UserInputCallback, req *PlanningRequest, currentQuestionsAsked int, statusCb func(string), toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) ([]*llm.Message, bool, int, error) {
 	var (
 		wg                    sync.WaitGroup
 		results               = make([]*toolCallResult, len(toolCalls))
@@ -506,6 +512,13 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 				return
 			}
 
+			// Notify UI about tool call details
+			if toolCallCb != nil {
+				if err := toolCallCb(toolName, toolID, args); err != nil {
+					logger.Warn("Failed to send planning tool call message: %v", err)
+				}
+			}
+
 			var toolResult string
 
 			switch toolName {
@@ -554,6 +567,19 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 					} else {
 						toolResult = fmt.Sprintf("%v", result.Result)
 					}
+				}
+			}
+
+			// Notify UI about tool result
+			if toolResultCb != nil {
+				// Determine error message for the callback
+				// We don't have a direct error object here for some cases, but if toolResult starts with "Error:", we can assume it's an error
+				var errorMsg string
+				if strings.HasPrefix(toolResult, "Error:") {
+					errorMsg = toolResult
+				}
+				if err := toolResultCb(toolName, toolID, toolResult, errorMsg); err != nil {
+					logger.Warn("Failed to send planning tool result message: %v", err)
 				}
 			}
 

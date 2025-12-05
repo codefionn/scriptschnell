@@ -881,7 +881,7 @@ func TestProcessToolCalls_Parallel(t *testing.T) {
 	ctx := context.Background()
 
 	start := time.Now()
-	_, _, _, err := agent.processToolCalls(ctx, toolCalls, nil, req, 0, nil)
+	_, _, _, err := agent.processToolCalls(ctx, toolCalls, nil, req, 0, nil, nil, nil)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -948,7 +948,7 @@ func TestProcessToolCalls_AskUserSerialization(t *testing.T) {
 		return "answer", nil
 	}
 
-	_, _, _, err := agent.processToolCalls(ctx, toolCalls, userInputCb, req, 0, nil)
+	_, _, _, err := agent.processToolCalls(ctx, toolCalls, userInputCb, req, 0, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("processToolCalls failed: %v", err)
 	}

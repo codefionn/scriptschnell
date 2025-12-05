@@ -1027,7 +1027,7 @@ func parseSimplicityResponse(content string) (bool, string, bool) {
 
 func heuristicPromptSimplicity(prompt string) (bool, string) {
 	words := strings.Fields(prompt)
-	if len(words) <= 12 && strings.Count(prompt, "\n") == 0 {
+	if len(words) <= 4 && strings.Count(prompt, "\n") == 0 {
 		return true, "short single-line prompt"
 	}
 
@@ -1059,7 +1059,7 @@ func formatPlanForDisplay(plan []string) string {
 }
 
 // runPlanningPhaseIfNeeded executes a planning pass before entering the main orchestration loop.
-func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt string, progressCallback progress.Callback) error {
+func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt string, progressCallback progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) error {
 	// Check if planning is enabled via feature flags
 	if !o.featureFlags.IsPlanningEnabled() {
 		logger.Debug("Planning phase disabled via feature flags")
@@ -1087,7 +1087,7 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		return nil
 	}
 
-	logger.Debug("Planning phase triggered: %s", decision.Reason)
+	logger.Info("Planning phase triggered: %s", decision.Reason)
 
 	statusMsg := fmt.Sprintf("Running planning pass (%s)...", decision.Reason)
 
@@ -1127,7 +1127,22 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 	o.session.SetPlanningActive(true, req.Objective)
 	defer o.session.SetPlanningActive(false, "")
 
-	response, err := o.planningAgent.PlanWithProgress(ctx, req, userInputCb, progressCallback)
+	// Create wrapper callbacks to distinguish planning tools
+	planningToolCallCb := func(toolName, toolID string, parameters map[string]interface{}) error {
+		if toolCallCb != nil {
+			return toolCallCb("Planning: "+toolName, toolID, parameters)
+		}
+		return nil
+	}
+
+	planningToolResultCb := func(toolName, toolID, result, errorMsg string) error {
+		if toolResultCb != nil {
+			return toolResultCb("Planning: "+toolName, toolID, result, errorMsg)
+		}
+		return nil
+	}
+
+	response, err := o.planningAgent.PlanWithProgress(ctx, req, userInputCb, progressCallback, planningToolCallCb, planningToolResultCb)
 	if err != nil {
 		return fmt.Errorf("planning failed: %w", err)
 	}
@@ -1215,7 +1230,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 	o.loopDetector.Reset()
 	logger.Debug("Loop detector reset for new prompt")
 
-	if err := o.runPlanningPhaseIfNeeded(ctx, prompt, progressCallback); err != nil {
+	if err := o.runPlanningPhaseIfNeeded(ctx, prompt, progressCallback, toolCallCallback, toolResultCallback); err != nil {
 		logger.Warn("Pre-loop planning failed: %v", err)
 	}
 

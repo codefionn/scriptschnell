@@ -158,7 +158,7 @@ func TestIsMistralModel(t *testing.T) {
 		{"mistral/Mistral-Large", true},
 		{"open-mistral-7b", true},
 		{"open-mistral-nemo", true},
-		
+
 		// Non-Mistral models
 		{"gpt-4o", false},
 		{"claude-3-5-sonnet", false},

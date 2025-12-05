@@ -25,7 +25,6 @@ func getMatchesCount(t *testing.T, result interface{}) int {
 	return count
 }
 
-
 func TestScanSecretsToolSpec(t *testing.T) {
 	spec := &ScanSecretsToolSpec{}
 

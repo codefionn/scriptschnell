@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 )
 
 // TestPlanningAgent_EnablesCaching verifies that the planning agent

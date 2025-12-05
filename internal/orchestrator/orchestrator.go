@@ -15,11 +15,11 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/mcp"
 	"github.com/codefionn/scriptschnell/internal/planning"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
-	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 )
@@ -339,7 +339,6 @@ func (o *Orchestrator) getSummarizeModelID() string {
 	}
 	return modelID
 }
-
 
 // initializePlanningAgent creates and initializes the planning agent
 func (o *Orchestrator) initializePlanningAgent() {

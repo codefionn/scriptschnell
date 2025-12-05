@@ -291,10 +291,9 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 	systemPrompt := p.buildSystemPrompt(req)
 
 	// Build ALL initial messages upfront to preserve prompt cache stability.
-	// The message prefix (system + initial user messages) must remain immutable
+	// The message prefix (initial user messages + context) must remain immutable
 	// throughout the agent's lifecycle for Anthropic's prompt caching to work.
 	messages := make([]*llm.Message, 0, 4)
-	messages = append(messages, &llm.Message{Role: "system", Content: systemPrompt})
 	messages = append(messages, &llm.Message{
 		Role:    "user",
 		Content: fmt.Sprintf("Create a plan for: %s", req.Objective),

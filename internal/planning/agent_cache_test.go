@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 )
 
 // TestPlanningAgentMessagePrefixStability ensures that the message prefix
@@ -24,7 +24,7 @@ func TestPlanningAgentMessagePrefixStability(t *testing.T) {
 			objective:       "Create a plan for implementing feature X",
 			context:         "",
 			contextFiles:    nil,
-			expectedMinMsgs: 2, // system + user objective
+			expectedMinMsgs: 1, // user objective
 			description:     "Only objective provided",
 		},
 		{
@@ -32,7 +32,7 @@ func TestPlanningAgentMessagePrefixStability(t *testing.T) {
 			objective:       "Create a plan for implementing feature X",
 			context:         "This is additional context about the feature",
 			contextFiles:    nil,
-			expectedMinMsgs: 3, // system + user objective + user context
+			expectedMinMsgs: 2, // user objective + user context
 			description:     "Objective with additional context",
 		},
 		{
@@ -40,7 +40,7 @@ func TestPlanningAgentMessagePrefixStability(t *testing.T) {
 			objective:       "Create a plan for implementing feature X",
 			context:         "",
 			contextFiles:    []string{"testdata/example.go"},
-			expectedMinMsgs: 2, // system + user objective (files are empty so not added)
+			expectedMinMsgs: 1, // user objective (context files empty)
 			description:     "Objective with context files",
 		},
 		{
@@ -48,7 +48,7 @@ func TestPlanningAgentMessagePrefixStability(t *testing.T) {
 			objective:       "Create a plan for implementing feature X",
 			context:         "Additional context",
 			contextFiles:    []string{"testdata/example.go"},
-			expectedMinMsgs: 3, // system + user objective + user context (files empty)
+			expectedMinMsgs: 2, // user objective + user context
 			description:     "Objective with both context and files",
 		},
 	}
@@ -97,12 +97,12 @@ func TestPlanningAgentMessagePrefixStability(t *testing.T) {
 				t.Errorf("First request: expected at least %d messages, got %d", tt.expectedMinMsgs, len(firstReq.Messages))
 			}
 
-			// Verify system message is first
-			if len(firstReq.Messages) > 0 && firstReq.Messages[0].Role != "system" {
-				t.Errorf("First message should be system, got: %s", firstReq.Messages[0].Role)
+			// Verify objective message is first
+			if len(firstReq.Messages) > 0 && firstReq.Messages[0].Role != "user" {
+				t.Errorf("First message should be user, got: %s", firstReq.Messages[0].Role)
 			}
 
-			// Verify user objective is second
+			// Verify any additional context message is also user
 			if len(firstReq.Messages) > 1 && firstReq.Messages[1].Role != "user" {
 				t.Errorf("Second message should be user, got: %s", firstReq.Messages[1].Role)
 			}
@@ -189,41 +189,35 @@ func TestPlanningAgentMessageSequenceWithToolCalls(t *testing.T) {
 		t.Fatalf("Expected 2 requests, got %d", len(mockClient.requests))
 	}
 
-	// First request: system + user
+	// First request: user objective (and optional context)
 	firstReq := mockClient.requests[0]
-	if len(firstReq.Messages) < 2 {
-		t.Fatalf("First request should have at least 2 messages (system + user)")
+	if len(firstReq.Messages) < 1 {
+		t.Fatalf("First request should have at least 1 message (user objective)")
 	}
 
-	// Second request: system + user + assistant (with tool calls) + tool result
+	// Second request: user + assistant (with tool calls) + tool result
 	secondReq := mockClient.requests[1]
-	expectedSecondLen := 4 // system + user + assistant + tool
+	expectedSecondLen := 3 // user + assistant + tool
 	if len(secondReq.Messages) != expectedSecondLen {
 		t.Errorf("Second request should have %d messages, got %d", expectedSecondLen, len(secondReq.Messages))
 	}
 
 	// Verify message sequence in second request
-	if len(secondReq.Messages) >= 4 {
-		if secondReq.Messages[0].Role != "system" {
-			t.Errorf("Message 0 should be system, got %s", secondReq.Messages[0].Role)
+	if len(secondReq.Messages) >= 3 {
+		if secondReq.Messages[0].Role != "user" {
+			t.Errorf("Message 0 should be user, got %s", secondReq.Messages[0].Role)
 		}
-		if secondReq.Messages[1].Role != "user" {
-			t.Errorf("Message 1 should be user, got %s", secondReq.Messages[1].Role)
+		if secondReq.Messages[1].Role != "assistant" {
+			t.Errorf("Message 1 should be assistant, got %s", secondReq.Messages[1].Role)
 		}
-		if secondReq.Messages[2].Role != "assistant" {
-			t.Errorf("Message 2 should be assistant, got %s", secondReq.Messages[2].Role)
-		}
-		if secondReq.Messages[3].Role != "tool" {
-			t.Errorf("Message 3 should be tool, got %s", secondReq.Messages[3].Role)
+		if secondReq.Messages[2].Role != "tool" {
+			t.Errorf("Message 2 should be tool, got %s", secondReq.Messages[2].Role)
 		}
 	}
 
-	// Verify that prefix (system + user) is identical between requests
-	if firstReq.Messages[0].Content != secondReq.Messages[0].Content {
-		t.Error("System message content changed between requests (CACHE BREAK)")
-	}
-	if firstReq.Messages[1].Content != secondReq.Messages[1].Content {
-		t.Error("User message content changed between requests (CACHE BREAK)")
+	// Verify that prefix (initial user messages) is identical between requests
+	if len(firstReq.Messages) > 0 && len(secondReq.Messages) > 0 && firstReq.Messages[0].Content != secondReq.Messages[0].Content {
+		t.Error("Initial objective message content changed between requests (CACHE BREAK)")
 	}
 }
 

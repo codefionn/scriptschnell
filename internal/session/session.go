@@ -33,6 +33,9 @@ type Session struct {
 	PlanningActive     bool            // whether planning phase is currently running
 	PlanningObjective  string          // objective of current planning phase
 	PlanningStartTime  time.Time       // when current planning phase started
+	LastSandboxExitCode int            // exit code from last sandbox execution
+	LastSandboxStdout   string         // stdout from last sandbox execution
+	LastSandboxStderr   string         // stderr from last sandbox execution
 	mu                 sync.RWMutex
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -357,4 +360,21 @@ func (s *Session) CompactWithSummary(original []*Message, summary string) bool {
 	s.UpdatedAt = time.Now()
 
 	return true
+}
+
+// SetLastSandboxOutput stores the output from the last sandbox execution
+func (s *Session) SetLastSandboxOutput(exitCode int, stdout, stderr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LastSandboxExitCode = exitCode
+	s.LastSandboxStdout = stdout
+	s.LastSandboxStderr = stderr
+	s.UpdatedAt = time.Now()
+}
+
+// GetLastSandboxOutput retrieves the output from the last sandbox execution
+func (s *Session) GetLastSandboxOutput() (exitCode int, stdout, stderr string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.LastSandboxExitCode, s.LastSandboxStdout, s.LastSandboxStderr
 }

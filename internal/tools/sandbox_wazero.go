@@ -74,6 +74,9 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	t.registerListFilesHostFunction(envBuilder, callTracker)
 	t.registerRemoveFileHostFunction(envBuilder, callTracker)
 	t.registerRemoveDirHostFunction(envBuilder, callTracker)
+	t.registerGetLastExitCodeHostFunction(envBuilder)
+	t.registerGetLastStdoutHostFunction(envBuilder)
+	t.registerGetLastStderrHostFunction(envBuilder)
 
 	_, err = envBuilder.Instantiate(ctx)
 	if err != nil {
@@ -211,6 +214,12 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			stderr = "Runtime error: " + runtimeErr.Error()
 		}
 		metadata := t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, finalExitCode, stdout, stderr, false, callTracker)
+
+		// Store the output in session even on error
+		if t.session != nil {
+			t.session.SetLastSandboxOutput(finalExitCode, stdout, stderr)
+		}
+
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    stdout,
 			"stderr":    stderr,
@@ -221,6 +230,12 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	}
 
 	metadata := t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, finalExitCode, stdout, stderr, false, callTracker)
+
+	// Store the output in session for the next sandbox execution
+	if t.session != nil {
+		t.session.SetLastSandboxOutput(finalExitCode, stdout, stderr)
+	}
+
 	return attachExecutionMetadata(map[string]interface{}{
 		"stdout":    stdout,
 		"stderr":    stderr,

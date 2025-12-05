@@ -738,3 +738,70 @@ func (t *SandboxTool) registerRemoveDirHostFunction(envBuilder HostModuleBuilder
 		}).
 		Export("remove_dir")
 }
+
+// registerGetLastExitCodeHostFunction registers the get_last_exit_code host function
+func (t *SandboxTool) registerGetLastExitCodeHostFunction(envBuilder HostModuleBuilder) {
+	// get_last_exit_code() -> exit_code
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module) int32 {
+			if t.session == nil {
+				return 0 // No session, return 0
+			}
+
+			exitCode, _, _ := t.session.GetLastSandboxOutput()
+			return int32(exitCode)
+		}).
+		Export("get_last_exit_code")
+}
+
+// registerGetLastStdoutHostFunction registers the get_last_stdout host function
+func (t *SandboxTool) registerGetLastStdoutHostFunction(envBuilder HostModuleBuilder) {
+	// get_last_stdout(buffer_ptr, buffer_cap) -> length
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, bufferPtr, bufferCap uint32) int32 {
+			if t.session == nil {
+				return 0 // No session, return empty
+			}
+
+			_, stdout, _ := t.session.GetLastSandboxOutput()
+			stdoutBytes := []byte(stdout)
+
+			memory := m.Memory()
+			if uint32(len(stdoutBytes)) > bufferCap {
+				stdoutBytes = stdoutBytes[:bufferCap]
+			}
+
+			if bufferCap > 0 && len(stdoutBytes) > 0 {
+				memory.Write(bufferPtr, stdoutBytes)
+			}
+
+			return int32(len(stdoutBytes))
+		}).
+		Export("get_last_stdout")
+}
+
+// registerGetLastStderrHostFunction registers the get_last_stderr host function
+func (t *SandboxTool) registerGetLastStderrHostFunction(envBuilder HostModuleBuilder) {
+	// get_last_stderr(buffer_ptr, buffer_cap) -> length
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, bufferPtr, bufferCap uint32) int32 {
+			if t.session == nil {
+				return 0 // No session, return empty
+			}
+
+			_, _, stderr := t.session.GetLastSandboxOutput()
+			stderrBytes := []byte(stderr)
+
+			memory := m.Memory()
+			if uint32(len(stderrBytes)) > bufferCap {
+				stderrBytes = stderrBytes[:bufferCap]
+			}
+
+			if bufferCap > 0 && len(stderrBytes) > 0 {
+				memory.Write(bufferPtr, stderrBytes)
+			}
+
+			return int32(len(stderrBytes))
+		}).
+		Export("get_last_stderr")
+}

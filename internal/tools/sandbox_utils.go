@@ -125,11 +125,22 @@ func formatSandboxUIResult(result map[string]interface{}) string {
 
 	var sections []string
 
+	// Apply 4096 line limit to stdout and stderr
+	const maxLines = 4096
+
 	if stdout != "" {
-		sections = append(sections, fmt.Sprintf("stdout:\n%s", stdout))
+		truncatedStdout, stdoutTruncMsg := truncateToLines(stdout, maxLines)
+		sections = append(sections, fmt.Sprintf("stdout:\n%s", truncatedStdout))
+		if stdoutTruncMsg != "" {
+			sections = append(sections, stdoutTruncMsg)
+		}
 	}
 	if stderr != "" {
-		sections = append(sections, fmt.Sprintf("stderr:\n%s", stderr))
+		truncatedStderr, stderrTruncMsg := truncateToLines(stderr, maxLines)
+		sections = append(sections, fmt.Sprintf("stderr:\n%s", truncatedStderr))
+		if stderrTruncMsg != "" {
+			sections = append(sections, stderrTruncMsg)
+		}
 	}
 	if errorMsg != "" {
 		sections = append(sections, fmt.Sprintf("error: %s", errorMsg))
@@ -181,4 +192,53 @@ func CalculateOutputStats(output string) (int, int) {
 	}
 
 	return bytes, lines
+}
+
+// truncateToLines limits text to a maximum number of lines.
+// If truncated, returns the truncated text and a truncation message.
+func truncateToLines(text string, maxLines int) (string, string) {
+	if text == "" {
+		return "", ""
+	}
+
+	// Count lines
+	lineCount := 0
+	for _, char := range text {
+		if char == '\n' {
+			lineCount++
+		}
+	}
+
+	// Count the last line if it doesn't end with newline
+	if len(text) > 0 && text[len(text)-1] != '\n' {
+		lineCount++
+	}
+
+	// If under the limit, return as-is
+	if lineCount <= maxLines {
+		return text, ""
+	}
+
+	// Find the truncation point (end of maxLines-th line)
+	currentLine := 0
+	truncIndex := len(text) // default to end of string
+	for i, char := range text {
+		if char == '\n' {
+			currentLine++
+			if currentLine >= maxLines {
+				truncIndex = i
+				break
+			}
+		}
+	}
+
+	// If we didn't find enough newlines, truncate at maxLines character count
+	if currentLine < maxLines {
+		truncIndex = len(text)
+	}
+
+	truncated := text[:truncIndex]
+	truncationMsg := fmt.Sprintf("\n\n[Output truncated: showed %d of %d lines. The full output is preserved in last_stdout/last_stderr variables for the next sandbox execution. Consider parsing specific parts with Go to reduce output.]", maxLines, lineCount)
+
+	return truncated, truncationMsg
 }

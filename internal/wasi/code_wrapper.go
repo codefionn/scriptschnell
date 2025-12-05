@@ -32,6 +32,49 @@ func WrapGoCodeWithAuthorization(userCode string) string {
 	wrapped.WriteString(`// STATCODE_AI_INTERNAL: Authorization system
 // This is injected by scriptschnell to enforce network authorization
 
+//go:wasmimport env get_last_exit_code
+func getLastExitCodeHost() int32
+
+//go:wasmimport env get_last_stdout
+func getLastStdoutHost(bufferPtr *byte, bufferCap int32) int32
+
+//go:wasmimport env get_last_stderr
+func getLastStderrHost(bufferPtr *byte, bufferCap int32) int32
+
+// Global variables accessible in user code
+var (
+	last_exit_code int
+	last_stdout    string
+	last_stderr    string
+)
+
+func init() {
+	// Initialize last_* variables from previous sandbox execution
+	last_exit_code = int(getLastExitCodeHost())
+
+	// Get last stdout
+	stdoutBuffer := make([]byte, 1024*1024) // 1MB buffer
+	var stdoutPtr *byte
+	if len(stdoutBuffer) > 0 {
+		stdoutPtr = &stdoutBuffer[0]
+	}
+	stdoutLen := getLastStdoutHost(stdoutPtr, int32(len(stdoutBuffer)))
+	if stdoutLen > 0 {
+		last_stdout = string(stdoutBuffer[:stdoutLen])
+	}
+
+	// Get last stderr
+	stderrBuffer := make([]byte, 1024*1024) // 1MB buffer
+	var stderrPtr *byte
+	if len(stderrBuffer) > 0 {
+		stderrPtr = &stderrBuffer[0]
+	}
+	stderrLen := getLastStderrHost(stderrPtr, int32(len(stderrBuffer)))
+	if stderrLen > 0 {
+		last_stderr = string(stderrBuffer[:stderrLen])
+	}
+}
+
 //go:wasmimport env authorize_domain
 func authorizeDomainHost(domainPtr *byte, domainLen int32) int32
 

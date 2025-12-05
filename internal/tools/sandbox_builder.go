@@ -3,6 +3,9 @@ package tools
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net"
 	"net/url"
 	"regexp"
@@ -697,6 +700,9 @@ func (b *SandboxBuilder) Validate() error {
 	if execCommandPattern.MatchString(b.code) {
 		return fmt.Errorf("direct exec.Command usage is blocked; use ExecuteCommand instead")
 	}
+	if isTrivialCode(b.code) {
+		return fmt.Errorf("code that only contains imports, comments, and fmt print statements is not allowed")
+	}
 	return nil
 }
 
@@ -745,6 +751,11 @@ func (b *SandboxBuilder) Clone() *SandboxBuilder {
 var (
 	stringLiteralPattern = regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"`)
 	execCommandPattern   = regexp.MustCompile(`\bexec\s*\.?\s*Command`)
+	importPattern        = regexp.MustCompile(`^\s*import\s*\([^)]*\)\s*$`)
+	fmtPrintPattern      = regexp.MustCompile(`fmt\.(Print|Println|Printf)\s*\(`)
+	packagePattern       = regexp.MustCompile(`^\s*package\s+\w+`)
+	commentPattern       = regexp.MustCompile(`^\s*//|/\*|\*/`)
+	whitespacePattern    = regexp.MustCompile(`^\s*$`)
 )
 
 // extractDomainsFromCode scans Go code for domain strings
@@ -891,4 +902,202 @@ func containsDangerousOps(code string) bool {
 	}
 
 	return false
+}
+
+// isTrivialCode checks if the code only contains imports, comments, and fmt print statements
+// without any substantial logic or operations using AST parsing for accurate results
+func isTrivialCode(code string) bool {
+	if code == "" {
+		return true
+	}
+
+	// Parse the code into an AST
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", code, parser.ParseComments|parser.AllErrors)
+	if err != nil {
+		// If code can't be parsed, it's likely substantial
+		return false
+	}
+
+	// Walk the AST to check for substantial content
+	checker := &trivialCodeChecker{}
+	ast.Walk(checker, file)
+
+	// Special case: allow minimal programs with empty main function
+	if checker.hasEmptyMainOnly(file) {
+		return false // Not trivial - it's a valid minimal program
+	}
+
+	return !checker.hasSubstantialContent
+}
+
+// trivialCodeChecker walks the AST to detect substantial content
+type trivialCodeChecker struct {
+	hasSubstantialContent bool
+	hasMainFunc           bool
+	mainFuncIsEmpty       bool
+}
+
+func (c *trivialCodeChecker) Visit(node ast.Node) ast.Visitor {
+	if c.hasSubstantialContent {
+		return nil // Already found substantial content, stop walking
+	}
+
+	switch n := node.(type) {
+	case *ast.FuncDecl:
+		// Track if we have a main function
+		if n.Name.Name == "main" {
+			c.hasMainFunc = true
+			c.mainFuncIsEmpty = (n.Body == nil) || (len(n.Body.List) == 0)
+		}
+		
+		// Check function bodies for substantial content
+		if n.Body != nil {
+			// Only check if the function has non-zero statements
+			// Empty function bodies are not substantial
+			for _, stmt := range n.Body.List {
+				if c.isStatementSubstantial(stmt) {
+					c.hasSubstantialContent = true
+					return nil
+				}
+			}
+		}
+		return nil
+
+	case *ast.GenDecl:
+		// Import declarations are not substantial
+		if n.Tok == token.IMPORT {
+			return nil
+		}
+		// Other declarations (var, const, type) are substantial
+		c.hasSubstantialContent = true
+		return nil
+
+	default:
+		// For all other nodes, only continue visiting if they might contain substantial content
+		// Don't mark unknown nodes as substantial here - let them be visited instead
+		return c
+	}
+}
+
+// hasEmptyMainOnly checks if the program only contains an empty main function
+func (c *trivialCodeChecker) hasEmptyMainOnly(file *ast.File) bool {
+	// If there's substantial content, it's not minimal
+	if c.hasSubstantialContent {
+		return false
+	}
+	
+	// Must have a main function that's empty
+	if !c.hasMainFunc || !c.mainFuncIsEmpty {
+		return false
+	}
+	
+	// Check if there are any other function declarations with content
+	for _, decl := range file.Decls {
+		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
+			// Skip main function, we already know it's empty
+			if funcDecl.Name.Name == "main" {
+				continue
+			}
+			// Any other function with a body makes it substantial
+			if funcDecl.Body != nil && len(funcDecl.Body.List) > 0 {
+				return false
+			}
+		}
+		// Any other declaration type (var, const, type) makes it substantial
+		if genDecl, ok := decl.(*ast.GenDecl); ok && genDecl.Tok != token.IMPORT {
+			return false
+		}
+	}
+	
+	// Only has empty main function and optional imports
+	return true
+}
+
+// isStatementSubstantial checks if an individual statement contains substantial content
+func (c *trivialCodeChecker) isStatementSubstantial(stmt ast.Stmt) bool {
+	switch s := stmt.(type) {
+	case *ast.ExprStmt:
+		// Check expression statements (like function calls)
+		return c.isExpressionSubstantial(s.X)
+
+	case *ast.DeclStmt:
+		// Variable declarations are substantial
+		return true
+
+	case *ast.AssignStmt:
+		// Variable assignments are substantial
+		return true
+
+	case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.SelectStmt:
+		// Control flow statements are substantial
+		return true
+
+	case *ast.ReturnStmt:
+		// Return statements with values are substantial
+		return s.Results != nil && len(s.Results) > 0
+
+	case *ast.GoStmt, *ast.DeferStmt:
+		// Go and defer statements are substantial
+		return true
+
+	case *ast.BlockStmt:
+		// Check block statements recursively
+		for _, blockStmt := range s.List {
+			if c.isStatementSubstantial(blockStmt) {
+				return true
+			}
+		}
+		return false
+
+	default:
+		// Any other statement type is substantial
+		return true
+	}
+}
+
+// isExpressionSubstantial checks if an expression contains substantial content
+func (c *trivialCodeChecker) isExpressionSubstantial(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.CallExpr:
+		// Check function calls
+		if c.isFunctionCallSubstantial(e) {
+			return true
+		}
+		return false
+
+	case *ast.Ident:
+		// Just identifiers by themselves aren't substantial
+		return false
+
+	case *ast.BasicLit:
+		// Basic literals (strings, numbers) aren't substantial
+		return false
+
+	default:
+		// Any other expression type is substantial
+		return true
+	}
+}
+
+// isFunctionCallSubstantial checks if a function call contains substantial content
+func (c *trivialCodeChecker) isFunctionCallSubstantial(call *ast.CallExpr) bool {
+	// Check if it's a fmt print function
+	if fun, ok := call.Fun.(*ast.SelectorExpr); ok {
+		if x, ok := fun.X.(*ast.Ident); ok && x.Name == "fmt" {
+			switch fun.Sel.Name {
+			case "Print", "Println", "Printf":
+				// Check if the arguments contain substantial expressions
+				for _, arg := range call.Args {
+					if c.isExpressionSubstantial(arg) {
+						return true
+					}
+				}
+				return false // Only string literals, not substantial
+			}
+		}
+	}
+
+	// Any function call is substantial (even if arguments are literals)
+	return true
 }

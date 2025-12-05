@@ -13,7 +13,8 @@ func TestSandboxBuilder_BasicUsage(t *testing.T) {
 	code := `package main
 import "fmt"
 func main() {
-	fmt.Println("Hello from builder!")
+	message := "Hello from builder!"
+	fmt.Println(message)
 }`
 
 	builder := NewSandboxBuilder().
@@ -271,6 +272,141 @@ func main() {
 }`)
 			},
 			expectErr: true,
+		},
+		{
+			name: "trivial code - only imports and comments",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+// This is a comment
+import "fmt"
+import "strings"
+
+// Another comment
+/* Multi-line comment */
+`)
+			},
+			expectErr: true,
+		},
+		{
+			name: "trivial code - only fmt prints",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello World")
+	fmt.Print("Testing")
+	fmt.Printf("Format %s", "test")
+}
+`)
+			},
+			expectErr: true,
+		},
+		{
+			name: "valid code - fmt print with function call",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+// This is a test program
+import "fmt"
+import "time" // for time stuff
+
+/* Main function with just prints */
+func main() {
+	fmt.Println("Starting...") // Start message
+	fmt.Printf("Time: %v\n", time.Now())
+	fmt.Print("Done.")
+}
+`)
+			},
+			expectErr: false,
+		},
+		{
+			name: "trivial code - mixed imports, comments and only fmt literals",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+// This is a test program
+import "fmt"
+import "strings" // for strings stuff
+
+/* Main function with just string literals */
+func main() {
+	fmt.Println("Starting...") // Start message
+	fmt.Printf("Format: %s\n", "literal")
+	fmt.Print("Done.")
+}
+`)
+			},
+			expectErr: true,
+		},
+		{
+			name: "valid code - with variable declaration",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+import "fmt"
+
+func main() {
+	name := "test"
+	fmt.Println(name)
+}
+`)
+			},
+			expectErr: false,
+		},
+		{
+			name: "valid code - with if statement",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+import "fmt"
+
+func main() {
+	if true {
+		fmt.Println("Hello")
+	}
+}
+`)
+			},
+			expectErr: false,
+		},
+		{
+			name: "valid code - with function call",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+import "fmt"
+
+func helper() string {
+	return "hello"
+}
+
+func main() {
+	result := helper()
+	fmt.Println(result)
+}
+`)
+			},
+			expectErr: false,
+		},
+		{
+			name: "valid code - with loop",
+			setup: func() *SandboxBuilder {
+				return NewSandboxBuilder().SetCode(`package main
+
+import "fmt"
+
+func main() {
+	for i := 0; i < 3; i++ {
+		fmt.Println(i)
+	}
+}
+`)
+			},
+			expectErr: false,
 		},
 	}
 

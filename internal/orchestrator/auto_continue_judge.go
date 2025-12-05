@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
@@ -224,7 +225,7 @@ func checkMessagesForLoops(messages []*session.Message, maxMessages int, roleFil
 	}
 
 	// Create a temporary loop detector for this check
-	tempDetector := NewLoopDetector()
+	tempDetector := loopdetector.NewLoopDetector()
 
 	// Collect recent messages matching the role filter
 	limit := maxMessages

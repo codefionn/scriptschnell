@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/llm"
 )
 
@@ -69,6 +70,7 @@ func TestPlanningAgentMessagePrefixStability(t *testing.T) {
 				id:           "test-agent",
 				client:       mockClient,
 				toolRegistry: NewPlanningToolRegistry(),
+				loopDetector: loopdetector.NewLoopDetector(),
 			}
 
 			req := &PlanningRequest{
@@ -168,6 +170,7 @@ func TestPlanningAgentMessageSequenceWithToolCalls(t *testing.T) {
 		id:           "test-agent",
 		client:       mockClient,
 		toolRegistry: NewPlanningToolRegistry(),
+		loopDetector: loopdetector.NewLoopDetector(),
 	}
 
 	req := &PlanningRequest{

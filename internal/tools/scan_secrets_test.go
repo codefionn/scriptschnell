@@ -25,30 +25,6 @@ func getMatchesCount(t *testing.T, result interface{}) int {
 	return count
 }
 
-// Helper to get matches from result
-func getMatches(t *testing.T, result interface{}) []interface{} {
-	t.Helper()
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Expected result to be a map, got %T", result)
-	}
-
-	matches, ok := resultMap["matches"]
-	if !ok {
-		t.Fatal("Expected 'matches' field in result")
-	}
-
-	// Try to convert to slice of interfaces
-	switch v := matches.(type) {
-	case []interface{}:
-		return v
-	default:
-		// If it's a typed slice, we need to handle it differently
-		t.Logf("Matches type: %T", matches)
-		// For now, just return an empty slice and let the test continue
-		return nil
-	}
-}
 
 func TestScanSecretsToolSpec(t *testing.T) {
 	spec := &ScanSecretsToolSpec{}

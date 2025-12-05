@@ -108,7 +108,7 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 				Objective:      "test max iterations",
 				AllowQuestions: false,
 			},
-			expectedSteps: 0, // Should get partial plan after max iterations
+			expectedSteps: 1, // Should get partial plan after max iterations
 			expectPartial: true,
 		},
 		{

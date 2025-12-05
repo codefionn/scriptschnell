@@ -112,6 +112,7 @@ func TestPlanningAgent_ToolInitialization(t *testing.T) {
 		result := agent.toolRegistry.Execute(context.Background(), toolName, map[string]interface{}{})
 		if result == nil {
 			t.Errorf("Expected tool %s to be registered", toolName)
+			continue
 		}
 		// Some tools should return errors for invalid params, but not "tool not found"
 		if result.Error == fmt.Sprintf("tool not found: %s", toolName) {
@@ -141,8 +142,7 @@ func TestPlanningAgent_SetExternalTools(t *testing.T) {
 	result := agent.toolRegistry.Execute(context.Background(), "external_tool", map[string]interface{}{})
 	if result == nil {
 		t.Error("Expected external tool to be available")
-	}
-	if result.Error == "tool not found: external_tool" {
+	} else if result.Error == "tool not found: external_tool" {
 		t.Error("External tool was not properly registered")
 	}
 

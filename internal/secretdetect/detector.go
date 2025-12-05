@@ -40,18 +40,16 @@ func (d *DetectorImpl) Scan(content string) []SecretMatch {
 		for _, pattern := range d.patterns {
 			// Find all matches in the line
 			locs := pattern.Regex.FindAllStringIndex(line, -1)
-			if locs != nil {
-				for _, loc := range locs {
-					matchText := line[loc[0]:loc[1]]
-					matches = append(matches, SecretMatch{
-						PatternName: pattern.Name,
-						MatchedText: matchText,
-						LineNumber:  lineNum,
-						Column:      loc[0] + 1,
-						FilePath:    "",  // Not applicable for string scan
-						Confidence:  1.0, // Regex match is usually high confidence
-					})
-				}
+			for _, loc := range locs {
+				matchText := line[loc[0]:loc[1]]
+				matches = append(matches, SecretMatch{
+					PatternName: pattern.Name,
+					MatchedText: matchText,
+					LineNumber:  lineNum,
+					Column:      loc[0] + 1,
+					FilePath:    "",  // Not applicable for string scan
+					Confidence:  1.0, // Regex match is usually high confidence
+				})
 			}
 		}
 	}
@@ -65,18 +63,16 @@ func (d *DetectorImpl) ScanLines(lines []string) []SecretMatch {
 		lineNum := i + 1
 		for _, pattern := range d.patterns {
 			locs := pattern.Regex.FindAllStringIndex(line, -1)
-			if locs != nil {
-				for _, loc := range locs {
-					matchText := line[loc[0]:loc[1]]
-					matches = append(matches, SecretMatch{
-						PatternName: pattern.Name,
-						MatchedText: matchText,
-						LineNumber:  lineNum,
-						Column:      loc[0] + 1,
-						FilePath:    "",
-						Confidence:  1.0,
-					})
-				}
+			for _, loc := range locs {
+				matchText := line[loc[0]:loc[1]]
+				matches = append(matches, SecretMatch{
+					PatternName: pattern.Name,
+					MatchedText: matchText,
+					LineNumber:  lineNum,
+					Column:      loc[0] + 1,
+					FilePath:    "",
+					Confidence:  1.0,
+				})
 			}
 		}
 	}
@@ -105,18 +101,16 @@ func (d *DetectorImpl) ScanFile(path string) ([]SecretMatch, error) {
 
 		for _, pattern := range d.patterns {
 			locs := pattern.Regex.FindAllStringIndex(line, -1)
-			if locs != nil {
-				for _, loc := range locs {
-					matchText := line[loc[0]:loc[1]]
-					matches = append(matches, SecretMatch{
-						PatternName: pattern.Name,
-						MatchedText: matchText,
-						LineNumber:  lineNum,
-						Column:      loc[0] + 1,
-						FilePath:    path,
-						Confidence:  1.0,
-					})
-				}
+			for _, loc := range locs {
+				matchText := line[loc[0]:loc[1]]
+				matches = append(matches, SecretMatch{
+					PatternName: pattern.Name,
+					MatchedText: matchText,
+					LineNumber:  lineNum,
+					Column:      loc[0] + 1,
+					FilePath:    path,
+					Confidence:  1.0,
+				})
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 )
@@ -74,19 +75,12 @@ func (e *ScanSecretsToolExecutor) Execute(ctx context.Context, params map[string
 		}
 		// If redaction is requested for a file, we need to read it first
 		if redact {
-			// Note: This is a simple implementation. For large files, we might want to stream.
-			// But since we need to return the string, we have to load it anyway.
-			// The read_file tool limits to 2000 lines, we should probably respect that or warn.
-			// But for now, let's just read it.
-			// However, since we already scanned it, we know if there are secrets.
-			// If we need to redact, we have to read the content.
-			// Let's assume the user knows what they are doing if they ask for redaction of a file.
-			// But wait, ScanFile returns matches. To redact, we need the content.
-			// We can't easily get the content from ScanFile.
-			// So we'll read the file separately if redaction is needed.
-			// But wait, ScanFile is efficient.
-			// If we just want matches, we don't need content.
-			// If we want redacted content, we need content.
+			// Read file content for redaction
+			fileContent, err := os.ReadFile(filePath)
+			if err != nil {
+				return &ToolResult{Error: fmt.Sprintf("Failed to read file for redaction: %v", err)}
+			}
+			scannedContent = string(fileContent)
 		}
 	} else {
 		scannedContent = content

@@ -19,6 +19,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/planning"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 )
@@ -68,7 +69,7 @@ type Orchestrator struct {
 	shellActorCancel      context.CancelFunc
 	activeShellMu         sync.Mutex
 	activeShellChan       chan struct{}
-	loopDetector          *LoopDetector
+	loopDetector          *loopdetector.LoopDetector
 	mcpManager            *mcp.Manager
 	toolSelectionDirty    bool
 	activeMCPServers      []string
@@ -140,7 +141,7 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 		cancel:       cancel,
 		actorSystem:  actor.NewSystem(),
 		cliMode:      cliMode,
-		loopDetector: NewLoopDetector(),
+		loopDetector: loopdetector.NewLoopDetector(),
 		featureFlags: features.NewFeatureFlags(),
 	}
 	orch.mcpManager = mcp.NewManager(cfg, cfg.WorkingDir, providerMgr)
@@ -339,13 +340,6 @@ func (o *Orchestrator) getSummarizeModelID() string {
 	return modelID
 }
 
-func (o *Orchestrator) getPlanningModelID() string {
-	modelID := o.providerMgr.GetPlanningModel()
-	if modelID == "" {
-		modelID = o.getSummarizeModelID()
-	}
-	return modelID
-}
 
 // initializePlanningAgent creates and initializes the planning agent
 func (o *Orchestrator) initializePlanningAgent() {

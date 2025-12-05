@@ -12,6 +12,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/session"
 	realtools "github.com/codefionn/scriptschnell/internal/tools"
@@ -87,6 +88,7 @@ type PlanningAgent struct {
 	toolRegistry *PlanningToolRegistry
 	actorSystem  *actor.System
 	investigator realtools.Investigator
+	loopDetector *loopdetector.LoopDetector
 	mu           sync.RWMutex
 }
 
@@ -118,6 +120,7 @@ func NewPlanningAgent(id string, filesystem fs.FileSystem, sess *session.Session
 		session:      sess,
 		client:       client,
 		investigator: investigator,
+		loopDetector: loopdetector.NewLoopDetector(),
 	}
 
 	// Initialize actor system and tools
@@ -341,6 +344,32 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 
 		logger.Debug("Planning response received, tool_calls=%d", len(response.ToolCalls))
 
+		// Check for text loops in the response
+		if response.Content != "" {
+			isLoop, pattern, count := p.loopDetector.AddText(response.Content)
+			if isLoop {
+				logger.Warn("Text loop detected in planning at iteration %d: pattern repeated %d times", iteration, count)
+				// Show a truncated version of the pattern to the user
+				displayPattern := pattern
+				if len(displayPattern) > 100 {
+					displayPattern = displayPattern[:100] + "..."
+				}
+				if err := progress.Dispatch(progressCb, progress.Normalize(progress.Update{
+					Message: fmt.Sprintf("\n\n🔁 Loop detected! The planning model is repeating the same text pattern %d times.\nPattern: %s\nStopping planning to prevent infinite loop.\n", count, displayPattern),
+					Mode:    progress.ReportNoStatus,
+				})); err != nil {
+					logger.Debug("planning loop detection callback error: %v", err)
+				}
+				logger.Debug("Breaking out of planning loop due to text repetition (iteration %d)", iteration)
+				// Return partial plan indicating the loop issue
+				return &PlanningResponse{
+					Plan:       []string{"Planning was stopped due to text repetition in the LLM response"},
+					NeedsInput: false,
+					Complete:   false,
+				}, nil
+			}
+		}
+
 		// Stream planning content to the UI if available
 		if response.Content != "" {
 			streamPlanning(response.Content)
@@ -361,9 +390,7 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 			}
 
 			// Add tool results to messages
-			for _, result := range toolResults {
-				messages = append(messages, result)
-			}
+			messages = append(messages, toolResults...)
 
 			// Update questions asked counter
 			questionsAsked += askedCount
@@ -383,8 +410,11 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		// Return if:
 		// 1. We have actual plan content or it's marked complete
 		// 2. It explicitly needs input (with or without questions) - this is a signal from LLM
-		hasContent := len(planResp.Plan) > 0 || planResp.Complete
-		needsUserInput := planResp.NeedsInput && req.AllowQuestions
+		var hasContent, needsUserInput bool
+		if planResp != nil {
+			hasContent = len(planResp.Plan) > 0 || planResp.Complete
+			needsUserInput = planResp.NeedsInput && req.AllowQuestions
+		}
 		shouldReturn := hasContent || needsUserInput
 		if planResp != nil && shouldReturn {
 			logger.Debug("Planning completed successfully")

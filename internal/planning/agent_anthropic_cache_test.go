@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/llm"
 )
 
@@ -24,6 +25,7 @@ func TestPlanningAgent_EnablesCaching(t *testing.T) {
 		id:           "test-agent",
 		client:       mockClient,
 		toolRegistry: NewPlanningToolRegistry(),
+		loopDetector: loopdetector.NewLoopDetector(),
 	}
 
 	req := &PlanningRequest{

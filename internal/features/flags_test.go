@@ -144,7 +144,6 @@ func TestIndividualToolFlags(t *testing.T) {
 	// Test each known tool individually
 	tools := []string{
 		"read_file",
-		"read_file_summarized",
 		"create_file",
 		"write_file_diff",
 		"write_file_replace",

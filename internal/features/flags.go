@@ -40,7 +40,7 @@ func NewFeatureFlags() *FeatureFlags {
 	return &FeatureFlags{
 		PlanningEnabled:      true,
 		ReadFile:             true,
-		ReadFileSummarized:   true,
+		ReadFileSummarized:   false, // The codebase_investigator completely replaces this
 		CreateFile:           true,
 		WriteFileDiff:        true,
 		WriteFileReplace:     true,

@@ -662,7 +662,8 @@ func TestPlanningAgent_TimeoutAndCancellation(t *testing.T) {
 				return &MockLLMClientWithDelay{delay: 50 * time.Millisecond}
 			},
 			ctxFunc: func() context.Context {
-				ctx, _ := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				cancel() // Cancel immediately to avoid context leak
 				return ctx
 			},
 			expectError: true, // Should timeout

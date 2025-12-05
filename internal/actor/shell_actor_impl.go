@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -116,6 +117,11 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, args []string, work
 		return "", "", -1, fmt.Errorf("no command provided")
 	}
 
+	resolvedArgs, err := a.resolveCommand(args, workingDir)
+	if err != nil {
+		return "", "", -1, err
+	}
+
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -123,7 +129,7 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, args []string, work
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
+	cmd := exec.CommandContext(cmdCtx, resolvedArgs[0], resolvedArgs[1:]...)
 	cmd.Dir = workingDir
 	cmd.Env = os.Environ()
 
@@ -135,7 +141,7 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, args []string, work
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -153,7 +159,12 @@ func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, args []st
 		return "", 0, fmt.Errorf("no command provided")
 	}
 
-	cmd := exec.Command(args[0], args[1:]...)
+	resolvedArgs, err := a.resolveCommand(args, workingDir)
+	if err != nil {
+		return "", 0, err
+	}
+
+	cmd := exec.Command(resolvedArgs[0], resolvedArgs[1:]...)
 	cmd.Dir = workingDir
 	cmd.Env = os.Environ()
 	configureProcessGroup(cmd)
@@ -173,7 +184,7 @@ func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, args []st
 	}
 
 	startedAt := time.Now()
-	commandDisplay := strings.Join(args, " ")
+	commandDisplay := strings.Join(resolvedArgs, " ")
 	jobID, job := a.registerBackgroundJob(cmd, commandDisplay, workingDir, startedAt)
 
 	// Read output in goroutines
@@ -419,6 +430,56 @@ func (a *shellActorImpl) stopJobInternal(job *shellJob, signal string) error {
 		return job.Process.Process.Kill()
 	}
 	return job.Process.Process.Signal(syscall.SIGTERM)
+}
+
+func (a *shellActorImpl) resolveCommand(args []string, workingDir string) ([]string, error) {
+	resolvedArgs := append([]string(nil), args...)
+	resolvedPath, err := resolveProgramPath(args[0], workingDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve program %q: %w", args[0], err)
+	}
+	resolvedArgs[0] = resolvedPath
+	return resolvedArgs, nil
+}
+
+func resolveProgramPath(program string, workingDir string) (string, error) {
+	if program == "" {
+		return "", fmt.Errorf("no program provided")
+	}
+
+	candidates := make([]string, 0, 3)
+	if filepath.IsAbs(program) {
+		candidates = append(candidates, program)
+	} else {
+		if workingDir != "" {
+			candidates = append(candidates, filepath.Join(workingDir, program))
+		}
+		candidates = append(candidates, program)
+	}
+
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			if filepath.IsAbs(candidate) {
+				return candidate, nil
+			}
+			if abs, absErr := filepath.Abs(candidate); absErr == nil {
+				return abs, nil
+			}
+			return candidate, nil
+		}
+	}
+
+	resolved, err := exec.LookPath(program)
+	if err != nil {
+		return "", err
+	}
+
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return resolved, nil
+	}
+	return abs, nil
 }
 
 func generateJobID() string {

@@ -18,7 +18,7 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 	tests := []struct {
 		name          string
 		setupMock     func() llm.Client
-		setupContext  func() context.Context
+		setupContext  func() (context.Context, context.CancelFunc)
 		request       *PlanningRequest
 		expectedError string
 		expectedSteps int
@@ -44,9 +44,9 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 					delay: 2 * time.Second,
 				}
 			},
-			setupContext: func() context.Context {
-				ctx, _ := context.WithTimeout(context.Background(), 100*time.Millisecond)
-				return ctx
+			setupContext: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+				return ctx, cancel
 			},
 			request: &PlanningRequest{
 				Objective:      "test timeout",
@@ -133,8 +133,10 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 			agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
 
 			ctx := context.Background()
+			var cancel context.CancelFunc
 			if tt.setupContext != nil {
-				ctx = tt.setupContext()
+				ctx, cancel = tt.setupContext()
+				defer cancel() // Avoid context leak
 			}
 			response, err := agent.Plan(ctx, tt.request, nil)
 
@@ -172,7 +174,7 @@ func TestPlanningAgent_ErrorHandling(t *testing.T) {
 func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 	tests := []struct {
 		name          string
-		setupContext  func() context.Context
+		setupContext  func() (context.Context, context.CancelFunc)
 		setupMock     func() llm.Client
 		request       *PlanningRequest
 		expectError   bool
@@ -180,11 +182,11 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 	}{
 		{
 			name: "context cancelled before planning",
-			setupContext: func() context.Context {
+			setupContext: func() (context.Context, context.CancelFunc) {
 				ctx, cancel := context.WithCancel(context.Background())
 				// Cancel immediately
 				cancel()
-				return ctx
+				return ctx, cancel
 			},
 			setupMock: func() llm.Client {
 				return NewMockLLMClient(`{"plan": ["step 1"], "complete": true}`)
@@ -195,9 +197,9 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 		},
 		{
 			name: "context with short timeout",
-			setupContext: func() context.Context {
-				ctx, _ := context.WithTimeout(context.Background(), 1*time.Millisecond)
-				return ctx
+			setupContext: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				return ctx, cancel
 			},
 			setupMock: func() llm.Client {
 				return &MockLLMClientWithDelay{delay: 100 * time.Millisecond}
@@ -208,8 +210,8 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 		},
 		{
 			name: "context cancelled during tool execution",
-			setupContext: func() context.Context {
-				return context.Background()
+			setupContext: func() (context.Context, context.CancelFunc) {
+				return context.Background(), func() {}
 			},
 			setupMock: func() llm.Client {
 				return &MockLLMClientWithContextCancellation{
@@ -226,8 +228,8 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 		},
 		{
 			name: "valid context with cancellation support",
-			setupContext: func() context.Context {
-				return context.Background()
+			setupContext: func() (context.Context, context.CancelFunc) {
+				return context.Background(), func() {}
 			},
 			setupMock: func() llm.Client {
 				return NewMockLLMClient(`{"plan": ["step 1"], "complete": true}`)
@@ -245,7 +247,8 @@ func TestPlanningAgent_ContextCancellationErrorHandling(t *testing.T) {
 
 			agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
 
-			ctx := tt.setupContext()
+			ctx, cancel := tt.setupContext()
+			defer cancel() // Avoid context leak
 			response, err := agent.Plan(ctx, tt.request, nil)
 
 			if tt.expectError {

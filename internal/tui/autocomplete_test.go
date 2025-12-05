@@ -86,6 +86,36 @@ func TestGetCommandSuggestions(t *testing.T) {
 	}
 }
 
+func TestFilepathAutocompleteRespectsGitIgnore(t *testing.T) {
+	mockFS := fs.NewMockFS()
+
+	// Write test files
+	_ = mockFS.WriteFile(context.Background(), "/test/main.go", []byte("package main"))
+	_ = mockFS.WriteFile(context.Background(), "/test/README.md", []byte("# Test"))
+
+	m := New("test-model", "", false)
+	m.SetFilesystem(mockFS, "/test")
+
+	// Stub gitignore to mark README.md as ignored
+	m.gitIgnore = &testGitIgnore{
+		ignored: map[string]bool{
+			filepath.Join("/test", "README.md"): true,
+		},
+	}
+
+	suggestions := m.getFilepathSuggestions("")
+	for _, sugg := range suggestions {
+		if sugg == "README.md" {
+			t.Fatalf("expected README.md to be excluded when gitignored, got %v", suggestions)
+		}
+	}
+
+	filtered := m.getFilepathSuggestions("README")
+	if len(filtered) != 0 {
+		t.Fatalf("expected no suggestions for gitignored file, got %v", filtered)
+	}
+}
+
 func TestUpdateSuggestions(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -857,6 +887,14 @@ func containsAnyFile(s string, files []string) bool {
 		}
 	}
 	return false
+}
+
+type testGitIgnore struct {
+	ignored map[string]bool
+}
+
+func (t *testGitIgnore) ignores(path string) bool {
+	return t.ignored[filepath.Clean(path)]
 }
 
 // MockFS is a simple in-memory filesystem for testing

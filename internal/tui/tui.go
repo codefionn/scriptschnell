@@ -140,6 +140,7 @@ type Model struct {
 	suggestions          []string
 	selectedSuggIndex    int
 	filesystem           fs.FileSystem
+	gitIgnore            gitIgnoreEvaluator
 	workingDir           string
 	originalSuggestions  []string // Store original suggestions for cycling
 	originalInput        string   // Store original input before cycling
@@ -303,6 +304,19 @@ func (m *Model) addToolMessage(toolName, toolID, content, fullResult string, sum
 func (m *Model) SetFilesystem(fs fs.FileSystem, workingDir string) {
 	m.filesystem = fs
 	m.workingDir = workingDir
+
+	if checker, err := newGitIgnoreChecker(workingDir); err == nil {
+		m.gitIgnore = checker
+	} else {
+		m.gitIgnore = nil
+	}
+}
+
+func (m *Model) isGitIgnored(path string) bool {
+	if m.gitIgnore == nil {
+		return false
+	}
+	return m.gitIgnore.ignores(path)
 }
 
 // SetTodoClient configures the TodoActorClient for accessing todo state
@@ -736,6 +750,10 @@ func (m *Model) getDirectoryBasedSuggestions(ctx context.Context, partialPath st
 	for _, entry := range entries {
 		baseName := filepath.Base(entry.Path)
 
+		if m.isGitIgnored(entry.Path) {
+			continue
+		}
+
 		// Check if entry matches prefix
 		if prefix != "" && !strings.HasPrefix(baseName, prefix) {
 			continue
@@ -782,6 +800,10 @@ func (m *Model) getRecursiveFilenameSuggestions(ctx context.Context, prefix stri
 		for _, entry := range entries {
 			baseName := filepath.Base(entry.Path)
 
+			if m.isGitIgnored(entry.Path) {
+				continue
+			}
+
 			// Skip hidden files for empty prefix
 			if strings.HasPrefix(baseName, ".") {
 				continue
@@ -820,6 +842,10 @@ func (m *Model) getRecursiveFilenameSuggestions(ctx context.Context, prefix stri
 			baseName := filepath.Base(entry.Path)
 
 			isHidden := strings.HasPrefix(baseName, ".")
+
+			if m.isGitIgnored(entry.Path) {
+				continue
+			}
 
 			// Skip hidden files unless prefix starts with .; still search hidden directories so their contents can match.
 			if isHidden && !strings.HasPrefix(prefix, ".") {

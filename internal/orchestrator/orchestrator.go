@@ -11,6 +11,7 @@ import (
 
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/features"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -81,6 +82,7 @@ type Orchestrator struct {
 	systemPromptMu        sync.RWMutex
 	planningAgent         *planning.PlanningAgent
 	planningAgentCancel   context.CancelFunc
+	featureFlags          *features.FeatureFlags
 }
 
 const (
@@ -139,6 +141,7 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 		actorSystem:  actor.NewSystem(),
 		cliMode:      cliMode,
 		loopDetector: NewLoopDetector(),
+		featureFlags: features.NewFeatureFlags(),
 	}
 	orch.mcpManager = mcp.NewManager(cfg, cfg.WorkingDir, providerMgr)
 
@@ -375,6 +378,10 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	specs := make([]toolSpec, 0, 16)
 	addSpec := func(spec tools.ToolSpec, critical bool, factory tools.ToolFactory, isMCP bool, mcpKey string) {
 		if spec == nil || factory == nil {
+			return
+		}
+		// Check if tool is enabled via feature flags (critical tools always enabled)
+		if !critical && !o.featureFlags.IsToolEnabled(spec.Name()) {
 			return
 		}
 		specs = append(specs, toolSpec{
@@ -1039,6 +1046,12 @@ func formatPlanForDisplay(plan []string) string {
 
 // runPlanningPhaseIfNeeded executes a planning pass before entering the main orchestration loop.
 func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt string, progressCallback progress.Callback) error {
+	// Check if planning is enabled via feature flags
+	if !o.featureFlags.IsPlanningEnabled() {
+		logger.Debug("Planning phase disabled via feature flags")
+		return nil
+	}
+
 	if o.planningClient == nil {
 		return nil
 	}
@@ -2468,6 +2481,11 @@ func (o *Orchestrator) GetFilesystem() fs.FileSystem {
 // GetWorkingDir returns the working directory
 func (o *Orchestrator) GetWorkingDir() string {
 	return o.workingDir
+}
+
+// GetFeatureFlags returns the feature flags manager
+func (o *Orchestrator) GetFeatureFlags() *features.FeatureFlags {
+	return o.featureFlags
 }
 
 // ClearSession clears the current session, removing all messages, file tracking, and todos

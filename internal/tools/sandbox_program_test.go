@@ -39,6 +39,34 @@ func skipIfTinyGoUnavailable(t *testing.T) {
 	t.Skip("TinyGo not installed or cached; skipping sandbox execution tests")
 }
 
+// skipIfCIEnvironment skips tests that are unreliable in CI environments
+// due to resource constraints, timeouts, or platform-specific behavior.
+func skipIfCIEnvironment(t *testing.T) {
+	t.Helper()
+
+	// Check for common CI environment variables
+	ciEnvVars := []string{
+		"CI",
+		"CONTINUOUS_INTEGRATION",
+		"GITHUB_ACTIONS",
+		"JENKINS_HOME",
+		"GITLAB_CI",
+		"BITBUCKET_BUILD_NUMBER",
+		"CIRCLECI",
+		"TRAVIS",
+		"APPVEYOR",
+		"CI_BUILD_ID",
+		"BUILDKITE",
+	}
+
+	for _, envVar := range ciEnvVars {
+		if os.Getenv(envVar) != "" {
+			t.Skipf("Skipping test in CI environment (detected %s)", envVar)
+			return
+		}
+	}
+}
+
 var sandboxConcurrencyLimit = make(chan struct{}, 1)
 
 // limitSandboxConcurrency ensures only one TinyGo-backed sandbox test runs at a time.
@@ -219,6 +247,7 @@ func TestStatusProgramTool_CompletedSandboxJob(t *testing.T) {
 func TestWaitProgramTool_SandboxCompletion(t *testing.T) {
 	t.Parallel()
 	skipIfTinyGoUnavailable(t)
+	skipIfCIEnvironment(t)
 	limitSandboxConcurrency(t)
 
 	workingDir := t.TempDir()

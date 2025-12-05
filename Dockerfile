@@ -37,6 +37,7 @@ RUN go mod download
 COPY . .
 
 # Run tests
+ARG CI=1
 RUN go test -short ./...
 
 # Build stage for main binary

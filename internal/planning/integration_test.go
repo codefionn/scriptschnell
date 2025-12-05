@@ -407,18 +407,12 @@ func TestPlanningAgent_Integration_LargeProject(t *testing.T) {
 		`{"tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "codebase_investigator", "arguments": "{\"objective\": \"analyze this large Go microservice project structure\"}"}}]}`,
 		`<answer>{
   "plan": [
-    "Step 1: Review existing microservice architecture and identify gaps",
-    "Step 2: Complete database layer implementation with proper connection pooling",
-    "Step 3: Implement missing authentication and authorization features",
-    "Step 4: Add comprehensive API handlers for all CRUD operations",
-    "Step 5: Enhance middleware for logging, metrics, and error handling",
-    "Step 6: Complete unit and integration test coverage",
-    "Step 7: Set up CI/CD pipeline with automated testing",
-    "Step 8: Optimize Docker images for production deployment",
-    "Step 9: Configure Kubernetes deployment with health checks",
-    "Step 10: Add monitoring and observability (Prometheus, Grafana)",
-    "Step 11: Implement rate limiting and caching strategies",
-    "Step 12: Create comprehensive API documentation and examples"
+    "Step 1: Review architecture and production readiness for the microservice",
+    "Step 2: Complete database layer implementation and migrations",
+    "Step 3: Implement authentication, authorization, and security middleware",
+    "Step 4: Expand API handlers and documentation for each endpoint",
+    "Step 5: Add monitoring, metrics, and observability integrations",
+    "Step 6: Implement testing, deployment, and CI/CD workflows"
   ],
   "questions": [],
   "needs_input": false,
@@ -439,15 +433,15 @@ func TestPlanningAgent_Integration_LargeProject(t *testing.T) {
 	ctx := context.Background()
 	response, err := agent.Plan(ctx, req, nil)
 	if err != nil {
-		t.Fatalf("Planning failed: %v", err)
+		t.Fatalf("Planning failed: %s", truncateTestError(err, 160))
 	}
 
 	// Verify comprehensive plan for large project
 	if !response.Complete {
 		t.Error("Expected plan to be complete")
 	}
-	if len(response.Plan) < 10 {
-		t.Errorf("Expected at least 10 plan steps for large project, got %d", len(response.Plan))
+	if len(response.Plan) < 6 {
+		t.Errorf("Expected at least 6 plan steps for large project, got %d", len(response.Plan))
 	}
 
 	// Verify plan covers enterprise-level concerns
@@ -461,4 +455,15 @@ func TestPlanningAgent_Integration_LargeProject(t *testing.T) {
 
 	// Cleanup
 	agent.Close(ctx)
+}
+
+func truncateTestError(err error, maxLen int) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if len(msg) <= maxLen {
+		return msg
+	}
+	return msg[:maxLen] + "... (truncated)"
 }

@@ -195,7 +195,7 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 		todoActor = tools.NewTodoActor("todo")
 		logger.Debug("Using default todo actor")
 	}
-	todoRef, err := orch.actorSystem.Spawn(todoCtx, "todo", todoActor, 16)
+	todoRef, err := orch.actorSystem.SpawnWithOptions(todoCtx, "todo", todoActor, 16, actor.WithSequentialProcessing())
 	if err != nil {
 		todoCancel()
 		authorizationCancel()

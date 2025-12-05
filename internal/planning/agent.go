@@ -44,6 +44,12 @@ func NewPlanningToolRegistry() *PlanningToolRegistry {
 	}
 }
 
+func (r *PlanningToolRegistry) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tools = make(map[string]PlanningTool)
+}
+
 func (r *PlanningToolRegistry) Register(tool PlanningTool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -139,7 +145,11 @@ func (p *PlanningAgent) initializeTools() {
 // Caller must hold p.mu when invoking this method.
 func (p *PlanningAgent) resetToolsLocked(extraTools []PlanningTool) {
 	// Create tool registry
-	p.toolRegistry = NewPlanningToolRegistry()
+	if p.toolRegistry == nil {
+		p.toolRegistry = NewPlanningToolRegistry()
+	} else {
+		p.toolRegistry.Reset()
+	}
 
 	// Register planning-specific tools
 	p.toolRegistry.Register(NewAskUserTool())

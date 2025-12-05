@@ -335,6 +335,37 @@ func TestActorRefReceiveError(t *testing.T) {
 	}
 }
 
+func TestActorRefSequentialProcessing(t *testing.T) {
+	ctx := context.Background()
+	actor := NewTestActor("test-1")
+	ref := NewActorRef("test-1", actor, 10, WithSequentialProcessing())
+
+	if err := ref.Start(ctx); err != nil {
+		t.Fatalf("failed to start actor: %v", err)
+	}
+
+	actor.SetReceiveHandler(func(ctx context.Context, msg Message) error {
+		time.Sleep(25 * time.Millisecond)
+		return nil
+	})
+
+	start := time.Now()
+	if err := ref.Send(&TestMessage{ID: "seq", Content: "sync"}); err != nil {
+		t.Fatalf("failed to send message: %v", err)
+	}
+	duration := time.Since(start)
+
+	if duration < 20*time.Millisecond {
+		t.Fatalf("expected send to wait for receive (duration=%s)", duration)
+	}
+
+	stopCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	if err := ref.Stop(stopCtx); err != nil {
+		t.Fatalf("failed to stop actor: %v", err)
+	}
+}
+
 // TestActorRefContextCancellation tests context cancellation during message processing
 func TestActorRefContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

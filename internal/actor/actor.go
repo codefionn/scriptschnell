@@ -25,22 +25,40 @@ type Actor interface {
 
 // ActorRef is a reference to an actor for sending messages
 type ActorRef struct {
-	id      string
-	mailbox chan Message
-	actor   Actor
-	wg      sync.WaitGroup
-	cancel  context.CancelFunc
-	mu      sync.RWMutex
-	stopped bool
+	id         string
+	mailbox    chan Message
+	actor      Actor
+	wg         sync.WaitGroup
+	cancel     context.CancelFunc
+	mu         sync.RWMutex
+	stopped    bool
+	sequential bool
+	sequenceMu sync.Mutex
+	ctx        context.Context
 }
 
 // NewActorRef creates a new actor reference
-func NewActorRef(id string, actor Actor, mailboxSize int) *ActorRef {
-	return &ActorRef{
+type ActorRefOption func(*ActorRef)
+
+// WithSequentialProcessing forces the actor to process messages synchronously
+// when sent. This disables the internal run loop and makes Send block until
+// Receive returns.
+func WithSequentialProcessing() ActorRefOption {
+	return func(ref *ActorRef) {
+		ref.sequential = true
+	}
+}
+
+func NewActorRef(id string, actor Actor, mailboxSize int, opts ...ActorRefOption) *ActorRef {
+	ref := &ActorRef{
 		id:      id,
 		actor:   actor,
 		mailbox: make(chan Message, mailboxSize),
 	}
+	for _, opt := range opts {
+		opt(ref)
+	}
+	return ref
 }
 
 // ID returns the actor's ID
@@ -51,10 +69,21 @@ func (ref *ActorRef) ID() string {
 // Send sends a message to the actor (non-blocking)
 func (ref *ActorRef) Send(msg Message) error {
 	ref.mu.RLock()
-	defer ref.mu.RUnlock()
-
 	if ref.stopped {
+		ref.mu.RUnlock()
 		return fmt.Errorf("actor %s is stopped", ref.id)
+	}
+	sequential := ref.sequential
+	ctx := ref.ctx
+	ref.mu.RUnlock()
+
+	if sequential {
+		ref.sequenceMu.Lock()
+		defer ref.sequenceMu.Unlock()
+		if err := ref.actor.Receive(ctx, msg); err != nil {
+			fmt.Printf("Actor %s error processing message: %v\n", ref.id, err)
+		}
+		return nil
 	}
 
 	select {
@@ -73,6 +102,12 @@ func (ref *ActorRef) Start(ctx context.Context) error {
 	if err := ref.actor.Start(ctx); err != nil {
 		cancel()
 		return err
+	}
+
+	ref.ctx = ctx
+
+	if ref.sequential {
+		return nil
 	}
 
 	ref.wg.Add(1)
@@ -141,6 +176,11 @@ func NewSystem() *System {
 
 // Spawn creates and starts a new actor
 func (s *System) Spawn(ctx context.Context, id string, actor Actor, mailboxSize int) (*ActorRef, error) {
+	return s.SpawnWithOptions(ctx, id, actor, mailboxSize)
+}
+
+// SpawnWithOptions creates and starts a new actor with additional reference options.
+func (s *System) SpawnWithOptions(ctx context.Context, id string, actor Actor, mailboxSize int, opts ...ActorRefOption) (*ActorRef, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -148,7 +188,7 @@ func (s *System) Spawn(ctx context.Context, id string, actor Actor, mailboxSize 
 		return nil, fmt.Errorf("actor with id %s already exists", id)
 	}
 
-	ref := NewActorRef(id, actor, mailboxSize)
+	ref := NewActorRef(id, actor, mailboxSize, opts...)
 	if err := ref.Start(ctx); err != nil {
 		return nil, err
 	}

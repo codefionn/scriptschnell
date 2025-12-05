@@ -604,6 +604,7 @@ func TestFilepathAutocompleteSuggestions(t *testing.T) {
 	_ = mockFS.WriteFile(context.Background(), "/test/internal/tui.go", []byte("package internal"))
 	_ = mockFS.WriteFile(context.Background(), "/test/cmd/cli/main.go", []byte("package main"))
 	_ = mockFS.WriteFile(context.Background(), "/test/.gitignore", []byte("*.log"))
+	_ = mockFS.WriteFile(context.Background(), "/test/.hidden/secret.txt", []byte("secret"))
 
 	m := New("test-model", "", false)
 	m.SetFilesystem(mockFS, "/test")
@@ -655,6 +656,12 @@ func TestFilepathAutocompleteSuggestions(t *testing.T) {
 			partialPath:   "cmd/cli/ma",
 			expectContain: []string{"cmd/cli/main.go"},
 			expectExclude: []string{"README.md"},
+		},
+		{
+			name:          "find file inside hidden directory",
+			partialPath:   "secret",
+			expectContain: []string{".hidden/secret.txt"},
+			expectExclude: []string{},
 		},
 		{
 			name:          "dot prefix includes hidden",

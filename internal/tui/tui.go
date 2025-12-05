@@ -819,8 +819,13 @@ func (m *Model) getRecursiveFilenameSuggestions(ctx context.Context, prefix stri
 
 			baseName := filepath.Base(entry.Path)
 
-			// Skip hidden files unless prefix starts with .
-			if strings.HasPrefix(baseName, ".") && !strings.HasPrefix(prefix, ".") {
+			isHidden := strings.HasPrefix(baseName, ".")
+
+			// Skip hidden files unless prefix starts with .; still search hidden directories so their contents can match.
+			if isHidden && !strings.HasPrefix(prefix, ".") {
+				if entry.IsDir {
+					searchDir(entry.Path, depth+1)
+				}
 				continue
 			}
 

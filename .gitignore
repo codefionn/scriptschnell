@@ -52,3 +52,6 @@ dist/
 build/
 /.gocache
 /.golangci-cache
+
+# Local Docker cache
+.cache/

@@ -22,23 +22,23 @@ type Message struct {
 
 // Session manages a conversation session
 type Session struct {
-	ID                 string
-	WorkingDir         string
-	Messages           []*Message
-	FilesRead          map[string]string // path -> content
-	FilesModified      map[string]bool
-	BackgroundJobs     map[string]*BackgroundJob
-	AuthorizedDomains  map[string]bool // domain -> authorized (session-level)
-	AuthorizedCommands []string        // command prefixes that are authorized (session-level)
-	PlanningActive     bool            // whether planning phase is currently running
-	PlanningObjective  string          // objective of current planning phase
-	PlanningStartTime  time.Time       // when current planning phase started
-	LastSandboxExitCode int            // exit code from last sandbox execution
-	LastSandboxStdout   string         // stdout from last sandbox execution
-	LastSandboxStderr   string         // stderr from last sandbox execution
-	mu                 sync.RWMutex
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                  string
+	WorkingDir          string
+	Messages            []*Message
+	FilesRead           map[string]string // path -> content
+	FilesModified       map[string]bool
+	BackgroundJobs      map[string]*BackgroundJob
+	AuthorizedDomains   map[string]bool // domain -> authorized (session-level)
+	AuthorizedCommands  []string        // command prefixes that are authorized (session-level)
+	PlanningActive      bool            // whether planning phase is currently running
+	PlanningObjective   string          // objective of current planning phase
+	PlanningStartTime   time.Time       // when current planning phase started
+	LastSandboxExitCode int             // exit code from last sandbox execution
+	LastSandboxStdout   string          // stdout from last sandbox execution
+	LastSandboxStderr   string          // stderr from last sandbox execution
+	mu                  sync.RWMutex
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // BackgroundJob represents a running background process

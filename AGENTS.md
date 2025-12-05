@@ -156,6 +156,8 @@ When modifying the codebase:
    - Actors must be thread-safe (use mutexes)
    - Messages should be immutable
    - Always handle context cancellation in Receive()
+   
+- Format Go code with `gofmt -s -w .` after making changes
 
 ## Project Structure
 

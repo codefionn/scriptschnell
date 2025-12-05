@@ -751,11 +751,6 @@ func (b *SandboxBuilder) Clone() *SandboxBuilder {
 var (
 	stringLiteralPattern = regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"`)
 	execCommandPattern   = regexp.MustCompile(`\bexec\s*\.?\s*Command`)
-	importPattern        = regexp.MustCompile(`^\s*import\s*\([^)]*\)\s*$`)
-	fmtPrintPattern      = regexp.MustCompile(`fmt\.(Print|Println|Printf)\s*\(`)
-	packagePattern       = regexp.MustCompile(`^\s*package\s+\w+`)
-	commentPattern       = regexp.MustCompile(`^\s*//|/\*|\*/`)
-	whitespacePattern    = regexp.MustCompile(`^\s*$`)
 )
 
 // extractDomainsFromCode scans Go code for domain strings
@@ -950,7 +945,7 @@ func (c *trivialCodeChecker) Visit(node ast.Node) ast.Visitor {
 			c.hasMainFunc = true
 			c.mainFuncIsEmpty = (n.Body == nil) || (len(n.Body.List) == 0)
 		}
-		
+
 		// Check function bodies for substantial content
 		if n.Body != nil {
 			// Only check if the function has non-zero statements
@@ -986,12 +981,12 @@ func (c *trivialCodeChecker) hasEmptyMainOnly(file *ast.File) bool {
 	if c.hasSubstantialContent {
 		return false
 	}
-	
+
 	// Must have a main function that's empty
 	if !c.hasMainFunc || !c.mainFuncIsEmpty {
 		return false
 	}
-	
+
 	// Check if there are any other function declarations with content
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
@@ -1009,7 +1004,7 @@ func (c *trivialCodeChecker) hasEmptyMainOnly(file *ast.File) bool {
 			return false
 		}
 	}
-	
+
 	// Only has empty main function and optional imports
 	return true
 }
@@ -1035,7 +1030,7 @@ func (c *trivialCodeChecker) isStatementSubstantial(stmt ast.Stmt) bool {
 
 	case *ast.ReturnStmt:
 		// Return statements with values are substantial
-		return s.Results != nil && len(s.Results) > 0
+		return len(s.Results) > 0
 
 	case *ast.GoStmt, *ast.DeferStmt:
 		// Go and defer statements are substantial

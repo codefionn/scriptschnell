@@ -209,6 +209,11 @@ Available tools:
 
 6. **Sandbox Shell Helper**: When writing Go sandbox programs, call `Shell` with a command slice (e.g., `Shell([]string{"ls", "-la"}, "")`). The earlier `Shell("ls -la")` form is deprecated and will be rejected.
 
+7. **Secret Detection**: The `secretdetect` package provides utilities to prevent secret leakage.
+   - Use `secretdetect.Scan()` to check content before sending to LLMs
+   - Use `secretdetect.Redact()` to mask secrets in UI output
+   - Integrate into file reading and user input processing flows
+
 ### Configuration
 
 Configuration files stored in platform-specific locations:
@@ -301,6 +306,7 @@ scriptschnell/
 │   ├── fs/                   # Filesystem abstraction (CachedFS, MockFS)
 │   ├── llm/                  # LLM client interface
 │   ├── provider/             # Provider management (API keys, models)
+│   ├── secretdetect/         # Secret detection and redaction
 │   ├── session/              # Session state management
 │   ├── tools/                # LLM tools (read_file, create_file, write_file_diff, shell, etc.)
 │   └── tui/                  # TUI implementation (Bubbletea)

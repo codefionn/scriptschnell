@@ -108,7 +108,7 @@ flowchart TD
     orchLLM -->|Assistant text + tool calls| orchestrator
 
     orchestrator -->|Planning decision| summarizer
-    summarizer -->|Planning config (Run? MCPs?)| orchestrator
+    summarizer -->|"Planning config (Run? MCPs?)"| orchestrator
 
     orchestrator -->|Pre-loop Planning| planning[Planning Agent]
     planning -->|Plan generation| planLLM[Planning Model]

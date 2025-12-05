@@ -67,6 +67,11 @@ func trimTrailingAssistantMessages(messages []*Message) []*Message {
 		if role == "user" || role == "tool" {
 			break
 		}
+		// Preserve assistant messages that have tool calls, as they are essential
+		// for maintaining the conversation flow and tool execution context
+		if role == "assistant" && len(messages[end-1].ToolCalls) > 0 {
+			break
+		}
 		end--
 	}
 

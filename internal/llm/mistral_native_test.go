@@ -189,6 +189,100 @@ func TestConvertMistralToolCalls(t *testing.T) {
 	}
 }
 
+func TestTrimTrailingAssistantMessages_PreserveToolCalls(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []*Message
+		expected int // Expected number of messages after trimming
+	}{
+		{
+			name: "simple user message not trimmed",
+			input: []*Message{
+				{Role: "user", Content: "Hello"},
+			},
+			expected: 1,
+		},
+		{
+			name: "trailing assistant message without tool calls is trimmed",
+			input: []*Message{
+				{Role: "user", Content: "Hello"},
+				{Role: "assistant", Content: "Hi there!"},
+			},
+			expected: 1,
+		},
+		{
+			name: "trailing assistant message with tool calls is preserved",
+			input: []*Message{
+				{Role: "user", Content: "Read file"},
+				{Role: "assistant", Content: "", ToolCalls: []map[string]interface{}{
+					{
+						"id":   "call_123",
+						"type": "function",
+						"function": map[string]interface{}{
+							"name":      "read_file",
+							"arguments": `{"path": "test.txt"}`,
+						},
+					},
+				}},
+			},
+			expected: 2,
+		},
+		{
+			name: "assistant message with both content and tool calls is preserved",
+			input: []*Message{
+				{Role: "user", Content: "Help me"},
+				{Role: "assistant", Content: "I'll help you.", ToolCalls: []map[string]interface{}{
+					{
+						"id":   "call_456",
+						"type": "function",
+						"function": map[string]interface{}{
+							"name":      "read_file",
+							"arguments": `{"path": "help.txt"}`,
+						},
+					},
+				}},
+			},
+			expected: 2,
+		},
+		{
+			name: "multiple trailing assistant messages, last one with tool calls is preserved",
+			input: []*Message{
+				{Role: "user", Content: "Start"},
+				{Role: "assistant", Content: "First response"},
+				{Role: "assistant", Content: "Second response"}, // This should be trimmed
+				{Role: "assistant", Content: "", ToolCalls: []map[string]interface{}{ // This should be preserved
+					{
+						"id":   "call_789",
+						"type": "function",
+						"function": map[string]interface{}{
+							"name":      "write_file",
+							"arguments": `{"path": "output.txt"}`,
+						},
+					},
+				}},
+			},
+			expected: 4, // All messages preserved because the last one has tool calls
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := trimTrailingAssistantMessages(tt.input)
+			if len(result) != tt.expected {
+				t.Errorf("trimTrailingAssistantMessages() returned %d messages, expected %d", len(result), tt.expected)
+				t.Logf("Input:")
+				for i, msg := range tt.input {
+					t.Logf("  [%d] %s: %q (%d tool calls)", i, msg.Role, msg.Content, len(msg.ToolCalls))
+				}
+				t.Logf("Result:")
+				for i, msg := range result {
+					t.Logf("  [%d] %s: %q (%d tool calls)", i, msg.Role, msg.Content, len(msg.ToolCalls))
+				}
+			}
+		})
+	}
+}
+
 func TestConvertMessages_SkipEmptyAssistantMessages(t *testing.T) {
 	client := &MistralClient{
 		apiKey: "test-key",

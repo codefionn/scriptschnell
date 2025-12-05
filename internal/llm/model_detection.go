@@ -118,6 +118,7 @@ const (
 	ModelIDMistralLarge  = "mistral-large"
 	ModelIDMistralMedium = "mistral-medium"
 	ModelIDMistralSmall  = "mistral-small"
+	ModelIDOpenMistral   = "open-mistral"
 	ModelIDMedium        = "medium"
 	ModelIDSmall         = "small"
 
@@ -240,7 +241,7 @@ func DetectModelFamily(modelID string) ModelFamily {
 	if containsAny(id, ModelIDMistralMedium, ModelIDMedium) {
 		return FamilyMistralMedium
 	}
-	if containsAny(id, ModelIDMistralSmall, ModelIDSmall) {
+	if containsAny(id, ModelIDMistralSmall, ModelIDSmall, ModelIDOpenMistral) {
 		return FamilyMistralSmall
 	}
 
@@ -265,6 +266,17 @@ func DetectModelFamily(modelID string) ModelFamily {
 	}
 
 	return FamilyUnknown
+}
+
+// IsMistralModel checks if the given model ID belongs to the Mistral family
+func IsMistralModel(modelID string) bool {
+	family := DetectModelFamily(modelID)
+	switch family {
+	case FamilyMistralLarge, FamilyMistralMedium, FamilyMistralSmall, FamilyCodestral, FamilyPixtral:
+		return true
+	default:
+		return false
+	}
 }
 
 // containsAny checks if the string contains any of the given substrings

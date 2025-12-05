@@ -143,3 +143,37 @@ func TestGetModelDescription_Claude(t *testing.T) {
 		})
 	}
 }
+
+func TestIsMistralModel(t *testing.T) {
+	tests := []struct {
+		modelID  string
+		expected bool
+	}{
+		// Mistral models
+		{"mistral-large-latest", true},
+		{"mistral-medium-latest", true},
+		{"mistral-small-latest", true},
+		{"codestral-latest", true},
+		{"pixtral-latest", true},
+		{"mistral/Mistral-Large", true},
+		{"open-mistral-7b", true},
+		{"open-mistral-nemo", true},
+		
+		// Non-Mistral models
+		{"gpt-4o", false},
+		{"claude-3-5-sonnet", false},
+		{"gemini-pro", false},
+		{"llama-3-70b", false},
+		{"", false},
+		{"unknown-model", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			result := IsMistralModel(tt.modelID)
+			if result != tt.expected {
+				t.Errorf("IsMistralModel(%q) = %v, want %v", tt.modelID, result, tt.expected)
+			}
+		})
+	}
+}

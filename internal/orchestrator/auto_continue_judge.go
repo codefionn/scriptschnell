@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codefionn/scriptschnell/internal/loopdetector"
+	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
@@ -54,7 +55,7 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 	}
 	logger.Debug("Auto-continue judge analyzing %d recent messages (from %d total)", len(recentMessages), len(messages))
 
-	prompt := buildAutoContinueJudgePrompt(userPrompts, recentMessages, systemPrompt)
+	prompt := buildAutoContinueJudgePrompt(userPrompts, recentMessages, systemPrompt, modelID)
 
 	judgeCtx, cancel := context.WithTimeout(ctx, autoContinueJudgeTimeout)
 	defer cancel()
@@ -72,6 +73,20 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 		return false, ""
 	}
 
+	// For Mistral models, be more conservative - only continue if explicitly requested
+	if llm.IsMistralModel(modelID) {
+		upper := strings.ToUpper(decision)
+		// Mistral models should only continue on very explicit "CONTINUE" response
+		if upper == "CONTINUE" && !strings.Contains(upper, "STOP") {
+			logger.Debug("Auto-continue judge decided: CONTINUE (Mistral model - explicit match, full response: %q)", decision)
+			return true, decision
+		}
+		// For any ambiguity or STOP response from Mistral, don't continue
+		logger.Debug("Auto-continue judge decided: STOP (Mistral model - conservative approach, full response: %q)", decision)
+		return false, decision
+	}
+
+	// For other models, use the original more permissive logic
 	upper := strings.ToUpper(decision)
 	fields := strings.Fields(upper)
 	head := upper
@@ -154,7 +169,7 @@ func selectRecentMessagesByTokens(modelID string, messages []*session.Message, t
 	return messages[start:]
 }
 
-func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Message, systemPrompt string) string {
+func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Message, systemPrompt, modelID string) string {
 	var sb strings.Builder
 	sb.WriteString("You are an auto-continue judge. Decide whether the assistant should keep generating its reply.\n")
 	sb.WriteString("Respond with exactly one word: CONTINUE or STOP.\n")
@@ -164,6 +179,10 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 	sb.WriteString("- The assistant is repeating the same text or patterns\n")
 	sb.WriteString("- The conversation appears to be stuck in a loop\n")
 	sb.WriteString("- The assistant is generating repetitive tool calls without making progress\n\n")
+
+	if llm.IsMistralModel(modelID) {
+		sb.WriteString("Error on the side of caution: only choose CONTINUE if it is very clear that continuation is needed. If in doubt, choose STOP.\n\n")
+	}
 
 	trimmedSystemPrompt := strings.TrimSpace(systemPrompt)
 	if trimmedSystemPrompt == "" {

@@ -267,6 +267,11 @@ func (c *MistralClient) convertMessages(req *CompletionRequest) []mistralChatMes
 			if len(msg.ToolCalls) > 0 {
 				apiMsg.ToolCalls = convertMistralToolCalls(msg.ToolCalls)
 			}
+			// Mistral API requires assistant messages to have either content or tool_calls
+			// Skip assistant messages that have neither
+			if strings.TrimSpace(msg.Content) == "" && len(msg.ToolCalls) == 0 {
+				continue
+			}
 		case "tool":
 			apiMsg.ToolCallID = msg.ToolID
 			apiMsg.Name = sanitizeMistralToolName(msg.ToolName)

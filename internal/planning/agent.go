@@ -287,13 +287,17 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 	// Build planning system prompt
 	systemPrompt := p.buildSystemPrompt(req)
 
-	// Start with the initial request
-	messages := []*llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: fmt.Sprintf("Create a plan for: %s", req.Objective)},
-	}
+	// Build ALL initial messages upfront to preserve prompt cache stability.
+	// The message prefix (system + initial user messages) must remain immutable
+	// throughout the agent's lifecycle for Anthropic's prompt caching to work.
+	messages := make([]*llm.Message, 0, 4)
+	messages = append(messages, &llm.Message{Role: "system", Content: systemPrompt})
+	messages = append(messages, &llm.Message{
+		Role:    "user",
+		Content: fmt.Sprintf("Create a plan for: %s", req.Objective),
+	})
 
-	// Add context if provided
+	// Add context if provided - MUST be added before the loop starts
 	if req.Context != "" {
 		messages = append(messages, &llm.Message{
 			Role:    "user",
@@ -301,7 +305,7 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		})
 	}
 
-	// Add context file contents if provided
+	// Add context file contents if provided - MUST be added before the loop starts
 	if ctxFiles := p.collectContextFiles(ctx, req.ContextFiles); ctxFiles != "" {
 		messages = append(messages, &llm.Message{
 			Role:    "user",
@@ -317,11 +321,13 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 
 		// Create completion request
 		completeReq := &llm.CompletionRequest{
-			Messages:     messages,
-			Tools:        p.toolRegistry.ToJSONSchema(),
-			Temperature:  0.3, // Lower temperature for more consistent planning
-			MaxTokens:    4096,
-			SystemPrompt: systemPrompt,
+			Messages:      messages,
+			Tools:         p.toolRegistry.ToJSONSchema(),
+			Temperature:   0.3, // Lower temperature for more consistent planning
+			MaxTokens:     4096,
+			SystemPrompt:  systemPrompt,
+			EnableCaching: true, // Enable caching for planning to speed up multi-turn conversations
+			CacheTTL:      "5m",
 		}
 
 		// Get response from planning model
@@ -329,6 +335,9 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		if err != nil {
 			return nil, fmt.Errorf("planning completion failed: %w", err)
 		}
+
+		// Ensure tool calls always carry an ID before we echo them back.
+		response.ToolCalls = llm.NormalizeToolCallIDs(response.ToolCalls)
 
 		logger.Debug("Planning response received, tool_calls=%d", len(response.ToolCalls))
 
@@ -396,102 +405,151 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 	return p.extractPartialPlan(messages), nil
 }
 
+// toolCallResult represents the result of a single tool execution
+type toolCallResult struct {
+	idx            int
+	message        *llm.Message
+	needsInput     bool
+	questionsAsked int
+	err            error
+}
+
 // processToolCalls executes the planning agent's tool calls
 func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[string]interface{}, userInputCb UserInputCallback, req *PlanningRequest, currentQuestionsAsked int, statusCb func(string)) ([]*llm.Message, bool, int, error) {
-	var results []*llm.Message
-	needsInput := false
-	questionsAsked := 0
+	var (
+		wg                    sync.WaitGroup
+		results               = make([]*toolCallResult, len(toolCalls))
+		askUserMu             sync.Mutex
+		questionsAskedInBatch int
+	)
 
-	for _, toolCall := range toolCalls {
-		toolID, _ := toolCall["id"].(string)
-		toolType, _ := toolCall["type"].(string)
+	for i, toolCall := range toolCalls {
+		wg.Add(1)
+		go func(idx int, call map[string]interface{}) {
+			defer wg.Done()
 
-		if toolType != "function" {
-			continue
-		}
+			res := &toolCallResult{idx: idx}
+			results[idx] = res
 
-		function, ok := toolCall["function"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		toolName, _ := function["name"].(string)
-		argsJSON, _ := function["arguments"].(string)
-
-		logger.Debug("Planning agent executing tool: %s", toolName)
-		if statusCb != nil {
-			statusCb(fmt.Sprintf("Planning: executing %s", toolName))
-		}
-
-		// Parse arguments
-		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			results = append(results, &llm.Message{
-				Role:     "tool",
-				Content:  fmt.Sprintf("Error parsing tool arguments: %v", err),
-				ToolID:   toolID,
-				ToolName: toolName,
-			})
-			continue
-		}
-
-		// Execute tool
-		var toolResult string
-
-		switch toolName {
-		case "ask_user":
-			if !req.AllowQuestions {
-				toolResult = "User questions are not allowed for this planning request"
-			} else if userInputCb == nil {
-				toolResult = "No user input callback available"
-				needsInput = true
-			} else if req.MaxQuestions > 0 && (currentQuestionsAsked+questionsAsked) >= req.MaxQuestions {
-				// Already at max questions, can't ask more
-				toolResult = "Maximum number of questions reached, cannot ask more questions"
-				needsInput = true
-			} else {
-				question, _ := args["question"].(string)
-				if question == "" {
-					toolResult = "No question provided"
-				} else {
-					userResponse, err := userInputCb(question)
-					if err != nil {
-						toolResult = fmt.Sprintf("Failed to get user input: %v", err)
-						needsInput = true
-					} else {
-						toolResult = userResponse
-						questionsAsked++
-					}
-				}
+			if ctx.Err() != nil {
+				res.err = ctx.Err()
+				return
 			}
 
-		default:
-			// Execute through planning tool registry
-			result := p.toolRegistry.Execute(ctx, toolName, args)
-			if result.Error != "" {
-				toolResult = fmt.Sprintf("Error: %s", result.Error)
-			} else {
-				if resultMap, ok := result.Result.(map[string]interface{}); ok {
-					if jsonBytes, err := json.Marshal(resultMap); err == nil {
-						toolResult = string(jsonBytes)
+			toolID, _ := call["id"].(string)
+			toolType, _ := call["type"].(string)
+
+			if toolType != "function" {
+				return
+			}
+
+			function, ok := call["function"].(map[string]interface{})
+			if !ok {
+				return
+			}
+
+			toolName, _ := function["name"].(string)
+			argsJSON, _ := function["arguments"].(string)
+
+			logger.Debug("Planning agent executing tool: %s", toolName)
+			if statusCb != nil {
+				statusCb(fmt.Sprintf("Planning: executing %s", toolName))
+			}
+
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+				res.message = &llm.Message{
+					Role:     "tool",
+					Content:  fmt.Sprintf("Error parsing tool arguments: %v", err),
+					ToolID:   toolID,
+					ToolName: toolName,
+				}
+				return
+			}
+
+			var toolResult string
+
+			switch toolName {
+			case "ask_user":
+				askUserMu.Lock()
+				func() {
+					defer askUserMu.Unlock()
+
+					if !req.AllowQuestions {
+						toolResult = "User questions are not allowed for this planning request"
+					} else if userInputCb == nil {
+						toolResult = "No user input callback available"
+						res.needsInput = true
+					} else if req.MaxQuestions > 0 && (currentQuestionsAsked+questionsAskedInBatch) >= req.MaxQuestions {
+						toolResult = "Maximum number of questions reached, cannot ask more questions"
+						res.needsInput = true
+					} else {
+						question, _ := args["question"].(string)
+						if question == "" {
+							toolResult = "No question provided"
+						} else {
+							userResponse, err := userInputCb(question)
+							if err != nil {
+								toolResult = fmt.Sprintf("Failed to get user input: %v", err)
+								res.needsInput = true
+							} else {
+								toolResult = userResponse
+								res.questionsAsked = 1
+								questionsAskedInBatch++
+							}
+						}
+					}
+				}()
+
+			default:
+				result := p.toolRegistry.Execute(ctx, toolName, args)
+				if result.Error != "" {
+					toolResult = fmt.Sprintf("Error: %s", result.Error)
+				} else {
+					if resultMap, ok := result.Result.(map[string]interface{}); ok {
+						if jsonBytes, err := json.Marshal(resultMap); err == nil {
+							toolResult = string(jsonBytes)
+						} else {
+							toolResult = fmt.Sprintf("%v", result.Result)
+						}
 					} else {
 						toolResult = fmt.Sprintf("%v", result.Result)
 					}
-				} else {
-					toolResult = fmt.Sprintf("%v", result.Result)
 				}
 			}
-		}
 
-		results = append(results, &llm.Message{
-			Role:     "tool",
-			Content:  toolResult,
-			ToolID:   toolID,
-			ToolName: toolName,
-		})
+			res.message = &llm.Message{
+				Role:     "tool",
+				Content:  toolResult,
+				ToolID:   toolID,
+				ToolName: toolName,
+			}
+		}(i, toolCall)
 	}
 
-	return results, needsInput, questionsAsked, nil
+	wg.Wait()
+
+	var finalResults []*llm.Message
+	var needsInput bool
+	var questionsAsked int
+
+	for _, res := range results {
+		if res == nil {
+			continue
+		}
+		if res.err != nil {
+			return nil, false, 0, res.err
+		}
+		if res.message != nil {
+			finalResults = append(finalResults, res.message)
+		}
+		if res.needsInput {
+			needsInput = true
+		}
+		questionsAsked += res.questionsAsked
+	}
+
+	return finalResults, needsInput, questionsAsked, nil
 }
 
 // buildFileList creates a formatted list of files in the working directory

@@ -164,15 +164,15 @@ func TestPlanningAgent_Integration_WithQuestions(t *testing.T) {
 // TestPlanningAgent_Integration_ToolChaining tests complex tool usage scenarios
 func TestPlanningAgent_Integration_ToolChaining(t *testing.T) {
 	mockFS := NewMockFileSystem()
-	
+
 	// Create a realistic project structure
 	files := map[string]string{
-		"Dockerfile": "FROM golang:1.21-alpine\nWORKDIR /app\nCOPY . .\nRUN go build\nCMD [\"./app\"]",
-		"internal/server/server.go": "package server\n\nimport \"fmt\"\n\ntype Server struct {\n\tport int\n}\n\nfunc NewServer(port int) *Server {\n\treturn &Server{port: port}\n}\n\nfunc (s *Server) Start() error {\n\treturn fmt.Errorf(\"not implemented\")\n}",
+		"Dockerfile":                     "FROM golang:1.21-alpine\nWORKDIR /app\nCOPY . .\nRUN go build\nCMD [\"./app\"]",
+		"internal/server/server.go":      "package server\n\nimport \"fmt\"\n\ntype Server struct {\n\tport int\n}\n\nfunc NewServer(port int) *Server {\n\treturn &Server{port: port}\n}\n\nfunc (s *Server) Start() error {\n\treturn fmt.Errorf(\"not implemented\")\n}",
 		"internal/server/server_test.go": "package server\n\nimport \"testing\"\n\nfunc TestNewServer(t *testing.T) {\n\ts := NewServer(8080)\n\tif s.port != 8080 {\n\t\tt.Errorf(\"Expected port 8080, got %d\", s.port)\n\t}\n}",
-		"Makefile": "build:\n\tgo build -o app ./cmd/main.go\n\ntest:\n\tgo test ./...\n\ndocker:\n\tdocker build -t test-app .",
+		"Makefile":                       "build:\n\tgo build -o app ./cmd/main.go\n\ntest:\n\tgo test ./...\n\ndocker:\n\tdocker build -t test-app .",
 	}
-	
+
 	for path, content := range files {
 		mockFS.AddFile(path, content)
 	}
@@ -378,23 +378,23 @@ func TestPlanningAgent_Integration_LargeProject(t *testing.T) {
 
 	// Simulate a larger project with many files
 	largeFiles := map[string]string{
-		"cmd/api/main.go": "package main\n\nfunc main() { startServer() }",
-		"internal/auth/jwt.go": "package auth\n\ntype JWT struct { secret string }",
-		"internal/auth/middleware.go": "package auth\n\nfunc AuthMiddleware() {}",
-		"internal/database/postgres.go": "package database\n\ntype Postgres struct { conn string }",
+		"cmd/api/main.go":                           "package main\n\nfunc main() { startServer() }",
+		"internal/auth/jwt.go":                      "package auth\n\ntype JWT struct { secret string }",
+		"internal/auth/middleware.go":               "package auth\n\nfunc AuthMiddleware() {}",
+		"internal/database/postgres.go":             "package database\n\ntype Postgres struct { conn string }",
 		"internal/database/migrations/001_init.sql": "CREATE TABLE users (id SERIAL);",
-		"internal/handlers/user.go": "package handlers\n\ntype UserHandler struct { db Database }",
-		"internal/handlers/auth.go": "package handlers\n\ntype AuthHandler struct {}",
-		"internal/models/user.go": "package models\n\ntype User struct { ID int }",
-		"internal/config/config.go": "package config\n\ntype Config struct { Port int }",
-		"pkg/utils/hash.go": "package utils\n\nfunc Hash(s string) string { return s }",
-		"pkg/utils/validation.go": "package utils\n\nfunc Validate(s string) bool { return true }",
-		"tests/integration/api_test.go": "package integration\n\nfunc TestAPI() {}",
-		"tests/unit/auth_test.go": "package auth\n\nfunc TestJWT() {}",
-		"docs/api.yaml": "openapi: 3.0.0\ninfo:\n  title: Test API",
-		"scripts/migrate.sh": "#!/bin/bash\necho 'Running migrations'",
-		"deploy/docker/Dockerfile": "FROM golang:1.21",
-		"deploy/k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment",
+		"internal/handlers/user.go":                 "package handlers\n\ntype UserHandler struct { db Database }",
+		"internal/handlers/auth.go":                 "package handlers\n\ntype AuthHandler struct {}",
+		"internal/models/user.go":                   "package models\n\ntype User struct { ID int }",
+		"internal/config/config.go":                 "package config\n\ntype Config struct { Port int }",
+		"pkg/utils/hash.go":                         "package utils\n\nfunc Hash(s string) string { return s }",
+		"pkg/utils/validation.go":                   "package utils\n\nfunc Validate(s string) bool { return true }",
+		"tests/integration/api_test.go":             "package integration\n\nfunc TestAPI() {}",
+		"tests/unit/auth_test.go":                   "package auth\n\nfunc TestJWT() {}",
+		"docs/api.yaml":                             "openapi: 3.0.0\ninfo:\n  title: Test API",
+		"scripts/migrate.sh":                        "#!/bin/bash\necho 'Running migrations'",
+		"deploy/docker/Dockerfile":                  "FROM golang:1.21",
+		"deploy/k8s/deployment.yaml":                "apiVersion: apps/v1\nkind: Deployment",
 	}
 
 	for path, content := range largeFiles {

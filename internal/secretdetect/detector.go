@@ -48,7 +48,7 @@ func (d *DetectorImpl) Scan(content string) []SecretMatch {
 						MatchedText: matchText,
 						LineNumber:  lineNum,
 						Column:      loc[0] + 1,
-						FilePath:    "", // Not applicable for string scan
+						FilePath:    "",  // Not applicable for string scan
 						Confidence:  1.0, // Regex match is usually high confidence
 					})
 				}
@@ -94,7 +94,7 @@ func (d *DetectorImpl) ScanFile(path string) ([]SecretMatch, error) {
 	var matches []SecretMatch
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
-	
+
 	// Buffer for long lines
 	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, 1024*1024) // 1MB max line size
@@ -102,7 +102,7 @@ func (d *DetectorImpl) ScanFile(path string) ([]SecretMatch, error) {
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
-		
+
 		for _, pattern := range d.patterns {
 			locs := pattern.Regex.FindAllStringIndex(line, -1)
 			if locs != nil {

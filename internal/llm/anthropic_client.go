@@ -258,6 +258,16 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 		params.Tools = convertAnthropicTools(req.Tools, req.EnableCaching, req.CacheTTL)
 	}
 
+	if req.EnableCaching {
+		params.Betas = append(params.Betas, anthropic.AnthropicBetaPromptCaching2024_07_31)
+
+		// Extended TTL header is required when using 1h caches (the default)
+		ttl := strings.TrimSpace(req.CacheTTL)
+		if ttl == "" || strings.EqualFold(ttl, "1h") {
+			params.Betas = append(params.Betas, anthropic.AnthropicBetaExtendedCacheTTL2025_04_11)
+		}
+	}
+
 	return params, nil
 }
 

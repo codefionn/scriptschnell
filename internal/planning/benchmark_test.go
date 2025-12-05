@@ -3,7 +3,7 @@ package planning
 import (
 	"context"
 	"testing"
-	
+
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
@@ -14,7 +14,7 @@ func BenchmarkPlanningAgent_SimplePlanning(b *testing.B) {
   "plan": ["Step 1: Analyze", "Step 2: Design", "Step 3: Implement"],
   "complete": true
 }`)
-	
+
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
 	defer agent.Close(context.Background())
@@ -26,7 +26,7 @@ func BenchmarkPlanningAgent_SimplePlanning(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := agent.Plan(ctx, req, nil)
@@ -41,7 +41,7 @@ func BenchmarkPlanningAgent_ComplexPlanning(b *testing.B) {
 	mockFS := NewMockFileSystem()
 	mockFS.AddFile("main.go", "package main\n\nfunc main() {}")
 	mockFS.AddFile("config.yaml", "app:\n  name: test")
-	
+
 	mockLLM := NewMockLLMClient(
 		`{"tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"main.go\"}"}}]}`,
 		`{"tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "search_files", "arguments": "{\"pattern\": \"*.yaml\"}"}}]}`,
@@ -56,7 +56,7 @@ func BenchmarkPlanningAgent_ComplexPlanning(b *testing.B) {
   "complete": true
 }`,
 	)
-	
+
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
 	defer agent.Close(context.Background())
@@ -68,7 +68,7 @@ func BenchmarkPlanningAgent_ComplexPlanning(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := agent.Plan(ctx, req, nil)
@@ -87,7 +87,7 @@ func BenchmarkPlanningAgent_WithQuestions(b *testing.B) {
   "needs_input": true,
   "complete": false
 }`)
-	
+
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
 	defer agent.Close(context.Background())
@@ -103,7 +103,7 @@ func BenchmarkPlanningAgent_WithQuestions(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := agent.Plan(ctx, req, userInputCb)
@@ -139,7 +139,7 @@ func BenchmarkPlanningAgent_PlanExtraction(b *testing.B) {
 // BenchmarkPlanningAgent_ToolRegistry benchmarks tool registry performance
 func BenchmarkPlanningAgent_ToolRegistry(b *testing.B) {
 	registry := NewPlanningToolRegistry()
-	
+
 	// Register multiple tools
 	tools := []PlanningTool{
 		NewAskUserTool(),
@@ -148,20 +148,20 @@ func BenchmarkPlanningAgent_ToolRegistry(b *testing.B) {
 		&MockPlanningTool{name: "search_file_content"},
 		&MockPlanningTool{name: "codebase_investigator"},
 	}
-	
+
 	for _, tool := range tools {
 		registry.Register(tool)
 	}
 
 	params := map[string]interface{}{
-		"question": "test question",
-		"path":     "test.txt",
-		"pattern":  "*.go",
+		"question":  "test question",
+		"path":      "test.txt",
+		"pattern":   "*.go",
 		"objective": "test investigation",
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		toolName := []string{"ask_user", "read_file", "search_files", "search_file_content", "codebase_investigator"}[i%5]
@@ -172,13 +172,13 @@ func BenchmarkPlanningAgent_ToolRegistry(b *testing.B) {
 // BenchmarkPlanningAgent_JSONSchema benchmarks JSON schema generation
 func BenchmarkPlanningAgent_JSONSchema(b *testing.B) {
 	registry := NewPlanningToolRegistry()
-	
+
 	// Register multiple tools
 	for i := 0; i < 10; i++ {
 		registry.Register(NewAskUserTool())
 		registry.Register(&MockPlanningTool{name: "read_file"})
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = registry.ToJSONSchema()
@@ -192,7 +192,7 @@ func BenchmarkPlanningAgent_ConcurrentRequests(b *testing.B) {
   "plan": ["Concurrent step 1", "Concurrent step 2"],
   "complete": true
 }`)
-	
+
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
 	defer agent.Close(context.Background())
@@ -204,7 +204,7 @@ func BenchmarkPlanningAgent_ConcurrentRequests(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -219,7 +219,7 @@ func BenchmarkPlanningAgent_ConcurrentRequests(b *testing.B) {
 // BenchmarkPlanningAgent_LargeResponse benchmarks performance with large planning responses
 func BenchmarkPlanningAgent_LargeResponse(b *testing.B) {
 	mockFS := NewMockFileSystem()
-	
+
 	// Generate a large plan response
 	largePlan := `{
   "plan": [`
@@ -232,7 +232,7 @@ func BenchmarkPlanningAgent_LargeResponse(b *testing.B) {
 	largePlan += `],
   "complete": true
 }`
-	
+
 	mockLLM := NewMockLLMClient(largePlan)
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
@@ -245,7 +245,7 @@ func BenchmarkPlanningAgent_LargeResponse(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := agent.Plan(ctx, req, nil)
@@ -262,14 +262,14 @@ func BenchmarkPlanningAgent_MemoryUsage(b *testing.B) {
   "plan": ["Memory test step 1", "Memory test step 2", "Memory test step 3"],
   "complete": true
 }`)
-	
+
 	b.ReportAllocs()
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		sess := session.NewSession("benchmark", ".")
 		agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
-		
+
 		req := &PlanningRequest{
 			Objective:      "Memory benchmark task",
 			AllowQuestions: false,
@@ -281,7 +281,7 @@ func BenchmarkPlanningAgent_MemoryUsage(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Planning failed: %v", err)
 		}
-		
+
 		agent.Close(ctx)
 	}
 }
@@ -289,9 +289,9 @@ func BenchmarkPlanningAgent_MemoryUsage(b *testing.B) {
 // BenchmarkPlanningAgent_ToolExecution benchmarks individual tool execution performance
 func BenchmarkPlanningAgent_ToolExecution(b *testing.B) {
 	tests := []struct {
-		name     string
-		tool     PlanningTool
-		params   map[string]interface{}
+		name   string
+		tool   PlanningTool
+		params map[string]interface{}
 	}{
 		{
 			name:   "AskUserTool",
@@ -314,7 +314,7 @@ func BenchmarkPlanningAgent_ToolExecution(b *testing.B) {
 		b.Run(test.name, func(b *testing.B) {
 			ctx := context.Background()
 			b.ResetTimer()
-			
+
 			for i := 0; i < b.N; i++ {
 				_ = test.tool.Execute(ctx, test.params)
 			}
@@ -325,18 +325,18 @@ func BenchmarkPlanningAgent_ToolExecution(b *testing.B) {
 // BenchmarkPlanningAgent_FileSystemOperations benchmarks filesystem tool performance
 func BenchmarkPlanningAgent_FileSystemOperations(b *testing.B) {
 	mockFS := NewMockFileSystem()
-	
+
 	// Add test files
 	for i := 0; i < 100; i++ {
 		mockFS.AddFile(string(rune('a'+i%26))+".go", "package main\n\nfunc test"+string(rune('A'+i%26))+"() {}")
 	}
-	
+
 	readTool := &MockPlanningTool{name: "read_file"}
 	searchTool := &MockPlanningTool{name: "search_files"}
 	contentTool := &MockPlanningTool{name: "search_file_content"}
-	
+
 	ctx := context.Background()
-	
+
 	b.Run("ReadFile", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -344,22 +344,22 @@ func BenchmarkPlanningAgent_FileSystemOperations(b *testing.B) {
 			_ = readTool.Execute(ctx, map[string]interface{}{"path": filename})
 		}
 	})
-	
+
 	b.Run("SearchFiles", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_ = searchTool.Execute(ctx, map[string]interface{}{
-				"pattern": "*.go",
+				"pattern":     "*.go",
 				"max_results": 20,
 			})
 		}
 	})
-	
+
 	b.Run("SearchContent", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_ = contentTool.Execute(ctx, map[string]interface{}{
-				"pattern": "func",
+				"pattern":     "func",
 				"max_results": 10,
 			})
 		}

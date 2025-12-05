@@ -1701,7 +1701,7 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 		} else {
 			content = "📝 **Creating file**"
 		}
-	case tools.ToolNameWriteFileDiff:
+	case tools.ToolNameEditFile:
 		if path, ok := parameters["path"].(string); ok {
 			content = fmt.Sprintf("✏️  **Updating file:** `%s`", path)
 		} else {
@@ -1769,7 +1769,7 @@ func (m *Model) generateToolSummary(toolName, result string, noOutput bool) stri
 		}
 		return fmt.Sprintf("✓ **Created file with %d lines**", lines)
 
-	case tools.ToolNameWriteFileDiff:
+	case tools.ToolNameEditFile:
 		// Count additions and deletions in the diff
 		additions := strings.Count(result, "\n+")
 		deletions := strings.Count(result, "\n-")
@@ -1993,7 +1993,7 @@ func (m *Model) generateMetadataAwareSummary(toolName string, metadata *tools.Ex
 		return m.generateSandboxSummary(metadata)
 	case tools.ToolNameReadFile:
 		return m.generateReadFileSummary(metadata)
-	case tools.ToolNameCreateFile, tools.ToolNameWriteFileDiff:
+	case tools.ToolNameCreateFile, tools.ToolNameEditFile:
 		return m.generateFileOperationSummary(toolName, metadata)
 	default:
 		return m.generateGenericSummary(metadata)
@@ -2167,7 +2167,7 @@ func (m *Model) generateFileOperationSummary(toolName string, metadata *tools.Ex
 	switch toolName {
 	case tools.ToolNameCreateFile:
 		action = "created"
-	case tools.ToolNameWriteFileDiff:
+	case tools.ToolNameEditFile:
 		action = "updated"
 	default:
 		action = "processed"

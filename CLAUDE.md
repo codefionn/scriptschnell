@@ -57,6 +57,20 @@ The application uses two separate LLM models ([internal/llm/client.go](internal/
 
 This separation optimizes cost and performance - expensive models only where needed.
 
+#### Planning Agent
+
+The planning agent ([internal/planning/agent.go](internal/planning/agent.go)) performs a pre-loop analysis for complex tasks:
+
+- **Planning Decision**: Before the main loop, the **Summarization Model** analyzes the prompt to decide:
+  1. If planning is required (complex/multi-step vs simple/single-step)
+  2. Which external MCP tools are relevant and should be allowed
+- **Planning Execution**: If triggered, the Planning Agent:
+  - Uses the **Planning Model** (or Orchestrator Model fallback)
+  - Can investigate the codebase using read-only tools
+  - Can ask clarifying questions (in TUI mode)
+  - Generates a step-by-step plan that is fed into the main session context
+- **MCP Access**: The planning agent has restricted access to MCP tools, filtered by the summarization model's decision to ensure relevance and safety.
+
 #### Provider Interface System
 
 The provider interface ([internal/llm/provider.go](internal/llm/provider.go)) enables dynamic model discovery:

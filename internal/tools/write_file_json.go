@@ -15,7 +15,7 @@ import (
 type WriteFileJSONToolSpec struct{}
 
 func (s *WriteFileJSONToolSpec) Name() string {
-	return ToolNameWriteFileJSON
+	return ToolNameEditFile
 }
 
 func (s *WriteFileJSONToolSpec) Description() string {
@@ -78,7 +78,7 @@ func NewWriteFileJSONTool(filesystem fs.FileSystem, sess *session.Session) *Writ
 }
 
 // Legacy interface implementation for backward compatibility
-func (t *WriteFileJSONTool) Name() string        { return ToolNameWriteFileJSON }
+func (t *WriteFileJSONTool) Name() string        { return ToolNameEditFile }
 func (t *WriteFileJSONTool) Description() string { return (&WriteFileJSONToolSpec{}).Description() }
 func (t *WriteFileJSONTool) Parameters() map[string]interface{} {
 	return (&WriteFileJSONToolSpec{}).Parameters()

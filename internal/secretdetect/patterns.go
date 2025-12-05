@@ -8,13 +8,13 @@ import (
 var (
 	// AWS Access Key ID
 	awsAccessKeyIDRegex = regexp.MustCompile(`(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}`)
-	
+
 	// AWS Secret Access Key (more prone to false positives, usually needs context)
 	// awsSecretAccessKeyRegex = regexp.MustCompile(`(?i)aws(.{0,20})?(?-i)['\"][0-9a-zA-Z\/+]{40}['\"]`)
 
 	// OpenAI API Key (sk-...)
 	openAIRegex = regexp.MustCompile(`sk-[a-zA-Z0-9]{32,}`)
-	
+
 	// OpenAI Project Key (sk-proj-...)
 	openAIProjRegex = regexp.MustCompile(`sk-proj-[a-zA-Z0-9_\-]{32,}`)
 
@@ -26,7 +26,7 @@ var (
 
 	// GitHub Personal Access Token
 	githubPatRegex = regexp.MustCompile(`ghp_[a-zA-Z0-9]{36}`)
-	
+
 	// GitHub OAuth Token
 	githubOAuthRegex = regexp.MustCompile(`gho_[a-zA-Z0-9]{36}`)
 
@@ -35,16 +35,16 @@ var (
 
 	// Slack User Token
 	slackUserTokenRegex = regexp.MustCompile(`xoxp-[0-9]{10,12}-[0-9]{10,12}-[0-9]{10,12}-[a-zA-Z0-9]{32}`)
-	
+
 	// RSA Private Key
 	rsaPrivateKeyRegex = regexp.MustCompile(`-----BEGIN RSA PRIVATE KEY-----`)
-	
+
 	// SSH Private Key
 	sshPrivateKeyRegex = regexp.MustCompile(`-----BEGIN OPENSSH PRIVATE KEY-----`)
-	
+
 	// Generic Private Key
 	genericPrivateKeyRegex = regexp.MustCompile(`-----BEGIN PRIVATE KEY-----`)
-	
+
 	// PGP Private Key
 	pgpPrivateKeyRegex = regexp.MustCompile(`-----BEGIN PGP PRIVATE KEY BLOCK-----`)
 )

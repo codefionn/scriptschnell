@@ -188,3 +188,112 @@ func TestConvertMistralToolCalls(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertMessages_SkipEmptyAssistantMessages(t *testing.T) {
+	client := &MistralClient{
+		apiKey: "test-key",
+		model:  "mistral-large-latest",
+	}
+
+	tests := []struct {
+		name     string
+		input    *CompletionRequest
+		validate func([]mistralChatMessage) bool
+	}{
+		{
+			name: "assistant message with empty content and no tool calls is skipped",
+			input: &CompletionRequest{
+				Messages: []*Message{
+					{Role: "user", Content: "Hello"},
+					{Role: "assistant", Content: "", ToolCalls: nil},
+					{Role: "user", Content: "Are you there?"},
+				},
+			},
+			validate: func(result []mistralChatMessage) bool {
+				// Should only have 2 messages (the empty assistant message should be skipped)
+				if len(result) != 2 {
+					return false
+				}
+				return result[0].Role == "user" && result[1].Role == "user"
+			},
+		},
+		{
+			name: "assistant message with whitespace-only content is skipped",
+			input: &CompletionRequest{
+				Messages: []*Message{
+					{Role: "user", Content: "Hello"},
+					{Role: "assistant", Content: "   \n\t  ", ToolCalls: nil},
+					{Role: "user", Content: "Anyone home?"},
+				},
+			},
+			validate: func(result []mistralChatMessage) bool {
+				// Should only have 2 messages
+				if len(result) != 2 {
+					return false
+				}
+				return result[0].Role == "user" && result[1].Role == "user"
+			},
+		},
+		{
+			name: "assistant message with empty content but with tool calls is kept",
+			input: &CompletionRequest{
+				Messages: []*Message{
+					{Role: "user", Content: "Hello"},
+					{Role: "assistant", Content: "", ToolCalls: []map[string]interface{}{
+						{
+							"id":   "call_123",
+							"type": "function",
+							"function": map[string]interface{}{
+								"name":      "test_func",
+								"arguments": "{}",
+							},
+						},
+					}},
+					{Role: "tool", ToolID: "call_123", Content: "result"},
+				},
+			},
+			validate: func(result []mistralChatMessage) bool {
+				// Should have all 3 messages
+				if len(result) != 3 {
+					return false
+				}
+				return result[0].Role == "user" &&
+					result[1].Role == "assistant" &&
+					len(result[1].ToolCalls) > 0 &&
+					result[2].Role == "tool"
+			},
+		},
+		{
+			name: "assistant message with non-empty content and no tool calls is kept",
+			input: &CompletionRequest{
+				Messages: []*Message{
+					{Role: "user", Content: "Hello"},
+					{Role: "assistant", Content: "Hi there!", ToolCalls: nil},
+				},
+			},
+			validate: func(result []mistralChatMessage) bool {
+				// Should have both messages
+				if len(result) != 2 {
+					return false
+				}
+				return result[0].Role == "user" &&
+					result[1].Role == "assistant" &&
+					result[1].Content == "Hi there!"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.convertMessages(tt.input)
+
+			if !tt.validate(result) {
+				t.Errorf("convertMessages() validation failed for test %q", tt.name)
+				t.Logf("Result has %d messages:", len(result))
+				for i, msg := range result {
+					t.Logf("  [%d] Role=%s, Content=%q, ToolCalls=%d", i, msg.Role, msg.Content, len(msg.ToolCalls))
+				}
+			}
+		})
+	}
+}

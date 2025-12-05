@@ -399,8 +399,6 @@ func extractErrorContext(err error) string {
 	return ""
 }
 
-
-
 // Execute executes a tool call
 func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {
 	entry, ok := r.entries[call.Name]

@@ -106,6 +106,15 @@ flowchart TD
     builder --> orchestrator[Orchestrator Loop]
     orchestrator -->|Completion requests| orchLLM[Orchestration Model Client]
     orchLLM -->|Assistant text + tool calls| orchestrator
+
+    orchestrator -->|Planning decision| summarizer
+    summarizer -->|Planning config (Run? MCPs?)| orchestrator
+
+    orchestrator -->|Pre-loop Planning| planning[Planning Agent]
+    planning -->|Plan generation| planLLM[Planning Model]
+    planning -->|Investigation| investigator
+    planning -->|Record plan| session
+
     orchestrator -->|Dispatch tool call| registry[Tool Registry]
     registry --> tools["Tool Actors<br/>(read_file, write_file_diff, shell, sandbox, MCP, ...)"]
     tools -->|Tool outputs| orchestrator
@@ -142,7 +151,7 @@ flowchart TD
     investigator -->|Investigation results| orchestrator
 ```
 
-## Providersl
+## Providers
 
 Supported providers:
 

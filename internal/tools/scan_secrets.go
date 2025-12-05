@@ -106,18 +106,18 @@ func (e *ScanSecretsToolExecutor) Execute(ctx context.Context, params map[string
 			// Let's update the factory to inject FS if we want to support file reading for redaction.
 			return &ToolResult{Error: "Redaction is only supported for 'content' parameter, not 'file_path'"}
 		}
-		
+
 		redacted := secretdetect.Redact(scannedContent, matches)
 		return &ToolResult{Result: redacted}
 	}
 
 	// Return matches
 	type MatchResult struct {
-		Type       string `json:"type"`
-		Text       string `json:"text"`
-		Line       int    `json:"line"`
-		Column     int    `json:"column"`
-		FilePath   string `json:"file_path,omitempty"`
+		Type       string  `json:"type"`
+		Text       string  `json:"text"`
+		Line       int     `json:"line"`
+		Column     int     `json:"column"`
+		FilePath   string  `json:"file_path,omitempty"`
 		Confidence float64 `json:"confidence"`
 	}
 

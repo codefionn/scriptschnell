@@ -65,6 +65,8 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 
 	// Create a new session for the investigation
 	investigationSession := session.NewSession("investigation", a.orch.workingDir)
+
+	// Add initial objective message - this must remain immutable for prompt caching
 	investigationSession.AddMessage(&session.Message{
 		Role:    "user",
 		Content: fmt.Sprintf("Investigation Objective: %s", objective),
@@ -151,7 +153,7 @@ The requested logic is found in internal/module/file.go function DoWork().
 			MaxTokens:     4096, // Reasonable limit for investigation steps
 			SystemPrompt:  systemPrompt,
 			EnableCaching: true, // Enable caching for investigation to speed up repeated queries
-			CacheTTL:      "1h",
+			CacheTTL:      "5m",
 		}
 
 		resp, err := client.CompleteWithRequest(ctx, req)

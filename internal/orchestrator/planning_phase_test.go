@@ -127,7 +127,7 @@ func TestBuildReadOnlyPlanningToolsIncludesWebSearch(t *testing.T) {
 	}
 	orch := &Orchestrator{config: cfg}
 
-	tools, errs := orch.buildReadOnlyPlanningTools()
+	tools, errs := orch.buildReadOnlyPlanningTools(nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}

@@ -11,8 +11,8 @@ import (
 
 func TestWriteFileReplaceTool_Name(t *testing.T) {
 	tool := NewWriteFileReplaceTool(nil, nil)
-	if tool.Name() != ToolNameWriteFileReplace {
-		t.Fatalf("expected name '%s', got '%s'", ToolNameWriteFileReplace, tool.Name())
+	if tool.Name() != ToolNameEditFile {
+		t.Fatalf("expected name '%s', got '%s'", ToolNameEditFile, tool.Name())
 	}
 }
 

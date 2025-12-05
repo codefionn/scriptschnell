@@ -66,7 +66,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffExistingNotRead(t *testing.T) {
 		t.Fatalf("write file failed: %v", err)
 	}
 
-	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "existing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameEditFile, map[string]interface{}{"path": "existing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffMissingFileDenied(t *testing.T)
 	sess := session.NewSession("test", ".")
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
 
-	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "missing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameEditFile, map[string]interface{}{"path": "missing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffPreauthorizedFile(t *testing.T)
 	}
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
-	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "allowed.txt"})
+	decision, err := actor.authorize(ctx, ToolNameEditFile, map[string]interface{}{"path": "allowed.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffPreauthorizedDir(t *testing.T) 
 	}
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
-	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "outside/data.txt"})
+	decision, err := actor.authorize(ctx, ToolNameEditFile, map[string]interface{}{"path": "outside/data.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestAuthorizationActorAuthorizeWriteFileDiffExistingReadAllowed(t *testing.
 	}
 	sess.TrackFileRead("existing.txt", "content")
 
-	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "existing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameEditFile, map[string]interface{}{"path": "existing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestAuthorizationActorDangerouslyAllowAllBypassesChecks(t *testing.T) {
 	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
 
 	// Should allow writing without prior read
-	decision, err := actor.authorize(ctx, ToolNameWriteFileDiff, map[string]interface{}{"path": "existing.txt"})
+	decision, err := actor.authorize(ctx, ToolNameEditFile, map[string]interface{}{"path": "existing.txt"})
 	if err != nil {
 		t.Fatalf("authorize returned error: %v", err)
 	}

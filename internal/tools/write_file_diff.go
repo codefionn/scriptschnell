@@ -15,7 +15,7 @@ import (
 type WriteFileDiffToolSpec struct{}
 
 func (s *WriteFileDiffToolSpec) Name() string {
-	return ToolNameWriteFileDiff
+	return ToolNameEditFile
 }
 
 func (s *WriteFileDiffToolSpec) Description() string {
@@ -105,7 +105,7 @@ func NewWriteFileDiffTool(filesystem fs.FileSystem, sess *session.Session) *Writ
 }
 
 // Legacy interface implementation for backward compatibility
-func (t *WriteFileDiffTool) Name() string        { return ToolNameWriteFileDiff }
+func (t *WriteFileDiffTool) Name() string        { return ToolNameEditFile }
 func (t *WriteFileDiffTool) Description() string { return (&WriteFileDiffToolSpec{}).Description() }
 func (t *WriteFileDiffTool) Parameters() map[string]interface{} {
 	return (&WriteFileDiffToolSpec{}).Parameters()

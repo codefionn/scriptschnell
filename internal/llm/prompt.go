@@ -113,6 +113,13 @@ func (pb *PromptBuilder) modelSpecificPrompt(modelName string) string {
 	modelFamily := DetectModelFamily(modelName)
 
 	switch {
+	case modelFamily == FamilyMistralLarge ||
+		modelFamily == FamilyMistralMedium ||
+		modelFamily == FamilyMistralSmall ||
+		modelFamily == FamilyCodestral ||
+		modelFamily == FamilyPixtral ||
+		modelFamily == FamilyMixtral:
+		return "Shell commands can be executed with the golang sandbox tool call.\n"
 	case modelFamily == FamilyZaiGLM:
 		return `Always use the todo tool calls to track progress and plan ahead.
 Create new todos, sub-todos and check them if done successfully.

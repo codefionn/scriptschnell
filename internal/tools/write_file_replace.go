@@ -15,7 +15,7 @@ import (
 type WriteFileReplaceToolSpec struct{}
 
 func (s *WriteFileReplaceToolSpec) Name() string {
-	return ToolNameWriteFileReplace
+	return ToolNameEditFile
 }
 
 func (s *WriteFileReplaceToolSpec) Description() string {
@@ -78,7 +78,7 @@ func NewWriteFileReplaceTool(filesystem fs.FileSystem, sess *session.Session) *W
 	}
 }
 
-func (t *WriteFileReplaceTool) Name() string { return ToolNameWriteFileReplace }
+func (t *WriteFileReplaceTool) Name() string { return ToolNameEditFile }
 func (t *WriteFileReplaceTool) Description() string {
 	return (&WriteFileReplaceToolSpec{}).Description()
 }

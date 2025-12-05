@@ -27,7 +27,7 @@ func NewWriteFileSimpleDiffTool(filesystem fs.FileSystem, sess *session.Session)
 }
 
 func (t *WriteFileSimpleDiffTool) Name() string {
-	return ToolNameWriteFileDiff
+	return ToolNameEditFile
 }
 
 func (t *WriteFileSimpleDiffTool) Description() string {

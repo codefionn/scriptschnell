@@ -416,6 +416,8 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	)
 	if o.shouldUseNonDiffUpdateTool(modelFamily) {
 		addSpec(&tools.WriteFileJSONToolSpec{}, true, tools.NewWriteFileJSONToolFactory(o.fs, o.session), false, "")
+	} else if o.shouldUseSimpleSingleDiffTool(modelFamily) {
+		addSpec(&tools.WriteFileReplaceSingleToolSpec{}, true, tools.NewWriteFileReplaceSingleToolFactory(o.fs, o.session), false, "")
 	} else if o.shouldUseSimpleDiffTool(modelFamily) {
 		addSpec(&tools.WriteFileReplaceToolSpec{}, true, tools.NewWriteFileReplaceToolFactory(o.fs, o.session), false, "")
 	} else {
@@ -620,7 +622,12 @@ func (o *Orchestrator) shouldUseNonDiffUpdateTool(modelFamily llm.ModelFamily) b
 }
 
 func (o *Orchestrator) shouldUseSimpleDiffTool(modelFamily llm.ModelFamily) bool {
-	return !o.shouldUseNonDiffUpdateTool(modelFamily)
+	return !o.shouldUseNonDiffUpdateTool(modelFamily) && !o.shouldUseSimpleSingleDiffTool(modelFamily)
+}
+
+func (o *Orchestrator) shouldUseSimpleSingleDiffTool(modelFamily llm.ModelFamily) bool {
+	return !o.shouldUseNonDiffUpdateTool(modelFamily) &&
+		modelFamily == llm.FamilyCodestral
 }
 
 func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
@@ -835,7 +842,7 @@ func (a *planningToolAdapter) Execute(ctx context.Context, params map[string]int
 }
 
 // buildReadOnlyPlanningTools returns planning-safe MCP tools filtered to read-only capabilities.
-func (o *Orchestrator) buildReadOnlyPlanningTools() ([]planning.PlanningTool, []error) {
+func (o *Orchestrator) buildReadOnlyPlanningTools(allowedMCPs []string) ([]planning.PlanningTool, []error) {
 	if o == nil || o.config == nil {
 		return nil, nil
 	}
@@ -867,6 +874,20 @@ func (o *Orchestrator) buildReadOnlyPlanningTools() ([]planning.PlanningTool, []
 			serverName := o.lookupServerBySanitizedKey(serverKey)
 			if serverName == "" {
 				continue
+			}
+
+			// Filter by allowedMCPs if specified (non-nil)
+			if allowedMCPs != nil {
+				allowed := false
+				for _, allowedName := range allowedMCPs {
+					if allowedName == serverName {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					continue
+				}
 			}
 
 			serverCfg := o.config.MCP.Servers[serverName]
@@ -1062,20 +1083,20 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		return nil
 	}
 
-	simple, reason := o.classifyPromptSimplicity(ctx, prompt)
-	if simple {
-		logger.Debug("Skipping planning phase: prompt marked simple (%s)", reason)
+	decision, err := o.decidePlanningConfiguration(ctx, prompt)
+	if err != nil {
+		logger.Warn("Planning decision error: %v", err)
 		return nil
 	}
 
-	if reason != "" {
-		logger.Debug("Planning phase triggered: %s", reason)
+	if !decision.ShouldRun {
+		logger.Debug("Skipping planning phase: %s", decision.Reason)
+		return nil
 	}
 
-	statusMsg := "Running planning pass..."
-	if reason != "" {
-		statusMsg = fmt.Sprintf("Running planning pass (%s)...", reason)
-	}
+	logger.Debug("Planning phase triggered: %s", decision.Reason)
+
+	statusMsg := fmt.Sprintf("Running planning pass (%s)...", decision.Reason)
 
 	dispatchProgress(progressCallback, progress.Update{
 		Message:   statusMsg,
@@ -1083,7 +1104,7 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		Ephemeral: true,
 	})
 
-	extraTools, errs := o.buildReadOnlyPlanningTools()
+	extraTools, errs := o.buildReadOnlyPlanningTools(decision.AllowedMCPs)
 	for _, err := range errs {
 		if err != nil {
 			logger.Warn("Planning MCP tool build warning: %v", err)
@@ -1286,6 +1307,9 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		if err != nil {
 			return fmt.Errorf("completion failed: %w", err)
 		}
+
+		// Ensure tool calls always have IDs; some providers omit them intermittently.
+		response.ToolCalls = llm.NormalizeToolCallIDs(response.ToolCalls)
 
 		// Log the stop reason
 		if response.StopReason != "" {

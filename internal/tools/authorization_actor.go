@@ -357,7 +357,7 @@ func (a *AuthorizationActor) authorize(ctx context.Context, toolName string, par
 	}
 
 	switch toolName {
-	case ToolNameWriteFileDiff:
+	case ToolNameEditFile:
 		return a.authorizeWriteFileDiff(ctx, params)
 	case ToolNameCreateFile:
 		return a.authorizeCreateFile(ctx, params)

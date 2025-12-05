@@ -75,6 +75,9 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 	// Execute TinyGo compilation
 	compileResult, err := t.compileWithTinyGo(execCtx, tinyGoBinary, args, sandboxDir)
 	if err != nil {
+		return nil, fmt.Errorf("TinyGo compilation failed: %w", err)
+	}
+	if compileResult != nil {
 		return compileResult, nil // Return compilation error as result
 	}
 

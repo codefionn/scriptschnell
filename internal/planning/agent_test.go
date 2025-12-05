@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -818,4 +820,140 @@ func (m *MockLLMClientWithCancellation) Stream(ctx context.Context, req *llm.Com
 
 func (m *MockLLMClientWithCancellation) GetModelName() string {
 	return "mock-cancellation-model"
+}
+
+// MockSlowTool sleeps for a duration
+type MockSlowTool struct {
+	duration time.Duration
+}
+
+func (t *MockSlowTool) Name() string                       { return "slow_tool" }
+func (t *MockSlowTool) Description() string                { return "Sleeps" }
+func (t *MockSlowTool) Parameters() map[string]interface{} { return nil }
+func (t *MockSlowTool) Execute(ctx context.Context, params map[string]interface{}) *PlanningToolResult {
+	select {
+	case <-ctx.Done():
+		return &PlanningToolResult{Error: ctx.Err().Error()}
+	case <-time.After(t.duration):
+		return &PlanningToolResult{Result: "slept"}
+	}
+}
+
+func TestProcessToolCalls_Parallel(t *testing.T) {
+	// Setup
+	mfs := fs.NewMockFS()
+	sess := session.NewSession("test-session", "/tmp")
+	agent := NewPlanningAgent("test-agent", mfs, sess, nil, nil)
+
+	// Register slow tool
+	slowTool := &MockSlowTool{duration: 100 * time.Millisecond}
+	agent.SetExternalTools([]PlanningTool{slowTool})
+
+	// Prepare tool calls
+	toolCalls := []map[string]interface{}{
+		{
+			"id":   "call_1",
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":      "slow_tool",
+				"arguments": "{}",
+			},
+		},
+		{
+			"id":   "call_2",
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":      "slow_tool",
+				"arguments": "{}",
+			},
+		},
+		{
+			"id":   "call_3",
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":      "slow_tool",
+				"arguments": "{}",
+			},
+		},
+	}
+
+	req := &PlanningRequest{AllowQuestions: true}
+	ctx := context.Background()
+
+	start := time.Now()
+	_, _, _, err := agent.processToolCalls(ctx, toolCalls, nil, req, 0, nil)
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("processToolCalls failed: %v", err)
+	}
+
+	// If parallel, it should be faster than sum of durations (300ms).
+	// We expect ~100ms.
+	if duration > 250*time.Millisecond {
+		t.Logf("Execution took %v (expected < 250ms for parallel execution)", duration)
+		// t.Fail() // Uncomment when implemented
+	}
+}
+
+func TestProcessToolCalls_AskUserSerialization(t *testing.T) {
+	// Setup
+	mfs := fs.NewMockFS()
+	sess := session.NewSession("test-session", "/tmp")
+	agent := NewPlanningAgent("test-agent", mfs, sess, nil, nil)
+
+	// Prepare tool calls: 2 ask_user calls
+	args1, _ := json.Marshal(map[string]interface{}{"question": "q1"})
+	args2, _ := json.Marshal(map[string]interface{}{"question": "q2"})
+
+	toolCalls := []map[string]interface{}{
+		{
+			"id":   "call_1",
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":      "ask_user",
+				"arguments": string(args1),
+			},
+		},
+		{
+			"id":   "call_2",
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":      "ask_user",
+				"arguments": string(args2),
+			},
+		},
+	}
+
+	req := &PlanningRequest{AllowQuestions: true}
+	ctx := context.Background()
+
+	var activeUsers int32
+	var maxActiveUsers int32
+	var mu sync.Mutex
+
+	userInputCb := func(question string) (string, error) {
+		current := atomic.AddInt32(&activeUsers, 1)
+
+		mu.Lock()
+		max := atomic.LoadInt32(&maxActiveUsers)
+		if current > max {
+			atomic.StoreInt32(&maxActiveUsers, current)
+		}
+		mu.Unlock()
+
+		time.Sleep(50 * time.Millisecond)
+
+		atomic.AddInt32(&activeUsers, -1)
+		return "answer", nil
+	}
+
+	_, _, _, err := agent.processToolCalls(ctx, toolCalls, userInputCb, req, 0, nil)
+	if err != nil {
+		t.Fatalf("processToolCalls failed: %v", err)
+	}
+
+	if atomic.LoadInt32(&maxActiveUsers) > 1 {
+		t.Errorf("Expected serialized ask_user calls, but found %d concurrent calls", maxActiveUsers)
+	}
 }

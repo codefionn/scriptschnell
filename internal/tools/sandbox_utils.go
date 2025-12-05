@@ -167,9 +167,9 @@ func CalculateOutputStats(output string) (int, int) {
 	if output == "" {
 		return 0, 0
 	}
-	
+
 	bytes := len(output)
-	
+
 	lines := 0
 	if output != "" {
 		lines = 1 // At least one line if content exists
@@ -179,6 +179,6 @@ func CalculateOutputStats(output string) (int, int) {
 			}
 		}
 	}
-	
+
 	return bytes, lines
 }

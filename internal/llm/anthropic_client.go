@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -63,74 +65,79 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 		return nil, err
 	}
 
-	stream := c.client.Beta.Messages.NewStreaming(ctx, params)
-	if stream == nil {
-		return nil, fmt.Errorf("anthropic stream failed: no stream returned")
-	}
-	defer stream.Close()
+	var resp *CompletionResponse
+	opErr := c.executeWithRetry(ctx, func() error {
+		stream := c.client.Beta.Messages.NewStreaming(ctx, params)
+		if stream == nil {
+			return fmt.Errorf("anthropic stream failed: no stream returned")
+		}
+		defer stream.Close()
 
-	var (
-		contentBuilder strings.Builder
-		toolCalls      []map[string]interface{}
-		// temporary storage for the current tool call being built
-		currentToolIndex int = -1
-		currentToolJSON  strings.Builder
-		stopReason       string
-	)
+		var (
+			contentBuilder strings.Builder
+			toolCalls      []map[string]interface{}
+			// temporary storage for the current tool call being built
+			currentToolIndex int = -1
+			currentToolJSON  strings.Builder
+			stopReason       string
+		)
 
-	for stream.Next() {
-		event := stream.Current()
+		for stream.Next() {
+			event := stream.Current()
 
-		switch e := event.AsAny().(type) {
-		case anthropic.BetaRawContentBlockStartEvent:
-			if e.ContentBlock.Type == "tool_use" {
-				currentToolIndex++
-				currentToolJSON.Reset()
-				toolCalls = append(toolCalls, map[string]interface{}{
-					"id":   e.ContentBlock.ID,
-					"type": "function",
-					"function": map[string]interface{}{
-						"name":      e.ContentBlock.Name,
-						"arguments": "", // will be filled by deltas
-					},
-				})
-			}
-		case anthropic.BetaRawContentBlockDeltaEvent:
-			if e.Delta.Type == "text_delta" {
-				contentBuilder.WriteString(e.Delta.Text)
-			} else if e.Delta.Type == "input_json_delta" {
+			switch e := event.AsAny().(type) {
+			case anthropic.BetaRawContentBlockStartEvent:
+				if e.ContentBlock.Type == "tool_use" {
+					currentToolIndex++
+					currentToolJSON.Reset()
+					toolCalls = append(toolCalls, map[string]interface{}{
+						"id":   e.ContentBlock.ID,
+						"type": "function",
+						"function": map[string]interface{}{
+							"name":      e.ContentBlock.Name,
+							"arguments": "", // will be filled by deltas
+						},
+					})
+				}
+			case anthropic.BetaRawContentBlockDeltaEvent:
+				if e.Delta.Type == "text_delta" {
+					contentBuilder.WriteString(e.Delta.Text)
+				} else if e.Delta.Type == "input_json_delta" {
+					if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
+						currentToolJSON.WriteString(e.Delta.PartialJSON)
+					}
+				}
+			case anthropic.BetaRawContentBlockStopEvent:
 				if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
-					currentToolJSON.WriteString(e.Delta.PartialJSON)
+					// Finalize the current tool call arguments
+					args := currentToolJSON.String()
+					if fn, ok := toolCalls[currentToolIndex]["function"].(map[string]interface{}); ok {
+						fn["arguments"] = args
+					}
 				}
-			}
-		case anthropic.BetaRawContentBlockStopEvent:
-			if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
-				// Finalize the current tool call arguments
-				args := currentToolJSON.String()
-				if fn, ok := toolCalls[currentToolIndex]["function"].(map[string]interface{}); ok {
-					fn["arguments"] = args
+			case anthropic.BetaRawMessageDeltaEvent:
+				if e.Delta.StopReason != "" {
+					stopReason = string(e.Delta.StopReason)
 				}
-				// We don't reset currentToolIndex here in case there are mixed blocks,
-				// but usually tool blocks are sequential.
-				// However, strictly speaking, we should track which block index maps to which tool call.
-				// For now, assuming standard Anthropic behavior (sequential blocks).
-			}
-		case anthropic.BetaRawMessageDeltaEvent:
-			if e.Delta.StopReason != "" {
-				stopReason = string(e.Delta.StopReason)
 			}
 		}
-	}
 
-	if err := stream.Err(); err != nil {
-		return nil, fmt.Errorf("anthropic stream failed: %w", err)
-	}
+		if err := stream.Err(); err != nil {
+			return fmt.Errorf("anthropic stream failed: %w", err)
+		}
 
-	return &CompletionResponse{
-		Content:    contentBuilder.String(),
-		ToolCalls:  toolCalls,
-		StopReason: stopReason,
-	}, nil
+		resp = &CompletionResponse{
+			Content:    contentBuilder.String(),
+			ToolCalls:  toolCalls,
+			StopReason: stopReason,
+		}
+		return nil
+	})
+
+	if opErr != nil {
+		return nil, opErr
+	}
+	return resp, nil
 }
 
 func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, callback func(chunk string) error) error {
@@ -139,39 +146,81 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, ca
 		return err
 	}
 
-	stream := c.client.Beta.Messages.NewStreaming(ctx, params)
-	if stream == nil {
-		return fmt.Errorf("anthropic stream failed: no stream returned")
-	}
-	defer stream.Close()
+	return c.executeWithRetry(ctx, func() error {
+		stream := c.client.Beta.Messages.NewStreaming(ctx, params)
+		if stream == nil {
+			return fmt.Errorf("anthropic stream failed: no stream returned")
+		}
+		defer stream.Close()
 
-	for stream.Next() {
-		event := stream.Current()
+		for stream.Next() {
+			event := stream.Current()
 
-		deltaEvent, ok := event.AsAny().(anthropic.BetaRawContentBlockDeltaEvent)
-		if !ok {
-			continue
+			deltaEvent, ok := event.AsAny().(anthropic.BetaRawContentBlockDeltaEvent)
+			if !ok {
+				continue
+			}
+
+			if deltaEvent.Delta.Type != "text_delta" {
+				continue
+			}
+
+			text := deltaEvent.Delta.Text
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+
+			if err := callback(text); err != nil {
+				return err
+			}
 		}
 
-		if deltaEvent.Delta.Type != "text_delta" {
-			continue
+		if err := stream.Err(); err != nil {
+			return fmt.Errorf("anthropic stream failed: %w", err)
 		}
 
-		text := deltaEvent.Delta.Text
-		if strings.TrimSpace(text) == "" {
-			continue
+		return nil
+	})
+}
+
+func (c *AnthropicClient) executeWithRetry(ctx context.Context, operation func() error) error {
+	const maxRetries = 5
+	baseDelay := 1 * time.Second
+
+	var err error
+	for i := 0; i <= maxRetries; i++ {
+		err = operation()
+		if err == nil {
+			return nil
 		}
 
-		if err := callback(text); err != nil {
+		if !isRateLimitError(err) {
 			return err
 		}
-	}
 
-	if err := stream.Err(); err != nil {
-		return fmt.Errorf("anthropic stream failed: %w", err)
-	}
+		if i == maxRetries {
+			break
+		}
 
-	return nil
+		delay := baseDelay * time.Duration(1<<i)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+			continue
+		}
+	}
+	return err
+}
+
+func isRateLimitError(err error) bool {
+	// Check for anthropic.Error and StatusCode 429
+	var apiErr *anthropic.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 429
+	}
+	// Fallback string check
+	return strings.Contains(err.Error(), "429")
 }
 
 func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.BetaMessageNewParams, error) {

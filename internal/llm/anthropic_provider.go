@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // AnthropicProvider implements the Provider interface for Anthropic
@@ -54,9 +55,24 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list models: %w", err)
+	var resp *http.Response
+	opErr := p.executeWithRetry(ctx, func() error {
+		var doErr error
+		resp, doErr = p.client.Do(req)
+		if doErr != nil {
+			return doErr
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			return fmt.Errorf("rate limit exceeded (429)")
+		}
+
+		return nil
+	})
+
+	if opErr != nil {
+		return nil, fmt.Errorf("failed to list models: %w", opErr)
 	}
 	defer resp.Body.Close()
 
@@ -109,6 +125,36 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error
 	}
 
 	return models, nil
+}
+
+func (p *AnthropicProvider) executeWithRetry(ctx context.Context, operation func() error) error {
+	const maxRetries = 5
+	baseDelay := 1 * time.Second
+
+	var err error
+	for i := 0; i <= maxRetries; i++ {
+		err = operation()
+		if err == nil {
+			return nil
+		}
+
+		if !strings.Contains(err.Error(), "429") {
+			return err
+		}
+
+		if i == maxRetries {
+			break
+		}
+
+		delay := baseDelay * time.Duration(1<<i)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+			continue
+		}
+	}
+	return err
 }
 
 func (p *AnthropicProvider) getFallbackModels() []*ModelInfo {

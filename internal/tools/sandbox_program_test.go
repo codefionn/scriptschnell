@@ -261,7 +261,8 @@ func TestWaitProgramTool_SandboxCompletion(t *testing.T) {
 	code := `package main
 import "fmt"
 func main() {
-	fmt.Println("Hello from sandbox")
+	message := "Hello from sandbox"
+	fmt.Println(message)
 }`
 
 	res := sandboxTool.Execute(ctx, map[string]interface{}{

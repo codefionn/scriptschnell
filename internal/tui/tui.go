@@ -1502,21 +1502,21 @@ func (m *Model) renderFooter(left, right string) string {
 
 func (m *Model) contextDisplay() string {
 	var parts []string
-	
+
 	// Add context file info
 	if strings.TrimSpace(m.contextFile) == "" {
 		parts = append(parts, "Context: (none)")
 	} else {
 		parts = append(parts, fmt.Sprintf("Context: %s", m.contextFile))
 	}
-	
+
 	// Add OpenRouter usage if available
 	if m.openRouterUsage != nil {
-		// Show cost
-		if cost, ok := m.openRouterUsage["total_cost"].(float64); ok && cost > 0 {
-			parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost/1000)) // Convert from credits to dollars
+		// Show cost (OpenRouter returns "cost" in dollars)
+		if cost, ok := m.openRouterUsage["cost"].(float64); ok && cost > 0 {
+			parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost))
 		}
-		
+
 		// Show caching if available
 		if cachedTokens, ok := m.openRouterUsage["cached_tokens"].(float64); ok && cachedTokens > 0 {
 			if totalTokens, ok2 := m.openRouterUsage["total_tokens"].(float64); ok2 && totalTokens > 0 {
@@ -1525,7 +1525,7 @@ func (m *Model) contextDisplay() string {
 			}
 		}
 	}
-	
+
 	return strings.Join(parts, " | ")
 }
 
@@ -1535,11 +1535,11 @@ func (m *Model) formatOpenRouterUsage() string {
 		logger.Debug("formatOpenRouterUsage called but no usage data available")
 		return ""
 	}
-	
+
 	logger.Debug("formatOpenRouterUsage processing usage data: %v", m.openRouterUsage)
-	
+
 	var parts []string
-	
+
 	// Add token usage
 	if promptTokens, ok := m.openRouterUsage["prompt_tokens"].(float64); ok {
 		if completionTokens, ok := m.openRouterUsage["completion_tokens"].(float64); ok {
@@ -1547,7 +1547,7 @@ func (m *Model) formatOpenRouterUsage() string {
 			parts = append(parts, fmt.Sprintf("Tokens: %.0f", totalTokens))
 		}
 	}
-	
+
 	// Add caching information if available
 	if cachedTokens, ok := m.openRouterUsage["cached_tokens"].(float64); ok && cachedTokens > 0 {
 		if totalTokens, ok2 := m.openRouterUsage["total_tokens"].(float64); ok2 && totalTokens > 0 {
@@ -1555,17 +1555,17 @@ func (m *Model) formatOpenRouterUsage() string {
 			parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
 		}
 	}
-	
-	// Add cost
-	if cost, ok := m.openRouterUsage["total_cost"].(float64); ok && cost > 0 {
-		parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost/1000))
+
+	// Add cost (OpenRouter returns "cost" not "total_cost", already in dollars)
+	if cost, ok := m.openRouterUsage["cost"].(float64); ok && cost > 0 {
+		parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost))
 	}
-	
+
 	if len(parts) == 0 {
 		logger.Debug("formatOpenRouterUsage: no displayable usage data found")
 		return ""
 	}
-	
+
 	result := strings.Join(parts, " | ")
 	logger.Debug("formatOpenRouterUsage returning formatted result: %s", result)
 	return result
@@ -1700,7 +1700,7 @@ func (m *Model) renderTodoPanel() string {
 		content.WriteString("\n")
 		content.WriteString(todoTitleStyle.Render("OpenRouter Usage"))
 		content.WriteString("\n")
-		
+
 		usageInfo := m.formatOpenRouterUsage()
 		if usageInfo != "" {
 			content.WriteString(todoItemStyle.Render(usageInfo))

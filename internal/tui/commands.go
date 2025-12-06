@@ -108,6 +108,7 @@ type CommandHandler struct {
 	ctx              context.Context
 	progressCallback ProgressCallback
 	contextCallback  ContextUsageCallback
+	usageCallback    OpenRouterUsageCallback
 	commands         map[string]commandDefinition
 }
 
@@ -138,6 +139,10 @@ func (ch *CommandHandler) SetProgressCallback(callback ProgressCallback) {
 // SetContextCallback sets the callback for context usage updates
 func (ch *CommandHandler) SetContextCallback(callback ContextUsageCallback) {
 	ch.contextCallback = callback
+}
+
+func (ch *CommandHandler) SetUsageCallback(callback OpenRouterUsageCallback) {
+	ch.usageCallback = callback
 }
 
 // HandleCommand processes a command
@@ -814,7 +819,7 @@ func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
 
 	// Process through orchestrator with streaming (in background)
 	go func() {
-		if err := ch.orchestrator.ProcessPrompt(ch.ctx, initPrompt, ch.progressCallback, ch.contextCallback, nil, nil, nil, nil); err != nil {
+		if err := ch.orchestrator.ProcessPrompt(ch.ctx, initPrompt, ch.progressCallback, ch.contextCallback, nil, nil, nil, ch.usageCallback); err != nil {
 			// Error will be handled by orchestrator's error handling
 			// Clear status on error
 			dispatch(progress.Update{Message: "", Mode: progress.ReportJustStatus, Ephemeral: true})

@@ -81,12 +81,26 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 			currentToolIndex int = -1
 			currentToolJSON  strings.Builder
 			stopReason       string
+			usage            map[string]interface{}
 		)
 
 		for stream.Next() {
 			event := stream.Current()
 
 			switch e := event.AsAny().(type) {
+			case anthropic.BetaRawMessageStartEvent:
+				// Capture usage information from message start event
+				usage = map[string]interface{}{
+					"input_tokens":  e.Message.Usage.InputTokens,
+					"output_tokens": e.Message.Usage.OutputTokens,
+				}
+				// Include cache-related tokens if available
+				if e.Message.Usage.CacheCreationInputTokens > 0 {
+					usage["cache_creation_input_tokens"] = e.Message.Usage.CacheCreationInputTokens
+				}
+				if e.Message.Usage.CacheReadInputTokens > 0 {
+					usage["cache_read_input_tokens"] = e.Message.Usage.CacheReadInputTokens
+				}
 			case anthropic.BetaRawContentBlockStartEvent:
 				if e.ContentBlock.Type == "tool_use" {
 					currentToolIndex++
@@ -131,6 +145,7 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 			Content:    contentBuilder.String(),
 			ToolCalls:  toolCalls,
 			StopReason: stopReason,
+			Usage:      usage,
 		}
 		return nil
 	})

@@ -1111,7 +1111,7 @@ func heuristicPromptSimplicity(prompt string) (bool, string) {
 		return false, "long prompt suggests complexity"
 	}
 
-	return len(words) < 30, "fallback heuristic"
+	return false, "no complexity indicators found => using planner"
 }
 
 func formatPlanForDisplay(plan []string) string {

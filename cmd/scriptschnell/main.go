@@ -420,6 +420,12 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 		}
 		return nil
 	})
+	cmdHandler.SetUsageCallback(func(usage map[string]interface{}) error {
+		if program != nil {
+			program.Send(tui.OpenRouterUsageMsg{Usage: usage})
+		}
+		return nil
+	})
 
 	// Helper to run overlay menus while managing terminal state
 	runOverlayMenu := func(run func() error) (retErr error) {

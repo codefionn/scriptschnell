@@ -27,10 +27,11 @@ type Options struct {
 
 // CLI handles command-line interface using the orchestrator
 type CLI struct {
-	config       *config.Config
-	providerMgr  *provider.Manager
-	orchestrator *tui.Orchestrator
-	options      *Options
+	config           *config.Config
+	providerMgr      *provider.Manager
+	orchestrator     *tui.Orchestrator
+	options          *Options
+	accumulatedUsage map[string]interface{}
 }
 
 func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI, error) {
@@ -153,13 +154,86 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		return false, fmt.Errorf("authorization required but not granted via CLI flags")
 	}
 
+	// Usage callback: accumulate usage statistics
+	usageCallback := func(usage map[string]interface{}) error {
+		if c.accumulatedUsage == nil {
+			c.accumulatedUsage = make(map[string]interface{})
+		}
+
+		// Helper to add numeric values
+		addNumeric := func(key string, value interface{}) {
+			if num, ok := value.(float64); ok {
+				if existing, ok := c.accumulatedUsage[key].(float64); ok {
+					c.accumulatedUsage[key] = existing + num
+				} else {
+					c.accumulatedUsage[key] = num
+				}
+			}
+		}
+
+		// Accumulate various token types
+		addNumeric("prompt_tokens", usage["prompt_tokens"])
+		addNumeric("completion_tokens", usage["completion_tokens"])
+		addNumeric("total_tokens", usage["total_tokens"])
+		addNumeric("cached_tokens", usage["cached_tokens"])
+		addNumeric("input_tokens", usage["input_tokens"])
+		addNumeric("output_tokens", usage["output_tokens"])
+		// OpenRouter returns "cost" not "total_cost"
+		addNumeric("cost", usage["cost"])
+
+		return nil
+	}
+
 	// Use the orchestrator to process the prompt
-	err := c.orchestrator.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, nil, nil, nil)
+	err := c.orchestrator.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, nil, nil, usageCallback)
 	if err != nil {
 		return fmt.Errorf("failed to process prompt: %w", err)
 	}
 
 	fmt.Println() // Final newline
+
+	// Print accumulated usage statistics
+	if len(c.accumulatedUsage) > 0 {
+		fmt.Fprintf(os.Stderr, "\n--- Usage Statistics ---\n")
+
+		// Calculate total tokens (try multiple field combinations)
+		var totalTokens float64
+		if total, ok := c.accumulatedUsage["total_tokens"].(float64); ok {
+			totalTokens = total
+		} else {
+			// For providers that use input_tokens + output_tokens
+			if input, ok := c.accumulatedUsage["input_tokens"].(float64); ok {
+				totalTokens += input
+			}
+			if output, ok := c.accumulatedUsage["output_tokens"].(float64); ok {
+				totalTokens += output
+			}
+			// For providers that use prompt_tokens + completion_tokens
+			if prompt, ok := c.accumulatedUsage["prompt_tokens"].(float64); ok {
+				totalTokens += prompt
+			}
+			if completion, ok := c.accumulatedUsage["completion_tokens"].(float64); ok {
+				totalTokens += completion
+			}
+		}
+
+		if totalTokens > 0 {
+			fmt.Fprintf(os.Stderr, "Total tokens: %.0f\n", totalTokens)
+		}
+
+		// Show cached tokens if available
+		if cached, ok := c.accumulatedUsage["cached_tokens"].(float64); ok && cached > 0 {
+			percentage := (cached / totalTokens) * 100
+			fmt.Fprintf(os.Stderr, "Cached tokens: %.0f (%.1f%%)\n", cached, percentage)
+		}
+
+		// Show cost if available (OpenRouter returns "cost" in dollars)
+		if cost, ok := c.accumulatedUsage["cost"].(float64); ok && cost > 0 {
+			fmt.Fprintf(os.Stderr, "Total cost: $%.6f\n", cost)
+		}
+
+		fmt.Fprintf(os.Stderr, "------------------------\n")
+	}
 
 	// Note: Modified files tracking would require exposing the session from orchestrator
 	// For now, tool output will show which files were written

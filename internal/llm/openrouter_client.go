@@ -207,7 +207,7 @@ func (c *OpenRouterClient) Stream(ctx context.Context, req *CompletionRequest, c
 
 func (c *OpenRouterClient) buildChatRequest(req *CompletionRequest, stream bool) (*openRouterChatRequest, error) {
 	logger.Debug("OpenRouter: building chat request for model %s, stream=%v", c.model, stream)
-	
+
 	messages, err := convertMessagesToOpenRouter(req)
 	if err != nil {
 		return nil, err
@@ -285,7 +285,7 @@ func convertMessagesToOpenRouter(req *CompletionRequest) ([]openRouterChatMessag
 
 func convertMessagesToOpenRouterFromUnified(req *CompletionRequest) ([]openRouterChatMessage, error) {
 	logger.Debug("convertMessagesToOpenRouterFromUnified: converting %d messages with system_prompt=%d chars, caching=%v", len(req.Messages), len(req.SystemPrompt), req.EnableCaching)
-	
+
 	messages := make([]openRouterChatMessage, 0, len(req.Messages)+1)
 
 	if system := strings.TrimSpace(req.SystemPrompt); system != "" {
@@ -393,7 +393,7 @@ func convertOpenRouterToolCalls(toolCalls []openRouterToolCall) []map[string]int
 	}
 
 	logger.Debug("convertOpenRouterToolCalls: converting %d tool calls", len(toolCalls))
-	
+
 	result := make([]map[string]interface{}, 0, len(toolCalls))
 	for i, tc := range toolCalls {
 		if tc.Function == nil {
@@ -414,14 +414,14 @@ func convertOpenRouterToolCalls(toolCalls []openRouterToolCall) []map[string]int
 		result = append(result, call)
 		logger.Debug("convertOpenRouterToolCalls: converted tool call %d with name=%s", i, tc.Function.Name)
 	}
-	
+
 	logger.Debug("convertOpenRouterToolCalls: successfully converted %d tool calls", len(result))
 	return result
 }
 
 func extractOpenRouterText(content interface{}) string {
 	logger.Debug("extractOpenRouterText: processing content of type %T", content)
-	
+
 	switch value := content.(type) {
 	case nil:
 		logger.Debug("extractOpenRouterText: content is nil")

@@ -22,6 +22,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"golang.org/x/term"
 )
@@ -147,6 +148,7 @@ type Model struct {
 	tabCycleIndex        int      // Tracks current suggestion index for tab cycling
 	contextFreePercent   int
 	contextWindow        int
+	openRouterUsage      map[string]interface{} // OpenRouter usage data (tokens, cost, etc.)
 	sanitizeState        ansiSanitizeState
 	showTodoPanel        bool
 	todoClient           *tools.TodoActorClient
@@ -186,6 +188,11 @@ type ToolResultMsg struct {
 type ContextUsageMsg struct {
 	FreePercent   int
 	ContextWindow int
+}
+
+// OpenRouterUsageMsg updates the UI with OpenRouter usage data (tokens, cost, etc.)
+type OpenRouterUsageMsg struct {
+	Usage map[string]interface{}
 }
 
 type viewportRefreshMsg struct {
@@ -1306,6 +1313,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.contextWindow = msg.ContextWindow
 		return m, baseCmd
 
+	case OpenRouterUsageMsg:
+		m.processOpenRouterUsage(msg.Usage)
+		return m, baseCmd
+		return m, baseCmd
+
 	case ErrMsg:
 		if errors.Is(error(msg), ErrQuitRequested) {
 			return m, tea.Batch(baseCmd, tea.Quit)
@@ -1359,6 +1371,12 @@ func (m *Model) processNextQueuedPrompt() tea.Cmd {
 		m.AddSystemMessage(fmt.Sprintf("Processing queued prompt: %s", preview))
 	}
 	return m.startPrompt(next)
+}
+
+// processOpenRouterUsage processes OpenRouter usage data and stores it for display
+func (m *Model) processOpenRouterUsage(usage map[string]interface{}) {
+	logger.Debug("OpenRouter usage data received: %v", usage)
+	m.openRouterUsage = usage
 }
 
 func formatQueuedPreview(text string) string {
@@ -1483,10 +1501,74 @@ func (m *Model) renderFooter(left, right string) string {
 }
 
 func (m *Model) contextDisplay() string {
+	var parts []string
+	
+	// Add context file info
 	if strings.TrimSpace(m.contextFile) == "" {
-		return "Context: (none)"
+		parts = append(parts, "Context: (none)")
+	} else {
+		parts = append(parts, fmt.Sprintf("Context: %s", m.contextFile))
 	}
-	return fmt.Sprintf("Context: %s", m.contextFile)
+	
+	// Add OpenRouter usage if available
+	if m.openRouterUsage != nil {
+		// Show cost
+		if cost, ok := m.openRouterUsage["total_cost"].(float64); ok && cost > 0 {
+			parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost/1000)) // Convert from credits to dollars
+		}
+		
+		// Show caching if available
+		if cachedTokens, ok := m.openRouterUsage["cached_tokens"].(float64); ok && cachedTokens > 0 {
+			if totalTokens, ok2 := m.openRouterUsage["total_tokens"].(float64); ok2 && totalTokens > 0 {
+				cachePercent := (cachedTokens / totalTokens) * 100
+				parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
+			}
+		}
+	}
+	
+	return strings.Join(parts, " | ")
+}
+
+// formatOpenRouterUsage formats OpenRouter usage data for display
+func (m *Model) formatOpenRouterUsage() string {
+	if m.openRouterUsage == nil {
+		logger.Debug("formatOpenRouterUsage called but no usage data available")
+		return ""
+	}
+	
+	logger.Debug("formatOpenRouterUsage processing usage data: %v", m.openRouterUsage)
+	
+	var parts []string
+	
+	// Add token usage
+	if promptTokens, ok := m.openRouterUsage["prompt_tokens"].(float64); ok {
+		if completionTokens, ok := m.openRouterUsage["completion_tokens"].(float64); ok {
+			totalTokens := promptTokens + completionTokens
+			parts = append(parts, fmt.Sprintf("Tokens: %.0f", totalTokens))
+		}
+	}
+	
+	// Add caching information if available
+	if cachedTokens, ok := m.openRouterUsage["cached_tokens"].(float64); ok && cachedTokens > 0 {
+		if totalTokens, ok2 := m.openRouterUsage["total_tokens"].(float64); ok2 && totalTokens > 0 {
+			cachePercent := (cachedTokens / totalTokens) * 100
+			parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
+		}
+	}
+	
+	// Add cost
+	if cost, ok := m.openRouterUsage["total_cost"].(float64); ok && cost > 0 {
+		parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost/1000))
+	}
+	
+	if len(parts) == 0 {
+		logger.Debug("formatOpenRouterUsage: no displayable usage data found")
+		return ""
+	}
+	
+	result := strings.Join(parts, " | ")
+	logger.Debug("formatOpenRouterUsage returning formatted result: %s", result)
+	return result
 }
 
 func (m *Model) renderContextUsage() string {
@@ -1611,6 +1693,25 @@ func (m *Model) renderTodoPanel() string {
 	for _, name := range names {
 		content.WriteString(todoItemStyle.Render(fmt.Sprintf("• %s", name)))
 		content.WriteString("\n")
+	}
+
+	// Add OpenRouter usage data if available
+	if m.openRouterUsage != nil {
+		content.WriteString("\n")
+		content.WriteString(todoTitleStyle.Render("OpenRouter Usage"))
+		content.WriteString("\n")
+		
+		usageInfo := m.formatOpenRouterUsage()
+		if usageInfo != "" {
+			content.WriteString(todoItemStyle.Render(usageInfo))
+			logger.Debug("OpenRouter usage displayed in todo panel: %s", usageInfo)
+		} else {
+			content.WriteString(todoEmptyStyle.Render("No usage data available."))
+			logger.Debug("OpenRouter usage panel shown but no usage data available")
+		}
+		content.WriteString("\n")
+	} else {
+		logger.Debug("OpenRouter usage panel not shown - no usage data available")
 	}
 
 	return todoPanelStyle.Render(strings.TrimRight(content.String(), "\n"))

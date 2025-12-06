@@ -18,6 +18,12 @@ type Message struct {
 	ToolID    string                   `json:"tool_id,omitempty"`
 	ToolName  string                   `json:"tool_name,omitempty"` // Name of the tool for tool responses
 	Timestamp time.Time                `json:"timestamp"`
+
+	// Native format storage (for prompt caching)
+	NativeFormat      interface{} `json:"native_format,omitempty"`       // Provider-specific message format
+	NativeProvider    string      `json:"native_provider,omitempty"`     // e.g., "anthropic", "openai"
+	NativeModelFamily string      `json:"native_model_family,omitempty"` // e.g., "claude-3", "gpt-4"
+	NativeTimestamp   time.Time   `json:"native_timestamp,omitempty"`    // When native format was created
 }
 
 // Session manages a conversation session
@@ -36,6 +42,8 @@ type Session struct {
 	LastSandboxExitCode int             // exit code from last sandbox execution
 	LastSandboxStdout   string          // stdout from last sandbox execution
 	LastSandboxStderr   string          // stderr from last sandbox execution
+	CurrentProvider     string          // Current LLM provider for native message format
+	CurrentModelFamily  string          // Current model family for native message format
 	mu                  sync.RWMutex
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -377,4 +385,36 @@ func (s *Session) GetLastSandboxOutput() (exitCode int, stdout, stderr string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.LastSandboxExitCode, s.LastSandboxStdout, s.LastSandboxStderr
+}
+
+// SetCurrentProvider updates the active provider/model family for native message storage
+func (s *Session) SetCurrentProvider(provider, modelFamily string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.CurrentProvider = provider
+	s.CurrentModelFamily = modelFamily
+	s.UpdatedAt = time.Now()
+}
+
+// GetCurrentProvider returns the current provider/model family
+func (s *Session) GetCurrentProvider() (provider, modelFamily string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.CurrentProvider, s.CurrentModelFamily
+}
+
+// NeedsConversion checks if messages need re-conversion for a new provider
+func (s *Session) NeedsConversion(provider, modelFamily string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.CurrentProvider == "" {
+		return true // First session
+	}
+
+	if s.CurrentProvider != provider || s.CurrentModelFamily != modelFamily {
+		return true // Provider or family changed
+	}
+
+	return false
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/codefionn/scriptschnell/internal/logger"
 	genai "google.golang.org/genai"
 )
 
@@ -185,6 +186,23 @@ func convertToolCallsFromContent(content *genai.Content) []map[string]interface{
 }
 
 func convertMessagesToGenAI(messages []*Message) ([]*genai.Content, error) {
+	// Check if we can use native Google format
+	hasNativeFormat := len(messages) > 0 && messages[0].NativeFormat != nil && messages[0].NativeProvider == "google"
+
+	if hasNativeFormat {
+		logger.Debug("Using native Google message format (%d messages)", len(messages))
+		contents, err := extractNativeGoogleMessages(messages)
+		if err != nil {
+			logger.Warn("Failed to extract native Google messages, falling back to conversion: %v", err)
+			return convertMessagesToGenAIFromUnified(messages)
+		}
+		return contents, nil
+	}
+
+	return convertMessagesToGenAIFromUnified(messages)
+}
+
+func convertMessagesToGenAIFromUnified(messages []*Message) ([]*genai.Content, error) {
 	contents := make([]*genai.Content, 0, len(messages))
 	for _, msg := range messages {
 		if msg == nil {
@@ -351,6 +369,81 @@ func convertToolsToGenAI(tools []map[string]interface{}) []*genai.Tool {
 	}
 
 	return result
+}
+
+// extractNativeGoogleMessages extracts native Google messages from unified messages
+func extractNativeGoogleMessages(messages []*Message) ([]*genai.Content, error) {
+	contents := make([]*genai.Content, 0, len(messages))
+
+	for _, msg := range messages {
+		if msg == nil || msg.NativeFormat == nil {
+			return nil, fmt.Errorf("message missing native format")
+		}
+
+		// Type assert to map[string]interface{} (Google native format)
+		nativeMap, ok := msg.NativeFormat.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("native format is not a map")
+		}
+
+		// Skip system metadata
+		if _, isSystem := nativeMap["_google_system"]; isSystem {
+			continue
+		}
+
+		// Extract role
+		roleStr, _ := nativeMap["role"].(string)
+
+		// Extract parts
+		partsInterface, _ := nativeMap["parts"].([]interface{})
+		parts := make([]*genai.Part, 0, len(partsInterface))
+
+		for _, partInterface := range partsInterface {
+			partMap, ok := partInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Handle text parts
+			if text, ok := partMap["text"].(string); ok {
+				parts = append(parts, genai.NewPartFromText(text))
+			}
+
+			// Handle function call parts
+			if functionCall, ok := partMap["functionCall"].(map[string]interface{}); ok {
+				name, _ := functionCall["name"].(string)
+				args, _ := functionCall["args"].(map[string]interface{})
+				argsMap := make(map[string]any)
+				for k, v := range args {
+					argsMap[k] = v
+				}
+				parts = append(parts, genai.NewPartFromFunctionCall(name, argsMap))
+			}
+
+			// Handle function response parts
+			if functionResponse, ok := partMap["functionResponse"].(map[string]interface{}); ok {
+				name, _ := functionResponse["name"].(string)
+				response, _ := functionResponse["response"].(map[string]interface{})
+				responseMap := make(map[string]any)
+				for k, v := range response {
+					responseMap[k] = v
+				}
+				parts = append(parts, genai.NewPartFromFunctionResponse(name, responseMap))
+			}
+		}
+
+		// Determine role based on native role string
+		var content *genai.Content
+		switch roleStr {
+		case "model":
+			content = genai.NewContentFromParts(parts, genai.RoleModel)
+		default: // "user" or "function"
+			content = genai.NewContentFromParts(parts, genai.RoleUser)
+		}
+		contents = append(contents, content)
+	}
+
+	return contents, nil
 }
 
 func normalizeGoogleModelName(modelName string) string {

@@ -154,7 +154,7 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 	}
 
 	// Use the orchestrator to process the prompt
-	err := c.orchestrator.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, nil, nil)
+	err := c.orchestrator.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, nil, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to process prompt: %w", err)
 	}

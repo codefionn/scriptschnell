@@ -529,7 +529,12 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 				case <-ctx.Done():
 					return false, ctx.Err()
 				}
-			}, toolCallCallback, toolResultCallback)
+			}, toolCallCallback, toolResultCallback, func(usage map[string]interface{}) error {
+				if program != nil {
+					program.Send(tui.OpenRouterUsageMsg{Usage: usage})
+				}
+				return nil
+			})
 
 			// Send complete message or error
 			if program != nil {

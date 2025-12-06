@@ -340,6 +340,69 @@ func (o *Orchestrator) getSummarizeModelID() string {
 	return modelID
 }
 
+// detectProviderChange checks if the provider/model family has changed
+func (o *Orchestrator) detectProviderChange(modelID string) (provider, modelFamily string, changed bool) {
+	converter := llm.GetConverter(modelID)
+	if converter == nil {
+		return "", "", false
+	}
+
+	provider = converter.GetProviderName()
+	modelFamily = converter.GetModelFamily(modelID)
+
+	changed = o.session.NeedsConversion(provider, modelFamily)
+
+	return provider, modelFamily, changed
+}
+
+// convertSessionMessages converts all session messages to native format for the current provider
+func (o *Orchestrator) convertSessionMessages(modelID, provider, modelFamily string) error {
+	converter := llm.GetConverter(modelID)
+	if converter == nil || !converter.SupportsNativeStorage() {
+		return nil
+	}
+
+	messages := o.session.GetMessages()
+	if len(messages) == 0 {
+		return nil
+	}
+
+	// Convert unified → native
+	unifiedMsgs := make([]*llm.Message, len(messages))
+	for i, msg := range messages {
+		unifiedMsgs[i] = &llm.Message{
+			Role:      msg.Role,
+			Content:   msg.Content,
+			ToolCalls: msg.ToolCalls,
+			ToolID:    msg.ToolID,
+			ToolName:  msg.ToolName,
+		}
+	}
+
+	// Get system prompt for conversion context
+	systemPrompt, err := o.getOrBuildSystemPrompt(context.Background(), modelID)
+	if err != nil {
+		systemPrompt = "" // Fall back to empty system prompt
+	}
+
+	nativeMessages, err := converter.ConvertToNative(unifiedMsgs, systemPrompt, o.config.EnablePromptCache, o.config.PromptCacheTTL)
+	if err != nil {
+		return fmt.Errorf("failed to convert messages to native format: %w", err)
+	}
+
+	// Update session messages with native format
+	for i, msg := range messages {
+		if i < len(nativeMessages) {
+			msg.NativeFormat = nativeMessages[i]
+			msg.NativeProvider = provider
+			msg.NativeModelFamily = modelFamily
+			msg.NativeTimestamp = time.Now()
+		}
+	}
+
+	return nil
+}
+
 // initializePlanningAgent creates and initializes the planning agent
 func (o *Orchestrator) initializePlanningAgent() {
 	if o.planningClient == nil {
@@ -772,6 +835,9 @@ func sanitizeMCPIdentifier(name string) string {
 // ContextUsageCallback receives free context percentage and total context window updates for UI display
 type ContextUsageCallback func(freePercent int, contextWindow int) error
 
+// OpenRouterUsageCallback receives OpenRouter usage data for cost tracking in UI display
+type OpenRouterUsageCallback func(usage map[string]interface{}) error
+
 // GetCurrentProgressCallback returns the active progress callback, if any.
 func (o *Orchestrator) GetCurrentProgressCallback() progress.Callback {
 	o.progressCbMu.Lock()
@@ -973,6 +1039,8 @@ func (o *Orchestrator) classifyPromptSimplicity(ctx context.Context, prompt stri
 			if simple, reason, ok := parseSimplicityResponse(resp.Content); ok {
 				return simple, reason
 			}
+		} else {
+			logger.Warn("Prompt simplicity classification error: %v with response: %v", err, resp)
 		}
 	}
 
@@ -1182,7 +1250,7 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 }
 
 // ProcessPrompt processes a user prompt
-func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progressCallback progress.Callback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback, toolCallCallback ToolCallCallback, toolResultCallback ToolResultCallback) error {
+func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progressCallback progress.Callback, contextCallback ContextUsageCallback, authCallback AuthorizationCallback, toolCallCallback ToolCallCallback, toolResultCallback ToolResultCallback, openRouterUsageCallback OpenRouterUsageCallback) error {
 	combinedCtx, cancel := combineContexts(ctx, o.ctx)
 	if cancel != nil {
 		defer cancel()
@@ -1260,6 +1328,17 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		}
 	}
 
+	// Detect provider/model changes and convert messages if needed
+	provider, modelFamily, providerChanged := o.detectProviderChange(modelID)
+	if providerChanged && provider != "" {
+		logger.Info("Provider changed to %s (%s), converting message history", provider, modelFamily)
+		if err := o.convertSessionMessages(modelID, provider, modelFamily); err != nil {
+			logger.Warn("Failed to convert messages to native format: %v", err)
+		} else {
+			o.session.SetCurrentProvider(provider, modelFamily)
+		}
+	}
+
 	// Tool execution loop
 	maxIterations := 256 // Prevent infinite loops
 	autoContinueAttempts := 0
@@ -1267,16 +1346,20 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		logger.Debug("ProcessPrompt iteration %d starting (max=%d)", iteration, maxIterations)
 
-		// Convert session messages to LLM format
+		// Convert session messages to LLM format (preserving native format)
 		sessionMessages := o.session.GetMessages()
 		llmMessages := make([]*llm.Message, len(sessionMessages))
 		for i, msg := range sessionMessages {
 			llmMessages[i] = &llm.Message{
-				Role:      msg.Role,
-				Content:   msg.Content,
-				ToolCalls: msg.ToolCalls,
-				ToolID:    msg.ToolID,
-				ToolName:  msg.ToolName,
+				Role:              msg.Role,
+				Content:           msg.Content,
+				ToolCalls:         msg.ToolCalls,
+				ToolID:            msg.ToolID,
+				ToolName:          msg.ToolName,
+				NativeFormat:      msg.NativeFormat,
+				NativeProvider:    msg.NativeProvider,
+				NativeModelFamily: msg.NativeModelFamily,
+				NativeTimestamp:   msg.NativeTimestamp,
 			}
 		}
 
@@ -1331,11 +1414,45 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 			len(response.Content), len(response.ToolCalls), response.StopReason)
 
 		// Add assistant response to session
-		o.session.AddMessage(&session.Message{
+		assistantMsg := &session.Message{
 			Role:      "assistant",
 			Content:   response.Content,
 			ToolCalls: response.ToolCalls,
-		})
+		}
+
+		// Process OpenRouter usage data if available
+		if response.Usage != nil {
+			logger.Debug("LLM response contains usage data, processing OpenRouter usage")
+			o.processOpenRouterUsage(response.Usage, openRouterUsageCallback)
+		} else {
+			logger.Debug("LLM response contains no usage data")
+		}
+
+		// Convert to native format immediately if supported
+		converter := llm.GetConverter(modelID)
+		if converter != nil && converter.SupportsNativeStorage() {
+			nativeMsgs, err := converter.ConvertToNative(
+				[]*llm.Message{{
+					Role:      "assistant",
+					Content:   response.Content,
+					ToolCalls: response.ToolCalls,
+				}},
+				"",
+				o.config.EnablePromptCache,
+				o.config.PromptCacheTTL,
+			)
+
+			if err == nil && len(nativeMsgs) > 0 {
+				assistantMsg.NativeFormat = nativeMsgs[len(nativeMsgs)-1] // Last message is the assistant message
+				assistantMsg.NativeProvider = provider
+				assistantMsg.NativeModelFamily = modelFamily
+				assistantMsg.NativeTimestamp = time.Now()
+			} else if err != nil {
+				logger.Warn("Failed to convert assistant message to native format: %v", err)
+			}
+		}
+
+		o.session.AddMessage(assistantMsg)
 		o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
 		// Stream the content to UI if present
@@ -1976,7 +2093,24 @@ func (o *Orchestrator) getContextWindow(modelID string) int {
 		return window
 	}
 
-	return heuristicContextWindow(modelID)
+	// Fallback to default context window
+	return 8192
+}
+
+// processOpenRouterUsage processes and sends OpenRouter usage data to the callback
+func (o *Orchestrator) processOpenRouterUsage(usage map[string]interface{}, callback OpenRouterUsageCallback) {
+	if callback == nil {
+		logger.Debug("OpenRouter usage callback is nil, skipping usage processing")
+		return
+	}
+
+	if usage != nil {
+		logger.Debug("Processing OpenRouter usage data: %v", usage)
+	} else {
+		logger.Debug("OpenRouter usage data is nil, still calling callback")
+	}
+
+	_ = callback(usage)
 }
 
 func selectCompactionPrefix(perMessageTokens []int, totalTokens int) int {

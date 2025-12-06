@@ -320,6 +320,24 @@ func convertMessagesToOpenAI(req *CompletionRequest) ([]openAIChatMessage, error
 		return nil, fmt.Errorf("openai completion request cannot be nil")
 	}
 
+	// Check if messages have native OpenAI format - if so, use directly for caching
+	hasNativeFormat := len(req.Messages) > 0 && req.Messages[0].NativeFormat != nil && req.Messages[0].NativeProvider == "openai"
+
+	if hasNativeFormat {
+		// Use native format directly to preserve caching metadata
+		messages, err := extractNativeOpenAIMessages(req.Messages, req.SystemPrompt, req.EnableCaching)
+		if err != nil {
+			// Fall back to conversion
+			return convertMessagesToOpenAIFromUnified(req)
+		}
+		return messages, nil
+	}
+
+	// Convert from unified format
+	return convertMessagesToOpenAIFromUnified(req)
+}
+
+func convertMessagesToOpenAIFromUnified(req *CompletionRequest) ([]openAIChatMessage, error) {
 	messages := make([]openAIChatMessage, 0, len(req.Messages)+1)
 
 	if system := strings.TrimSpace(req.SystemPrompt); system != "" {
@@ -369,6 +387,56 @@ func convertMessagesToOpenAI(req *CompletionRequest) ([]openAIChatMessage, error
 	}
 
 	return messages, nil
+}
+
+// extractNativeOpenAIMessages extracts native OpenAI messages from Message objects
+func extractNativeOpenAIMessages(messages []*Message, systemPrompt string, enableCaching bool) ([]openAIChatMessage, error) {
+	result := make([]openAIChatMessage, 0, len(messages)+1)
+
+	// Add system message if provided and not already in native messages
+	hasSystemMessage := false
+	for _, msg := range messages {
+		if msg != nil && msg.NativeFormat != nil {
+			if m, ok := msg.NativeFormat.(map[string]interface{}); ok {
+				if role, ok := m["role"].(string); ok && role == "system" {
+					hasSystemMessage = true
+					break
+				}
+			}
+		}
+	}
+
+	if !hasSystemMessage && strings.TrimSpace(systemPrompt) != "" {
+		sysMsg := openAIChatMessage{
+			Role:    "system",
+			Content: systemPrompt,
+		}
+		if enableCaching {
+			sysMsg.CacheControl = map[string]interface{}{"type": "ephemeral"}
+		}
+		result = append(result, sysMsg)
+	}
+
+	// Extract native messages
+	for _, msg := range messages {
+		if msg == nil || msg.NativeFormat == nil {
+			continue
+		}
+
+		data, err := json.Marshal(msg.NativeFormat)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal native message: %w", err)
+		}
+
+		var oaiMsg openAIChatMessage
+		if err := json.Unmarshal(data, &oaiMsg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal to openAIChatMessage: %w", err)
+		}
+
+		result = append(result, oaiMsg)
+	}
+
+	return result, nil
 }
 
 func convertOpenAIToolCalls(toolCalls []map[string]interface{}) []map[string]interface{} {

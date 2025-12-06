@@ -11,6 +11,7 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/shared/constant"
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 const (
@@ -228,10 +229,32 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 		return anthropic.BetaMessageNewParams{}, fmt.Errorf("anthropic completion request cannot be nil")
 	}
 
-	systemBlocks, chatMessages, err := convertMessagesToAnthropic(req.SystemPrompt, req.Messages, req.EnableCaching, req.CacheTTL)
-	if err != nil {
-		return anthropic.BetaMessageNewParams{}, err
+	// Check if messages have native Anthropic format - if so, use directly for caching
+	hasNativeFormat := len(req.Messages) > 0 && req.Messages[0].NativeFormat != nil && req.Messages[0].NativeProvider == "anthropic"
+	var systemBlocks []anthropic.BetaTextBlockParam
+	var chatMessages []anthropic.BetaMessageParam
+	var err error
+
+	if hasNativeFormat {
+		// Use native format directly to preserve caching metadata
+		logger.Debug("Using native Anthropic message format (%d messages)", len(req.Messages))
+		systemBlocks, chatMessages, err = extractNativeAnthropicMessages(req.Messages)
+		if err != nil {
+			logger.Warn("Failed to extract native messages, falling back to conversion: %v", err)
+			// Fall back to conversion
+			systemBlocks, chatMessages, err = convertMessagesToAnthropic(req.SystemPrompt, req.Messages, req.EnableCaching, req.CacheTTL)
+			if err != nil {
+				return anthropic.BetaMessageNewParams{}, err
+			}
+		}
+	} else {
+		// Convert from unified format
+		systemBlocks, chatMessages, err = convertMessagesToAnthropic(req.SystemPrompt, req.Messages, req.EnableCaching, req.CacheTTL)
+		if err != nil {
+			return anthropic.BetaMessageNewParams{}, err
+		}
 	}
+
 	if len(chatMessages) == 0 {
 		return anthropic.BetaMessageNewParams{}, fmt.Errorf("anthropic completion requires at least one user or assistant message")
 	}
@@ -269,6 +292,48 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 	}
 
 	return params, nil
+}
+
+// extractNativeAnthropicMessages extracts native Anthropic messages from Message objects
+func extractNativeAnthropicMessages(messages []*Message) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {
+	systemBlocks := make([]anthropic.BetaTextBlockParam, 0)
+	chatMessages := make([]anthropic.BetaMessageParam, 0, len(messages))
+
+	for _, msg := range messages {
+		if msg == nil || msg.NativeFormat == nil {
+			continue
+		}
+
+		// Check for system blocks (stored as special map)
+		if m, ok := msg.NativeFormat.(map[string]interface{}); ok {
+			if systemData, isSystem := m["_anthropic_system"]; isSystem {
+				// This is a system block
+				data, err := json.Marshal(systemData)
+				if err == nil {
+					var blocks []anthropic.BetaTextBlockParam
+					if err := json.Unmarshal(data, &blocks); err == nil {
+						systemBlocks = append(systemBlocks, blocks...)
+					}
+				}
+				continue
+			}
+		}
+
+		// Convert native format to BetaMessageParam
+		data, err := json.Marshal(msg.NativeFormat)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to marshal native message: %w", err)
+		}
+
+		var betaMsg anthropic.BetaMessageParam
+		if err := json.Unmarshal(data, &betaMsg); err != nil {
+			return nil, nil, fmt.Errorf("failed to unmarshal to BetaMessageParam: %w", err)
+		}
+
+		chatMessages = append(chatMessages, betaMsg)
+	}
+
+	return systemBlocks, chatMessages, nil
 }
 
 func convertMessagesToAnthropic(systemPrompt string, messages []*Message, enableCaching bool, cacheTTL string) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {

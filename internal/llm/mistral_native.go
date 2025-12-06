@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 const (
@@ -194,7 +195,23 @@ func (c *MistralClient) Stream(ctx context.Context, req *CompletionRequest, call
 }
 
 func (c *MistralClient) buildChatRequest(req *CompletionRequest, stream bool) (*mistralChatRequest, error) {
-	messages := c.convertMessages(req)
+	// Check if we can use native Mistral format
+	hasNativeFormat := len(req.Messages) > 0 && req.Messages[0].NativeFormat != nil && req.Messages[0].NativeProvider == "mistral"
+
+	var messages []mistralChatMessage
+	var err error
+
+	if hasNativeFormat {
+		logger.Debug("Using native Mistral message format (%d messages)", len(req.Messages))
+		messages, err = extractNativeMistralMessages(req.Messages, req.SystemPrompt)
+		if err != nil {
+			logger.Warn("Failed to extract native Mistral messages, falling back to conversion: %v", err)
+			messages = c.convertMessages(req)
+		}
+	} else {
+		messages = c.convertMessages(req)
+	}
+
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("mistral completion requires at least one message")
 	}
@@ -284,6 +301,40 @@ func (c *MistralClient) convertMessages(req *CompletionRequest) []mistralChatMes
 	}
 
 	return messages
+}
+
+// extractNativeMistralMessages extracts native Mistral messages from unified messages
+// Note: System prompt should NOT be added here as it's already included in the native format
+func extractNativeMistralMessages(messages []*Message, systemPrompt string) ([]mistralChatMessage, error) {
+	result := make([]mistralChatMessage, 0, len(messages))
+
+	// Extract native messages (system prompt is already included in native format)
+	for _, msg := range messages {
+		if msg == nil || msg.NativeFormat == nil {
+			return nil, fmt.Errorf("message missing native format")
+		}
+
+		// Type assert to map[string]interface{} (Mistral uses OpenAI-compatible format)
+		nativeMap, ok := msg.NativeFormat.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("native format is not a map")
+		}
+
+		// Marshal and unmarshal to convert to mistralChatMessage
+		data, err := json.Marshal(nativeMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal native message: %w", err)
+		}
+
+		var mistralMsg mistralChatMessage
+		if err := json.Unmarshal(data, &mistralMsg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal to Mistral message: %w", err)
+		}
+
+		result = append(result, mistralMsg)
+	}
+
+	return result, nil
 }
 
 type mistralChatRequest struct {

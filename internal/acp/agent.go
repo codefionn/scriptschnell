@@ -975,6 +975,7 @@ func (a *ScriptschnellAIAgent) processPromptWithStreaming(session *statcodeSessi
 		authCallback,
 		toolCallCallback,
 		toolResultCallback,
+		nil, // OpenRouter usage callback - not used in ACP
 	)
 
 	// Send any remaining text in the buffer after processing completes

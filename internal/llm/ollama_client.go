@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // OllamaClient implements the Client interface for the Ollama REST API.
@@ -164,6 +166,50 @@ func (c *OllamaClient) Stream(ctx context.Context, req *CompletionRequest, callb
 }
 
 func (c *OllamaClient) buildChatRequest(req *CompletionRequest, stream bool) (*ollamaChatRequest, error) {
+	// Check if we can use native Ollama format
+	hasNativeFormat := len(req.Messages) > 0 && req.Messages[0].NativeFormat != nil && req.Messages[0].NativeProvider == "ollama"
+
+	var messages []ollamaChatMessage
+	var systemPrompt string
+	var err error
+
+	if hasNativeFormat {
+		logger.Debug("Using native Ollama message format (%d messages)", len(req.Messages))
+		messages, systemPrompt, err = extractNativeOllamaMessages(req.Messages, req.SystemPrompt)
+		if err != nil {
+			logger.Warn("Failed to extract native Ollama messages, falling back to conversion: %v", err)
+			messages, systemPrompt = convertMessagesToOllamaFromUnified(req)
+		}
+	} else {
+		messages, systemPrompt = convertMessagesToOllamaFromUnified(req)
+	}
+
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("ollama completion requires at least one message")
+	}
+
+	options := make(map[string]interface{})
+	if req.Temperature != 0 {
+		options["temperature"] = req.Temperature
+	}
+	if req.MaxTokens > 0 {
+		options["num_predict"] = req.MaxTokens
+	}
+	if len(options) == 0 {
+		options = nil
+	}
+
+	return &ollamaChatRequest{
+		Model:    c.model,
+		Stream:   stream,
+		System:   systemPrompt,
+		Messages: messages,
+		Tools:    req.Tools,
+		Options:  options,
+	}, nil
+}
+
+func convertMessagesToOllamaFromUnified(req *CompletionRequest) ([]ollamaChatMessage, string) {
 	messages := make([]ollamaChatMessage, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		if msg == nil {
@@ -193,29 +239,55 @@ func (c *OllamaClient) buildChatRequest(req *CompletionRequest, stream bool) (*o
 		messages = append(messages, oMsg)
 	}
 
-	if len(messages) == 0 {
-		return nil, fmt.Errorf("ollama completion requires at least one message")
+	return messages, req.SystemPrompt
+}
+
+// extractNativeOllamaMessages extracts native Ollama messages and system prompt
+// Note: Ollama stores system prompt separately as metadata, not as a message
+func extractNativeOllamaMessages(messages []*Message, fallbackSystemPrompt string) ([]ollamaChatMessage, string, error) {
+	result := make([]ollamaChatMessage, 0, len(messages))
+	systemPrompt := ""
+
+	// Extract native messages and system prompt from metadata
+	for _, msg := range messages {
+		if msg == nil || msg.NativeFormat == nil {
+			return nil, "", fmt.Errorf("message missing native format")
+		}
+
+		// Type assert to map[string]interface{}
+		nativeMap, ok := msg.NativeFormat.(map[string]interface{})
+		if !ok {
+			return nil, "", fmt.Errorf("native format is not a map")
+		}
+
+		// Check for system metadata
+		if sys, isSystem := nativeMap["_ollama_system"]; isSystem {
+			if sysStr, ok := sys.(string); ok {
+				systemPrompt = sysStr
+			}
+			continue
+		}
+
+		// Marshal and unmarshal to convert to ollamaChatMessage
+		data, err := json.Marshal(nativeMap)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to marshal native message: %w", err)
+		}
+
+		var ollamaMsg ollamaChatMessage
+		if err := json.Unmarshal(data, &ollamaMsg); err != nil {
+			return nil, "", fmt.Errorf("failed to unmarshal to Ollama message: %w", err)
+		}
+
+		result = append(result, ollamaMsg)
 	}
 
-	options := make(map[string]interface{})
-	if req.Temperature != 0 {
-		options["temperature"] = req.Temperature
-	}
-	if req.MaxTokens > 0 {
-		options["num_predict"] = req.MaxTokens
-	}
-	if len(options) == 0 {
-		options = nil
+	// Use fallback if no system prompt in native format
+	if systemPrompt == "" {
+		systemPrompt = fallbackSystemPrompt
 	}
 
-	return &ollamaChatRequest{
-		Model:    c.model,
-		Stream:   stream,
-		System:   req.SystemPrompt,
-		Messages: messages,
-		Tools:    req.Tools,
-		Options:  options,
-	}, nil
+	return result, systemPrompt, nil
 }
 
 func (c *OllamaClient) newChatRequest(ctx context.Context, payload *ollamaChatRequest) (*http.Request, error) {

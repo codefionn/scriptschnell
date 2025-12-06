@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"time"
 )
 
 // Message represents a chat message
@@ -11,6 +12,12 @@ type Message struct {
 	ToolCalls []map[string]interface{} `json:"tool_calls,omitempty"`
 	ToolID    string                   `json:"tool_id,omitempty"`
 	ToolName  string                   `json:"tool_name,omitempty"` // Name of the tool for tool responses
+
+	// Native format storage (for prompt caching)
+	NativeFormat      interface{} `json:"native_format,omitempty"`       // Provider-specific message format
+	NativeProvider    string      `json:"native_provider,omitempty"`     // e.g., "anthropic", "openai"
+	NativeModelFamily string      `json:"native_model_family,omitempty"` // e.g., "claude-3", "gpt-4"
+	NativeTimestamp   time.Time   `json:"native_timestamp,omitempty"`    // When native format was created
 }
 
 // CompletionRequest represents a completion request
@@ -29,6 +36,7 @@ type CompletionResponse struct {
 	Content    string                   `json:"content"`
 	ToolCalls  []map[string]interface{} `json:"tool_calls,omitempty"`
 	StopReason string                   `json:"stop_reason"`
+	Usage      map[string]interface{}   `json:"usage,omitempty"` // Provider-specific usage data (tokens, cost, etc.)
 }
 
 // Client is the interface for LLM clients

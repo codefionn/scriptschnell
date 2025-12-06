@@ -814,7 +814,7 @@ func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
 
 	// Process through orchestrator with streaming (in background)
 	go func() {
-		if err := ch.orchestrator.ProcessPrompt(ch.ctx, initPrompt, ch.progressCallback, ch.contextCallback, nil, nil, nil); err != nil {
+		if err := ch.orchestrator.ProcessPrompt(ch.ctx, initPrompt, ch.progressCallback, ch.contextCallback, nil, nil, nil, nil); err != nil {
 			// Error will be handled by orchestrator's error handling
 			// Clear status on error
 			dispatch(progress.Update{Message: "", Mode: progress.ReportJustStatus, Ephemeral: true})

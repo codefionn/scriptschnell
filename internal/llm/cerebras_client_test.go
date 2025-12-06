@@ -113,3 +113,73 @@ func TestConvertCerebrasToolCalls(t *testing.T) {
 		t.Fatalf("unexpected function payload: %#v", fn)
 	}
 }
+
+func TestConvertMessagesToCerebras_NativeFormat(t *testing.T) {
+	// Create messages with native Cerebras format
+	req := &CompletionRequest{
+		SystemPrompt: "Be helpful",
+		Messages: []*Message{
+			{
+				Role:           "user",
+				Content:        "Hello",
+				NativeFormat:   map[string]interface{}{"role": "system", "content": "Be helpful"},
+				NativeProvider: "cerebras",
+			},
+			{
+				Role:           "user",
+				Content:        "Hello",
+				NativeFormat:   map[string]interface{}{"role": "user", "content": "Hello"},
+				NativeProvider: "cerebras",
+			},
+		},
+	}
+
+	msgs, err := convertMessagesToCerebras(req)
+	if err != nil {
+		t.Fatalf("convertMessagesToCerebras returned error: %v", err)
+	}
+
+	// Should have 2 messages: system (from native) + user (from native)
+	// System prompt should NOT be duplicated
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (no duplicate system prompt), got %d", len(msgs))
+	}
+
+	// First message should be system from native format
+	if msgs[0].Role != "system" || msgs[0].Content != "Be helpful" {
+		t.Errorf("first message should be system from native format, got: role=%s content=%s", msgs[0].Role, msgs[0].Content)
+	}
+
+	// Second message should be user from native format
+	if msgs[1].Role != "user" || msgs[1].Content != "Hello" {
+		t.Errorf("second message should be user from native format, got: role=%s content=%s", msgs[1].Role, msgs[1].Content)
+	}
+}
+
+func TestConvertMessagesToCerebras_FallbackOnMissingNative(t *testing.T) {
+	// Create messages with native format but missing NativeFormat field
+	req := &CompletionRequest{
+		SystemPrompt: "Be helpful",
+		Messages: []*Message{
+			{
+				Role:           "user",
+				Content:        "Hello",
+				NativeProvider: "cerebras", // Has provider but no NativeFormat
+			},
+		},
+	}
+
+	msgs, err := convertMessagesToCerebras(req)
+	if err != nil {
+		t.Fatalf("convertMessagesToCerebras returned error: %v", err)
+	}
+
+	// Should fall back to unified conversion
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (system + user from fallback), got %d", len(msgs))
+	}
+
+	if msgs[0].Role != "system" || msgs[0].Content != "Be helpful" {
+		t.Errorf("fallback should include system prompt, got: role=%s content=%s", msgs[0].Role, msgs[0].Content)
+	}
+}

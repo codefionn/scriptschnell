@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 const cerebrasAPIBaseURL = "https://api.cerebras.ai/v1"
@@ -227,6 +229,23 @@ func convertMessagesToCerebras(req *CompletionRequest) ([]cerebrasChatMessage, e
 		return nil, fmt.Errorf("cerebras completion request cannot be nil")
 	}
 
+	// Check if we can use native Cerebras format
+	hasNativeFormat := len(req.Messages) > 0 && req.Messages[0].NativeFormat != nil && req.Messages[0].NativeProvider == "cerebras"
+
+	if hasNativeFormat {
+		logger.Debug("Using native Cerebras message format (%d messages)", len(req.Messages))
+		messages, err := extractNativeCerebrasMessages(req.Messages, req.SystemPrompt)
+		if err != nil {
+			logger.Warn("Failed to extract native Cerebras messages, falling back to conversion: %v", err)
+			return convertMessagesToCerebrasFromUnified(req)
+		}
+		return messages, nil
+	}
+
+	return convertMessagesToCerebrasFromUnified(req)
+}
+
+func convertMessagesToCerebrasFromUnified(req *CompletionRequest) ([]cerebrasChatMessage, error) {
 	messages := make([]cerebrasChatMessage, 0, len(req.Messages)+1)
 
 	if system := strings.TrimSpace(req.SystemPrompt); system != "" {
@@ -269,6 +288,40 @@ func convertMessagesToCerebras(req *CompletionRequest) ([]cerebrasChatMessage, e
 	}
 
 	return messages, nil
+}
+
+// extractNativeCerebrasMessages extracts native Cerebras messages from unified messages
+// Note: System prompt should NOT be added here as it's already included in the native format
+func extractNativeCerebrasMessages(messages []*Message, systemPrompt string) ([]cerebrasChatMessage, error) {
+	result := make([]cerebrasChatMessage, 0, len(messages))
+
+	// Extract native messages (system prompt is already included in native format)
+	for _, msg := range messages {
+		if msg == nil || msg.NativeFormat == nil {
+			return nil, fmt.Errorf("message missing native format")
+		}
+
+		// Type assert to map[string]interface{} (Cerebras uses OpenAI-compatible format)
+		nativeMap, ok := msg.NativeFormat.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("native format is not a map")
+		}
+
+		// Marshal and unmarshal to convert to cerebrasChatMessage
+		data, err := json.Marshal(nativeMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal native message: %w", err)
+		}
+
+		var cerebrasMsg cerebrasChatMessage
+		if err := json.Unmarshal(data, &cerebrasMsg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal to Cerebras message: %w", err)
+		}
+
+		result = append(result, cerebrasMsg)
+	}
+
+	return result, nil
 }
 
 func convertCerebrasToolCalls(toolCalls []cerebrasToolCall) []map[string]interface{} {

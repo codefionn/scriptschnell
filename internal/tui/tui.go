@@ -149,6 +149,7 @@ type Model struct {
 	contextFreePercent   int
 	contextWindow        int
 	openRouterUsage      map[string]interface{} // OpenRouter usage data (tokens, cost, etc.)
+	thinkingTokens       int                    // Current thinking/reasoning tokens during generation
 	sanitizeState        ansiSanitizeState
 	showTodoPanel        bool
 	todoClient           *tools.TodoActorClient
@@ -1277,6 +1278,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CompleteMsg:
 		m.generating = false
 		m.processingStatus = ""
+		m.thinkingTokens = 0 // Reset thinking tokens when generation completes
 		if !m.animationsDisabled {
 			m.spinnerActive = false
 		}
@@ -1316,7 +1318,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case OpenRouterUsageMsg:
 		m.processOpenRouterUsage(msg.Usage)
 		return m, baseCmd
-		return m, baseCmd
 
 	case ErrMsg:
 		if errors.Is(error(msg), ErrQuitRequested) {
@@ -1340,6 +1341,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) startPrompt(input string) tea.Cmd {
 	m.processingStatus = ""
+	m.thinkingTokens = 0 // Reset thinking tokens for new prompt
 	m.addMessage("You", input)
 	m.generating = true
 	var cmds []tea.Cmd
@@ -1377,6 +1379,39 @@ func (m *Model) processNextQueuedPrompt() tea.Cmd {
 func (m *Model) processOpenRouterUsage(usage map[string]interface{}) {
 	logger.Debug("OpenRouter usage data received: %v", usage)
 	m.openRouterUsage = usage
+
+	// Extract thinking/reasoning tokens if available
+	m.thinkingTokens = extractThinkingTokens(usage)
+	if m.thinkingTokens > 0 {
+		logger.Debug("Extracted thinking tokens: %d", m.thinkingTokens)
+	}
+}
+
+// extractThinkingTokens extracts thinking/reasoning tokens from usage data
+// Supports multiple provider formats (OpenAI, Anthropic, etc.)
+func extractThinkingTokens(usage map[string]interface{}) int {
+	if usage == nil {
+		return 0
+	}
+
+	// OpenAI format: completion_tokens_details.reasoning_tokens
+	if details, ok := usage["completion_tokens_details"].(map[string]interface{}); ok {
+		if reasoningTokens, ok := details["reasoning_tokens"].(float64); ok {
+			return int(reasoningTokens)
+		}
+	}
+
+	// Alternative format: reasoning_tokens at top level
+	if reasoningTokens, ok := usage["reasoning_tokens"].(float64); ok {
+		return int(reasoningTokens)
+	}
+
+	// Anthropic extended thinking format (if available)
+	if thinkingTokens, ok := usage["thinking_tokens"].(float64); ok {
+		return int(thinkingTokens)
+	}
+
+	return 0
 }
 
 func formatQueuedPreview(text string) string {
@@ -1436,16 +1471,24 @@ func (m *Model) View() string {
 
 	footerLeft := ""
 	if m.processingStatus != "" {
+		statusText := m.processingStatus
+		if m.thinkingTokens > 0 {
+			statusText = fmt.Sprintf("%s (%d tokens)", statusText, m.thinkingTokens)
+		}
 		if !m.animationsDisabled && m.spinnerActive {
-			footerLeft = statusStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), m.processingStatus))
+			footerLeft = statusStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), statusText))
 		} else {
-			footerLeft = statusStyle.Render(fmt.Sprintf("⚙️  %s", m.processingStatus))
+			footerLeft = statusStyle.Render(fmt.Sprintf("⚙️  %s", statusText))
 		}
 	} else if m.generating {
+		generatingText := "Generating..."
+		if m.thinkingTokens > 0 {
+			generatingText = fmt.Sprintf("Generating... (%d thinking tokens)", m.thinkingTokens)
+		}
 		if !m.animationsDisabled && m.spinnerActive {
-			footerLeft = statusStyle.Render(fmt.Sprintf("%s Generating...", m.spinner.View()))
+			footerLeft = statusStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), generatingText))
 		} else {
-			footerLeft = statusStyle.Render("⏳ Generating...")
+			footerLeft = statusStyle.Render(fmt.Sprintf("⏳ %s", generatingText))
 		}
 	} else if m.err != nil {
 		if m.errVisibleUntil.IsZero() || time.Now().Before(m.errVisibleUntil) {

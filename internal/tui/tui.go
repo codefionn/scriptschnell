@@ -23,6 +23,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/syntax"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"golang.org/x/term"
 )
@@ -137,6 +138,7 @@ type Model struct {
 	rendererCache        map[int]*glamour.TermRenderer // Cache renderers by width
 	rendererInitInFlight bool                          // Track if async init is running
 	rendererInitMutex    sync.Mutex                    // Protect cache and flag
+	highlighter          *syntax.Highlighter           // Syntax highlighter for code blocks
 	contextFile          string
 	suggestions          []string
 	selectedSuggIndex    int
@@ -255,6 +257,9 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		rendererCache[80] = renderer
 	}
 
+	// Initialize syntax highlighter
+	highlighter := syntax.NewHighlighter()
+
 	m := &Model{
 		textarea:           ta,
 		viewport:           vp,
@@ -263,6 +268,7 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		contextFile:        contextFile,
 		renderer:           renderer,
 		rendererCache:      rendererCache,
+		highlighter:        highlighter,
 		spinner:            sp,
 		animationsDisabled: disableAnimations,
 		contextFreePercent: 100,
@@ -1857,16 +1863,6 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 		realToolName = strings.TrimPrefix(toolName, "Planning: ")
 	}
 
-	// Format parameters as JSON for display
-	var paramsBuf strings.Builder
-	if len(parameters) > 0 {
-		// Format parameters in a more readable way
-		paramsBuf.WriteString("\n**Parameters:**\n")
-		for k, v := range parameters {
-			paramsBuf.WriteString(fmt.Sprintf("  • %s: %v\n", k, v))
-		}
-	}
-
 	// Create more descriptive content based on tool type
 	var content string
 	switch realToolName {
@@ -1894,6 +1890,30 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 		} else {
 			content = "💻 **Executing command**"
 		}
+	case tools.ToolNameGoSandbox:
+		content = "🔧 **Running Go sandbox**"
+		if code, ok := parameters["code"].(string); ok {
+			// Show the code in a code block
+			content = "🔧 **Running Go sandbox:**\n```go\n" + code + "\n```"
+		}
+		// Add timeout info if specified
+		if timeout, ok := parameters["timeout"]; ok {
+			if timeoutInt, ok := timeout.(float64); ok && timeoutInt != 30 {
+				content += fmt.Sprintf("\n**Timeout:** %d seconds", int(timeoutInt))
+			}
+		}
+		// Add libraries info if specified
+		if libs, ok := parameters["libraries"].([]interface{}); ok && len(libs) > 0 {
+			libStrs := make([]string, len(libs))
+			for i, lib := range libs {
+				if libStr, ok := lib.(string); ok {
+					libStrs[i] = libStr
+				}
+			}
+			if len(libStrs) > 0 {
+				content += fmt.Sprintf("\n**Libraries:** %s", strings.Join(libStrs, ", "))
+			}
+		}
 	default:
 		content = fmt.Sprintf("🔧 **Calling tool:** `%s`", realToolName)
 	}
@@ -1901,8 +1921,6 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 	if isPlanning {
 		content = "📋 **Planning:** " + content
 	}
-
-	content += paramsBuf.String()
 
 	m.addMessage("Tool", content)
 }
@@ -2407,9 +2425,9 @@ func (m *Model) truncateToolResult(result string) string {
 
 	// If no paragraphs, split by single newlines and take first few lines
 	lines := strings.Split(result, "\n")
-	if len(lines) > 3 {
-		// Take first 3 lines
-		firstLines := strings.Join(lines[:3], "\n")
+	if len(lines) > 10 {
+		// Take first 10 lines
+		firstLines := strings.Join(lines[:10], "\n")
 		if len(firstLines) > 300 {
 			return firstLines[:297] + "..."
 		}
@@ -2454,10 +2472,16 @@ func (m *Model) updateViewport() {
 		rendered.WriteString(header)
 		rendered.WriteString("\n")
 
-		// Render content with markdown for Assistant messages only
-		if msg.role == "Assistant" && m.renderer != nil && msg.content != "" {
+		// Render content with markdown for Assistant and Tool messages
+		if (msg.role == "Assistant" || msg.role == "Tool") && m.renderer != nil && msg.content != "" {
+			// Apply syntax highlighting to code blocks before markdown rendering
+			contentToRender := msg.content
+			if m.highlighter != nil {
+				contentToRender = m.highlighter.HighlightMarkdownCodeBlocks(msg.content)
+			}
+
 			// Render markdown
-			if mdRendered, err := m.renderer.Render(msg.content); err == nil {
+			if mdRendered, err := m.renderer.Render(contentToRender); err == nil {
 				rendered.WriteString(strings.TrimRight(mdRendered, "\n"))
 			} else {
 				// Fallback to plain text if rendering fails

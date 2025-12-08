@@ -83,6 +83,8 @@ When running in ACP mode, scriptschnell communicates via stdio using the ACP pro
 - [ ] Weird kimi k2 context window problems
 - [ ] Deadlock problem when model used invalid tool call (the session cannot continue)
 - [ ] Multi session support in the tui
+- [ ] Anthropic Prompt Caching
+- [ ] Auto session saving
 
 ## Goals
 

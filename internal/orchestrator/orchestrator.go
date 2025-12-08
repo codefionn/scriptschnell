@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +39,9 @@ type ToolResultCallback func(toolName, toolID, result, errorMsg string) error
 type ProgressCallback = progress.Callback
 type ProgressUpdate = progress.Update
 
+// UserInputCallback is called when the planning agent needs user input
+type UserInputCallback = planning.UserInputCallback
+
 // Orchestrator manages the LLM interaction
 type Orchestrator struct {
 	fs                    fs.FileSystem
@@ -67,6 +72,8 @@ type Orchestrator struct {
 	toolExecutorCancel    context.CancelFunc
 	shellActorClient      *actor.ShellActorClient
 	shellActorCancel      context.CancelFunc
+	sessionStorageRef     *actor.ActorRef
+	sessionStorageCancel  context.CancelFunc
 	activeShellMu         sync.Mutex
 	activeShellChan       chan struct{}
 	loopDetector          *loopdetector.LoopDetector
@@ -84,6 +91,7 @@ type Orchestrator struct {
 	planningAgent         *planning.PlanningAgent
 	planningAgentCancel   context.CancelFunc
 	featureFlags          *features.FeatureFlags
+	userInputCb           UserInputCallback
 }
 
 const (
@@ -91,6 +99,32 @@ const (
 	errorRetryMaxAttempts   = 5
 	preconnectThrottle      = 2 * time.Second
 )
+
+var toolCallValidationRegex = regexp.MustCompile(`(?i)tool call validation failed.*?missing required parameter ['"]?([^'"]+)['"]?.*?in ['"]?([^'"]+)['"]?(?: function call)?`)
+var toolNotInRequestRegex = regexp.MustCompile(`(?i)tool call validation failed.*?attempted to call tool ['"]?([^'"]+)['"]?.*?which was not in request\.tools`)
+
+type toolCallValidationError struct {
+	toolName     string
+	missingParam string
+	inner        error
+}
+
+func (e *toolCallValidationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.inner != nil {
+		return fmt.Sprintf("tool call validation failed for %s: missing %s: %v", e.toolName, e.missingParam, e.inner)
+	}
+	return fmt.Sprintf("tool call validation failed for %s: missing %s", e.toolName, e.missingParam)
+}
+
+func (e *toolCallValidationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.inner
+}
 
 type toolExecutionFunc func(ctx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error)
 
@@ -228,6 +262,35 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	logger.Debug("Shell actor spawned")
 	orch.shellActorClient = actor.NewShellActorClient(shellRef)
 	orch.shellActorCancel = shellCancel
+
+	// Set up session storage actor
+	configFunc := func() *config.AutoSaveConfig {
+		return &orch.config.AutoSave
+	}
+	sessionStorageActor, err := actor.NewSessionStorageActorWithConfig("session_storage", configFunc)
+	if err != nil {
+		shellCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to create session storage actor: %v", err)
+		return nil, fmt.Errorf("failed to create session storage actor: %w", err)
+	}
+	// Create managed context for session storage actor (like other actors)
+	sessionStorageCtx, sessionStorageCancel := context.WithCancel(context.Background())
+	sessionStorageRef, err := orch.actorSystem.Spawn(sessionStorageCtx, "session_storage", sessionStorageActor, 16)
+	if err != nil {
+		sessionStorageCancel()
+		shellCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start session storage actor: %v", err)
+		return nil, fmt.Errorf("failed to start session storage actor: %w", err)
+	}
+	logger.Debug("Session storage actor spawned")
+	orch.sessionStorageRef = sessionStorageRef
+	orch.sessionStorageCancel = sessionStorageCancel
 
 	// Set up error judge actor with summarize client
 	errorJudgeCtx, errorJudgeCancel := context.WithCancel(context.Background())
@@ -418,6 +481,50 @@ func (o *Orchestrator) initializePlanningAgent() {
 	logger.Debug("Planning agent initialized")
 }
 
+const (
+	cacheControlTokenInterval  = 5000
+	cacheControlMaxBreakpoints = 4
+)
+
+func markCacheControlBreakpoints(messages []*llm.Message, intervalTokens, maxBreakpoints int) {
+	if intervalTokens <= 0 || maxBreakpoints <= 0 || len(messages) == 0 {
+		return
+	}
+
+	var (
+		cumulativeTokens int
+		candidates       []int
+	)
+
+	for idx, msg := range messages {
+		if msg == nil {
+			continue
+		}
+
+		cumulativeTokens += llm.EstimateTokenCountForMessage(msg)
+		if cumulativeTokens >= intervalTokens {
+			candidates = append(candidates, idx)
+			cumulativeTokens = 0
+		}
+	}
+
+	if len(candidates) > maxBreakpoints {
+		candidates = candidates[len(candidates)-maxBreakpoints:]
+	}
+
+	for _, msg := range messages {
+		if msg != nil {
+			msg.CacheControl = false
+		}
+	}
+
+	for _, idx := range candidates {
+		if idx >= 0 && idx < len(messages) {
+			messages[idx].CacheControl = true
+		}
+	}
+}
+
 // toolSpec holds tool registration information
 // Uses ToolSpec (static descriptor) + ToolFactory (executor factory) pattern
 type toolSpec struct {
@@ -503,6 +610,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	// Shell tooling
 	if o.shouldUseShellTool(modelFamily) {
 		addSpec(&tools.ShellToolSpec{}, true, tools.NewShellToolFactory(o.session, o.workingDir), false, "")
+		addSpec(&tools.LsToolSpec{}, true, tools.NewLsToolFactory(o.workingDir), false, "")
 	}
 
 	addSpec(&tools.StatusProgramToolSpec{}, true, tools.NewStatusProgramToolFactory(o.session), false, "")
@@ -1186,9 +1294,18 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 	}
 
 	var questionsAsked []string
-	userInputCb := func(question string) (string, error) {
-		questionsAsked = append(questionsAsked, question)
-		return fmt.Sprintf("Question noted: %s (Please answer this question)", question), nil
+	var userInputCb UserInputCallback
+	if o.userInputCb != nil {
+		userInputCb = func(question string) (string, error) {
+			questionsAsked = append(questionsAsked, question)
+			return o.userInputCb(question)
+		}
+	} else {
+		// Fallback for when no callback is set
+		userInputCb = func(question string) (string, error) {
+			questionsAsked = append(questionsAsked, question)
+			return fmt.Sprintf("Question noted: %s (Please answer this question)", question), nil
+		}
 	}
 
 	// Set planning active before starting
@@ -1293,6 +1410,17 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		Role:    "user",
 		Content: prompt,
 	})
+	
+	// Auto-save the session if enabled
+	if o.config.AutoSave.Enabled {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := o.SaveCurrentSession(ctx); err != nil {
+				logger.Warn("Failed to auto-save session: %v", err)
+			}
+		}()
+	}
 
 	// Reset loop detector for new prompt
 	o.loopDetector.Reset()
@@ -1348,8 +1476,22 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 
 		// Convert session messages to LLM format (preserving native format)
 		sessionMessages := o.session.GetMessages()
-		llmMessages := make([]*llm.Message, len(sessionMessages))
-		for i, msg := range sessionMessages {
+		requestMessages := sessionMessages
+		if len(requestMessages) == 0 {
+			requestMessages = []*session.Message{
+				{
+					Role:    "system",
+					Content: systemPrompt,
+				},
+				{
+					Role:    "user",
+					Content: prompt,
+				},
+			}
+		}
+
+		llmMessages := make([]*llm.Message, len(requestMessages))
+		for i, msg := range requestMessages {
 			llmMessages[i] = &llm.Message{
 				Role:              msg.Role,
 				Content:           msg.Content,
@@ -1363,7 +1505,11 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 			}
 		}
 
-		totalTokens, perMessageTokens, _ := estimateContextTokens(modelID, systemPrompt, sessionMessages)
+		if o.config != nil && o.config.EnablePromptCache {
+			markCacheControlBreakpoints(llmMessages, cacheControlTokenInterval, cacheControlMaxBreakpoints)
+		}
+
+		totalTokens, perMessageTokens, _ := estimateContextTokens(modelID, systemPrompt, requestMessages)
 		o.dispatchContextUsage(modelID, totalTokens, contextCallback)
 		o.maybeCompactContext(modelID, systemPrompt, sessionMessages, perMessageTokens, totalTokens, progressCallback, contextCallback)
 
@@ -1394,8 +1540,22 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		}
 
 		// Get completion with error retry logic
+		var validationErr *toolCallValidationError
 		response, err := o.completeWithRetry(ctx, req, progressCallback)
 		if err != nil {
+			if errors.As(err, &validationErr) {
+				msg := fmt.Sprintf("Tool call validation failed for '%s': missing required parameter '%s'. This client cannot populate the value automatically, so please include it in your next tool call.",
+					validationErr.toolName, validationErr.missingParam)
+				logger.Warn("Tool call validation error: %v", validationErr)
+				o.session.AddMessage(&session.Message{
+					Role:    "user",
+					Content: msg,
+				})
+				o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
+				sendStream(fmt.Sprintf("\n⚠️ %s\n", msg), false)
+				sendStatus("Waiting for tool call validation fix...")
+				continue
+			}
 			return fmt.Errorf("completion failed: %w", err)
 		}
 
@@ -1454,6 +1614,17 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 
 		o.session.AddMessage(assistantMsg)
 		o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
+		
+		// Auto-save the session if enabled
+		if o.config.AutoSave.Enabled {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := o.SaveCurrentSession(ctx); err != nil {
+					logger.Warn("Failed to auto-save session: %v", err)
+				}
+			}()
+		}
 
 		// Stream the content to UI if present
 		if response.Content != "" {
@@ -1787,6 +1958,43 @@ func (o *Orchestrator) processToolCalls(
 	return nil
 }
 
+func parseToolCallValidationError(err error) *toolCallValidationError {
+	if err == nil {
+		return nil
+	}
+
+	errMsg := err.Error()
+
+	// Case 1: Missing required parameter in tool call
+	matches := toolCallValidationRegex.FindStringSubmatch(errMsg)
+	if len(matches) >= 3 {
+		missing := strings.Trim(matches[1], `"' `)
+		toolName := strings.Trim(matches[2], `"' `)
+		if missing != "" && toolName != "" {
+			return &toolCallValidationError{
+				toolName:     toolName,
+				missingParam: missing,
+				inner:        err,
+			}
+		}
+	}
+
+	// Case 2: Tool not available in request.tools (like shell tool)
+	matches = toolNotInRequestRegex.FindStringSubmatch(errMsg)
+	if len(matches) >= 2 {
+		toolName := strings.Trim(matches[1], `"' `)
+		if toolName != "" {
+			return &toolCallValidationError{
+				toolName:     toolName,
+				missingParam: fmt.Sprintf("tool '%s' is not available (not in request.tools)", toolName),
+				inner:        err,
+			}
+		}
+	}
+
+	return nil
+}
+
 // completeWithRetry wraps LLM completion with error retry logic
 func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.CompletionRequest, progressCallback progress.Callback) (*llm.CompletionResponse, error) {
 	modelID := o.providerMgr.GetOrchestrationModel()
@@ -1817,6 +2025,10 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 
 		// Log the error
 		logger.Warn("LLM completion error (attempt %d/%d): %v", attempt, errorRetryMaxAttempts, err)
+
+		if validationErr := parseToolCallValidationError(err); validationErr != nil {
+			return nil, validationErr
+		}
 
 		// Last attempt - return the error
 		if attempt >= errorRetryMaxAttempts {
@@ -2423,6 +2635,14 @@ func (o *Orchestrator) Close() error {
 		o.planningAgentCancel()
 	}
 
+	if o.shellActorCancel != nil {
+		o.shellActorCancel()
+	}
+
+	if o.sessionStorageCancel != nil {
+		o.sessionStorageCancel()
+	}
+
 	var firstErr error
 
 	if o.planningAgent != nil {
@@ -2708,4 +2928,65 @@ func (o *Orchestrator) getOrBuildSystemPrompt(ctx context.Context, modelID strin
 	logger.Info("System prompt built and cached for session (%d chars)", len(systemPrompt))
 
 	return systemPrompt, nil
+}
+
+// GetSession returns the current session
+func (o *Orchestrator) GetSession() *session.Session {
+	return o.session
+}
+
+// SetSession replaces the current session with a new one
+func (o *Orchestrator) SetSession(newSession *session.Session) {
+	// Ensure the session has the same working directory
+	newSession.WorkingDir = o.workingDir
+
+	// Replace the session
+	o.session = newSession
+
+	// Rebuild tools to ensure they use the new session
+	// This is important so tools like read_file respect the new session's file tracking
+	err := o.rebuildSessionTools()
+	if err != nil {
+		logger.Warn("Failed to rebuild session tools after session replacement: %v", err)
+	}
+}
+
+// SaveCurrentSession saves the current session to persistent storage
+func (o *Orchestrator) SaveCurrentSession(ctx context.Context) error {
+	if o.session == nil {
+		return fmt.Errorf("no active session to save")
+	}
+	if o.sessionStorageRef == nil {
+		return fmt.Errorf("session storage not available")
+	}
+
+	sessionName := actor.GenerateSessionName("")
+	
+	err := actor.SaveSessionViaActor(ctx, o.sessionStorageRef, o.session, sessionName)
+	if err != nil {
+		return fmt.Errorf("failed to save session: %w", err)
+	}
+
+	logger.Debug("Session saved successfully: %s", o.session.ID)
+	return nil
+}
+
+// SetUserInputCallback sets the callback for user input during planning
+func (o *Orchestrator) SetUserInputCallback(callback UserInputCallback) {
+	o.userInputCb = callback
+}
+
+// rebuildSessionTools rebuilds tools that depend on the session
+func (o *Orchestrator) rebuildSessionTools() error {
+	// Rebuild all tools to ensure they use the new session
+	errs := o.rebuildTools(true)
+	if len(errs) > 0 {
+		return fmt.Errorf("some tools failed to rebuild: %v", errs)
+	}
+	return nil
+}
+
+// GetActor returns an actor reference by name
+func (o *Orchestrator) GetActor(name string) (*actor.ActorRef, bool) {
+	return o.actorSystem.Get(name)
 }

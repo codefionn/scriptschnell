@@ -10,6 +10,7 @@ import (
 
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
+	"github.com/codefionn/scriptschnell/internal/project"
 )
 
 const AgentsFileName = "AGENTS.md"
@@ -27,15 +28,17 @@ var defaultToolDescriptions = []string{
 }
 
 type systemPromptData struct {
-	WorkingDir     string
-	Files          []string
-	ProjectContext string
-	ModelSpecific  string
-	Tools          []string
-	IsCLIMode      bool
-	OS             string
-	CurrentDate    string
-	HasWebSearch   bool
+	WorkingDir       string
+	Files            []string
+	ProjectContext   string
+	ModelSpecific    string
+	Tools            []string
+	IsCLIMode        bool
+	OS               string
+	CurrentDate      string
+	HasWebSearch     bool
+	ProjectLanguage  string
+	ProjectFramework string
 }
 
 // PromptBuilder builds system prompts for the LLM
@@ -70,16 +73,25 @@ func (pb *PromptBuilder) BuildSystemPrompt(ctx context.Context, modelName string
 		tools = append(tools, "web_search: Search the web for up-to-date information using configured search provider.")
 	}
 
+	// Detect project language/framework
+	projectLanguage, projectFramework, err := pb.projectLanguageContext(ctx)
+	if err != nil {
+		projectLanguage = "Unknown"
+		projectFramework = ""
+	}
+
 	data := systemPromptData{
-		WorkingDir:     pb.workingDir,
-		Files:          files,
-		ProjectContext: pb.projectSpecificContext(ctx),
-		ModelSpecific:  pb.modelSpecificPrompt(modelName),
-		Tools:          tools,
-		IsCLIMode:      cliMode,
-		OS:             runtime.GOOS,
-		CurrentDate:    time.Now().Format("2006-01-02"),
-		HasWebSearch:   hasWebSearch,
+		WorkingDir:       pb.workingDir,
+		Files:            files,
+		ProjectContext:   pb.projectSpecificContext(ctx),
+		ModelSpecific:    pb.modelSpecificPrompt(modelName),
+		Tools:            tools,
+		IsCLIMode:        cliMode,
+		OS:               runtime.GOOS,
+		CurrentDate:      time.Now().Format("2006-01-02"),
+		HasWebSearch:     hasWebSearch,
+		ProjectLanguage:  projectLanguage,
+		ProjectFramework: projectFramework,
 	}
 
 	var buf bytes.Buffer
@@ -88,6 +100,22 @@ func (pb *PromptBuilder) BuildSystemPrompt(ctx context.Context, modelName string
 	}
 
 	return buf.String(), nil
+}
+
+func (pb *PromptBuilder) projectLanguageContext(ctx context.Context) (string, string, error) {
+	detector := project.NewDetector(pb.workingDir)
+	projectTypes, err := detector.Detect(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
+	if len(projectTypes) == 0 {
+		return "Unknown", "", nil
+	}
+
+	// Return the highest confidence project type
+	bestMatch := projectTypes[0]
+	return bestMatch.Name, bestMatch.Description, nil
 }
 
 func (pb *PromptBuilder) projectSpecificContext(ctx context.Context) string {

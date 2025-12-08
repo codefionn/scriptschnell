@@ -14,6 +14,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/project"
 	"github.com/codefionn/scriptschnell/internal/session"
 	realtools "github.com/codefionn/scriptschnell/internal/tools"
 )
@@ -159,6 +160,7 @@ func (p *PlanningAgent) resetToolsLocked(extraTools []PlanningTool) {
 
 	// Register planning-specific tools
 	p.toolRegistry.Register(NewAskUserTool())
+	p.toolRegistry.Register(NewAskUserMultipleTool())
 
 	// Register real tools via adapter
 	p.toolRegistry.Register(NewRealToolAdapter(
@@ -310,25 +312,31 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 	// The message prefix (initial user messages + context) must remain immutable
 	// throughout the agent's lifecycle for Anthropic's prompt caching to work.
 	messages := make([]*llm.Message, 0, 4)
-	messages = append(messages, &llm.Message{
-		Role:    "user",
-		Content: fmt.Sprintf("Create a plan for: %s", req.Objective),
-	})
+	var prefixMessage *llm.Message
+	addPrefixMessage := func(content string) {
+		msg := &llm.Message{
+			Role:    "user",
+			Content: content,
+		}
+		messages = append(messages, msg)
+		prefixMessage = msg
+	}
+
+	// Build the immutable prefix that Anthropic can cache.
+	addPrefixMessage(fmt.Sprintf("Create a plan for: %s", req.Objective))
 
 	// Add context if provided - MUST be added before the loop starts
 	if req.Context != "" {
-		messages = append(messages, &llm.Message{
-			Role:    "user",
-			Content: fmt.Sprintf("Additional context: %s", req.Context),
-		})
+		addPrefixMessage(fmt.Sprintf("Additional context: %s", req.Context))
 	}
 
 	// Add context file contents if provided - MUST be added before the loop starts
 	if ctxFiles := p.collectContextFiles(ctx, req.ContextFiles); ctxFiles != "" {
-		messages = append(messages, &llm.Message{
-			Role:    "user",
-			Content: ctxFiles,
-		})
+		addPrefixMessage(ctxFiles)
+	}
+
+	if prefixMessage != nil {
+		prefixMessage.CacheControl = true
 	}
 
 	maxIterations := 96 // Prevent infinite loops
@@ -553,6 +561,53 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 					}
 				}()
 
+			case "ask_user_multiple":
+				askUserMu.Lock()
+				func() {
+					defer askUserMu.Unlock()
+
+					if !req.AllowQuestions {
+						toolResult = "User questions are not allowed for this planning request"
+					} else if userInputCb == nil {
+						toolResult = "No user input callback available"
+						res.needsInput = true
+					} else if req.MaxQuestions > 0 && (currentQuestionsAsked+questionsAskedInBatch) >= req.MaxQuestions {
+						toolResult = "Maximum number of questions reached, cannot ask more questions"
+						res.needsInput = true
+					} else {
+						questions, _ := args["questions"].([]interface{})
+						if len(questions) == 0 {
+							toolResult = "No questions provided"
+						} else {
+							// Format questions for user callback
+							var questionsText strings.Builder
+							for i, q := range questions {
+								if questionMap, ok := q.(map[string]interface{}); ok {
+									question, _ := questionMap["question"].(string)
+									options, _ := questionMap["options"].([]interface{})
+									questionsText.WriteString(fmt.Sprintf("%d. %s\n", i+1, question))
+									for j, opt := range options {
+										if optStr, ok := opt.(string); ok {
+											questionsText.WriteString(fmt.Sprintf("   %c. %s\n", 'a'+j, optStr))
+										}
+									}
+									questionsText.WriteString("\n")
+								}
+							}
+
+							userResponse, err := userInputCb(questionsText.String())
+							if err != nil {
+								toolResult = fmt.Sprintf("Failed to get user input: %v", err)
+								res.needsInput = true
+							} else {
+								toolResult = userResponse
+								res.questionsAsked = len(questions)
+								questionsAskedInBatch += len(questions)
+							}
+						}
+					}
+				}()
+
 			default:
 				result := p.toolRegistry.Execute(ctx, toolName, args)
 				if result.Error != "" {
@@ -667,6 +722,21 @@ func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 				prompt.WriteString("\n")
 			}
 		}
+
+		// Detect project language/framework
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		detector := project.NewDetector(p.session.WorkingDir)
+		projectTypes, err := detector.Detect(ctx)
+		if err == nil && len(projectTypes) > 0 {
+			bestMatch := projectTypes[0]
+			prompt.WriteString(fmt.Sprintf("Project Language/Framework: %s", bestMatch.Name))
+			if bestMatch.Description != "" {
+				prompt.WriteString(fmt.Sprintf(" (%s)", bestMatch.Description))
+			}
+			prompt.WriteString("\n\n")
+		}
 	}
 
 	// Add context files if provided
@@ -682,8 +752,11 @@ func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 
 	if req.AllowQuestions {
 		prompt.WriteString("- Ask questions when you need clarification\n")
+		prompt.WriteString("- CONSERVATIVE: Ask all your questions AT ONCE using the ask_user_multiple tool to minimize user interaction\n")
+		prompt.WriteString("- Use ask_user_multiple with 3 response options per question for better user experience\n")
+		prompt.WriteString("- Only use ask_user for single, simple questions\n")
 		if req.MaxQuestions > 0 {
-			prompt.WriteString(fmt.Sprintf("- Ask at most %d questions\n", req.MaxQuestions))
+			prompt.WriteString(fmt.Sprintf("- Ask at most %d questions total\n", req.MaxQuestions))
 		}
 	} else {
 		prompt.WriteString("- Do not ask questions; work with the information provided\n")
@@ -951,6 +1024,99 @@ func (t *AskUserTool) Execute(ctx context.Context, params map[string]interface{}
 		Result: map[string]interface{}{
 			"question": question,
 			"status":   "pending_user_input",
+		},
+	}
+}
+
+// AskUserMultipleTool allows the planning agent to ask multiple questions with response options
+type AskUserMultipleTool struct{}
+
+func NewAskUserMultipleTool() *AskUserMultipleTool {
+	return &AskUserMultipleTool{}
+}
+
+func (t *AskUserMultipleTool) Name() string { return "ask_user_multiple" }
+func (t *AskUserMultipleTool) Description() string {
+	return "Ask multiple questions with predefined response options to get user clarification efficiently"
+}
+func (t *AskUserMultipleTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"questions": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"question": map[string]interface{}{
+							"type":        "string",
+							"description": "The question to ask the user",
+						},
+						"options": map[string]interface{}{
+							"type": "array",
+							"items": map[string]interface{}{
+								"type": "string",
+							},
+							"description": "Three predefined response options for the user",
+						},
+					},
+					"required": []string{"question", "options"},
+				},
+				"description": "Array of questions with their response options",
+			},
+		},
+		"required": []string{"questions"},
+	}
+}
+
+func (t *AskUserMultipleTool) Execute(ctx context.Context, params map[string]interface{}) *PlanningToolResult {
+	questions, ok := params["questions"].([]interface{})
+	if !ok {
+		return &PlanningToolResult{
+			Error: "questions parameter is required and must be an array",
+		}
+	}
+
+	// Validate questions structure
+	for i, q := range questions {
+		questionMap, ok := q.(map[string]interface{})
+		if !ok {
+			return &PlanningToolResult{
+				Error: fmt.Sprintf("question %d must be an object", i),
+			}
+		}
+
+		// Validate question text
+		questionText, ok := questionMap["question"].(string)
+		if !ok || questionText == "" {
+			return &PlanningToolResult{
+				Error: fmt.Sprintf("question %d must have a non-empty 'question' string", i),
+			}
+		}
+
+		// Validate options
+		options, ok := questionMap["options"].([]interface{})
+		if !ok || len(options) != 3 {
+			return &PlanningToolResult{
+				Error: fmt.Sprintf("question %d must have exactly 3 options", i),
+			}
+		}
+
+		for j, opt := range options {
+			if _, ok := opt.(string); !ok {
+				return &PlanningToolResult{
+					Error: fmt.Sprintf("question %d option %d must be a string", i, j),
+				}
+			}
+		}
+	}
+
+	// This tool is handled specially by the planning agent
+	// The actual user interaction happens through the callback
+	return &PlanningToolResult{
+		Result: map[string]interface{}{
+			"questions": questions,
+			"status":    "pending_user_input",
 		},
 	}
 }

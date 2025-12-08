@@ -47,6 +47,7 @@ Key actors in the system:
 - **Tool Actors**: Execute individual tools (read_file, create_file, write_file_diff, shell, etc.)
 - **Session Actor**: Manages conversation state and file tracking
 - **FS Actor**: Handles filesystem operations with caching
+- **Session Storage Actor**: Handles persistent storage and retrieval of conversation sessions
 
 #### Dual LLM System
 
@@ -111,6 +112,58 @@ Sessions track conversation state and enforce safety rules ([internal/session/se
 - **FilesModified**: Tracks which files were changed
 - **BackgroundJobs**: Manages long-running shell commands
 - **Thread-safe**: All operations use read/write locks
+
+#### Session Persistence
+
+Sessions can be saved and loaded using gob format with workspace isolation ([internal/session/storage.go](internal/session/storage.go) and [internal/actor/session_storage_actor.go](internal/actor/session_storage_actor.go)):
+
+- **Workspace Isolation**: Sessions are stored per workspace using SHA256 hash of workspace path
+- **Storage Location**: Platform-specific state directories:
+  - Linux: `$XDG_STATE_HOME/scriptschnell/sessions/` or `~/.local/state/scriptschnell/sessions/`
+  - macOS: `~/Library/Application Support/scriptschnell/sessions/`
+  - Windows: `%LOCALAPPDATA%\\scriptschnell\\sessions\\`
+- **Storage Format**: gob-encoded binary with versioning for forward compatibility
+- **Atomic Writes**: Sessions are saved to `.tmp` files then renamed for data safety
+- **Session Metadata**: Includes ID, name, workspace, timestamps, and message count
+- **Slash Commands**: Available in both TUI and ACP modes:
+  - `/session save [name]` - Save current session with optional name
+  - `/session load [id]` - Load session by ID (or list without ID)
+  - `/session list` - Show all sessions for current workspace
+  - `/session delete [id]` - Delete a saved session
+- **Actor Integration**: Session storage handled by dedicated SessionStorageActor for concurrent access
+
+**Important**: Only sessions from the current workspace are visible/accessible for security and organization.
+
+#### Syntax Validation
+
+Automatic syntax validation using tree-sitter parsers ([internal/syntax/validator.go](internal/syntax/validator.go)):
+
+- **Automatic Validation**: Syntax is automatically validated after file writes (`write_file_diff`, `create_file`)
+- **Non-Blocking**: Validation warnings don't prevent file writes - LLM receives detailed error info but writes always succeed
+- **Supported Languages**: Go, Python, TypeScript, JavaScript, TSX, JSX, Bash
+  - Additional languages can be added by including tree-sitter grammar packages
+- **Error Detection**: Uses tree-sitter's ERROR and MISSING nodes to identify syntax issues
+  - **Note**: Tree-sitter has excellent error recovery - it may not flag all recoverable syntax errors
+  - Unrecoverable errors (incomplete tokens, missing critical syntax) are always detected
+- **Error Reporting**:
+  - **LLM receives** JSON with line/column numbers and error descriptions
+  - **UI displays** markdown-formatted warnings with error details
+  - Limited to first 5 errors for readability
+
+**Implementation**:
+- Shared language detection ([internal/syntax/language.go](internal/syntax/language.go))
+- Tree-sitter integration for parsing
+- Validation results included in tool responses:
+  ```json
+  {
+    "path": "main.go",
+    "bytes_written": 150,
+    "updated": true,
+    "validation_warning": "Found 2 syntax error(s)..."
+  }
+  ```
+
+**Disabling**: Validation is automatic for supported languages. To skip validation for specific files, use file extensions that don't match supported languages.
 
 #### Tool Registry System
 

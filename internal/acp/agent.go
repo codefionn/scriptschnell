@@ -10,12 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/orchestrator"
 	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/project"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"github.com/coder/acp-go-sdk"
 	godiff "github.com/sourcegraph/go-diff/diff"
@@ -76,6 +79,15 @@ func (a *ScriptschnellAIAgent) GetAvailableCommands() []acp.AvailableCommand {
 			Input: &acp.AvailableCommandInput{
 				UnstructuredCommandInput: &acp.AvailableCommandUnstructuredCommandInput{
 					Hint: "list | add <directory> | remove <directory>",
+				},
+			},
+		},
+		{
+			Name:        "session",
+			Description: "Manage LLM sessions (/session save | /session load | /session list | /session delete)",
+			Input: &acp.AvailableCommandInput{
+				UnstructuredCommandInput: &acp.AvailableCommandUnstructuredCommandInput{
+					Hint: "save [name] | load [id] | list | delete [id]",
 				},
 			},
 		},
@@ -143,6 +155,8 @@ func (a *ScriptschnellAIAgent) executeSlashCommand(sessionID, command, args stri
 		resp, err = a.handleClearCommand(session), nil
 	case "context":
 		resp, err = a.handleContextCommand(args)
+	case "session":
+		resp, err = a.handleSessionCommand(args)
 	default:
 		err = fmt.Errorf("unknown command: /%s", command)
 	}
@@ -170,6 +184,22 @@ func (a *ScriptschnellAIAgent) handleInitCommand(sessionID, args string) (string
 
 	// Use the orchestrator to execute some initialization logic
 	response += "→ Reading current directory structure...\n"
+
+	projectTypes, detectErr := project.NewDetector(a.config.WorkingDir).Detect(context.Background())
+	if detectErr != nil {
+		response += fmt.Sprintf("→ Project detection failed: %v\n\n", detectErr)
+	} else if len(projectTypes) == 0 {
+		response += "→ Unable to detect a supported project type from existing files.\n\n"
+	} else {
+		response += "→ Detected project type(s):\n"
+		for _, pt := range projectTypes {
+			response += fmt.Sprintf("   - %s (%.0f%% confidence): %s\n", pt.Name, pt.Confidence*100, pt.Description)
+			if len(pt.Evidence) > 0 {
+				response += fmt.Sprintf("     Evidence: %s\n", pt.Evidence[0])
+			}
+		}
+		response += "\n"
+	}
 
 	// In a real implementation, this would:
 	// 1. Examine the current directory
@@ -385,6 +415,277 @@ func (a *ScriptschnellAIAgent) handleContextRemove(dir string) (string, error) {
 	logger.Debug("handleContextRemove: removed context directory %s", dir)
 
 	return fmt.Sprintf("✓ Removed context directory: %s", dir), nil
+}
+
+// handleSessionCommand handles the /session command
+func (a *ScriptschnellAIAgent) handleSessionCommand(args string) (string, error) {
+	logger.Debug("handleSessionCommand: args=%q", truncateForLog(args))
+
+	args = strings.TrimSpace(args)
+	parts := strings.Fields(args)
+
+	if len(parts) == 0 || parts[0] == "help" {
+		return a.sessionHelp(), nil
+	}
+
+	subCmd := strings.ToLower(parts[0])
+	switch subCmd {
+	case "save":
+		var name string
+		if len(parts) > 1 {
+			name = strings.Join(parts[1:], " ")
+		}
+		return a.handleSessionSave(name)
+	case "load":
+		var sessionID string
+		if len(parts) > 1 {
+			sessionID = parts[1]
+		}
+		return a.handleSessionLoad(sessionID)
+	case "list":
+		return a.handleSessionList()
+	case "delete":
+		if len(parts) < 2 {
+			return "", fmt.Errorf("usage: /session delete <session_id>")
+		}
+		return a.handleSessionDelete(parts[1])
+	default:
+		return "", fmt.Errorf("unknown /session subcommand: %s", subCmd)
+	}
+}
+
+func (a *ScriptschnellAIAgent) sessionHelp() string {
+	return `💾 Session Commands:
+
+/session save [name]
+    Save the current session with an optional name.
+    Sessions are stored per workspace.
+
+/session load [session_id]
+    Load a session by ID. If no ID provided shows selection menu.
+    Only shows sessions from the current workspace.
+
+/session list
+    List all saved sessions for the current workspace.
+
+/session delete [session_id]
+    Delete a saved session by ID.
+
+Sessions are workspace-dependent and stored persistently.
+Each session contains the conversation history, file tracking, and metadata.
+
+Examples:
+  /session save MyProjectSetup
+  /session list
+  /session load abc123def456
+  /session delete abc123def456
+`
+}
+
+func (a *ScriptschnellAIAgent) handleSessionSave(name string) (string, error) {
+	// Get the orchestrator from the active session
+	activeSession := a.getActiveSession()
+	if activeSession == nil || activeSession.orchestrator == nil {
+		return "", fmt.Errorf("no active orchestrator available")
+	}
+
+	// Get session storage actor
+	storageRef, exists := activeSession.orchestrator.GetActor("session_storage")
+	if !exists {
+		return "", fmt.Errorf("session storage not initialized")
+	}
+
+	// Generate name if not provided
+	if name == "" {
+		name = actor.GenerateSessionName("")
+	} else {
+		name = actor.GenerateSessionName(name)
+	}
+
+	// Save the session
+	currentSession := activeSession.orchestrator.GetSession()
+	if err := actor.SaveSessionViaActor(context.Background(), storageRef, currentSession, name); err != nil {
+		return "", fmt.Errorf("failed to save session: %w", err)
+	}
+
+	return fmt.Sprintf("✓ Session saved as '%s' (ID: %s)", name, currentSession.ID), nil
+}
+
+func (a *ScriptschnellAIAgent) handleSessionList() (string, error) {
+	// Get the orchestrator from the active session
+	activeSession := a.getActiveSession()
+	if activeSession == nil || activeSession.orchestrator == nil {
+		return "", fmt.Errorf("no active orchestrator available")
+	}
+
+	// Get session storage actor
+	storageRef, exists := activeSession.orchestrator.GetActor("session_storage")
+	if !exists {
+		return "", fmt.Errorf("session storage not initialized")
+	}
+
+	// List sessions for current workspace
+	sessions, err := actor.ListSessionsViaActor(context.Background(), storageRef, a.config.WorkingDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		return "No saved sessions found for this workspace.\n\nUse /session save [name] to save the current session.", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("💾 Saved sessions for workspace: %s\n\n", a.config.WorkingDir))
+
+	for i, sess := range sessions {
+		name := sess.Name
+		if name == "" {
+			name = "Unnamed"
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, name))
+		sb.WriteString(fmt.Sprintf("   ID: %s\n", sess.ID))
+		sb.WriteString(fmt.Sprintf("   Created: %s\n", sess.CreatedAt.Format("2006-01-02 15:04:05")))
+		sb.WriteString(fmt.Sprintf("   Updated: %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05")))
+		sb.WriteString(fmt.Sprintf("   Messages: %d\n", sess.MessageCount))
+		sb.WriteString("\n")
+	}
+
+	return strings.TrimRight(sb.String(), "\n"), nil
+}
+
+func (a *ScriptschnellAIAgent) handleSessionLoad(sessionID string) (string, error) {
+	// Get the orchestrator from the active session
+	activeSession := a.getActiveSession()
+	if activeSession == nil || activeSession.orchestrator == nil {
+		return "", fmt.Errorf("no active orchestrator available")
+	}
+
+	// Get session storage actor
+	storageRef, exists := activeSession.orchestrator.GetActor("session_storage")
+	if !exists {
+		return "", fmt.Errorf("session storage not initialized")
+	}
+
+	// If no session ID provided, show list
+	if sessionID == "" {
+		return a.handleSessionLoadWithMenu(storageRef)
+	}
+
+	// Load specific session
+	loadedSession, err := actor.LoadSessionViaActor(context.Background(), storageRef, a.config.WorkingDir, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load session: %w", err)
+	}
+
+	// Replace current session in orchestrator
+	activeSession.orchestrator.SetSession(loadedSession)
+
+	// Get session name for display
+	var name string
+	if len(loadedSession.GetMessages()) == 0 {
+		name = "Unnamed"
+	} else {
+		// Try to get the name from storage metadata
+		sessions, _ := actor.ListSessionsViaActor(context.Background(), storageRef, a.config.WorkingDir)
+		for _, sess := range sessions {
+			if sess.ID == sessionID {
+				name = sess.Name
+				if name == "" {
+					name = "Unnamed"
+				}
+				break
+			}
+		}
+	}
+
+	return fmt.Sprintf("✓ Loaded session '%s' (ID: %s) with %d messages", name, sessionID, len(loadedSession.GetMessages())), nil
+}
+
+func (a *ScriptschnellAIAgent) handleSessionLoadWithMenu(storageRef *actor.ActorRef) (string, error) {
+	// Get available sessions
+	sessions, err := actor.ListSessionsViaActor(context.Background(), storageRef, a.config.WorkingDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		return "No saved sessions found for this workspace.\n\nUse /session save [name] to save the current session.", nil
+	}
+
+	// Build menu response
+	var sb strings.Builder
+	sb.WriteString("💾 Available sessions to load:\n\n")
+
+	for i, sess := range sessions {
+		name := sess.Name
+		if name == "" {
+			name = "Unnamed"
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s (ID: %s) - %d messages\n", i+1, name, sess.ID, sess.MessageCount))
+	}
+
+	sb.WriteString("\nTo load a session, use: /session load <session_id>\n")
+	sb.WriteString("Example: /session load abc123def456")
+
+	return sb.String(), nil
+}
+
+func (a *ScriptschnellAIAgent) handleSessionDelete(sessionID string) (string, error) {
+	// Get the orchestrator from the active session
+	activeSession := a.getActiveSession()
+	if activeSession == nil || activeSession.orchestrator == nil {
+		return "", fmt.Errorf("no active orchestrator available")
+	}
+
+	// Get session storage actor
+	storageRef, exists := activeSession.orchestrator.GetActor("session_storage")
+	if !exists {
+		return "", fmt.Errorf("session storage not initialized")
+	}
+
+	// First, show session info before deletion
+	sessions, err := actor.ListSessionsViaActor(context.Background(), storageRef, a.config.WorkingDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	var targetSession *session.SessionMetadata
+	for _, sess := range sessions {
+		if sess.ID == sessionID {
+			targetSession = &sess
+			break
+		}
+	}
+
+	if targetSession == nil {
+		return "", fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Show session info before deletion
+	name := targetSession.Name
+	if name == "" {
+		name = "Unnamed"
+	}
+
+	// Delete the session
+	err = actor.DeleteSessionViaActor(context.Background(), storageRef, a.config.WorkingDir, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to delete session: %w", err)
+	}
+
+	return fmt.Sprintf("✓ Deleted session: %s\n\nName: %s\nID: %s\nCreated: %s\nMessages: %d",
+		sessionID, name, targetSession.ID, targetSession.CreatedAt.Format("2006-01-02 15:04:05"), targetSession.MessageCount), nil
+}
+
+// getActiveSession returns the current active session
+func (a *ScriptschnellAIAgent) getActiveSession() *statcodeSession {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// Find the first active session (in a real implementation, we might track this differently)
+	for _, session := range a.sessions {
+		return session
+	}
+	return nil
 }
 
 // ScriptschnellAIAgent implements the acp.Agent interface to expose statcode-ai functionality via ACP

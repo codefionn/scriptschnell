@@ -89,7 +89,7 @@ func (t *WriteFileReplaceTool) Parameters() map[string]interface{} {
 func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {
-		return &ToolResult{Error: "path is required"}
+		return &ToolResult{Error: "tool call validation failed for write_file_replace: missing required parameter 'path'"}
 	}
 
 	edits, err := parseReplacementEdits(params)
@@ -203,7 +203,7 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 func parseReplacementEdits(params map[string]interface{}) ([]replacementEdit, error) {
 	rawEdits, hasEdits := params["edits"]
 	if !hasEdits || rawEdits == nil {
-		return nil, fmt.Errorf("edits is required")
+		return nil, fmt.Errorf("tool call validation failed for write_file_replace: missing required parameter 'edits'")
 	}
 
 	data, err := json.Marshal(rawEdits)

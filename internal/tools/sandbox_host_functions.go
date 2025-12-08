@@ -561,6 +561,11 @@ func (t *SandboxTool) registerListFilesHostFunction(envBuilder HostModuleBuilder
 			}
 			pattern := string(patternBytes)
 
+			// Normalize requests for the current directory (e.g., ".", "./", "")
+			if filepath.Clean(pattern) == "." {
+				pattern = "." + string(os.PathSeparator) + "*"
+			}
+
 			// Check if filesystem is available
 			if t.filesystem == nil {
 				errMsg := []byte("Error: Filesystem not available")

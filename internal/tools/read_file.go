@@ -8,6 +8,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/syntax"
 )
 
 // ReadFileToolSpec is the static specification for the read_file tool
@@ -106,6 +107,9 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 
 	// Check line limit
 	lineCount := strings.Count(content, "\n") + 1
+	wasTruncated := false
+	totalLines := lineCount
+
 	if lineCount > 2000 {
 		// Read only first 2000 lines
 		lines, err := t.fs.ReadFileLines(ctx, path, 1, 2000)
@@ -114,6 +118,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 		}
 		content = strings.Join(lines, "\n")
 		content += fmt.Sprintf("\n\n[... file truncated, %d total lines, showing first 2000 lines. Use sections parameter to read specific ranges]", lineCount)
+		wasTruncated = true
 	}
 
 	// Track file as read in session
@@ -124,13 +129,32 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 	actualLineCount := len(strings.Split(content, "\n"))
 	logger.Info("read_file: successfully read %s (%d lines)", path, actualLineCount)
 
+	// Generate UI result with syntax highlighting
+	// For UI, show a more prominent truncation warning if applicable
+	var uiResult string
+	if wasTruncated {
+		// Remove the text truncation message from content for UI display
+		uiContent := strings.Join(strings.Split(content, "\n")[:2000], "\n")
+		uiResult = t.formatUIResultWithTruncation(path, uiContent, 2000, totalLines)
+	} else {
+		uiResult = t.formatUIResult(path, content, actualLineCount)
+	}
+
 	return &ToolResult{
 		Result: map[string]interface{}{
 			"path":    path,
 			"content": content,
 			"lines":   actualLineCount,
 		},
+		UIResult: uiResult,
 	}
+}
+
+// sectionData represents a section of a file to read
+type sectionData struct {
+	fromLine int
+	toLine   int
+	content  string
 }
 
 func (t *ReadFileTool) executeMultiSection(ctx context.Context, path string, sectionsParam interface{}) *ToolResult {
@@ -181,8 +205,16 @@ func (t *ReadFileTool) executeMultiSection(ctx context.Context, path string, sec
 	}
 
 	// Read all sections
+	var sectionsData []sectionData
 	var contentParts []string
 	var err error
+
+	// Get total file line count for UI display
+	fileData, err := t.fs.ReadFile(ctx, path)
+	if err != nil {
+		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
+	}
+	totalFileLines := strings.Count(string(fileData), "\n") + 1
 
 	for i, r := range ranges {
 		var lines []string
@@ -192,8 +224,13 @@ func (t *ReadFileTool) executeMultiSection(ctx context.Context, path string, sec
 		}
 
 		sectionContent := strings.Join(lines, "\n")
+		sectionsData = append(sectionsData, sectionData{
+			fromLine: r.fromLine,
+			toLine:   r.toLine,
+			content:  sectionContent,
+		})
 
-		// Add section header for clarity
+		// Add section header for clarity (for LLM)
 		if len(ranges) > 1 {
 			header := fmt.Sprintf("[Section %d: lines %d-%d]", i+1, r.fromLine, r.toLine)
 			contentParts = append(contentParts, header, sectionContent)
@@ -211,6 +248,9 @@ func (t *ReadFileTool) executeMultiSection(ctx context.Context, path string, sec
 
 	logger.Info("read_file: successfully read %s (%d sections, %d lines total)", path, len(ranges), totalLines)
 
+	// Generate UI result with multi-section formatting
+	uiResult := t.formatMultiSectionUIResult(path, sectionsData, totalFileLines)
+
 	return &ToolResult{
 		Result: map[string]interface{}{
 			"path":     path,
@@ -218,8 +258,140 @@ func (t *ReadFileTool) executeMultiSection(ctx context.Context, path string, sec
 			"lines":    totalLines,
 			"sections": len(ranges),
 		},
+		UIResult: uiResult,
 	}
 }
+
+// formatUIResult creates a UI-formatted result
+// Note: Syntax highlighting is handled by Glamour during markdown rendering
+func (t *ReadFileTool) formatUIResult(path, content string, lineCount int) string {
+	// Detect language from file extension for Glamour
+	language := syntax.DetectLanguage(path)
+
+	// Add line numbers to content
+	lines := strings.Split(content, "\n")
+	numberedContent := addLineNumbers(lines, 1)
+
+	// Create UI result with plain content
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📖 **Read file:** `%s`\n\n", path))
+
+	// Add file info
+	if language != "" {
+		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines | Language: %s\n\n`, lineCount, language))
+		// Use language tag for Glamour's syntax highlighting
+		sb.WriteString("```" + language + "\n")
+	} else {
+		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines\n\n`, lineCount))
+		sb.WriteString("```\n")
+	}
+
+	sb.WriteString(numberedContent)
+	sb.WriteString("\n```")
+
+	return sb.String()
+}
+
+// formatUIResultWithTruncation creates a UI-formatted result for truncated files
+// Note: Syntax highlighting is handled by Glamour during markdown rendering
+func (t *ReadFileTool) formatUIResultWithTruncation(path, content string, shownLines, totalLines int) string {
+	// Detect language from file extension for Glamour
+	language := syntax.DetectLanguage(path)
+
+	// Add line numbers to content
+	lines := strings.Split(content, "\n")
+	numberedContent := addLineNumbers(lines, 1)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📖 **Read file:** `%s`\n\n", path))
+
+	// Add file info with truncation warning
+	if language != "" {
+		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines | Language: %s\n\n`, totalLines, language))
+	} else {
+		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines\n\n`, totalLines))
+	}
+
+	// Add prominent truncation warning
+	sb.WriteString(fmt.Sprintf("⚠️  **File truncated:** Showing lines 1-%d of %d total lines. Use `sections` parameter to read specific ranges.\n\n", shownLines, totalLines))
+
+	// Add code block with plain content
+	if language != "" {
+		sb.WriteString("```" + language + "\n")
+	} else {
+		sb.WriteString("```\n")
+	}
+	sb.WriteString(numberedContent)
+	sb.WriteString("\n```")
+
+	return sb.String()
+}
+
+// formatMultiSectionUIResult creates a UI-formatted result for multi-section reads
+// Note: Syntax highlighting is handled by Glamour during markdown rendering
+func (t *ReadFileTool) formatMultiSectionUIResult(path string, sections []sectionData, totalFileLines int) string {
+	// Detect language from file extension for Glamour
+	language := syntax.DetectLanguage(path)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📖 **Read file (multiple sections):** `%s`\n\n", path))
+
+	// Add file info
+	if language != "" {
+		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d total lines | Reading %d sections | Language: %s\n\n`, totalFileLines, len(sections), language))
+	} else {
+		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d total lines | Reading %d sections\n\n`, totalFileLines, len(sections)))
+	}
+
+	// Process each section
+	for i, section := range sections {
+		if i > 0 {
+			// Add horizontal rule separator between sections
+			sb.WriteString("\n---\n\n")
+		}
+
+		// Add section info
+		sb.WriteString(fmt.Sprintf("**Lines %d-%d**\n\n", section.fromLine, section.toLine))
+
+		// Add line numbers to section content
+		lines := strings.Split(section.content, "\n")
+		numberedContent := addLineNumbers(lines, section.fromLine)
+
+		// Add code block with plain content
+		if language != "" {
+			sb.WriteString("```" + language + "\n")
+		} else {
+			sb.WriteString("```\n")
+		}
+		sb.WriteString(numberedContent)
+		sb.WriteString("\n```\n")
+	}
+
+	return sb.String()
+}
+
+// addLineNumbers adds line numbers to content
+func addLineNumbers(lines []string, startLine int) string {
+	if len(lines) == 0 {
+		return ""
+	}
+
+	// Calculate the width needed for line numbers based on the last line
+	maxDigits := len(fmt.Sprintf("%d", startLine+len(lines)-1))
+
+	var sb strings.Builder
+	for i, line := range lines {
+		lineNum := startLine + i
+		sb.WriteString(fmt.Sprintf("%*d | %s", maxDigits, lineNum, line))
+		if i < len(lines)-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+// Note: Language detection is now handled by syntax.DetectLanguage()
+// See internal/syntax/language.go for the shared implementation
 
 // NewReadFileToolFactory creates a factory for ReadFileTool
 func NewReadFileToolFactory(filesystem fs.FileSystem, sess *session.Session) ToolFactory {

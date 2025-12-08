@@ -149,7 +149,7 @@ func TestWriteFileReplaceTool_RequiresFields(t *testing.T) {
 
 	// Test missing path
 	result := tool.Execute(ctx, map[string]interface{}{"edits": []map[string]interface{}{{"old_string": "a", "new_string": "b"}}})
-	if result.Error == "" || !strings.Contains(result.Error, "path is required") {
+	if result.Error == "" || !strings.Contains(result.Error, "tool call validation failed for write_file_replace: missing required parameter 'path'") {
 		t.Fatalf("expected path required error, got %s", result.Error)
 	}
 
@@ -160,7 +160,7 @@ func TestWriteFileReplaceTool_RequiresFields(t *testing.T) {
 
 	// Test missing edits
 	result = tool.Execute(ctx, map[string]interface{}{"path": "f.txt"})
-	if result.Error == "" || !strings.Contains(result.Error, "edits is required") {
+	if result.Error == "" || !strings.Contains(result.Error, "tool call validation failed for write_file_replace: missing required parameter 'edits'") {
 		t.Fatalf("expected edits required error, got %s", result.Error)
 	}
 }

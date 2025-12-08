@@ -111,6 +111,9 @@ You are an interactive CLI agent specializing in software engineering tasks. You
 - Working directory: {{ .WorkingDir }}
 - Operating System: {{ .OS }}
 - Current date: {{ .CurrentDate }}
+{{- if .ProjectLanguage }}
+- Project Language/Framework: {{ .ProjectLanguage }}{{ if .ProjectFramework }} ({{ .ProjectFramework }}){{ end }}
+{{- end }}
 {{- if .Files }}
 - Files in working directory:
 {{- range .Files }}

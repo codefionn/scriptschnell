@@ -18,6 +18,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secrets"
+	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tui"
 	"golang.org/x/term"
 )
@@ -372,7 +373,10 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 
 func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	logger.Info("Running in TUI mode")
-	ctx := context.Background()
+
+	// Create cancellable context for application lifecycle
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Create orchestrator
 	// TUI mode is interactive, so pass cliMode=false
@@ -394,6 +398,12 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	model.SetFilesystem(orch.GetFilesystem(), orch.GetWorkingDir())
 	model.SetTodoClient(orch.GetTodoClient())
 	model.SetOnPromptActivity(orch.TriggerPreconnect)
+
+	// Set session switch callback for tab switching
+	model.SetOnSwitchSession(func(newSession *session.Session) error {
+		orch.SetSession(newSession)
+		return nil
+	})
 
 	// Declare program variable first (will be assigned later)
 	var program *tea.Program
@@ -818,6 +828,13 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					}
 					return nil
 
+				case tui.MenuTypeNewTab:
+					// Create a new tab with the specified name
+					if program != nil {
+						program.Send(tui.NewTabMsg{Name: menuResult.TabName})
+					}
+					return nil
+
 				default:
 					return nil
 				}
@@ -848,6 +865,42 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 
 	model.SetOnBackground(func() error {
 		return orch.BackgroundCurrentShellJob()
+	})
+
+	// Set up user input callback for planning questions
+	orch.SetUserInputCallback(func(question string) (string, error) {
+		// Create channels for response
+		responseChan := make(chan string, 1)
+		errorChan := make(chan error, 1)
+
+		// Send message to TUI to handle user input
+		if program != nil {
+			if strings.Contains(question, "a) ") && strings.Contains(question, "b) ") && strings.Contains(question, "c) ") {
+				// This looks like multiple choice questions
+				program.Send(tui.UserMultipleQuestionsRequestMsg{
+					Questions: question,
+					Response:  responseChan,
+					Error:     errorChan,
+				})
+			} else {
+				// Single question
+				program.Send(tui.UserInputRequestMsg{
+					Question: question,
+					Response: responseChan,
+					Error:    errorChan,
+				})
+			}
+		}
+
+		// Wait for response
+		select {
+		case answer := <-responseChan:
+			return answer, nil
+		case err := <-errorChan:
+			return "", err
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
 	})
 
 	// Run TUI

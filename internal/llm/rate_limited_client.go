@@ -181,8 +181,7 @@ func estimateTokensFromMessages(messages []*Message) (toolTokens, totalTokens in
 		if msg == nil {
 			continue
 		}
-		chars := len(msg.Content)
-		tokenEstimate := charsToTokens(chars)
+		tokenEstimate := EstimateTokenCount(msg.Content)
 		totalTokens += tokenEstimate
 		if strings.EqualFold(msg.Role, "tool") {
 			// Tool responses dominate the downstream prompt size.
@@ -190,17 +189,6 @@ func estimateTokensFromMessages(messages []*Message) (toolTokens, totalTokens in
 		}
 	}
 	return toolTokens, totalTokens
-}
-
-func charsToTokens(chars int) int {
-	if chars <= 0 {
-		return 0
-	}
-	tokens := chars / 4
-	if tokens <= 0 {
-		tokens = 1
-	}
-	return tokens
 }
 
 func tokensToDuration(tokens, tokensPerMinute int) time.Duration {

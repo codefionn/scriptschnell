@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/project"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 )
@@ -105,11 +107,32 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 		)
 	}
 
+	// Build file tree for context
+	fileTree := a.buildFileTree(ctx, 3, 200) // Max depth 3, max 200 files
+
+	// Detect project language/framework
+	detector := project.NewDetector(a.orch.workingDir)
+	projectTypes, err := detector.Detect(ctx)
+	var projectLanguage, projectFramework string
+	if err == nil && len(projectTypes) > 0 {
+		bestMatch := projectTypes[0]
+		projectLanguage = bestMatch.Name
+		projectFramework = bestMatch.Description
+	} else {
+		projectLanguage = "Unknown"
+		projectFramework = ""
+	}
+
 	// System prompt for investigator
-	systemPrompt := `You are a Codebase Investigator agent.:
+	systemPrompt := fmt.Sprintf(`You are a Codebase Investigator agent.:
 Your goal is to explore the codebase to answer the user's objective.
 You have access to tools to search and read files.
 You should systematically explore relevant files.
+
+%s
+
+Project Information:
+- Language/Framework: %s%s
 
 Use the parallel_tool to execute multiple tools (e.g. multiple search_files, search_file_content, read_file) concurrently.
 
@@ -124,7 +147,12 @@ Also for really relevant files, provide the file path and code location (e.g. fu
 Example:
 <answer>
 The requested logic is found in internal/module/file.go function DoWork().
-</answer>`
+</answer>`, fileTree, projectLanguage, func() string {
+		if projectFramework != "" {
+			return " (" + projectFramework + ")"
+		}
+		return ""
+	}())
 
 	client := a.orch.summarizeClient
 	if client == nil {
@@ -296,6 +324,81 @@ func extractToolDetails(toolName string, params map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+// buildFileTree creates a tree representation of files in the workspace
+func (a *CodebaseInvestigatorAgent) buildFileTree(ctx context.Context, maxDepth int, maxFiles int) string {
+	var result strings.Builder
+	result.WriteString("## Workspace File Structure\n\n")
+
+	fileCount := 0
+	var walk func(dir string, prefix string, depth int) error
+	walk = func(dir string, prefix string, depth int) error {
+		if depth > maxDepth || fileCount >= maxFiles {
+			return nil
+		}
+
+		entries, err := a.orch.fs.ListDir(ctx, dir)
+		if err != nil {
+			return err
+		}
+
+		// Sort entries: directories first, then files alphabetically
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].IsDir != entries[j].IsDir {
+				return entries[i].IsDir
+			}
+			return filepath.Base(entries[i].Path) < filepath.Base(entries[j].Path)
+		})
+
+		for i, entry := range entries {
+			if fileCount >= maxFiles {
+				result.WriteString(fmt.Sprintf("%s... (truncated, %d files shown)\n", prefix, maxFiles))
+				return nil
+			}
+
+			// Skip common directories to ignore
+			name := filepath.Base(entry.Path)
+			if name == ".git" || name == "node_modules" || name == "vendor" ||
+				name == ".next" || name == "dist" || name == "build" ||
+				name == "__pycache__" || name == ".cache" {
+				continue
+			}
+
+			isLast := i == len(entries)-1
+			connector := "├── "
+			if isLast {
+				connector = "└── "
+			}
+
+			if entry.IsDir {
+				result.WriteString(fmt.Sprintf("%s%s%s/\n", prefix, connector, name))
+				fileCount++
+
+				// Recurse into subdirectory
+				newPrefix := prefix
+				if isLast {
+					newPrefix += "    "
+				} else {
+					newPrefix += "│   "
+				}
+				_ = walk(entry.Path, newPrefix, depth+1)
+			} else {
+				result.WriteString(fmt.Sprintf("%s%s%s\n", prefix, connector, name))
+				fileCount++
+			}
+		}
+
+		return nil
+	}
+
+	_ = walk(a.orch.workingDir, "", 0)
+
+	if fileCount >= maxFiles {
+		result.WriteString(fmt.Sprintf("\n(Showing first %d files/directories)\n", maxFiles))
+	}
+
+	return result.String()
 }
 
 func extractAnswer(content string) string {

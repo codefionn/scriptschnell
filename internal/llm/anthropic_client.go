@@ -271,7 +271,9 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 	}
 
 	if len(chatMessages) == 0 {
-		return anthropic.BetaMessageNewParams{}, fmt.Errorf("anthropic completion requires at least one user or assistant message")
+		logger.Warn("anthropic completion request has no user or assistant messages; injecting fallback prompt")
+		fallback := buildFallbackAnthropicUserMessage(req.SystemPrompt)
+		chatMessages = append(chatMessages, fallback)
 	}
 
 	maxTokens := req.MaxTokens
@@ -400,6 +402,9 @@ func convertMessagesToAnthropic(systemPrompt string, messages []*Message, enable
 			if len(blocks) == 0 {
 				continue
 			}
+			if msg.CacheControl {
+				applyCacheControlToBlocks(blocks, enableCaching, cacheTTL)
+			}
 			chatMessages = append(chatMessages, anthropic.BetaMessageParam{
 				Role:    anthropic.BetaMessageParamRoleUser,
 				Content: blocks,
@@ -495,6 +500,21 @@ func buildAnthropicTextBlocks(content string) []anthropic.BetaContentBlockParamU
 		return nil
 	}
 	return []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(content)}
+}
+
+// buildFallbackAnthropicUserMessage creates a minimal user message when the request otherwise lacks any chat turns.
+func buildFallbackAnthropicUserMessage(systemPrompt string) anthropic.BetaMessageParam {
+	content := strings.TrimSpace(systemPrompt)
+	if content == "" {
+		content = "Please describe how I can help."
+	}
+
+	return anthropic.BetaMessageParam{
+		Role: anthropic.BetaMessageParamRoleUser,
+		Content: []anthropic.BetaContentBlockParamUnion{
+			anthropic.NewBetaTextBlock(content),
+		},
+	}
 }
 
 func convertAnthropicTools(tools []map[string]interface{}, enableCaching bool, cacheTTL string) []anthropic.BetaToolUnionParam {
@@ -644,4 +664,18 @@ func makeCacheControl(ttl string) anthropic.BetaCacheControlEphemeralParam {
 	}
 
 	return cacheControl
+}
+
+// applyCacheControlToBlocks applies cache control metadata to the last text block if enabled.
+func applyCacheControlToBlocks(blocks []anthropic.BetaContentBlockParamUnion, enableCaching bool, cacheTTL string) {
+	if !enableCaching {
+		return
+	}
+
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if text := blocks[i].OfText; text != nil {
+			text.CacheControl = makeCacheControl(cacheTTL)
+			return
+		}
+	}
 }

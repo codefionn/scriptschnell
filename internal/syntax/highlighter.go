@@ -127,16 +127,16 @@ func (h *Highlighter) highlightNode(node *tree_sitter.Node, source []byte, resul
 
 // ANSI color codes
 const (
-	colorReset     = "\033[0m"
-	colorKeyword   = "\033[35m"  // Magenta
-	colorString    = "\033[32m"  // Green
-	colorNumber    = "\033[33m"  // Yellow
-	colorComment   = "\033[90m"  // Bright black (gray)
-	colorFunction  = "\033[36m"  // Cyan
-	colorType      = "\033[34m"  // Blue
-	colorOperator  = "\033[37m"  // White
-	colorConstant  = "\033[91m"  // Bright red
-	colorVariable  = "\033[97m"  // Bright white
+	colorReset    = "\033[0m"
+	colorKeyword  = "\033[35m" // Magenta
+	colorString   = "\033[32m" // Green
+	colorNumber   = "\033[33m" // Yellow
+	colorComment  = "\033[90m" // Bright black (gray)
+	colorFunction = "\033[36m" // Cyan
+	colorType     = "\033[34m" // Blue
+	colorOperator = "\033[37m" // White
+	colorConstant = "\033[91m" // Bright red
+	colorVariable = "\033[97m" // Bright white
 )
 
 // getColorForNodeType returns the ANSI color code for a given node type
@@ -153,7 +153,7 @@ func (h *Highlighter) getColorForNodeType(nodeType string) string {
 
 	// Numbers
 	if strings.Contains(nodeType, "number") || strings.Contains(nodeType, "int") ||
-	   strings.Contains(nodeType, "float") || nodeType == "true" || nodeType == "false" {
+		strings.Contains(nodeType, "float") || nodeType == "true" || nodeType == "false" {
 		return colorNumber
 	}
 
@@ -164,7 +164,7 @@ func (h *Highlighter) getColorForNodeType(nodeType string) string {
 
 	// Functions
 	if strings.Contains(nodeType, "function") || strings.Contains(nodeType, "method") ||
-	   nodeType == "call_expression" {
+		nodeType == "call_expression" {
 		return colorFunction
 	}
 

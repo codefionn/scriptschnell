@@ -81,27 +81,36 @@ type MCPOpenAIConfig struct {
 	ResponseJSON bool    `json:"response_json,omitempty"`
 }
 
+// AutoSaveConfig holds configuration for automatic session saving
+type AutoSaveConfig struct {
+	Enabled           bool `json:"enabled"`
+	SaveIntervalSeconds int  `json:"save_interval_seconds"`
+	MaxConcurrentSaves int  `json:"max_concurrent_saves"`
+}
+
 // Config represents application configuration
 type Config struct {
-	WorkingDir         string              `json:"working_dir"`
-	CacheTTL           int                 `json:"cache_ttl_seconds"`
-	MaxCacheEntries    int                 `json:"max_cache_entries"`
-	DefaultTimeout     int                 `json:"default_timeout_seconds"`
-	TempDir            string              `json:"-"`
-	Temperature        float64             `json:"temperature"`
-	MaxTokens          int                 `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
-	ProviderConfigPath string              `json:"-"`
-	DisableAnimations  bool                `json:"disable_animations"`
-	LogLevel           string              `json:"log_level"` // debug, info, warn, error, none
-	LogPath            string              `json:"-"`
-	AuthorizedDomains  map[string]bool     `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
-	AuthorizedCommands map[string]bool     `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
-	Search             SearchConfig        `json:"search"`                        // Web search provider configuration
-	MCP                MCPConfig           `json:"mcp,omitempty"`                 // Custom MCP server configuration
-	Secrets            SecretsSettings     `json:"secrets,omitempty"`             // Encryption settings
-	EnablePromptCache  bool                `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
-	PromptCacheTTL     string              `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
-	ContextDirectories map[string][]string `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
+	WorkingDir         string                        `json:"working_dir"`
+	CacheTTL           int                           `json:"cache_ttl_seconds"`
+	MaxCacheEntries    int                           `json:"max_cache_entries"`
+	DefaultTimeout     int                           `json:"default_timeout_seconds"`
+	TempDir            string                        `json:"-"`
+	Temperature        float64                       `json:"temperature"`
+	MaxTokens          int                           `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
+	ProviderConfigPath string                        `json:"-"`
+	DisableAnimations  bool                          `json:"disable_animations"`
+	LogLevel           string                        `json:"log_level"` // debug, info, warn, error, none
+	LogPath            string                        `json:"-"`
+	AuthorizedDomains  map[string]bool               `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
+	AuthorizedCommands map[string]bool               `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
+	Search             SearchConfig                  `json:"search"`                        // Web search provider configuration
+	MCP                MCPConfig                     `json:"mcp,omitempty"`                 // Custom MCP server configuration
+	Secrets            SecretsSettings               `json:"secrets,omitempty"`             // Encryption settings
+	EnablePromptCache  bool                          `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
+	PromptCacheTTL     string                        `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
+	ContextDirectories map[string][]string           `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
+	OpenTabs           map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
+	AutoSave           AutoSaveConfig                `json:"auto_save,omitempty"`          // Session auto-save configuration
 
 	secretsPassword string `json:"-"`
 }
@@ -110,6 +119,14 @@ type Config struct {
 type SecretsSettings struct {
 	PasswordSet bool   `json:"password_set,omitempty"`
 	Verifier    string `json:"verifier,omitempty"`
+}
+
+// WorkspaceTabState tracks open tabs for a specific workspace
+type WorkspaceTabState struct {
+	ActiveTabID   int            `json:"active_tab_id"`            // ID of currently active tab
+	TabIDs        []int          `json:"tab_ids"`                  // Ordered list of tab IDs
+	TabNames      map[int]string `json:"tab_names,omitempty"`      // Tab ID -> name mapping
+	WorktreePaths map[int]string `json:"worktree_paths,omitempty"` // Tab ID -> worktree path
 }
 
 func defaultConfigDir() string {
@@ -180,6 +197,11 @@ func DefaultConfig() *Config {
 		EnablePromptCache:  true,                      // Enable by default for cost savings
 		PromptCacheTTL:     "1h",                      // Default to 1 hour for longer sessions
 		ContextDirectories: make(map[string][]string), // No context directories by default
+		AutoSave: AutoSaveConfig{
+			Enabled:              true, // Enable by default
+			SaveIntervalSeconds:  5,    // Save every 5 seconds
+			MaxConcurrentSaves: 1,    // Only one save operation at a time
+		},
 	}
 }
 

@@ -20,6 +20,8 @@ const (
 	MenuTypeMCP
 	// MenuTypeClearSession indicates the session should be cleared
 	MenuTypeClearSession
+	// MenuTypeNewTab indicates a new tab should be created
+	MenuTypeNewTab
 )
 
 // ModelRole represents the role a model can have
@@ -40,6 +42,8 @@ type MenuResult struct {
 	Message string
 	// ModelRole is used for MenuTypeModels to indicate which role to configure
 	ModelRole ModelRole
+	// TabName is used for MenuTypeNewTab to specify the tab name
+	TabName string
 }
 
 // NewMenuResult creates a MenuResult with just a message (no menu)
@@ -98,5 +102,13 @@ func NewClearSessionResult() MenuResult {
 	return MenuResult{
 		Type:    MenuTypeClearSession,
 		Message: "Session and todos cleared. Starting fresh conversation.",
+	}
+}
+
+// NewNewTabResult creates a MenuResult that creates a new tab
+func NewNewTabResult(name string) MenuResult {
+	return MenuResult{
+		Type:    MenuTypeNewTab,
+		TabName: name,
 	}
 }

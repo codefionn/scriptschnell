@@ -189,6 +189,9 @@ func convertMessagesToAnthropicNative(systemPrompt string, messages []*Message, 
 			if len(blocks) == 0 {
 				continue
 			}
+			if msg.CacheControl {
+				applyCacheControlToBlocksNative(blocks, enableCaching, cacheTTL)
+			}
 			chatMessages = append(chatMessages, anthropic.BetaMessageParam{
 				Role:    anthropic.BetaMessageParamRoleUser,
 				Content: blocks,
@@ -327,6 +330,20 @@ func makeCacheControlNative(ttl string) anthropic.BetaCacheControlEphemeralParam
 	}
 
 	return cacheControl
+}
+
+// applyCacheControlToBlocksNative marks the last text block with cache metadata when enabled.
+func applyCacheControlToBlocksNative(blocks []anthropic.BetaContentBlockParamUnion, enableCaching bool, cacheTTL string) {
+	if !enableCaching {
+		return
+	}
+
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if text := blocks[i].OfText; text != nil {
+			text.CacheControl = makeCacheControlNative(cacheTTL)
+			return
+		}
+	}
 }
 
 // Helper function to convert tool definitions

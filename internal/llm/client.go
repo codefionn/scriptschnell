@@ -7,11 +7,12 @@ import (
 
 // Message represents a chat message
 type Message struct {
-	Role      string                   `json:"role"`
-	Content   string                   `json:"content"`
-	ToolCalls []map[string]interface{} `json:"tool_calls,omitempty"`
-	ToolID    string                   `json:"tool_id,omitempty"`
-	ToolName  string                   `json:"tool_name,omitempty"` // Name of the tool for tool responses
+	Role         string                   `json:"role"`
+	Content      string                   `json:"content"`
+	ToolCalls    []map[string]interface{} `json:"tool_calls,omitempty"`
+	ToolID       string                   `json:"tool_id,omitempty"`
+	ToolName     string                   `json:"tool_name,omitempty"`     // Name of the tool for tool responses
+	CacheControl bool                     `json:"cache_control,omitempty"` // Marks the message as the end of a cached prefix
 
 	// Native format storage (for prompt caching)
 	NativeFormat      interface{} `json:"native_format,omitempty"`       // Provider-specific message format

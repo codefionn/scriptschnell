@@ -19,4 +19,6 @@ const (
 	ToolNameSearchFiles          = "search_files"
 	ToolNameSearchFileContent    = "search_file_content"
 	ToolNameCodebaseInvestigator = "codebase_investigator"
+	ToolNameValidateSyntax       = "validate_syntax"
+	ToolNameLs                   = "ls"
 )

@@ -3,10 +3,13 @@ package tools
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/syntax"
 )
 
 // CreateFileToolSpec is the static specification for the create_file tool
@@ -82,6 +85,18 @@ func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interfac
 		return &ToolResult{Error: fmt.Sprintf("file already exists: %s (use write_file_diff to update existing files)", path)}
 	}
 
+	// Validate syntax before writing (non-blocking)
+	var validationWarning string
+	language := syntax.DetectLanguage(path)
+	if language != "" && syntax.IsValidationSupported(language) {
+		validator := syntax.NewValidator()
+		validationResult, err := validator.Validate(content, language)
+		if err == nil && !validationResult.Valid {
+			validationWarning = formatValidationWarning(path, validationResult)
+			logger.Warn("create_file: syntax validation found %d error(s) in %s", len(validationResult.Errors), path)
+		}
+	}
+
 	if err := t.fs.WriteFile(ctx, path, []byte(content)); err != nil {
 		logger.Error("create_file: error writing file: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
@@ -95,14 +110,51 @@ func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interfac
 
 	logger.Info("create_file: created %s (%d bytes)", path, len(content))
 
-	return &ToolResult{
-		Result: map[string]interface{}{
-			"path":          path,
-			"bytes_written": len(content),
-			"created":       true,
-		},
-		UIResult: generateGitDiff(path, "", content),
+	// Build result with optional validation warning
+	resultMap := map[string]interface{}{
+		"path":          path,
+		"bytes_written": len(content),
+		"created":       true,
 	}
+	if validationWarning != "" {
+		resultMap["validation_warning"] = validationWarning
+	}
+
+	// Generate UI result with validation warning if present
+	uiResult := generateGitDiff(path, "", content)
+	if validationWarning != "" {
+		uiResult = fmt.Sprintf("%s\n\n⚠️  **Syntax Validation**\n%s", uiResult, validationWarning)
+	}
+
+	return &ToolResult{
+		Result:   resultMap,
+		UIResult: uiResult,
+	}
+}
+
+// formatValidationWarning creates a human-readable warning message from validation results
+func formatValidationWarning(path string, result *syntax.ValidationResult) string {
+	if result.Valid {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d syntax error(s) in %s:\n",
+		len(result.Errors), filepath.Base(path)))
+
+	// Limit to first 5 errors for readability
+	maxErrors := 5
+	for i, err := range result.Errors {
+		if i >= maxErrors {
+			sb.WriteString(fmt.Sprintf("  ... and %d more error(s)\n",
+				len(result.Errors)-maxErrors))
+			break
+		}
+		sb.WriteString(fmt.Sprintf("  • Line %d, Column %d: %s\n",
+			err.Line, err.Column, err.Message))
+	}
+
+	return sb.String()
 }
 
 // NewCreateFileToolFactory creates a factory for CreateFileTool

@@ -8,6 +8,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/syntax"
 	"github.com/sourcegraph/go-diff/diff"
 )
 
@@ -152,6 +153,18 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 		return &ToolResult{Error: fmt.Sprintf("error applying diff: %v", err)}
 	}
 
+	// Validate syntax before writing (non-blocking)
+	var validationWarning string
+	language := syntax.DetectLanguage(path)
+	if language != "" && syntax.IsValidationSupported(language) {
+		validator := syntax.NewValidator()
+		validationResult, err := validator.Validate(finalContent, language)
+		if err == nil && !validationResult.Valid {
+			validationWarning = formatValidationWarning(path, validationResult)
+			logger.Warn("write_file_diff: syntax validation found %d error(s) in %s", len(validationResult.Errors), path)
+		}
+	}
+
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
 		logger.Error("write_file_diff: error writing file: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
@@ -163,13 +176,25 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 
 	logger.Info("write_file_diff: updated %s (%d bytes)", path, len(finalContent))
 
+	// Build result with optional validation warning
+	resultMap := map[string]interface{}{
+		"path":          path,
+		"bytes_written": len(finalContent),
+		"updated":       true,
+	}
+	if validationWarning != "" {
+		resultMap["validation_warning"] = validationWarning
+	}
+
+	// Generate UI result with validation warning if present
+	uiResult := generateGitDiff(path, string(currentData), finalContent)
+	if validationWarning != "" {
+		uiResult = fmt.Sprintf("%s\n\n⚠️  **Syntax Validation**\n%s", uiResult, validationWarning)
+	}
+
 	return &ToolResult{
-		Result: map[string]interface{}{
-			"path":          path,
-			"bytes_written": len(finalContent),
-			"updated":       true,
-		},
-		UIResult: generateGitDiff(path, string(currentData), finalContent),
+		Result:   resultMap,
+		UIResult: uiResult,
 	}
 }
 

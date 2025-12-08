@@ -19,34 +19,7 @@ func (m *TestMessage) Type() string {
 	return "test"
 }
 
-// CounterMessage is used for counting operations
-type CounterMessage struct{}
-
-func (m *CounterMessage) Type() string {
-	return "counter"
-}
-
-// ErrorMessage is used to trigger errors
-type ErrorMessage struct{}
-
-func (m *ErrorMessage) Type() string {
-	return "error"
-}
-
 // TestActor is a simple actor implementation for testing
-// CounterMessage is used for counting operations
-type CounterMessage struct{}
-
-func (m *CounterMessage) Type() string {
-	return "counter"
-}
-
-// ErrorMessage is used to trigger errors
-type ErrorMessage struct{}
-
-func (m *ErrorMessage) Type() string {
-	return "error"
-}
 
 // TestActor is a simple actor implementation for testing
 type TestActor struct {

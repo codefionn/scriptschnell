@@ -7,9 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 type commandHelpEntry struct {
@@ -96,6 +99,19 @@ func getDefaultCommandDefinitions() []commandDefinition {
 			Description: "Manage context directories (/context help for subcommands)",
 			Suggestions: []string{"/context"},
 			Handler:     (*CommandHandler).handleContext,
+		},
+		{
+			Name:        "/session",
+			Description: "Manage LLM sessions (/session help for subcommands)",
+			Suggestions: []string{"/session", "/session save", "/session load", "/session list", "/session delete"},
+			Handler:     (*CommandHandler).handleSession,
+		},
+		{
+			Name:               "/new",
+			Description:        "Create new session tab with optional name (creates git worktree if named)",
+			Suggestions:        []string{"/new", "/new <name>"},
+			PlaceholderExample: "/new feature-auth",
+			Handler:            (*CommandHandler).handleNew,
 		},
 	}
 }
@@ -961,6 +977,254 @@ func (ch *CommandHandler) handleContextRemove(args []string) (MenuResult, error)
 	return NewMenuResult(fmt.Sprintf("Removed context directory: %s", dir)), nil
 }
 
+func (ch *CommandHandler) handleSession(args []string) (MenuResult, error) {
+	if len(args) == 0 || args[0] == "help" {
+		return NewMenuResult(ch.sessionHelp()), nil
+	}
+
+	subCmd := strings.ToLower(args[0])
+	switch subCmd {
+	case "save":
+		return ch.handleSessionSave(args[1:])
+	case "load":
+		return ch.handleSessionLoad(args[1:])
+	case "list":
+		return ch.handleSessionList()
+	case "delete":
+		return ch.handleSessionDelete(args[1:])
+	default:
+		return MenuResult{}, fmt.Errorf("unknown /session subcommand: %s", subCmd)
+	}
+}
+
+func (ch *CommandHandler) sessionHelp() string {
+	return `Session Commands:
+
+/session save [name]
+    Save the current session with an optional name.
+    Sessions are stored per workspace.
+
+/session load [session_id]
+    Load a session by ID. If no ID provided shows selection menu.
+    Only shows sessions from the current workspace.
+
+/session list
+    List all saved sessions for the current workspace.
+
+/session delete [session_id]
+    Delete a saved session by ID.
+`
+}
+
+func (ch *CommandHandler) handleSessionSave(args []string) (MenuResult, error) {
+	if ch.orchestrator == nil {
+		return MenuResult{}, fmt.Errorf("orchestrator not available")
+	}
+
+	// Get session name from args or generate default
+	var name string
+	if len(args) > 0 {
+		name = strings.Join(args, " ")
+	}
+
+	// Get session storage actor
+	storageRef, exists := ch.orchestrator.GetActor("session_storage")
+	if !exists {
+		return MenuResult{}, fmt.Errorf("session storage not initialized")
+	}
+
+	// Generate name if not provided
+	if name == "" {
+		name = actor.GenerateSessionName("")
+	} else {
+		name = actor.GenerateSessionName(name)
+	}
+
+	// Save the session
+	currentSession := ch.orchestrator.GetSession()
+	logger.Info("handleSessionSave: attempting to save session %s as '%s'", currentSession.ID, name)
+
+	if err := actor.SaveSessionViaActor(ch.ctx, storageRef, currentSession, name); err != nil {
+		logger.Error("handleSessionSave: save failed: %v", err)
+		// Include storage path in error message to help user diagnose
+		storageDir, pathErr := session.GetSessionStorageDir()
+		if pathErr == nil {
+			return MenuResult{}, fmt.Errorf("failed to save session to %s: %w", storageDir, err)
+		}
+		return MenuResult{}, fmt.Errorf("failed to save session: %w", err)
+	}
+
+	logger.Info("handleSessionSave: save succeeded for session %s", currentSession.ID)
+	return NewMenuResult(fmt.Sprintf("Session saved as '%s' (ID: %s)", name, currentSession.ID)), nil
+}
+
+func (ch *CommandHandler) handleSessionList() (MenuResult, error) {
+	if ch.orchestrator == nil {
+		return MenuResult{}, fmt.Errorf("orchestrator not available")
+	}
+
+	// Get session storage actor
+	storageRef, exists := ch.orchestrator.GetActor("session_storage")
+	if !exists {
+		return MenuResult{}, fmt.Errorf("session storage not initialized")
+	}
+
+	// List sessions for current workspace
+	sessions, err := actor.ListSessionsViaActor(ch.ctx, storageRef, ch.config.WorkingDir)
+	if err != nil {
+		return MenuResult{}, fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		return NewMenuResult("No saved sessions found for this workspace."), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Saved sessions for workspace: %s\n\n", ch.config.WorkingDir))
+
+	for i, sess := range sessions {
+		name := sess.Name
+		if name == "" {
+			name = "Unnamed"
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, name))
+		sb.WriteString(fmt.Sprintf("   ID: %s\n", sess.ID))
+		sb.WriteString(fmt.Sprintf("   Created: %s\n", sess.CreatedAt.Format("2006-01-02 15:04:05")))
+		sb.WriteString(fmt.Sprintf("   Updated: %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05")))
+		sb.WriteString(fmt.Sprintf("   Messages: %d\n", sess.MessageCount))
+		sb.WriteString("\n")
+	}
+
+	return NewMenuResult(strings.TrimRight(sb.String(), "\n")), nil
+}
+
+func (ch *CommandHandler) handleSessionLoad(args []string) (MenuResult, error) {
+	if ch.orchestrator == nil {
+		return MenuResult{}, fmt.Errorf("orchestrator not available")
+	}
+
+	// Get session storage actor
+	storageRef, exists := ch.orchestrator.GetActor("session_storage")
+	if !exists {
+		return MenuResult{}, fmt.Errorf("session storage not initialized")
+	}
+
+	// If no session ID provided, show list
+	if len(args) == 0 {
+		return ch.handleSessionLoadWithMenu(storageRef)
+	}
+
+	// Load specific session
+	sessionID := args[0]
+	loadedSession, err := actor.LoadSessionViaActor(ch.ctx, storageRef, ch.config.WorkingDir, sessionID)
+	if err != nil {
+		return MenuResult{}, fmt.Errorf("failed to load session: %w", err)
+	}
+
+	// Replace current session in orchestrator
+	ch.orchestrator.SetSession(loadedSession)
+
+	var name string
+	if len(loadedSession.GetMessages()) == 0 {
+		name = "Unnamed"
+	} else {
+		// Try to get the name from storage metadata
+		sessions, _ := actor.ListSessionsViaActor(ch.ctx, storageRef, ch.config.WorkingDir)
+		for _, sess := range sessions {
+			if sess.ID == sessionID {
+				name = sess.Name
+				if name == "" {
+					name = "Unnamed"
+				}
+				break
+			}
+		}
+	}
+
+	return NewMenuResult(fmt.Sprintf("Loaded session '%s' (ID: %s) with %d messages", name, sessionID, len(loadedSession.GetMessages()))), nil
+}
+
+func (ch *CommandHandler) handleSessionLoadWithMenu(storageRef *actor.ActorRef) (MenuResult, error) {
+	// Get available sessions
+	sessions, err := actor.ListSessionsViaActor(ch.ctx, storageRef, ch.config.WorkingDir)
+	if err != nil {
+		return MenuResult{}, fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		return NewMenuResult("No saved sessions found for this workspace."), nil
+	}
+
+	// Build menu options
+	var options []string
+	for _, sess := range sessions {
+		name := sess.Name
+		if name == "" {
+			name = "Unnamed"
+		}
+		options = append(options, fmt.Sprintf("%s (%s) - %d messages", name, sess.ID, sess.MessageCount))
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Available sessions to load:\n\n")
+
+	for i, option := range options {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, option))
+	}
+
+	sb.WriteString("\nTo load a session, use: /session load <session_id>\n")
+	sb.WriteString("Example: /session load abc123def456")
+
+	return NewMenuResult(sb.String()), nil
+}
+
+func (ch *CommandHandler) handleSessionDelete(args []string) (MenuResult, error) {
+	if ch.orchestrator == nil {
+		return MenuResult{}, fmt.Errorf("orchestrator not available")
+	}
+
+	if len(args) == 0 {
+		return MenuResult{}, fmt.Errorf("usage: /session delete <session_id>")
+	}
+
+	// Get session storage actor
+	storageRef, exists := ch.orchestrator.GetActor("session_storage")
+	if !exists {
+		return MenuResult{}, fmt.Errorf("session storage not initialized")
+	}
+
+	sessionID := args[0]
+
+	// First, show session info before deletion
+	sessions, err := actor.ListSessionsViaActor(ch.ctx, storageRef, ch.config.WorkingDir)
+	if err != nil {
+		return MenuResult{}, fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	var targetSession *session.SessionMetadata
+	for _, sess := range sessions {
+		if sess.ID == sessionID {
+			targetSession = &sess
+			break
+		}
+	}
+
+	if targetSession == nil {
+		return MenuResult{}, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Show confirmation with session info
+	name := targetSession.Name
+	if name == "" {
+		name = "Unnamed"
+	}
+
+	confirmationMsg := fmt.Sprintf("Are you sure you want to delete this session?\n\nName: %s\nID: %s\nCreated: %s\nMessages: %d\n\nType 'yes' to confirm deletion.",
+		name, targetSession.ID, targetSession.CreatedAt.Format("2006-01-02 15:04:05"), targetSession.MessageCount)
+
+	return NewMenuResult(fmt.Sprintf("%s\n\nTo confirm deletion, use: /session delete %s\n\nThis will permanently remove the session.", confirmationMsg, sessionID)), nil
+}
+
 // GetKeyMap returns keyboard shortcut help
 func GetKeyMap() string {
 	return `Keyboard Shortcuts:
@@ -978,4 +1242,15 @@ Commands:
   Ctrl+X + H    - Show help
   Ctrl+X + Q    - Quit
 `
+}
+
+// handleNew creates a new session tab
+func (ch *CommandHandler) handleNew(args []string) (MenuResult, error) {
+	var name string
+	if len(args) > 0 {
+		name = strings.Join(args, " ")
+	}
+
+	// Validation will be done in the TUI's handleNewTab method
+	return NewNewTabResult(name), nil
 }

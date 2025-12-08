@@ -23,7 +23,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/logger"
-	"github.com/codefionn/scriptschnell/internal/syntax"
+	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"golang.org/x/term"
 )
@@ -138,7 +138,6 @@ type Model struct {
 	rendererCache        map[int]*glamour.TermRenderer // Cache renderers by width
 	rendererInitInFlight bool                          // Track if async init is running
 	rendererInitMutex    sync.Mutex                    // Protect cache and flag
-	highlighter          *syntax.Highlighter           // Syntax highlighter for code blocks
 	contextFile          string
 	suggestions          []string
 	selectedSuggIndex    int
@@ -152,6 +151,7 @@ type Model struct {
 	contextWindow        int
 	openRouterUsage      map[string]interface{} // OpenRouter usage data (tokens, cost, etc.)
 	thinkingTokens       int                    // Current thinking/reasoning tokens during generation
+	contentReceived      bool                   // Track if any content has been received in current generation
 	sanitizeState        ansiSanitizeState
 	showTodoPanel        bool
 	todoClient           *tools.TodoActorClient
@@ -159,6 +159,12 @@ type Model struct {
 	viewportRefreshToken int
 	config               *config.Config
 	activeMCPProvider    func() []string
+
+	// Multi-session tab state
+	sessions         []*TabSession
+	activeSessionIdx int
+	sessionIDCounter int
+	onSwitchSession  func(*session.Session) error
 }
 
 // ErrMsg is an error message type
@@ -193,6 +199,20 @@ type ContextUsageMsg struct {
 	ContextWindow int
 }
 
+// UserInputRequestMsg is sent when the planning agent needs user input
+type UserInputRequestMsg struct {
+	Question string
+	Response chan string // Channel to send the answer back
+	Error    chan error  // Channel to send any error
+}
+
+// UserMultipleQuestionsRequestMsg is sent when the planning agent has multiple questions
+type UserMultipleQuestionsRequestMsg struct {
+	Questions string
+	Response  chan string // Channel to send the answers back
+	Error     chan error  // Channel to send any error
+}
+
 // OpenRouterUsageMsg updates the UI with OpenRouter usage data (tokens, cost, etc.)
 type OpenRouterUsageMsg struct {
 	Usage map[string]interface{}
@@ -222,9 +242,14 @@ type RendererReadyMsg struct {
 	Err      error
 }
 
+// NewTabMsg is sent to create a new tab
+type NewTabMsg struct {
+	Name string
+}
+
 func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your prompt here... (@ for files, Shift+Enter (or Alt+Enter) for newline, Ctrl+X for commands, Ctrl+B to background shell, Ctrl+D or Ctrl+C×2 to quit)"
+	ta.Placeholder = "Type your prompt here... (@ for files, Shift+Enter for newline, Ctrl+X for commands)"
 	ta.Focus()
 	ta.Prompt = "│ "
 	ta.CharLimit = 10000
@@ -257,9 +282,6 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		rendererCache[80] = renderer
 	}
 
-	// Initialize syntax highlighter
-	highlighter := syntax.NewHighlighter()
-
 	m := &Model{
 		textarea:           ta,
 		viewport:           vp,
@@ -268,7 +290,6 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		contextFile:        contextFile,
 		renderer:           renderer,
 		rendererCache:      rendererCache,
-		highlighter:        highlighter,
 		spinner:            sp,
 		animationsDisabled: disableAnimations,
 		contextFreePercent: 100,
@@ -324,6 +345,13 @@ func (m *Model) SetFilesystem(fs fs.FileSystem, workingDir string) {
 	} else {
 		m.gitIgnore = nil
 	}
+
+	// Initialize tabs after config and working directory are set
+	if m.config != nil && len(m.sessions) == 0 {
+		if err := m.restoreTabs(); err != nil {
+			logger.Warn("Failed to restore tabs: %v", err)
+		}
+	}
 }
 
 func (m *Model) isGitIgnored(path string) bool {
@@ -346,6 +374,11 @@ func (m *Model) SetConfig(cfg *config.Config) {
 // SetActiveMCPProvider registers a callback that supplies currently active MCP servers.
 func (m *Model) SetActiveMCPProvider(provider func() []string) {
 	m.activeMCPProvider = provider
+}
+
+// SetOnSwitchSession registers a callback for when the user switches sessions
+func (m *Model) SetOnSwitchSession(callback func(*session.Session) error) {
+	m.onSwitchSession = callback
 }
 
 func (m *Model) scheduleViewportRefresh() tea.Cmd {
@@ -1017,9 +1050,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	wasReady := m.ready
 
 	shouldBlockTextarea := false
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && len(m.suggestions) > 0 {
-		switch keyMsg.Type {
-		case tea.KeyUp, tea.KeyDown, tea.KeyTab, tea.KeyShiftTab, tea.KeyEnter:
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if len(m.suggestions) > 0 {
+			switch keyMsg.Type {
+			case tea.KeyUp, tea.KeyDown, tea.KeyTab, tea.KeyShiftTab, tea.KeyEnter:
+				shouldBlockTextarea = true
+			}
+		}
+		// Block tab navigation keys from textarea
+		keyStr := keyMsg.String()
+		if len(keyStr) >= 5 && keyStr[:4] == "alt+" && keyStr[4] >= '1' && keyStr[4] <= '9' {
+			shouldBlockTextarea = true
+		}
+		// Also block Ctrl+T (new tab) and Ctrl+W (close tab)
+		if keyStr == "ctrl+t" || keyStr == "ctrl+w" {
 			shouldBlockTextarea = true
 		}
 	}
@@ -1132,6 +1176,46 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, baseCmd
 
+		case "ctrl+t":
+			// Create new unnamed tab
+			return m, m.handleNewTab("")
+
+		case "ctrl+w":
+			// Close current tab
+			if len(m.sessions) > 1 {
+				return m, m.handleCloseTab(m.activeSessionIdx)
+			}
+			return m, baseCmd
+
+		case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5",
+			"alt+6", "alt+7", "alt+8", "alt+9":
+			// Switch to tab 1-9
+			keyStr := msg.String()
+			logger.Info("Alt key pressed: '%s', length: %d", keyStr, len(keyStr))
+
+			// Parse the digit from the key string
+			var digit rune
+			for _, ch := range keyStr {
+				if ch >= '0' && ch <= '9' {
+					digit = ch
+					break
+				}
+			}
+
+			if digit == 0 {
+				logger.Warn("Could not parse digit from key: %s", keyStr)
+				return m, baseCmd
+			}
+
+			tabNum := int(digit-'0') - 1
+			logger.Info("Switching to tab index %d (tab number %d)", tabNum, tabNum+1)
+
+			if tabNum < len(m.sessions) {
+				return m, m.handleSwitchTab(tabNum)
+			}
+			logger.Info("Tab index %d out of range (have %d sessions)", tabNum, len(m.sessions))
+			return m, baseCmd
+
 		case "tab":
 			if len(m.suggestions) > 0 {
 				m.cycleSuggestion(1)
@@ -1186,7 +1270,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.textarea.Reset()
-			m.textarea.Placeholder = "Type your prompt here... (@ for files, Shift+Enter (or Alt+Enter) for newline, Ctrl+X for commands, Ctrl+B to background shell, Ctrl+D or Ctrl+C×2 to quit)"
+			m.textarea.Placeholder = "Type your prompt here... (@ for files, Shift+Enter for newline, Ctrl+X for commands)"
 			m.sanitizeState = ansiSanitizeState{}
 			m.suggestions = nil
 			m.selectedSuggIndex = 0
@@ -1269,6 +1353,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case GeneratingMsg:
 		if msg.Content != "" {
+			m.contentReceived = true // Mark that content has started streaming
+
 			// If this is the first chunk of assistant content, summarize any previous tool results
 			if len(m.messages) == 0 || m.messages[len(m.messages)-1].role != "Assistant" {
 				m.summarizeLastToolResult()
@@ -1284,7 +1370,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CompleteMsg:
 		m.generating = false
 		m.processingStatus = ""
-		m.thinkingTokens = 0 // Reset thinking tokens when generation completes
+		m.thinkingTokens = 0      // Reset thinking tokens when generation completes
+		m.contentReceived = false // Reset content flag for clarity
 		if !m.animationsDisabled {
 			m.spinnerActive = false
 		}
@@ -1340,6 +1427,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(baseCmd, next)
 		}
 		return m, baseCmd
+
+	case NewTabMsg:
+		return m, m.handleNewTab(msg.Name)
+
+	case UserInputRequestMsg:
+		cmd := m.handleUserInputRequest(msg)
+		return m, cmd
+
+	case UserMultipleQuestionsRequestMsg:
+		cmd := m.handleUserMultipleQuestionsRequest(msg)
+		return m, cmd
 	}
 
 	return m, baseCmd
@@ -1347,7 +1445,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) startPrompt(input string) tea.Cmd {
 	m.processingStatus = ""
-	m.thinkingTokens = 0 // Reset thinking tokens for new prompt
+	m.thinkingTokens = 0      // Reset thinking tokens for new prompt
+	m.contentReceived = false // Reset content flag for new generation
 	m.addMessage("You", input)
 	m.generating = true
 	var cmds []tea.Cmd
@@ -1450,12 +1549,20 @@ func (m *Model) View() string {
 
 	// Title
 	title := titleStyle.Render("scriptschnell - AI-Powered Coding Assistant")
-	status := statusStyle.Render(fmt.Sprintf("Model: %s | Ctrl+X: Commands | Ctrl+B: Background shell | ESC: Stop | Ctrl+D/Ctrl+C×2: Quit", m.currentModel))
+	status := statusStyle.Render(fmt.Sprintf("Model: %s", m.currentModel))
 
 	sb.WriteString(title)
 	sb.WriteString("\n")
 	sb.WriteString(status)
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
+
+	// Tab bar (if multiple sessions)
+	tabBar := m.renderTabBar()
+	if tabBar != "" {
+		sb.WriteString(tabBar)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
 
 	// Viewport with messages
 	sb.WriteString(m.viewport.View())
@@ -1487,10 +1594,15 @@ func (m *Model) View() string {
 			footerLeft = statusStyle.Render(fmt.Sprintf("⚙️  %s", statusText))
 		}
 	} else if m.generating {
-		generatingText := "Generating..."
-		if m.thinkingTokens > 0 {
-			generatingText = fmt.Sprintf("Generating... (%d thinking tokens)", m.thinkingTokens)
+		var generatingText string
+
+		// Show thinking tokens only if we haven't received content yet (still in thinking phase)
+		if m.thinkingTokens > 0 && !m.contentReceived {
+			generatingText = fmt.Sprintf("Thinking... (%d thinking tokens)", m.thinkingTokens)
+		} else {
+			generatingText = "Generating..."
 		}
+
 		if !m.animationsDisabled && m.spinnerActive {
 			footerLeft = statusStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), generatingText))
 		} else {
@@ -1711,6 +1823,31 @@ func (m *Model) renderTodoPanel() string {
 	todoList, err := m.todoClient.List()
 
 	var content strings.Builder
+
+	// Add keyboard shortcuts at the top of the todo panel so they're always visible
+	content.WriteString(todoTitleStyle.Render("Keybinds"))
+	content.WriteString("\n")
+
+	keybinds := []string{
+		"Ctrl+X: Commands",
+		"Ctrl+B: Background",
+		"ESC: Stop",
+		"Ctrl+C×2/Ctrl+D: Quit",
+	}
+
+	// Add tab shortcuts only if multiple tabs exist
+	if len(m.sessions) > 1 {
+		keybinds = append(keybinds, "Ctrl+T: New Tab")
+		keybinds = append(keybinds, "Ctrl+W: Close Tab")
+		keybinds = append(keybinds, "Alt+1-9: Switch Tab")
+	}
+
+	for _, keybind := range keybinds {
+		content.WriteString(todoItemStyle.Render(fmt.Sprintf("• %s", keybind)))
+		content.WriteString("\n")
+	}
+
+	content.WriteString("\n")
 	content.WriteString(todoTitleStyle.Render("Todo Tasks"))
 	content.WriteString("\n")
 
@@ -1946,11 +2083,17 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 		}
 		m.addToolMessage(realToolName, toolID, content, "", true)
 	} else {
-		// Check if this is a git diff format (starts with --- and +++)
-		isGitDiff := strings.HasPrefix(result, "---") || strings.HasPrefix(result, "diff --git")
-
-		if isGitDiff {
-			// For write file operations, show a nice summary with the diff
+		// Check if this is a pre-formatted UIResult (already has markdown formatting)
+		if isAlreadyFormatted(result) {
+			// Tool already formatted UIResult - use as-is
+			if isPlanning {
+				content = "📋 **Planning:** " + result
+			} else {
+				content = result
+			}
+			m.addToolMessage(realToolName, toolID, content, result, false)
+		} else if strings.HasPrefix(result, "---") || strings.HasPrefix(result, "diff --git") {
+			// Git diff format - wrap in diff code block
 			summary := m.generateToolSummary(realToolName, result, false)
 			if isPlanning {
 				summary = "📋 **Planning:** " + summary
@@ -1959,7 +2102,7 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 			fullContent := fmt.Sprintf("%s\n```diff\n%s\n```", summary, displayResult)
 			m.addToolMessage(realToolName, toolID, fullContent, result, false)
 		} else {
-			// Create the full result display
+			// Raw output - wrap in code block
 			displayResult := m.truncateToolResult(result)
 			fullContent := fmt.Sprintf("✓ **Result:**\n```\n%s\n```", displayResult)
 			if isPlanning {
@@ -1968,6 +2111,14 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 			m.addToolMessage(realToolName, toolID, fullContent, result, false)
 		}
 	}
+}
+
+// isAlreadyFormatted checks if a tool result is already formatted with markdown
+func isAlreadyFormatted(result string) bool {
+	// Check for markdown code blocks with language tags and tool-specific formatting
+	// Tools like read_file include 📖 and 📊 emoji indicators along with code blocks
+	return strings.Contains(result, "```") &&
+		(strings.Contains(result, "📖") || strings.Contains(result, "📊"))
 }
 
 // generateToolSummary creates a simple one-line summary for tool results
@@ -2474,19 +2625,16 @@ func (m *Model) updateViewport() {
 
 		// Render content with markdown for Assistant and Tool messages
 		if (msg.role == "Assistant" || msg.role == "Tool") && m.renderer != nil && msg.content != "" {
-			// Apply syntax highlighting to code blocks before markdown rendering
-			contentToRender := msg.content
-			if m.highlighter != nil {
-				contentToRender = m.highlighter.HighlightMarkdownCodeBlocks(msg.content)
-			}
-
-			// Render markdown
-			if mdRendered, err := m.renderer.Render(contentToRender); err == nil {
-				rendered.WriteString(strings.TrimRight(mdRendered, "\n"))
+			// Render markdown with Glamour, which handles syntax highlighting internally via Chroma
+			var renderedContent string
+			if mdRendered, err := m.renderer.Render(msg.content); err == nil {
+				renderedContent = strings.TrimRight(mdRendered, "\n")
 			} else {
 				// Fallback to plain text if rendering fails
-				rendered.WriteString(msg.content)
+				renderedContent = msg.content
 			}
+
+			rendered.WriteString(renderedContent)
 		} else {
 			// Plain text for user and system messages
 			rendered.WriteString(msg.content)
@@ -2583,4 +2731,115 @@ func (m *Model) UpdateModel(modelName string) {
 func (m *Model) ClearMessages() {
 	m.messages = []message{}
 	m.updateViewport()
+}
+
+// handleUserInputRequest handles single question user input requests
+func (m *Model) handleUserInputRequest(msg UserInputRequestMsg) tea.Cmd {
+	// Create user input dialog
+	dialog := NewUserInputDialog(msg.Question)
+
+	// Return a command that runs the dialog and sends the result
+	return func() tea.Msg {
+		p := tea.NewProgram(dialog, tea.WithAltScreen())
+		result, err := p.Run()
+		if err != nil {
+			msg.Error <- err
+			return nil
+		}
+
+		if userInputDialog, ok := result.(UserInputDialog); ok {
+			msg.Response <- userInputDialog.GetAnswer()
+		}
+		return nil
+	}
+}
+
+// handleUserMultipleQuestionsRequest handles multiple choice question requests
+func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequestMsg) tea.Cmd {
+	// Parse the questions from the formatted string
+	// The format is expected to be:
+	// 1. Question text?
+	//    a) Option 1
+	//    b) Option 2
+	//    c) Option 3
+	//
+	// 2. Another question?
+	//    a) Option 1
+	//    b) Option 2
+	//    c) Option 3
+
+	lines := strings.Split(msg.Questions, "\n")
+	var questions []QuestionWithOptions
+	var currentQuestion QuestionWithOptions
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Check if this is a question line (starts with number)
+		if len(line) > 2 && line[0] >= '1' && line[0] <= '9' && line[1] == '.' {
+			// Save previous question if exists
+			if currentQuestion.Question != "" {
+				questions = append(questions, currentQuestion)
+			}
+			// Start new question
+			currentQuestion = QuestionWithOptions{
+				Question: strings.TrimSpace(line[2:]),
+				Options:  make([]string, 0, 3),
+			}
+		} else if len(line) > 0 && line[0] >= 'a' && line[0] <= 'c' && line[1] == ')' {
+			// This is an option line
+			option := strings.TrimSpace(line[2:])
+			currentQuestion.Options = append(currentQuestion.Options, option)
+		}
+	}
+
+	// Add the last question
+	if currentQuestion.Question != "" {
+		questions = append(questions, currentQuestion)
+	}
+
+	// Validate questions
+	for _, q := range questions {
+		if len(q.Options) != 3 {
+			// If parsing failed, fall back to asking as single question
+			return m.handleUserInputRequest(UserInputRequestMsg{
+				Question: msg.Questions,
+				Response: msg.Response,
+				Error:    msg.Error,
+			})
+		}
+	}
+
+	if len(questions) == 0 {
+		msg.Error <- fmt.Errorf("no questions found")
+		return nil
+	}
+
+	// Create user questions dialog
+	dialog := NewUserQuestionDialog(questions)
+
+	// Return a command that runs the dialog and sends the result
+	return func() tea.Msg {
+		p := tea.NewProgram(&dialog, tea.WithAltScreen())
+		result, err := p.Run()
+		if err != nil {
+			msg.Error <- err
+			return nil
+		}
+
+		if questionsDialog, ok := result.(*UserQuestionDialog); ok {
+			answers := questionsDialog.GetAnswers()
+			var formattedAnswers strings.Builder
+			for i, answer := range answers {
+				if answer != "" {
+					formattedAnswers.WriteString(fmt.Sprintf("Question %d: %s\n", i+1, answer))
+				}
+			}
+			msg.Response <- formattedAnswers.String()
+		}
+		return nil
+	}
 }

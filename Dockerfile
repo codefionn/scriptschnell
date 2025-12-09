@@ -15,7 +15,6 @@ RUN apk add --no-cache git ca-certificates tzdata \
 COPY --from=tinygo /usr/local/tinygo /usr/local/tinygo
 ENV PATH="/usr/local/tinygo/bin:${PATH}"
 
-RUN mkdir /go
 ENV GOPATH=/go
 
 # Copy go mod files and download dependencies

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/shared/constant"
 )
 
 // AnthropicConverterImpl implements NativeConverter for Anthropic/Claude models
@@ -344,110 +343,4 @@ func applyCacheControlToBlocksNative(blocks []anthropic.BetaContentBlockParamUni
 			return
 		}
 	}
-}
-
-// Helper function to convert tool definitions
-func convertAnthropicToolsNative(tools []map[string]interface{}, enableCaching bool, cacheTTL string) []anthropic.BetaToolUnionParam {
-	if len(tools) == 0 {
-		return nil
-	}
-
-	result := make([]anthropic.BetaToolUnionParam, 0, len(tools))
-	for idx, raw := range tools {
-		if raw == nil {
-			continue
-		}
-
-		function, ok := raw["function"].(map[string]interface{})
-		if !ok || function == nil {
-			continue
-		}
-
-		name := strings.TrimSpace(toString(function["name"]))
-		if name == "" {
-			continue
-		}
-
-		schema := anthropic.BetaToolInputSchemaParam{
-			Type: constant.Object("object"),
-		}
-
-		if params, ok := function["parameters"].(map[string]interface{}); ok {
-			if props, ok := params["properties"]; ok {
-				schema.Properties = props
-			}
-			if req := extractStringSliceNative(params["required"]); len(req) > 0 {
-				schema.Required = req
-			}
-			if schemaType, ok := params["type"].(string); ok && schemaType != "" {
-				schema.Type = constant.Object(schemaType)
-			}
-			if extras := copyExtraFieldsNative(params, "type", "properties", "required"); len(extras) > 0 {
-				schema.ExtraFields = extras
-			}
-		}
-
-		tool := &anthropic.BetaToolParam{
-			Name:        name,
-			InputSchema: schema,
-			Type:        anthropic.BetaToolTypeCustom,
-		}
-
-		if desc := strings.TrimSpace(toString(function["description"])); desc != "" {
-			tool.Description = anthropic.String(desc)
-		}
-
-		// Add cache control to the last tool definition if caching is enabled
-		// This creates a cache breakpoint after all tool definitions
-		if enableCaching && idx == len(tools)-1 {
-			tool.CacheControl = makeCacheControlNative(cacheTTL)
-		}
-
-		result = append(result, anthropic.BetaToolUnionParam{OfTool: tool})
-	}
-
-	if len(result) == 0 {
-		return nil
-	}
-	return result
-}
-
-func extractStringSliceNative(value interface{}) []string {
-	switch v := value.(type) {
-	case []string:
-		return append([]string(nil), v...)
-	case []interface{}:
-		result := make([]string, 0, len(v))
-		for _, item := range v {
-			if str, ok := item.(string); ok && str != "" {
-				result = append(result, str)
-			}
-		}
-		return result
-	default:
-		return nil
-	}
-}
-
-func copyExtraFieldsNative(src map[string]interface{}, skip ...string) map[string]any {
-	if len(src) == 0 {
-		return nil
-	}
-	skipSet := make(map[string]struct{}, len(skip))
-	for _, key := range skip {
-		skipSet[key] = struct{}{}
-	}
-
-	extras := make(map[string]any)
-	for key, val := range src {
-		if _, shouldSkip := skipSet[key]; shouldSkip {
-			continue
-		}
-		extras[key] = val
-	}
-
-	if len(extras) == 0 {
-		return nil
-	}
-	return extras
 }

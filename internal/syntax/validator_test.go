@@ -105,10 +105,10 @@ func main() {
 			wantErr: true,
 		},
 		{
-			name:     "Python invalid indentation",
+			name:     "Python missing colon",
 			language: "python",
-			code: `def hello():
-print("Invalid")  # Should be indented`,
+			code: `def hello()
+    print("missing colon")`,
 			wantErr: true,
 		},
 		{

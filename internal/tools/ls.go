@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -105,7 +104,7 @@ func (t *LsTool) executeSingleDir(ctx context.Context, path string, longFormat, 
 		path = filepath.Join(t.workingDir, path)
 	}
 	
-	entries, err := ioutil.ReadDir(path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return &ToolResult{
 			Error: fmt.Sprintf("failed to read directory %s: %v", path, err),
@@ -121,10 +120,16 @@ func (t *LsTool) executeSingleDir(ctx context.Context, path string, longFormat, 
 
 	var files []os.FileInfo
 	for _, entry := range entries {
-		if !all && strings.HasPrefix(entry.Name(), ".") {
+		// Get FileInfo for compatibility with existing code
+		fileInfo, err := entry.Info()
+		if err != nil {
+			continue // Skip this entry if we can't get info
+		}
+		
+		if !all && strings.HasPrefix(fileInfo.Name(), ".") {
 			continue
 		}
-		files = append(files, entry)
+		files = append(files, fileInfo)
 	}
 
 	// Sort files

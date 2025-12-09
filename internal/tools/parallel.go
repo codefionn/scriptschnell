@@ -237,10 +237,13 @@ func (t *ParallelTool) ExecuteWithCallbacks(ctx context.Context, params map[stri
 
 	// Send initial progress message showing all tools being executed
 	sendStream := func(msg string) {
-		progress.Dispatch(progressCb, progress.Update{
+		if err := progress.Dispatch(progressCb, progress.Update{
 			Message: msg,
 			Mode:    progress.ReportNoStatus,
-		})
+		}); err != nil {
+			// Ignore progress dispatch errors to avoid interrupting parallel execution
+			return
+		}
 	}
 
 	// Show which tools are being executed in parallel

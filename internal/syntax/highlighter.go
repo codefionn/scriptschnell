@@ -55,7 +55,9 @@ func (h *Highlighter) Highlight(code string, language string) (string, error) {
 	defer parser.Close()
 
 	// Set language
-	parser.SetLanguage(tree_sitter.NewLanguage(lang))
+	if err := parser.SetLanguage(tree_sitter.NewLanguage(lang)); err != nil {
+		return "", fmt.Errorf("failed to set parser language: %w", err)
+	}
 
 	// Parse code
 	tree := parser.Parse([]byte(code), nil)

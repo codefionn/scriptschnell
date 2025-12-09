@@ -24,7 +24,7 @@ func NewSessionStorageActor(name string) (*SessionStorageActor, error) {
 func NewSessionStorageActorWithConfig(name string, configFunc func() *config.AutoSaveConfig) (*SessionStorageActor, error) {
 	var storage *session.SessionStorage
 	var err error
-	
+
 	if configFunc != nil {
 		storage, err = session.NewSessionStorageWithConfig(configFunc)
 	} else {

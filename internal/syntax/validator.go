@@ -83,7 +83,9 @@ func (v *Validator) Validate(code string, language string) (*ValidationResult, e
 	defer parser.Close()
 
 	// Set language
-	parser.SetLanguage(tree_sitter.NewLanguage(lang))
+	if err := parser.SetLanguage(tree_sitter.NewLanguage(lang)); err != nil {
+		return nil, fmt.Errorf("failed to set parser language: %w", err)
+	}
 
 	// Parse code
 	sourceBytes := []byte(code)

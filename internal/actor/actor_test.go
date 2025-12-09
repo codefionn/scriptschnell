@@ -2,119 +2,10 @@ package actor
 
 import (
 	"context"
-	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
-
-// TestMessage is a simple test message type
-type TestMessage struct {
-	ID      string
-	Content string
-}
-
-func (m *TestMessage) Type() string {
-	return "test"
-}
-
-// CounterMessage is used for counting operations
-type CounterMessage struct{}
-
-func (m *CounterMessage) Type() string {
-	return "counter"
-}
-
-// ErrorMessage is used to trigger errors
-type ErrorMessage struct{}
-
-func (m *ErrorMessage) Type() string {
-	return "error"
-}
-
-// TestActor is a simple actor implementation for testing
-type TestActor struct {
-	id             string
-	receivedMsgs   []Message
-	receiveCount   atomic.Int32
-	startCalled    atomic.Bool
-	stopCalled     atomic.Bool
-	shouldError    atomic.Bool
-	mu             sync.Mutex
-	receiveHandler func(ctx context.Context, msg Message) error
-}
-
-func NewTestActor(id string) *TestActor {
-	return &TestActor{
-		id:           id,
-		receivedMsgs: make([]Message, 0),
-	}
-}
-
-func (a *TestActor) ID() string {
-	return a.id
-}
-
-func (a *TestActor) Start(ctx context.Context) error {
-	a.startCalled.Store(true)
-	return nil
-}
-
-func (a *TestActor) Stop(ctx context.Context) error {
-	a.stopCalled.Store(true)
-	return nil
-}
-
-func (a *TestActor) Receive(ctx context.Context, msg Message) error {
-	a.receiveCount.Add(1)
-
-	if a.receiveHandler != nil {
-		return a.receiveHandler(ctx, msg)
-	}
-
-	a.mu.Lock()
-	a.receivedMsgs = append(a.receivedMsgs, msg)
-	a.mu.Unlock()
-
-	if a.shouldError.Load() {
-		return errors.New("test error")
-	}
-
-	if _, ok := msg.(*ErrorMessage); ok {
-		return errors.New("error message received")
-	}
-
-	return nil
-}
-
-func (a *TestActor) GetReceivedMessages() []Message {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	msgs := make([]Message, len(a.receivedMsgs))
-	copy(msgs, a.receivedMsgs)
-	return msgs
-}
-
-func (a *TestActor) GetReceiveCount() int32 {
-	return a.receiveCount.Load()
-}
-
-func (a *TestActor) WasStartCalled() bool {
-	return a.startCalled.Load()
-}
-
-func (a *TestActor) WasStopCalled() bool {
-	return a.stopCalled.Load()
-}
-
-func (a *TestActor) SetShouldError(val bool) {
-	a.shouldError.Store(val)
-}
-
-func (a *TestActor) SetReceiveHandler(handler func(ctx context.Context, msg Message) error) {
-	a.receiveHandler = handler
-}
 
 // TestNewActorRef tests creating a new actor reference
 func TestNewActorRef(t *testing.T) {
@@ -335,7 +226,7 @@ func TestActorRefReceiveError(t *testing.T) {
 	}
 }
 
-func TestActorRefSequentialProcessing(t *testing.T) {
+func TestActorRefSequentialProcessing_Variants(t *testing.T) {
 	ctx := context.Background()
 	actor := NewTestActor("test-1")
 	ref := NewActorRef("test-1", actor, 10, WithSequentialProcessing())
@@ -367,7 +258,7 @@ func TestActorRefSequentialProcessing(t *testing.T) {
 }
 
 // TestActorRefContextCancellation tests context cancellation during message processing
-func TestActorRefContextCancellation(t *testing.T) {
+func TestActorRefContextCancellation_Basic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	actor := NewTestActor("test-1")
 
@@ -414,7 +305,7 @@ func TestActorRefContextCancellation(t *testing.T) {
 }
 
 // TestSystemSpawn tests spawning actors in the system
-func TestSystemSpawn(t *testing.T) {
+func TestSystemSpawn_Basic(t *testing.T) {
 	ctx := context.Background()
 	system := NewSystem()
 
@@ -446,7 +337,7 @@ func TestSystemSpawn(t *testing.T) {
 }
 
 // TestSystemGet tests retrieving actors from the system
-func TestSystemGet(t *testing.T) {
+func TestSystemGet_Basic(t *testing.T) {
 	ctx := context.Background()
 	system := NewSystem()
 
@@ -479,7 +370,7 @@ func TestSystemGet(t *testing.T) {
 }
 
 // TestSystemStop tests stopping individual actors
-func TestSystemStop(t *testing.T) {
+func TestSystemStop_Basic(t *testing.T) {
 	ctx := context.Background()
 	system := NewSystem()
 
@@ -516,7 +407,7 @@ func TestSystemStop(t *testing.T) {
 }
 
 // TestSystemStopAll tests stopping all actors
-func TestSystemStopAll(t *testing.T) {
+func TestSystemStopAll_Basic(t *testing.T) {
 	ctx := context.Background()
 	system := NewSystem()
 
@@ -560,7 +451,7 @@ func TestSystemStopAll(t *testing.T) {
 }
 
 // TestSystemConcurrentAccess tests concurrent access to the system
-func TestSystemConcurrentAccess(t *testing.T) {
+func TestSystemConcurrentAccess_Basic(t *testing.T) {
 	ctx := context.Background()
 	system := NewSystem()
 
@@ -597,7 +488,7 @@ func TestSystemConcurrentAccess(t *testing.T) {
 }
 
 // TestActorCommunication tests communication between actors
-func TestActorCommunication(t *testing.T) {
+func TestActorCommunication_Basic(t *testing.T) {
 	ctx := context.Background()
 	system := NewSystem()
 
@@ -648,7 +539,7 @@ func TestActorCommunication(t *testing.T) {
 }
 
 // BenchmarkActorSend benchmarks sending messages to an actor
-func BenchmarkActorSend(b *testing.B) {
+func BenchmarkActorSend_Basic(b *testing.B) {
 	ctx := context.Background()
 	actor := NewTestActor("bench-actor")
 	ref := NewActorRef("bench-actor", actor, 10000)
@@ -676,8 +567,7 @@ func BenchmarkActorSend(b *testing.B) {
 	}
 }
 
-// BenchmarkActorSpawn benchmarks spawning actors
-func BenchmarkActorSpawn(b *testing.B) {
+func BenchmarkActorSpawn_Basic(b *testing.B) {
 	ctx := context.Background()
 
 	b.ResetTimer()

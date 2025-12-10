@@ -11,14 +11,7 @@ variables:
   # TinyGo version as used in Dockerfile
   TINYGO_VERSION: "0.39.0"
 
-# Cache configuration for Go modules
-caches:
-  - path: /go/pkg/mod
-    when:
-      - event: push
-      - event: pull_request
-
-pipeline:
+steps:
   # Lint step - runs golangci-lint
   lint:
     image: golang:${GOLANG_VERSION}-alpine
@@ -38,6 +31,11 @@ pipeline:
     commands:
       - apk add --no-cache git ca-certificates tzdata
       - update-ca-certificates
+      # Install TinyGo (required for tests that use sandbox functionality)
+      - wget https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
+      - tar -C /usr/local -xzf tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
+      - rm tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
+      - export PATH="/usr/local/tinygo/bin:${PATH}"
       - go mod download
       - echo "Running tests with -short flag..."
       - go test -short ./...

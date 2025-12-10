@@ -52,9 +52,9 @@ pipeline:
       - apk add --no-cache git ca-certificates tzdata
       - update-ca-certificates
       # Install TinyGo (required for the project)
-      - wget https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.apk
-      - apk add --allow-untrusted tinygo_${TINYGO_VERSION}_amd64.apk
-      - rm tinygo_${TINYGO_VERSION}_amd64.apk
+      - wget https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
+      - tar -C /usr/local -xzf tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
+      - rm tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
       - export PATH="/usr/local/tinygo/bin:${PATH}"
       # Download dependencies and build
       - go mod download

@@ -7,11 +7,11 @@ import (
 )
 
 func TestAuthorizationDialogDefaultsToDeny(t *testing.T) {
-	dialog := NewAuthorizationDialog(AuthorizationRequest{
+	dialog := NewAuthorizationDialog(&AuthorizationRequest{
 		ToolName:   "write_file_diff",
 		Parameters: map[string]interface{}{"path": "main.go"},
 		Reason:     "File exists but was not read",
-	})
+	}, "test-tab")
 
 	model, cmd := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -32,7 +32,7 @@ func TestAuthorizationDialogDefaultsToDeny(t *testing.T) {
 }
 
 func TestAuthorizationDialogApproveSelection(t *testing.T) {
-	dialog := NewAuthorizationDialog(AuthorizationRequest{ToolName: "write_file_diff"})
+	dialog := NewAuthorizationDialog(&AuthorizationRequest{ToolName: "write_file_diff"}, "test-tab")
 	dialog.list.Select(0)
 
 	model, _ := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -50,7 +50,7 @@ func TestAuthorizationDialogApproveSelection(t *testing.T) {
 }
 
 func TestAuthorizationDialogEscapeDenies(t *testing.T) {
-	dialog := NewAuthorizationDialog(AuthorizationRequest{ToolName: "write_file_diff"})
+	dialog := NewAuthorizationDialog(&AuthorizationRequest{ToolName: "write_file_diff"}, "test-tab")
 
 	model, _ := dialog.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated, ok := model.(AuthorizationDialog)

@@ -77,16 +77,20 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 		logger.Warn("Summary model decision does not equal exactly what was asked for: %q", decision)
 	}
 
-	// For Mistral models, be more conservative - only continue if explicitly requested
+	// For Mistral models, be extremely conservative - only continue on crystal clear cases
 	if llm.IsMistralModel(modelID) {
 		upper := strings.ToUpper(decision)
-		// Mistral models should only continue on very explicit "CONTINUE" response
-		if upper == "CONTINUE" && !strings.Contains(upper, "STOP") {
-			logger.Debug("Auto-continue judge decided: CONTINUE (Mistral model - explicit match, full response: %q)", decision)
+		// Remove any whitespace and normalize for strict comparison
+		normalized := strings.TrimSpace(upper)
+
+		// Mistral models should ONLY continue on a pristine "CONTINUE" - no extra words, no ambiguity
+		if normalized == "CONTINUE" && len(normalized) == 8 {
+			logger.Debug("Auto-continue judge decided: CONTINUE (Mistral model - pristine match only, full response: %q)", decision)
 			return true, decision
 		}
-		// For any ambiguity or STOP response from Mistral, don't continue
-		logger.Debug("Auto-continue judge decided: STOP (Mistral model - conservative approach, full response: %q)", decision)
+
+		// For ANY deviation from pristine "CONTINUE" or any STOP indication, don't continue
+		logger.Debug("Auto-continue judge decided: STOP (Mistral model - ultra-conservative approach, normalized: %q, full response: %q)", normalized, decision)
 		return false, decision
 	}
 
@@ -185,7 +189,18 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 	sb.WriteString("- The assistant is generating repetitive tool calls without making progress\n\n")
 
 	if llm.IsMistralModel(modelID) {
-		sb.WriteString("Error on the side of caution: only choose CONTINUE if it is very clear that continuation is needed. If in doubt, choose STOP.\n\n")
+		sb.WriteString("IMPORTANT: Be extremely conservative in your decision.\n")
+		sb.WriteString("Strongly prefer STOP over CONTINUE. Only choose CONTINUE if ALL of these conditions are met:\n")
+		sb.WriteString("1. The response is visibly cut off mid-sentence or mid-code block\n")
+		sb.WriteString("2. There is an clear task that was started but not completed\n")
+		sb.WriteString("3. The response ends with obvious truncation indicators (e.g., incomplete code, hanging parentheses, or 'I'll continue')\n")
+		sb.WriteString("4. No ambiguity exists - continuation is absolutely necessary\n\n")
+		sb.WriteString("Choose STOP for everything else, including:\n")
+		sb.WriteString("- Perfectly complete responses\n")
+		sb.WriteString("- Natural stopping points (end of a thought or completed explanation)\n")
+		sb.WriteString("- Responses that could continue but don't need to\n")
+		sb.WriteString("- Any uncertainty or doubt in your judgment\n\n")
+		sb.WriteString("When in doubt, ALWAYS choose STOP.\n\n")
 	}
 
 	trimmedSystemPrompt := strings.TrimSpace(systemPrompt)

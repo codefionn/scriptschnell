@@ -48,6 +48,8 @@ func (s *WriteFileReplaceSingleToolSpec) Parameters() map[string]interface{} {
 	}
 }
 
+func (s *WriteFileReplaceSingleToolSpec) RequiresExclusiveExecution() bool { return true }
+
 // WriteFileReplaceSingleTool is the executor with runtime dependencies.
 type WriteFileReplaceSingleTool struct {
 	fs      fs.FileSystem

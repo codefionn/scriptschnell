@@ -90,6 +90,8 @@ Example update diff 2:
 	}
 }
 
+func (s *WriteFileDiffToolSpec) RequiresExclusiveExecution() bool { return true }
+
 // WriteFileDiffTool applies unified diffs to existing files.
 // This tool required actual git-like diffs with hunk headers
 // which seems to be a big problem in today's LLMs.

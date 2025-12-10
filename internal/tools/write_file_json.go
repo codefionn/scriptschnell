@@ -63,6 +63,8 @@ func (s *WriteFileJSONToolSpec) Parameters() map[string]interface{} {
 	}
 }
 
+func (s *WriteFileJSONToolSpec) RequiresExclusiveExecution() bool { return true }
+
 // WriteFileJSONTool is the executor with runtime dependencies
 type WriteFileJSONTool struct {
 	fs      fs.FileSystem

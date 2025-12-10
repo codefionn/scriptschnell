@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/progress"
@@ -179,8 +180,9 @@ type registryEntry struct {
 	// Legacy: full tool implementation
 	tool Tool
 	// New: separated spec and executor
-	spec     ToolSpec
-	executor ToolExecutor
+	spec      ToolSpec
+	executor  ToolExecutor
+	exclusive bool
 }
 
 func (e *registryEntry) getSpec() ToolSpec {
@@ -195,6 +197,13 @@ func (e *registryEntry) getExecutor() ToolExecutor {
 		return e.executor
 	}
 	return e.tool
+}
+
+func requiresExclusive(spec ToolSpec) bool {
+	if ex, ok := spec.(exclusiveToolSpec); ok {
+		return ex.RequiresExclusiveExecution()
+	}
+	return false
 }
 
 // ManualSuggestion represents a manual override for tool suggestions
@@ -212,6 +221,7 @@ type Registry struct {
 	entries           map[string]*registryEntry
 	authorizer        Authorizer
 	manualSuggestions map[string]*ManualSuggestion
+	writeMu           sync.Mutex
 }
 
 // NewRegistry creates a new tool registry with an optional authorizer
@@ -223,6 +233,19 @@ func NewRegistry(authorizer Authorizer) *Registry {
 	}
 	r.initializeDefaultSuggestions()
 	return r
+}
+
+type exclusiveToolSpec interface {
+	RequiresExclusiveExecution() bool
+}
+
+// executeWithWriteLock serializes tool executions that mutate files to avoid concurrent writes.
+func (r *Registry) executeWithWriteLock(exclusive bool, fn func() *ToolResult) *ToolResult {
+	if exclusive {
+		r.writeMu.Lock()
+		defer r.writeMu.Unlock()
+	}
+	return fn()
 }
 
 // initializeDefaultSuggestions populates the registry with common manual suggestions
@@ -362,15 +385,19 @@ func (r *Registry) AddManualSuggestion(pattern string, suggestion *ManualSuggest
 
 // Register adds a tool to the registry (legacy method for backward compatibility)
 func (r *Registry) Register(tool Tool) {
-	r.entries[tool.Name()] = &registryEntry{tool: tool}
+	r.entries[tool.Name()] = &registryEntry{
+		tool:      tool,
+		exclusive: requiresExclusive(tool),
+	}
 }
 
 // RegisterSpec adds a tool spec with a factory to the registry
 func (r *Registry) RegisterSpec(spec ToolSpec, factory ToolFactory) {
 	executor := factory(r)
 	r.entries[spec.Name()] = &registryEntry{
-		spec:     spec,
-		executor: executor,
+		spec:      spec,
+		executor:  executor,
+		exclusive: requiresExclusive(spec),
 	}
 }
 
@@ -441,7 +468,9 @@ func (r *Registry) ExecuteWithApproval(ctx context.Context, call *ToolCall) *Too
 
 	// Skip authorization check - user has already approved
 
-	result := executor.Execute(ctx, call.Parameters)
+	result := r.executeWithWriteLock(entry.exclusive, func() *ToolResult {
+		return executor.Execute(ctx, call.Parameters)
+	})
 	if result == nil {
 		return &ToolResult{
 			ID:    call.ID,
@@ -595,7 +624,9 @@ func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {
 		}
 	}
 
-	result := executor.Execute(ctx, call.Parameters)
+	result := r.executeWithWriteLock(entry.exclusive, func() *ToolResult {
+		return executor.Execute(ctx, call.Parameters)
+	})
 	if result == nil {
 		return &ToolResult{
 			ID:    call.ID,
@@ -655,7 +686,9 @@ func (r *Registry) ExecuteWithCallbacks(ctx context.Context, call *ToolCall, too
 	if cbTool, ok := executor.(interface {
 		ExecuteWithCallbacks(ctx context.Context, params map[string]interface{}, progressCb progress.Callback, toolCallCb func(string, string, map[string]interface{}) error, toolResultCb func(string, string, string, string) error) *ToolResult
 	}); ok {
-		result := cbTool.ExecuteWithCallbacks(ctx, call.Parameters, progressCb, toolCallCb, toolResultCb)
+		result := r.executeWithWriteLock(entry.exclusive, func() *ToolResult {
+			return cbTool.ExecuteWithCallbacks(ctx, call.Parameters, progressCb, toolCallCb, toolResultCb)
+		})
 		if result == nil {
 			return &ToolResult{
 				ID:    call.ID,
@@ -667,7 +700,9 @@ func (r *Registry) ExecuteWithCallbacks(ctx context.Context, call *ToolCall, too
 	}
 
 	// Fallback to regular execution
-	result := executor.Execute(ctx, call.Parameters)
+	result := r.executeWithWriteLock(entry.exclusive, func() *ToolResult {
+		return executor.Execute(ctx, call.Parameters)
+	})
 	if result == nil {
 		return &ToolResult{
 			ID:    call.ID,

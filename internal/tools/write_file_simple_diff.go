@@ -100,6 +100,8 @@ Example update diff 2:
 	}
 }
 
+func (t *WriteFileSimpleDiffTool) RequiresExclusiveExecution() bool { return true }
+
 func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {

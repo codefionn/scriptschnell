@@ -830,7 +830,9 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 									SessionID:    sessionID,
 									ResponseChan: make(chan actor.SessionStorageDeleteResponse, 1),
 								}
-								storageRef.Send(deleteMsg)
+								if err := storageRef.Send(deleteMsg); err != nil {
+									return fmt.Errorf("failed to send delete message: %w", err)
+								}
 								response := <-deleteMsg.ResponseChan
 								if response.Err != nil {
 									return fmt.Errorf("failed to delete session: %w", response.Err)

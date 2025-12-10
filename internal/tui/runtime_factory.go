@@ -22,7 +22,7 @@ type SharedResources struct {
 	sessionStorageRef    *actor.ActorRef
 	sessionStorageCancel context.CancelFunc
 	sessionStorageSystem *actor.System // System that owns the session storage actor
-	filesystem           fs.FileSystem  // Shared CachedFS
+	filesystem           fs.FileSystem // Shared CachedFS
 }
 
 // TabRuntime holds per-tab isolated resources
@@ -113,7 +113,7 @@ func (rf *RuntimeFactory) CreateTabRuntime(tabID int, sess *session.Session) (*T
 		rf.shared.config,
 		rf.shared.providerMgr,
 		rf.cliMode,
-		rf.shared.filesystem,       // Shared FS
+		rf.shared.filesystem,        // Shared FS
 		sess,                        // Tab's session
 		rf.shared.sessionStorageRef, // Shared session storage
 	)
@@ -189,7 +189,9 @@ func (rf *RuntimeFactory) Close() error {
 	logger.Debug("Closing shared session storage actor")
 	if rf.shared.sessionStorageRef != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		rf.shared.sessionStorageSystem.StopAll(shutdownCtx)
+		if err := rf.shared.sessionStorageSystem.StopAll(shutdownCtx); err != nil {
+			logger.Error("Error stopping session storage system: %v", err)
+		}
 		cancel()
 	}
 

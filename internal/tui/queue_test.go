@@ -16,10 +16,10 @@ func newModelWithTabs(t *testing.T, count int) *Model {
 		id := i + 1
 		sess := session.NewSession(fmt.Sprintf("tab-%d", id), "")
 		m.sessions[i] = &TabSession{
-			ID:           id,
-			Session:      sess,
-			Messages:     []message{},
-			Generating:   false,
+			ID:             id,
+			Session:        sess,
+			Messages:       []message{},
+			Generating:     false,
 			WaitingForAuth: false,
 		}
 		// Initialize queued prompts for this tab
@@ -33,15 +33,15 @@ func TestQueuedPromptsProcessAfterCompletion(t *testing.T) {
 	m := New("test-model", "", true)
 	// Initialize with one tab
 	m.sessions = []*TabSession{{
-		ID:           1,
-		Session:      session.NewSession("tab-1", ""),
-		Messages:     []message{},
-		Generating:   false,
+		ID:             1,
+		Session:        session.NewSession("tab-1", ""),
+		Messages:       []message{},
+		Generating:     false,
 		WaitingForAuth: false,
 	}}
 	m.activeSessionIdx = 0
 	m.queuedPrompts[0] = []string{}
-	
+
 	// Simulate an in-flight generation.
 	m.setTabGenerating(m.activeSessionIdx, true)
 
@@ -66,7 +66,7 @@ func TestQueuedPromptsProcessAfterCompletion(t *testing.T) {
 
 	// Complete the generation and simulate queue processing
 	m.setTabGenerating(m.activeSessionIdx, false) // Stop generation
-	
+
 	// Simulate the queue processing logic that would happen
 	queue := m.queuedPrompts[m.activeSessionIdx]
 	if len(queue) > 0 {
@@ -77,7 +77,7 @@ func TestQueuedPromptsProcessAfterCompletion(t *testing.T) {
 		m.addMessage("You", next)
 		m.setTabGenerating(m.activeSessionIdx, true) // Start generating again
 	}
-	
+
 	if len(m.queuedPrompts[m.activeSessionIdx]) != 0 {
 		t.Fatalf("expected queued prompt to start processing, queue has %d remaining", len(m.queuedPrompts[m.activeSessionIdx]))
 	}
@@ -107,7 +107,7 @@ func TestQueuedPromptRunsOnQueuedTabNotActive(t *testing.T) {
 
 	// Complete the first generation and process queue for tab 1
 	m.setTabGenerating(0, false) // Stop generation in tab 0
-	
+
 	// Simulate queue processing for tab 1
 	queue := m.queuedPrompts[1]
 	if len(queue) > 0 {

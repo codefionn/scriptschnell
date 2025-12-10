@@ -41,7 +41,7 @@ func (s SessionMenuItem) Title() string {
 	if title == "" {
 		title = "Unnamed"
 	}
-	return fmt.Sprintf("%s", title)
+	return title
 }
 
 // Description implements MenuItem

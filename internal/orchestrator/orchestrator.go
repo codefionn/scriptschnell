@@ -1009,12 +1009,32 @@ func (o *Orchestrator) TestMCPServer(serverName string) error {
 		return fmt.Errorf("mcp server not found: %s", serverName)
 	}
 
-	tmpCfg := *o.config
-	tmpCfg.MCP.Servers = map[string]*config.MCPServerConfig{
-		serverName: server,
+	tmpCfg := &config.Config{
+		WorkingDir:         o.config.WorkingDir,
+		CacheTTL:           o.config.CacheTTL,
+		MaxCacheEntries:    o.config.MaxCacheEntries,
+		DefaultTimeout:     o.config.DefaultTimeout,
+		TempDir:            o.config.TempDir,
+		Temperature:        o.config.Temperature,
+		MaxTokens:          o.config.MaxTokens,
+		ProviderConfigPath: o.config.ProviderConfigPath,
+		DisableAnimations:  o.config.DisableAnimations,
+		LogLevel:           o.config.LogLevel,
+		LogPath:            o.config.LogPath,
+		AuthorizedDomains:  o.config.AuthorizedDomains,
+		AuthorizedCommands: o.config.AuthorizedCommands,
+		Search:             o.config.Search,
+		MCP: config.MCPConfig{
+			Servers: map[string]*config.MCPServerConfig{
+				serverName: server,
+			},
+		},
+		Secrets:           o.config.Secrets,
+		EnablePromptCache: o.config.EnablePromptCache,
+		AutoSave:          o.config.AutoSave,
 	}
 
-	manager := mcp.NewManager(&tmpCfg, o.workingDir, o.providerMgr)
+	manager := mcp.NewManager(tmpCfg, o.workingDir, o.providerMgr)
 	tools, errs := manager.BuildTools()
 	if len(errs) > 0 {
 		messages := make([]string, 0, len(errs))

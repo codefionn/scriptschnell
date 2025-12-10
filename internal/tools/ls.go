@@ -35,7 +35,7 @@ func (s *LsToolSpec) Parameters() map[string]interface{} {
 				"description": "Show detailed information including permissions, size, and modification time",
 			},
 			"all": map[string]interface{}{
-				"type":        "boolean", 
+				"type":        "boolean",
 				"description": "Show hidden files (files starting with .)",
 			},
 			"recursive": map[string]interface{}{
@@ -85,11 +85,11 @@ func (t *LsTool) Execute(ctx context.Context, params map[string]interface{}) *To
 	}
 
 	startTime := time.Now()
-	
+
 	if recursive {
 		return t.executeRecursive(ctx, path, longFormat, all, sortByTime, reverse, startTime)
 	}
-	
+
 	return t.executeSingleDir(ctx, path, longFormat, all, sortByTime, reverse, startTime)
 }
 
@@ -98,12 +98,12 @@ func (t *LsTool) executeSingleDir(ctx context.Context, path string, longFormat, 
 	if path == "" {
 		path = t.workingDir
 	}
-	
+
 	// Check if path is relative and resolve it
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(t.workingDir, path)
 	}
-	
+
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return &ToolResult{
@@ -125,7 +125,7 @@ func (t *LsTool) executeSingleDir(ctx context.Context, path string, longFormat, 
 		if err != nil {
 			continue // Skip this entry if we can't get info
 		}
-		
+
 		if !all && strings.HasPrefix(fileInfo.Name(), ".") {
 			continue
 		}
@@ -156,7 +156,7 @@ func (t *LsTool) executeSingleDir(ctx context.Context, path string, longFormat, 
 
 	for _, file := range files {
 		fullPath := filepath.Join(path, file.Name())
-		
+
 		if longFormat {
 			fileInfo := t.formatLongEntry(file, fullPath)
 			result = append(result, fileInfo)
@@ -180,10 +180,10 @@ func (t *LsTool) executeSingleDir(ctx context.Context, path string, longFormat, 
 		StartTime:       &startTime,
 		EndTime:         &endTime,
 		DurationMs:      time.Since(startTime).Milliseconds(),
-		WorkingDir:        path,
-		OutputSizeBytes:   len(outputStr),
-		OutputLineCount:   lineCount,
-		ToolType:          ToolNameLs,
+		WorkingDir:      path,
+		OutputSizeBytes: len(outputStr),
+		OutputLineCount: lineCount,
+		ToolType:        ToolNameLs,
 	}
 
 	return &ToolResult{
@@ -198,7 +198,7 @@ func (t *LsTool) executeRecursive(ctx context.Context, path string, longFormat, 
 	if path == "" {
 		path = t.workingDir
 	}
-	
+
 	// Check if path is relative and resolve it
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(t.workingDir, path)
@@ -236,7 +236,7 @@ func (t *LsTool) executeRecursive(ctx context.Context, path string, longFormat, 
 			fileData = t.formatShortEntry(info)
 			allOutput = append(allOutput, relPath)
 		}
-		
+
 		allFiles = append(allFiles, map[string]interface{}{
 			"path":     relPath,
 			"file":     fileData,
@@ -250,10 +250,10 @@ func (t *LsTool) executeRecursive(ctx context.Context, path string, longFormat, 
 			Error: fmt.Sprintf("error walking directory %s: %v", path, err),
 			ExecutionMetadata: &ExecutionMetadata{
 				StartTime:  &startTime,
-				EndTime:      pointerToTime(time.Now()),
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				WorkingDir:   path,
-				ErrorType:    "unknown",
+				EndTime:    pointerToTime(time.Now()),
+				DurationMs: time.Since(startTime).Milliseconds(),
+				WorkingDir: path,
+				ErrorType:  "unknown",
 			},
 		}
 	}
@@ -269,7 +269,7 @@ func (t *LsTool) executeRecursive(ctx context.Context, path string, longFormat, 
 			}
 			return result
 		})
-		
+
 		// Update output lines to match sorted order
 		allOutput = make([]string, 0, len(allFiles))
 		for _, file := range allFiles {
@@ -290,7 +290,7 @@ func (t *LsTool) executeRecursive(ctx context.Context, path string, longFormat, 
 			}
 			return result
 		})
-		
+
 		// Update output lines
 		allOutput = make([]string, 0, len(allFiles))
 		for _, file := range allFiles {
@@ -305,10 +305,10 @@ func (t *LsTool) executeRecursive(ctx context.Context, path string, longFormat, 
 		StartTime:       &startTime,
 		EndTime:         &endTime,
 		DurationMs:      time.Since(startTime).Milliseconds(),
-		WorkingDir:        path,
-		OutputSizeBytes:   len(outputStr),
-		OutputLineCount:   len(allFiles),
-		ToolType:          ToolNameLs,
+		WorkingDir:      path,
+		OutputSizeBytes: len(outputStr),
+		OutputLineCount: len(allFiles),
+		ToolType:        ToolNameLs,
 	}
 
 	return &ToolResult{
@@ -320,9 +320,9 @@ func (t *LsTool) executeRecursive(ctx context.Context, path string, longFormat, 
 
 func (t *LsTool) formatShortEntry(file os.FileInfo) map[string]interface{} {
 	return map[string]interface{}{
-		"name":    file.Name(),
-		"size":    file.Size(),
-		"is_dir":  file.IsDir(),
+		"name":     file.Name(),
+		"size":     file.Size(),
+		"is_dir":   file.IsDir(),
 		"mod_time": file.ModTime(),
 	}
 }

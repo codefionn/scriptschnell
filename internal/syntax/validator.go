@@ -200,8 +200,8 @@ func (v *Validator) findErrorNodes(node *tree_sitter.Node, source []byte) []Synt
 	}
 
 	traverse(node)
-	
-	// Additional safety check: if root has error but we didn't find ERROR nodes, 
+
+	// Additional safety check: if root has error but we didn't find ERROR nodes,
 	// there might be parsing recovery issues - add a general error
 	if node.HasError() && len(errors) == 0 {
 		rootPos := node.StartPosition()
@@ -212,7 +212,7 @@ func (v *Validator) findErrorNodes(node *tree_sitter.Node, source []byte) []Synt
 			ErrorNode: "ERROR",
 		})
 	}
-	
+
 	return errors
 }
 

@@ -86,31 +86,31 @@ func TestGenerateSimpleTitle(t *testing.T) {
 
 func TestTitleGeneratorWithMockLLM(t *testing.T) {
 	tests := []struct {
-		name         string
-		llmResponse  string
-		llmError     error
-		userPrompt   string
+		name              string
+		llmResponse       string
+		llmError          error
+		userPrompt        string
 		expectedSubstring string
 	}{
 		{
-			name:         "successful LLM generation",
-			llmResponse:  `{"title": "Fix authentication bug"}`,
-			llmError:     nil,
-			userPrompt:   "please fix the authentication bug in the login handler",
+			name:              "successful LLM generation",
+			llmResponse:       `{"title": "Fix authentication bug"}`,
+			llmError:          nil,
+			userPrompt:        "please fix the authentication bug in the login handler",
 			expectedSubstring: "Fix authentication bug",
 		},
 		{
-			name:         "LLM returns markdown wrapped JSON",
-			llmResponse:  "```json\n{\"title\": \"Add dark mode toggle\"}\n```",
-			llmError:     nil,
-			userPrompt:   "add a dark mode toggle to the settings page",
+			name:              "LLM returns markdown wrapped JSON",
+			llmResponse:       "```json\n{\"title\": \"Add dark mode toggle\"}\n```",
+			llmError:          nil,
+			userPrompt:        "add a dark mode toggle to the settings page",
 			expectedSubstring: "Add dark mode toggle",
 		},
 		{
-			name:         "fallback on LLM failure",
-			llmResponse:  "",
-			llmError:     nil, // Empty response triggers fallback
-			userPrompt:   "refactor user service",
+			name:              "fallback on LLM failure",
+			llmResponse:       "",
+			llmError:          nil, // Empty response triggers fallback
+			userPrompt:        "refactor user service",
 			expectedSubstring: "Refactor user service",
 		},
 	}

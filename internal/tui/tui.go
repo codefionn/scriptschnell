@@ -448,11 +448,6 @@ func detectTerminalSize() (int, int, bool) {
 	return 0, 0, false
 }
 
-// addToolMessage adds a tool message with metadata for potential summary replacement
-func (m *Model) addToolMessage(toolName, toolID, content, fullResult string, summarized bool) {
-	m.addToolMessageForTab(m.targetGenerationTab(), toolName, toolID, content, fullResult, summarized)
-}
-
 func (m *Model) addToolMessageForTab(tabIdx int, toolName, toolID, content, fullResult string, summarized bool) {
 	if !m.validTabIndex(tabIdx) {
 		return
@@ -545,19 +540,6 @@ func (m *Model) setTabGenerating(tabIdx int, generating bool) {
 		m.concurrentGens[m.sessions[tabIdx].ID] = generating
 		logger.Debug("Tab %d generation state set to %v", m.sessions[tabIdx].ID, generating)
 	}
-}
-
-// isAnyTabGenerating returns true if any tab is currently generating
-func (m *Model) isAnyTabGenerating() bool {
-	m.concurrentGensMu.RLock()
-	defer m.concurrentGensMu.RUnlock()
-
-	for _, gen := range m.concurrentGens {
-		if gen {
-			return true
-		}
-	}
-	return false
 }
 
 // isCurrentTabGenerating returns true if the currently active tab is generating
@@ -1827,46 +1809,6 @@ func (m *Model) createProgressCallbackForTab(tabID int) progress.Callback {
 }
 
 // Old implementation below - keeping for reference during transition
-func (m *Model) createProgressCallbackForTab_old(tabID int) func(update interface{}) error {
-	return func(update interface{}) error {
-		// Handle different progress update types
-		switch u := update.(type) {
-		case string:
-			// Simple string content
-			if u != "" {
-				m.program.Send(TabGeneratingMsg{
-					TabID:   tabID,
-					Content: u,
-				})
-			}
-		case map[string]interface{}:
-			// Structured update with message field
-			if msg, ok := u["message"].(string); ok && msg != "" {
-				if shouldStatus, ok := u["should_status"].(bool); ok && shouldStatus {
-					m.program.Send(TabProcessingStatusMsg{
-						TabID:  tabID,
-						Status: msg,
-					})
-				} else if shouldStream, ok := u["should_stream"].(bool); ok && shouldStream {
-					m.program.Send(TabGeneratingMsg{
-						TabID:   tabID,
-						Content: msg,
-					})
-				} else {
-					// Default to generating message
-					m.program.Send(TabGeneratingMsg{
-						TabID:   tabID,
-						Content: msg,
-					})
-				}
-			}
-		default:
-			logger.Debug("Unknown progress update type for tab %d: %T", tabID, update)
-		}
-		return nil
-	}
-}
-
 // startPromptForTab initiates generation for a specific tab using its own orchestrator
 func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 	if tabIdx < 0 || tabIdx >= len(m.sessions) {
@@ -2078,51 +2020,6 @@ func (m *Model) processNextQueuedPromptForTab(tabIdx int) tea.Cmd {
 
 	// Start prompt for this specific tab
 	return m.startPromptForTab(tabIdx, next)
-}
-
-func (m *Model) processNextQueuedPrompt(tabIdx int) tea.Cmd {
-	if tabIdx < 0 {
-		return nil
-	}
-
-	queue := m.queuedPrompts[tabIdx]
-	if len(queue) == 0 {
-		return nil
-	}
-	next := queue[0]
-	m.queuedPrompts[tabIdx] = queue[1:]
-	preview := formatQueuedPreview(next)
-	remaining := len(m.queuedPrompts[tabIdx])
-	if remaining > 0 {
-		m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Processing queued prompt: %s (%d remaining)", preview, remaining))
-	} else {
-		m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Processing queued prompt: %s", preview))
-	}
-	return m.startPrompt(tabIdx, next)
-}
-
-func (m *Model) nextQueuedTab(preferred ...int) int {
-	seen := make(map[int]struct{})
-	for _, idx := range preferred {
-		if idx < 0 || !m.validTabIndex(idx) {
-			continue
-		}
-		seen[idx] = struct{}{}
-		if len(m.queuedPrompts[idx]) > 0 {
-			return idx
-		}
-	}
-
-	for i := range m.sessions {
-		if _, ok := seen[i]; ok {
-			continue
-		}
-		if len(m.queuedPrompts[i]) > 0 {
-			return i
-		}
-	}
-
-	return -1
 }
 
 // processOpenRouterUsage processes OpenRouter usage data and stores it for display
@@ -2751,15 +2648,6 @@ func (m *Model) appendToLastMessageForTab(tabIdx int, content string) {
 	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
 }
 
-func (m *Model) appendToLastMessage(content string) {
-	m.appendToLastMessageForTab(m.activeSessionIdx, content)
-}
-
-// summarizeLastToolResult summarizes the last tool result if it hasn't been summarized yet
-func (m *Model) summarizeLastToolResult() {
-	m.summarizeLastToolResultForTab(m.activeSessionIdx)
-}
-
 func (m *Model) summarizeLastToolResultForTab(tabIdx int) {
 	if !m.validTabIndex(tabIdx) {
 		return
@@ -2779,23 +2667,6 @@ func (m *Model) summarizeLastToolResultForTab(tabIdx int) {
 	}
 }
 
-// appendToTabMessage appends content to a tab's last message without updating the viewport
-// Used when a background tab receives streaming content
-func (m *Model) appendToTabMessage(tabIdx int, content string) {
-	if tabIdx < 0 || tabIdx >= len(m.sessions) {
-		return
-	}
-
-	tabMessages := m.sessions[tabIdx].Messages
-	if len(tabMessages) == 0 {
-		return
-	}
-
-	lastIdx := len(tabMessages) - 1
-	tabMessages[lastIdx].content += content
-	m.sessions[tabIdx].Messages = tabMessages
-}
-
 func (m *Model) appendAssistantChunkForTab(tabIdx int, content string) {
 	if !m.validTabIndex(tabIdx) || content == "" {
 		return
@@ -2807,7 +2678,6 @@ func (m *Model) appendAssistantChunkForTab(tabIdx int, content string) {
 		msgs = m.sessions[tabIdx].Messages
 		if len(msgs) == 0 || msgs[len(msgs)-1].role != "Assistant" {
 			m.addMessageForTab(tabIdx, "Assistant", "")
-			msgs = m.sessions[tabIdx].Messages
 		}
 	}
 
@@ -3482,11 +3352,6 @@ func (m *Model) updateViewport() {
 
 	m.lastUpdateHeight = len(m.messages)
 	m.viewportDirty = false
-}
-
-func (m *Model) handleSubmit(input string) tea.Cmd {
-	// In concurrent mode, directly call startPrompt for active tab
-	return m.startPrompt(m.activeSessionIdx, input)
 }
 
 func (m *Model) handleCommand(input string) tea.Cmd {

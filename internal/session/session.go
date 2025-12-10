@@ -32,7 +32,7 @@ type Message struct {
 // Session manages a conversation session
 type Session struct {
 	ID                  string
-	Title               string          // Auto-generated title for the session
+	Title               string // Auto-generated title for the session
 	WorkingDir          string
 	Messages            []*Message
 	FilesRead           map[string]string // path -> content

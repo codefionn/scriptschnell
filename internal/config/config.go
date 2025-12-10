@@ -84,9 +84,9 @@ type MCPOpenAIConfig struct {
 
 // AutoSaveConfig holds configuration for automatic session saving
 type AutoSaveConfig struct {
-	Enabled           bool `json:"enabled"`
+	Enabled             bool `json:"enabled"`
 	SaveIntervalSeconds int  `json:"save_interval_seconds"`
-	MaxConcurrentSaves int  `json:"max_concurrent_saves"`
+	MaxConcurrentSaves  int  `json:"max_concurrent_saves"`
 }
 
 // Config represents application configuration
@@ -111,7 +111,7 @@ type Config struct {
 	PromptCacheTTL     string                        `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
 	ContextDirectories map[string][]string           `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
 	OpenTabs           map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
-	AutoSave           AutoSaveConfig                `json:"auto_save,omitempty"`          // Session auto-save configuration
+	AutoSave           AutoSaveConfig                `json:"auto_save,omitempty"`           // Session auto-save configuration
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
 	secretsPassword string       `json:"-"`
@@ -200,9 +200,9 @@ func DefaultConfig() *Config {
 		PromptCacheTTL:     "1h",                      // Default to 1 hour for longer sessions
 		ContextDirectories: make(map[string][]string), // No context directories by default
 		AutoSave: AutoSaveConfig{
-			Enabled:              true, // Enable by default
-			SaveIntervalSeconds:  5,    // Save every 5 seconds
-			MaxConcurrentSaves: 1,    // Only one save operation at a time
+			Enabled:             true, // Enable by default
+			SaveIntervalSeconds: 5,    // Save every 5 seconds
+			MaxConcurrentSaves:  1,    // Only one save operation at a time
 		},
 	}
 }
@@ -459,8 +459,27 @@ func (c *Config) decryptSensitiveFields(password string) error {
 }
 
 func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
-	copyCfg := *c
-	copyCfg.Search = c.Search
+	copyCfg := Config{
+		WorkingDir:         c.WorkingDir,
+		CacheTTL:           c.CacheTTL,
+		MaxCacheEntries:    c.MaxCacheEntries,
+		DefaultTimeout:     c.DefaultTimeout,
+		TempDir:            c.TempDir,
+		Temperature:        c.Temperature,
+		MaxTokens:          c.MaxTokens,
+		ProviderConfigPath: c.ProviderConfigPath,
+		DisableAnimations:  c.DisableAnimations,
+		LogLevel:           c.LogLevel,
+		LogPath:            c.LogPath,
+		AuthorizedDomains:  c.AuthorizedDomains,
+		AuthorizedCommands: c.AuthorizedCommands,
+		Search:             c.Search,
+		MCP:                c.MCP,
+		Secrets:            c.Secrets,
+		EnablePromptCache:  c.EnablePromptCache,
+		AutoSave:           c.AutoSave,
+		secretsPassword:    c.secretsPassword,
+	}
 
 	var err error
 	copyCfg.Search.Exa.APIKey, err = encryptField(copyCfg.Search.Exa.APIKey, c.secretsPassword)

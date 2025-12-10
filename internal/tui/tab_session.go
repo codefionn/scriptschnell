@@ -16,6 +16,14 @@ type TabSession struct {
 	Messages     []message        // TUI-specific message display cache
 	CreatedAt    time.Time
 	LastActiveAt time.Time
+	// Per-tab usage data
+	OpenRouterUsage map[string]interface{}
+	ThinkingTokens  int
+
+	// Per-tab runtime state
+	Runtime        *TabRuntime // Orchestrator runtime for this tab (lazy-loaded)
+	Generating     bool        // Is this tab currently generating?
+	WaitingForAuth bool        // Is this tab waiting for user authorization?
 }
 
 // DisplayName returns the name to show in the tab bar
@@ -29,4 +37,14 @@ func (ts *TabSession) DisplayName() string {
 // HasMessages returns true if the session has any messages
 func (ts *TabSession) HasMessages() bool {
 	return len(ts.Messages) > 0
+}
+
+// IsGenerating returns true if this tab is currently generating
+func (ts *TabSession) IsGenerating() bool {
+	return ts.Generating
+}
+
+// NeedsAuthorization returns true if this tab is waiting for authorization
+func (ts *TabSession) NeedsAuthorization() bool {
+	return ts.WaitingForAuth
 }

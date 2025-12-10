@@ -212,7 +212,7 @@ func TestGroqClient_ConvertResponsesResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := client.convertGroqResponsesResponse(tt.response)
-			
+
 			if got.Content != tt.expected.Content {
 				t.Errorf("convertGroqResponsesResponse() content = %v, want %v", got.Content, tt.expected.Content)
 			}
@@ -266,27 +266,27 @@ func TestNewGroqClient(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, err := NewGroqClient(tt.apiKey, tt.model)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewGroqClient() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
 				groqClient, ok := client.(*GroqClient)
 				if !ok {
 					t.Errorf("NewGroqClient() returned wrong type, got %T, want *GroqClient", client)
 					return
 				}
-				
+
 				if groqClient.useResponsesAPI != tt.expectAPI {
 					t.Errorf("NewGroqClient().useResponsesAPI = %v, want %v", groqClient.useResponsesAPI, tt.expectAPI)
 				}
-				
+
 				if groqClient.apiKey != tt.apiKey {
 					t.Errorf("NewGroqClient().apiKey = %v, want %v", groqClient.apiKey, tt.apiKey)
 				}
-				
+
 				expectedModel := tt.model
 				if expectedModel == "" {
 					expectedModel = "llama-3.1-8b-instant"
@@ -356,14 +356,18 @@ func TestGroqClient_UsageData_ConvertResponsesResponse(t *testing.T) {
 				Content:    "Test response with usage",
 				StopReason: "completed",
 				Usage: map[string]interface{}{
-					"input_tokens":  100,
-					"output_tokens": 50,
-					"total_tokens":  150,
+					"input_tokens":      float64(100),
+					"output_tokens":     float64(50),
+					"total_tokens":      float64(150),
+					"prompt_tokens":     float64(100),
+					"completion_tokens": float64(50),
+					"cached_tokens":     float64(25),
+					"reasoning_tokens":  float64(10),
 					"input_tokens_details": map[string]interface{}{
-						"cached_tokens": 25,
+						"cached_tokens": float64(25),
 					},
 					"output_tokens_details": map[string]interface{}{
-						"reasoning_tokens": 10,
+						"reasoning_tokens": float64(10),
 					},
 				},
 			},
@@ -413,9 +417,11 @@ func TestGroqClient_UsageData_ConvertResponsesResponse(t *testing.T) {
 				Content:    "Test response minimal usage",
 				StopReason: "completed",
 				Usage: map[string]interface{}{
-					"input_tokens":  75,
-					"output_tokens": 25,
-					"total_tokens":  100,
+					"input_tokens":      float64(75),
+					"output_tokens":     float64(25),
+					"total_tokens":      float64(100),
+					"prompt_tokens":     float64(75),
+					"completion_tokens": float64(25),
 					// No details in expected result
 				},
 			},

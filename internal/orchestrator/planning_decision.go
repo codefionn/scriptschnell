@@ -120,11 +120,6 @@ Respond ONLY with a JSON object in the following format:
 	decision := &PlanningDecision{}
 	content := resp.Content
 
-	var jsonCheck interface{}
-	if err := json.Unmarshal([]byte(content), &jsonCheck); err != nil {
-		logger.Warn("Summary model decision does not equal exactly what was asked for: %q", content)
-	}
-
 	// Try to extract JSON if wrapped in markdown code blocks
 	if start := strings.Index(content, "```json"); start != -1 {
 		content = content[start+7:]
@@ -136,6 +131,13 @@ Respond ONLY with a JSON object in the following format:
 		if end := strings.LastIndex(content, "}"); end != -1 {
 			content = content[start : end+1]
 		}
+	}
+
+	// Validate that we have clean JSON
+	content = strings.TrimSpace(content)
+	var jsonCheck interface{}
+	if err := json.Unmarshal([]byte(content), &jsonCheck); err != nil {
+		logger.Warn("Summary model decision does not equal exactly what was asked for: %q", content)
 	}
 
 	if err := json.Unmarshal([]byte(content), decision); err != nil {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -77,13 +78,16 @@ func (m *Model) handleNewTab(name string) tea.Cmd {
 
 	// Create TabSession wrapper
 	tabSession := &TabSession{
-		ID:           tabID,
-		Session:      sess,
-		Name:         name,
-		WorktreePath: worktreePath,
-		Messages:     []message{},
-		CreatedAt:    time.Now(),
-		LastActiveAt: time.Now(),
+		ID:             tabID,
+		Session:        sess,
+		Name:           name,
+		WorktreePath:   worktreePath,
+		Messages:       []message{},
+		CreatedAt:      time.Now(),
+		LastActiveAt:   time.Now(),
+		Runtime:        nil,   // Lazy-loaded on first prompt
+		Generating:     false, // Not generating initially
+		WaitingForAuth: false, // Not waiting for auth initially
 	}
 
 	// Add to sessions list
@@ -104,40 +108,42 @@ func (m *Model) handleSwitchTab(newIdx int) tea.Cmd {
 		return nil // Already on this tab
 	}
 
-	// Save current tab's display state (including generation state)
+	// Save current tab's display state
 	m.sessions[m.activeSessionIdx].Messages = m.messages
 	m.sessions[m.activeSessionIdx].LastActiveAt = time.Now()
 
-	// Switch to new tab
+	// Switch to new tab (just UI, no orchestrator switching!)
 	m.activeSessionIdx = newIdx
 	newTabSession := m.sessions[newIdx]
+	m.messages = newTabSession.Messages
+	m.openRouterUsage = newTabSession.OpenRouterUsage
+	m.thinkingTokens = newTabSession.ThinkingTokens
+	m.updateViewport()
 
-	// Switch orchestrator session (via callback if available)
-	shouldSwitchSession := true
-	if m.generating && m.validTabIndex(m.generationTabIdx) && newIdx != m.generationTabIdx {
-		// Keep orchestrator pinned to the generating tab, apply switch after completion
-		m.pendingSessionIdx = newIdx
-		shouldSwitchSession = false
-	} else {
-		m.pendingSessionIdx = -1
+	// Update context file if new tab has a runtime
+	if newTabSession.Runtime != nil {
+		m.contextFile = newTabSession.Runtime.Orchestrator.GetExtendedContextFile()
 	}
 
-	if shouldSwitchSession && m.onSwitchSession != nil {
-		if err := m.onSwitchSession(newTabSession.Session); err != nil {
-			logger.Warn("Failed to switch orchestrator session: %v", err)
-			m.AddSystemMessage(fmt.Sprintf("Error switching session: %v", err))
+	// Update processing status/spinner based on new tab's state
+	if newTabSession.IsGenerating() {
+		m.processingStatus = "Generating..."
+		if !m.animationsDisabled {
+			m.spinnerActive = true
+		}
+	} else {
+		m.processingStatus = ""
+		if !m.animationsDisabled {
+			m.spinnerActive = false
 		}
 	}
-
-	// Restore tab's display state
-	m.messages = newTabSession.Messages
-	m.updateViewport()
 
 	// Save tab state to config
 	if err := m.saveTabState(); err != nil {
 		logger.Warn("Failed to save tab state: %v", err)
 	}
 
+	logger.Debug("Switched to tab %d (ID: %d, generating: %v)", newIdx, newTabSession.ID, newTabSession.IsGenerating())
 	return nil
 }
 
@@ -152,27 +158,43 @@ func (m *Model) handleCloseTab(idx int) tea.Cmd {
 		return nil
 	}
 
-	// Allow closing non-active tabs even during generation
-	// Only block closing the active tab if generating
-	if m.generating && idx == m.activeSessionIdx {
-		m.AddSystemMessage("Cannot close active tab during generation. Switch to another tab first or press ESC to stop.")
+	closingTab := m.sessions[idx]
+
+	// Don't allow closing if this tab is generating
+	if closingTab.IsGenerating() {
+		m.AddSystemMessage("Cannot close tab during generation. Press ESC to stop first.")
+		logger.Warn("Attempted to close generating tab %d", closingTab.ID)
 		return nil
 	}
-
-	closingTab := m.sessions[idx]
 
 	// Auto-save session if it has messages
 	if len(closingTab.Session.GetMessages()) > 0 {
 		logger.Info("Auto-saving session %s on tab close", closingTab.Session.ID)
-		if m.onSaveSession != nil {
+		// Use tab's runtime to save if available
+		if closingTab.Runtime != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := closingTab.Runtime.Orchestrator.SaveCurrentSession(ctx); err != nil {
+				logger.Warn("Failed to auto-save session on tab close: %v", err)
+			} else {
+				logger.Info("Successfully auto-saved session %s on tab close", closingTab.Session.ID)
+			}
+		} else if m.onSaveSession != nil {
 			if err := m.onSaveSession(closingTab.Session); err != nil {
 				logger.Warn("Failed to auto-save session on tab close: %v", err)
 				m.AddSystemMessage(fmt.Sprintf("Warning: Failed to auto-save session: %v", err))
 			} else {
 				logger.Info("Successfully auto-saved session %s on tab close", closingTab.Session.ID)
 			}
+		}
+	}
+
+	// Cleanup runtime via factory
+	if m.factory != nil && closingTab.Runtime != nil {
+		if err := m.factory.DestroyTabRuntime(closingTab.ID); err != nil {
+			logger.Warn("Failed to destroy runtime for tab %d: %v", closingTab.ID, err)
 		} else {
-			logger.Warn("No session save callback available for tab close autosave")
+			logger.Info("Successfully destroyed runtime for tab %d", closingTab.ID)
 		}
 	}
 
@@ -183,6 +205,14 @@ func (m *Model) handleCloseTab(idx int) tea.Cmd {
 
 	// Remove from sessions list
 	m.sessions = append(m.sessions[:idx], m.sessions[idx+1:]...)
+
+	// Clean up queued prompts for this tab
+	delete(m.queuedPrompts, idx)
+
+	// Clean up concurrent generation tracking
+	m.concurrentGensMu.Lock()
+	delete(m.concurrentGens, closingTab.ID)
+	m.concurrentGensMu.Unlock()
 
 	// Adjust active index if needed
 	if m.activeSessionIdx >= len(m.sessions) {
@@ -195,6 +225,8 @@ func (m *Model) handleCloseTab(idx int) tea.Cmd {
 	if err := m.saveTabState(); err != nil {
 		logger.Warn("Failed to save tab state after closing: %v", err)
 	}
+
+	logger.Info("Closed tab %d (ID: %d)", idx, closingTab.ID)
 
 	// Switch to adjusted active tab
 	return m.handleSwitchTab(m.activeSessionIdx)
@@ -211,8 +243,16 @@ func (m *Model) renderTabBar() string {
 		isActive := i == m.activeSessionIdx
 		tabText := ts.DisplayName()
 
-		// Add modified indicator
-		if ts.HasMessages() {
+		// Add state indicators
+		if ts.NeedsAuthorization() {
+			// Yellow/orange dot for authorization required
+			authDot := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(" ◉")
+			tabText += authDot
+		} else if ts.IsGenerating() {
+			// Regular dot for generating
+			tabText += " ●"
+		} else if ts.HasMessages() {
+			// Regular dot for has messages
 			tabText += " ●"
 		}
 

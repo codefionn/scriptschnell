@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/codefionn/scriptschnell/internal/secrets"
 )
@@ -112,7 +113,8 @@ type Config struct {
 	OpenTabs           map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
 	AutoSave           AutoSaveConfig                `json:"auto_save,omitempty"`          // Session auto-save configuration
 
-	secretsPassword string `json:"-"`
+	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
+	secretsPassword string       `json:"-"`
 }
 
 // SecretsSettings keeps track of password-protection state.
@@ -260,6 +262,8 @@ func Load(path string) (*Config, error) {
 
 // AuthorizeDomain adds a domain to the permanently authorized list
 func (c *Config) AuthorizeDomain(domain string) {
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
 	if c.AuthorizedDomains == nil {
 		c.AuthorizedDomains = make(map[string]bool)
 	}
@@ -268,6 +272,8 @@ func (c *Config) AuthorizeDomain(domain string) {
 
 // IsDomainAuthorized checks if a domain is permanently authorized
 func (c *Config) IsDomainAuthorized(domain string) bool {
+	c.authMu.RLock()
+	defer c.authMu.RUnlock()
 	if c.AuthorizedDomains == nil {
 		return false
 	}
@@ -276,6 +282,8 @@ func (c *Config) IsDomainAuthorized(domain string) bool {
 
 // AuthorizeCommand adds a command prefix to the permanently authorized list
 func (c *Config) AuthorizeCommand(commandPrefix string) {
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
 	if c.AuthorizedCommands == nil {
 		c.AuthorizedCommands = make(map[string]bool)
 	}
@@ -284,6 +292,8 @@ func (c *Config) AuthorizeCommand(commandPrefix string) {
 
 // IsCommandAuthorized checks if a command prefix is permanently authorized
 func (c *Config) IsCommandAuthorized(commandPrefix string) bool {
+	c.authMu.RLock()
+	defer c.authMu.RUnlock()
 	if c.AuthorizedCommands == nil {
 		return false
 	}

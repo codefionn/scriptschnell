@@ -23,6 +23,8 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"golang.org/x/term"
@@ -114,7 +116,6 @@ type Model struct {
 	width                int
 	height               int
 	contentWidth         int
-	generating           bool
 	processingStatus     string // Current processing status (e.g., "Calling tool: write_file_diff")
 	spinner              spinner.Model
 	spinnerActive        bool
@@ -164,12 +165,21 @@ type Model struct {
 	sessions         []*TabSession
 	activeSessionIdx int
 	sessionIDCounter int
-	onSwitchSession  func(*session.Session) error
 	onSaveSession    func(*session.Session) error // Callback to save a session
 
-	// Generation anchoring
-	generationTabIdx  int // Tab index where the current generation started
-	pendingSessionIdx int // Tab index queued to switch orchestrator to after generation
+	// Multi-tab concurrent generation state
+	factory          *RuntimeFactory // Creates per-tab runtimes
+	program          *tea.Program    // Reference to tea.Program for self-messaging
+	concurrentGens   map[int]bool    // Track which tabs are generating (tabID -> bool)
+	concurrentGensMu sync.RWMutex    // Protect concurrentGens map
+
+	// Authorization state
+	pendingAuthorizations   map[string]*AuthorizationRequest // authID -> request
+	authorizationCounter    int                              // Counter for unique auth IDs
+	authorizationMu         sync.Mutex                       // Protect authorization state
+	activeAuthorizationID   string                           // Currently displayed authorization
+	authorizationDialogOpen bool                             // Is authorization dialog visible
+	authorizationDialog     AuthorizationDialog              // The authorization dialog component
 }
 
 // ErrMsg is an error message type
@@ -220,6 +230,7 @@ type UserMultipleQuestionsRequestMsg struct {
 
 // OpenRouterUsageMsg updates the UI with OpenRouter usage data (tokens, cost, etc.)
 type OpenRouterUsageMsg struct {
+	TabID int
 	Usage map[string]interface{}
 }
 
@@ -238,6 +249,70 @@ type AuthorizationRequestMsg struct {
 // ProcessingStatusMsg is sent to update the processing status indicator
 type ProcessingStatusMsg struct {
 	Status string
+}
+
+// Tab-specific message types for concurrent generation
+
+// TabGeneratingMsg is sent when a specific tab receives streaming content
+type TabGeneratingMsg struct {
+	TabID   int
+	Content string
+}
+
+// TabProcessingStatusMsg updates the processing status for a specific tab
+type TabProcessingStatusMsg struct {
+	TabID  int
+	Status string
+}
+
+// TabGenerationCompleteMsg is sent when a tab's generation completes
+type TabGenerationCompleteMsg struct {
+	TabID int
+	Error error
+}
+
+// TabAuthorizationRequiredMsg is sent when a tab needs authorization
+type TabAuthorizationRequiredMsg struct {
+	TabID  int
+	Reason string
+}
+
+// TabToolCallMsg is sent when a tool is called in a specific tab
+type TabToolCallMsg struct {
+	TabID      int
+	ToolName   string
+	ToolID     string
+	Parameters map[string]interface{}
+}
+
+// TabToolResultMsg is sent when a tool execution completes in a specific tab
+type TabToolResultMsg struct {
+	TabID    int
+	ToolName string
+	ToolID   string
+	Result   string
+	Error    string
+}
+
+// AuthorizationRequest represents a pending authorization request
+type AuthorizationRequest struct {
+	AuthID       string
+	TabID        int
+	ToolName     string
+	Parameters   map[string]interface{}
+	Reason       string
+	ResponseChan chan bool // Channel to send approval result
+}
+
+// AuthorizationResponseMsg is sent when user approves/denies authorization
+type AuthorizationResponseMsg struct {
+	AuthID   string
+	Approved bool
+}
+
+// ShowAuthorizationDialogMsg is sent to display an authorization dialog
+type ShowAuthorizationDialogMsg struct {
+	Request *AuthorizationRequest
 }
 
 // RendererReadyMsg is sent when async renderer creation completes
@@ -288,20 +363,21 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	}
 
 	m := &Model{
-		textarea:           ta,
-		viewport:           vp,
-		messages:           []message{},
-		currentModel:       currentModel,
-		contextFile:        contextFile,
-		renderer:           renderer,
-		rendererCache:      rendererCache,
-		spinner:            sp,
-		animationsDisabled: disableAnimations,
-		contextFreePercent: 100,
-		renderWrapWidth:    80,
-		queuedPrompts:      make(map[int][]string),
-		generationTabIdx:   -1,
-		pendingSessionIdx:  -1,
+		textarea:              ta,
+		viewport:              vp,
+		messages:              []message{},
+		currentModel:          currentModel,
+		contextFile:           contextFile,
+		renderer:              renderer,
+		rendererCache:         rendererCache,
+		spinner:               sp,
+		animationsDisabled:    disableAnimations,
+		contextFreePercent:    100,
+		renderWrapWidth:       80,
+		queuedPrompts:         make(map[int][]string),
+		concurrentGens:        make(map[int]bool),
+		pendingAuthorizations: make(map[string]*AuthorizationRequest),
+		authorizationCounter:  0,
 	}
 
 	if width, height, ok := detectTerminalSize(); ok {
@@ -309,6 +385,50 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	}
 
 	return m
+}
+
+// NewWithFactory creates a new TUI model with RuntimeFactory for multi-tab concurrent generation
+func NewWithFactory(factory *RuntimeFactory, cfg *config.Config, providerMgr *provider.Manager) *Model {
+	// Get current model name from provider manager
+	currentModel := providerMgr.GetOrchestrationModel()
+
+	m := New(currentModel, "", cfg.DisableAnimations)
+	m.factory = factory
+	m.config = cfg
+	m.workingDir = factory.GetWorkingDir()
+
+	// Initialize context file without requiring orchestrator
+	m.contextFile = m.getExtendedContextFileWithoutOrchestrator()
+
+	return m
+}
+
+// getExtendedContextFileWithoutOrchestrator replicates GetExtendedContextFile logic without requiring an orchestrator
+// This allows us to show the context file on startup before any runtime is created
+func (m *Model) getExtendedContextFileWithoutOrchestrator() string {
+	if m.factory == nil {
+		return ""
+	}
+
+	filesystem := m.factory.GetSharedFilesystem()
+	ctx := context.Background()
+
+	// First try AGENTS.md (llm.AgentsFileName)
+	exists, err := filesystem.Exists(ctx, "AGENTS.md")
+	if err == nil && exists {
+		return "AGENTS.md"
+	}
+
+	// Fall back to README variants
+	candidates := []string{"README.md", "README.txt", "README"}
+	for _, candidate := range candidates {
+		exists, err := filesystem.Exists(ctx, candidate)
+		if err == nil && exists {
+			return candidate
+		}
+	}
+
+	return ""
 }
 
 func detectTerminalSize() (int, int, bool) {
@@ -392,14 +512,70 @@ func (m *Model) SetActiveMCPProvider(provider func() []string) {
 	m.activeMCPProvider = provider
 }
 
-// SetOnSwitchSession registers a callback for when the user switches sessions
-func (m *Model) SetOnSwitchSession(callback func(*session.Session) error) {
-	m.onSwitchSession = callback
-}
-
 // SetOnSaveSession registers a callback for when a session needs to be saved
 func (m *Model) SetOnSaveSession(callback func(*session.Session) error) {
 	m.onSaveSession = callback
+}
+
+// SetProgram stores a reference to the tea.Program for self-messaging
+func (m *Model) SetProgram(program *tea.Program) {
+	m.program = program
+}
+
+// GetActiveTab returns the currently active tab session
+func (m *Model) GetActiveTab() *TabSession {
+	if m.activeSessionIdx >= 0 && m.activeSessionIdx < len(m.sessions) {
+		return m.sessions[m.activeSessionIdx]
+	}
+	return nil
+}
+
+// GetAllTabs returns all tab sessions
+func (m *Model) GetAllTabs() []*TabSession {
+	return m.sessions
+}
+
+// setTabGenerating sets the generation state for a specific tab
+func (m *Model) setTabGenerating(tabIdx int, generating bool) {
+	m.concurrentGensMu.Lock()
+	defer m.concurrentGensMu.Unlock()
+
+	if tabIdx >= 0 && tabIdx < len(m.sessions) {
+		m.sessions[tabIdx].Generating = generating
+		m.concurrentGens[m.sessions[tabIdx].ID] = generating
+		logger.Debug("Tab %d generation state set to %v", m.sessions[tabIdx].ID, generating)
+	}
+}
+
+// isAnyTabGenerating returns true if any tab is currently generating
+func (m *Model) isAnyTabGenerating() bool {
+	m.concurrentGensMu.RLock()
+	defer m.concurrentGensMu.RUnlock()
+
+	for _, gen := range m.concurrentGens {
+		if gen {
+			return true
+		}
+	}
+	return false
+}
+
+// isCurrentTabGenerating returns true if the currently active tab is generating
+func (m *Model) isCurrentTabGenerating() bool {
+	if m.activeSessionIdx < 0 || m.activeSessionIdx >= len(m.sessions) {
+		return false
+	}
+	return m.sessions[m.activeSessionIdx].IsGenerating()
+}
+
+// findTabIndexByID finds the tab index by tab ID, returns -1 if not found
+func (m *Model) findTabIndexByID(tabID int) int {
+	for i, tab := range m.sessions {
+		if tab.ID == tabID {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *Model) scheduleViewportRefresh() tea.Cmd {
@@ -1062,11 +1238,74 @@ func (m *Model) cycleSuggestion(direction int) {
 	m.selectedSuggIndex = m.tabCycleIndex
 }
 
+// handleAuthorizationDialog handles messages when authorization dialog is open
+func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "esc":
+			// Deny and close
+			m.program.Send(AuthorizationResponseMsg{
+				AuthID:   m.activeAuthorizationID,
+				Approved: false,
+			})
+			return m, nil
+
+		case "enter":
+			// Check which option is selected
+			if item, ok := m.authorizationDialog.list.SelectedItem().(authChoiceItem); ok {
+				approved := item.value == "approve"
+				m.program.Send(AuthorizationResponseMsg{
+					AuthID:   m.activeAuthorizationID,
+					Approved: approved,
+				})
+			}
+			return m, nil
+
+		case "y", "Y":
+			// Quick approve with 'y'
+			m.program.Send(AuthorizationResponseMsg{
+				AuthID:   m.activeAuthorizationID,
+				Approved: true,
+			})
+			return m, nil
+
+		case "n", "N":
+			// Quick deny with 'n'
+			m.program.Send(AuthorizationResponseMsg{
+				AuthID:   m.activeAuthorizationID,
+				Approved: false,
+			})
+			return m, nil
+		}
+
+		// Update dialog list for navigation
+		var cmd tea.Cmd
+		m.authorizationDialog.list, cmd = m.authorizationDialog.list.Update(msg)
+		return m, cmd
+
+	case tea.WindowSizeMsg:
+		// Update dialog size
+		m.authorizationDialog.width = msg.Width
+		m.authorizationDialog.height = msg.Height
+		listWidth, listHeight := m.authorizationDialog.listSize()
+		m.authorizationDialog.list.SetSize(listWidth, listHeight)
+		return m, nil
+	}
+
+	return m, nil
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		tiCmd tea.Cmd
 		vpCmd tea.Cmd
 	)
+
+	// Handle authorization dialog if open
+	if m.authorizationDialogOpen {
+		return m.handleAuthorizationDialog(msg)
+	}
 
 	wasReady := m.ready
 
@@ -1163,15 +1402,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, baseCmd
 
 		case "esc":
-			if m.generating && m.onStop != nil {
-				m.generating = false
-				m.processingStatus = ""
-				if !m.animationsDisabled {
-					m.spinnerActive = false
-				}
-				if err := m.onStop(); err != nil {
-					fmt.Printf("failed to stop generation: %v\n", err)
-				}
+			if m.isCurrentTabGenerating() {
+				m.stopGeneration("Generation stopped.")
 			} else if len(m.suggestions) > 0 {
 				m.suggestions = nil
 				m.selectedSuggIndex = 0
@@ -1301,18 +1533,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			isCommand := m.commandMode || strings.HasPrefix(input, "/")
 			if isCommand {
 				m.commandMode = false
-				if m.generating {
-					m.AddSystemMessage("Finish current response before running commands.")
-					return m, baseCmd
-				}
+				// In concurrent mode, commands can run anytime
 				return m, tea.Batch(baseCmd, m.handleCommand(input))
 			}
 
-			if m.generating {
+			// Check if current tab is generating
+			if m.isCurrentTabGenerating() {
+				// Queue the prompt for this tab
 				m.queuePrompt(m.activeSessionIdx, input)
 				return m, baseCmd
 			}
 
+			// Start prompt on active tab
 			return m, tea.Batch(baseCmd, m.startPrompt(m.activeSessionIdx, input))
 		}
 
@@ -1372,34 +1604,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, baseCmd
 
-	case GeneratingMsg:
-		if msg.Content != "" {
-			m.contentReceived = true // Mark that content has started streaming
-			targetTab := m.targetGenerationTab()
-			if targetTab >= 0 {
-				m.appendAssistantChunkForTab(targetTab, msg.Content)
-			}
-		}
-		return m, baseCmd
-
-	case CompleteMsg:
-		tabIdx := m.generationTabIdx
-		m.generating = false
-		m.processingStatus = ""
-		m.thinkingTokens = 0      // Reset thinking tokens when generation completes
-		m.contentReceived = false // Reset content flag for clarity
-		m.generationTabIdx = -1
-		if !m.animationsDisabled {
-			m.spinnerActive = false
-		}
-		if m.pendingSessionIdx >= 0 {
-			m.applyPendingSessionSwitch()
-		}
-		next := m.processNextQueuedPrompt(tabIdx)
-		if next != nil {
-			return m, tea.Batch(baseCmd, next)
-		}
-		return m, baseCmd
+	// NOTE: Old GeneratingMsg and CompleteMsg handlers removed - replaced by tab-specific handlers below
 
 	case ProcessingStatusMsg:
 		m.processingStatus = msg.Status
@@ -1429,7 +1634,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, baseCmd
 
 	case OpenRouterUsageMsg:
-		m.processOpenRouterUsage(msg.Usage)
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx >= 0 {
+			m.processOpenRouterUsage(tabIdx, msg.Usage)
+		} else {
+			logger.Warn("Received OpenRouterUsageMsg for unknown tab ID: %d", msg.TabID)
+		}
 		return m, baseCmd
 
 	case ErrMsg:
@@ -1437,20 +1647,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(baseCmd, tea.Quit)
 		}
 		m.err = msg
-		tabIdx := m.generationTabIdx
 		m.errVisibleUntil = time.Now().Add(errorDisplayDuration)
-		m.generating = false
-		m.generationTabIdx = -1
-		if !m.animationsDisabled {
-			m.spinnerActive = false
-		}
-		if m.pendingSessionIdx >= 0 {
-			m.applyPendingSessionSwitch()
-		}
-		next := m.processNextQueuedPrompt(tabIdx)
-		if next != nil {
-			return m, tea.Batch(baseCmd, next)
-		}
 		return m, baseCmd
 
 	case NewTabMsg:
@@ -1463,35 +1660,424 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case UserMultipleQuestionsRequestMsg:
 		cmd := m.handleUserMultipleQuestionsRequest(msg)
 		return m, cmd
+
+	// Tab-specific message handlers for concurrent generation
+	case TabGeneratingMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx < 0 {
+			logger.Warn("Received TabGeneratingMsg for unknown tab ID: %d", msg.TabID)
+			return m, baseCmd
+		}
+
+		if msg.Content != "" {
+			if tabIdx == m.activeSessionIdx {
+				m.contentReceived = true
+			}
+			m.appendAssistantChunkForTab(tabIdx, msg.Content)
+		}
+		return m, baseCmd
+
+	case TabProcessingStatusMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx < 0 {
+			return m, baseCmd
+		}
+
+		// Only update status if this is the active tab
+		if tabIdx == m.activeSessionIdx {
+			m.processingStatus = msg.Status
+			var extra tea.Cmd
+			if !m.animationsDisabled {
+				shouldSpin := msg.Status != ""
+				if shouldSpin && !m.spinnerActive {
+					m.spinnerActive = true
+					extra = func() tea.Msg { return m.spinner.Tick() }
+				} else if !shouldSpin && m.spinnerActive {
+					m.spinnerActive = false
+				}
+			}
+			return m, tea.Batch(baseCmd, extra)
+		}
+		return m, baseCmd
+
+	case TabGenerationCompleteMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx < 0 {
+			return m, baseCmd
+		}
+
+		// Mark tab as no longer generating
+		m.setTabGenerating(tabIdx, false)
+		m.sessions[tabIdx].ThinkingTokens = 0
+
+		// Clear status if this was the active tab
+		if tabIdx == m.activeSessionIdx {
+			m.processingStatus = ""
+			m.thinkingTokens = 0
+			m.contentReceived = false
+			if !m.animationsDisabled {
+				m.spinnerActive = false
+			}
+			if msg.Error != nil {
+				m.err = msg.Error
+				m.errVisibleUntil = time.Now().Add(errorDisplayDuration)
+			}
+		}
+
+		// Process queued prompts for this tab
+		return m, m.processNextQueuedPromptForTab(tabIdx)
+
+	case TabAuthorizationRequiredMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx >= 0 && tabIdx < len(m.sessions) {
+			m.sessions[tabIdx].WaitingForAuth = true
+			logger.Debug("Tab %d waiting for authorization", msg.TabID)
+		}
+		return m, baseCmd
+
+	case ShowAuthorizationDialogMsg:
+		// Create and display authorization dialog
+		m.authorizationMu.Lock()
+		m.activeAuthorizationID = msg.Request.AuthID
+		m.authorizationDialogOpen = true
+		m.authorizationMu.Unlock()
+
+		// Get tab name for display
+		tabIdx := m.findTabIndexByID(msg.Request.TabID)
+		tabName := fmt.Sprintf("Tab %d", tabIdx+1)
+		if tabIdx >= 0 && tabIdx < len(m.sessions) && m.sessions[tabIdx].Name != "" {
+			tabName = m.sessions[tabIdx].Name
+		}
+
+		// Create authorization dialog
+		m.authorizationDialog = NewAuthorizationDialog(msg.Request, tabName)
+		logger.Info("Showing authorization dialog for tab %d (authID: %s)", msg.Request.TabID, msg.Request.AuthID)
+
+		return m, baseCmd
+
+	case AuthorizationResponseMsg:
+		// User responded to authorization
+		m.authorizationMu.Lock()
+		request, ok := m.pendingAuthorizations[msg.AuthID]
+		if ok {
+			// Send response to waiting callback
+			select {
+			case request.ResponseChan <- msg.Approved:
+				logger.Info("Authorization response sent for authID %s: %v", msg.AuthID, msg.Approved)
+			default:
+				logger.Warn("Failed to send authorization response for authID %s (channel not ready)", msg.AuthID)
+			}
+
+			// Mark tab as no longer waiting for auth
+			tabIdx := m.findTabIndexByID(request.TabID)
+			if tabIdx >= 0 && tabIdx < len(m.sessions) {
+				m.sessions[tabIdx].WaitingForAuth = false
+			}
+		}
+
+		// Close authorization dialog
+		m.authorizationDialogOpen = false
+		m.activeAuthorizationID = ""
+		m.authorizationMu.Unlock()
+
+		return m, baseCmd
+
+	case TabToolCallMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx >= 0 {
+			m.addToolCallMessageForTab(tabIdx, msg.ToolName, msg.ToolID, msg.Parameters)
+		}
+		return m, baseCmd
+
+	case TabToolResultMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx >= 0 {
+			m.addToolResultMessageForTab(tabIdx, msg.ToolName, msg.ToolID, msg.Result, msg.Error)
+		}
+		return m, baseCmd
 	}
 
 	return m, baseCmd
 }
 
-func (m *Model) startPrompt(tabIdx int, input string) tea.Cmd {
-	m.processingStatus = ""
-	m.thinkingTokens = 0      // Reset thinking tokens for new prompt
-	m.contentReceived = false // Reset content flag for new generation
-	m.generationTabIdx = tabIdx
-	m.pendingSessionIdx = -1
-	m.addMessageForTab(tabIdx, "You", input)
-	m.generating = true
-	var cmds []tea.Cmd
-	if !m.animationsDisabled {
-		m.spinnerActive = true
-		cmds = append(cmds, func() tea.Msg { return m.spinner.Tick() })
+// createProgressCallbackForTab creates a progress callback that tags messages with tab ID
+func (m *Model) createProgressCallbackForTab(tabID int) progress.Callback {
+	return func(update progress.Update) error {
+		// Normalize the update
+		normalized := progress.Normalize(update)
+
+		// Handle status messages
+		if normalized.ShouldStatus() {
+			m.program.Send(TabProcessingStatusMsg{
+				TabID:  tabID,
+				Status: strings.TrimRight(normalized.Message, "\n"),
+			})
+		}
+
+		// Handle streaming content
+		if normalized.Message != "" && normalized.ShouldStream() {
+			m.program.Send(TabGeneratingMsg{
+				TabID:   tabID,
+				Content: normalized.Message,
+			})
+		}
+
+		return nil
 	}
-	cmds = append(cmds, m.handleSubmit(input))
-	return tea.Batch(cmds...)
+}
+
+// Old implementation below - keeping for reference during transition
+func (m *Model) createProgressCallbackForTab_old(tabID int) func(update interface{}) error {
+	return func(update interface{}) error {
+		// Handle different progress update types
+		switch u := update.(type) {
+		case string:
+			// Simple string content
+			if u != "" {
+				m.program.Send(TabGeneratingMsg{
+					TabID:   tabID,
+					Content: u,
+				})
+			}
+		case map[string]interface{}:
+			// Structured update with message field
+			if msg, ok := u["message"].(string); ok && msg != "" {
+				if shouldStatus, ok := u["should_status"].(bool); ok && shouldStatus {
+					m.program.Send(TabProcessingStatusMsg{
+						TabID:  tabID,
+						Status: msg,
+					})
+				} else if shouldStream, ok := u["should_stream"].(bool); ok && shouldStream {
+					m.program.Send(TabGeneratingMsg{
+						TabID:   tabID,
+						Content: msg,
+					})
+				} else {
+					// Default to generating message
+					m.program.Send(TabGeneratingMsg{
+						TabID:   tabID,
+						Content: msg,
+					})
+				}
+			}
+		default:
+			logger.Debug("Unknown progress update type for tab %d: %T", tabID, update)
+		}
+		return nil
+	}
+}
+
+// startPromptForTab initiates generation for a specific tab using its own orchestrator
+func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
+	if tabIdx < 0 || tabIdx >= len(m.sessions) {
+		logger.Warn("startPromptForTab: invalid tab index %d", tabIdx)
+		return nil
+	}
+
+	if m.factory == nil {
+		logger.Error("RuntimeFactory not initialized")
+		return nil
+	}
+
+	tab := m.sessions[tabIdx]
+
+	// Get or create runtime for this tab
+	runtime, ok := m.factory.GetTabRuntime(tab.ID)
+	if !ok {
+		var err error
+		runtime, err = m.factory.CreateTabRuntime(tab.ID, tab.Session)
+		if err != nil {
+			logger.Error("Failed to create runtime for tab %d: %v", tab.ID, err)
+			return func() tea.Msg {
+				return TabGenerationCompleteMsg{
+					TabID: tab.ID,
+					Error: fmt.Errorf("failed to create runtime: %w", err),
+				}
+			}
+		}
+		tab.Runtime = runtime
+
+		// Update context file if this is the active tab and it's the first runtime
+		if tabIdx == m.activeSessionIdx {
+			m.contextFile = runtime.Orchestrator.GetExtendedContextFile()
+		}
+	}
+
+	// Mark tab as generating
+	m.setTabGenerating(tabIdx, true)
+	m.addMessageForTab(tabIdx, "You", input)
+
+	// Reset usage/thinking state for this generation
+	tab.OpenRouterUsage = nil
+	tab.ThinkingTokens = 0
+	if tabIdx == m.activeSessionIdx {
+		m.openRouterUsage = nil
+		m.thinkingTokens = 0
+	}
+
+	// Reset state for this generation if active tab
+	if tabIdx == m.activeSessionIdx {
+		m.processingStatus = ""
+		m.contentReceived = false
+		if !m.animationsDisabled {
+			m.spinnerActive = true
+		}
+	}
+
+	// Create per-tab progress callback that tags messages with tab ID
+	progressCallback := m.createProgressCallbackForTab(tab.ID)
+
+	// Create authorization callback for this tab
+	authorizationCallback := func(toolName string, params map[string]interface{}, reason string) (bool, error) {
+		logger.Debug("Tab %d: authorization requested for tool %s: %s", tab.ID, toolName, reason)
+
+		// Generate unique authorization ID
+		m.authorizationMu.Lock()
+		m.authorizationCounter++
+		authID := fmt.Sprintf("auth-%d-%d", tab.ID, m.authorizationCounter)
+		m.authorizationMu.Unlock()
+
+		// Create authorization request with response channel
+		responseChan := make(chan bool, 1)
+		request := &AuthorizationRequest{
+			AuthID:       authID,
+			TabID:        tab.ID,
+			ToolName:     toolName,
+			Parameters:   params,
+			Reason:       reason,
+			ResponseChan: responseChan,
+		}
+
+		// Store pending authorization
+		m.authorizationMu.Lock()
+		m.pendingAuthorizations[authID] = request
+		m.authorizationMu.Unlock()
+
+		// Mark tab as waiting for authorization
+		m.program.Send(TabAuthorizationRequiredMsg{
+			TabID:  tab.ID,
+			Reason: reason,
+		})
+
+		// Send message to display authorization dialog
+		m.program.Send(ShowAuthorizationDialogMsg{
+			Request: request,
+		})
+
+		// Block until user responds
+		logger.Debug("Tab %d: waiting for authorization response (authID: %s)", tab.ID, authID)
+		approved := <-responseChan
+		logger.Debug("Tab %d: authorization response received: %v (authID: %s)", tab.ID, approved, authID)
+
+		// Cleanup
+		m.authorizationMu.Lock()
+		delete(m.pendingAuthorizations, authID)
+		m.authorizationMu.Unlock()
+
+		return approved, nil
+	}
+
+	// Create tool call callback for this tab
+	toolCallCallback := func(toolName, toolID string, parameters map[string]interface{}) error {
+		logger.Debug("Tab %d: tool call %s (ID: %s)", tab.ID, toolName, toolID)
+		m.program.Send(TabToolCallMsg{
+			TabID:      tab.ID,
+			ToolName:   toolName,
+			ToolID:     toolID,
+			Parameters: parameters,
+		})
+		return nil
+	}
+
+	// Create tool result callback for this tab
+	toolResultCallback := func(toolName, toolID, result, errorMsg string) error {
+		logger.Debug("Tab %d: tool result %s (ID: %s)", tab.ID, toolName, toolID)
+		m.program.Send(TabToolResultMsg{
+			TabID:    tab.ID,
+			ToolName: toolName,
+			ToolID:   toolID,
+			Result:   result,
+			Error:    errorMsg,
+		})
+		return nil
+	}
+
+	// Create usage callback for this tab
+	usageCallback := func(usage map[string]interface{}) error {
+		logger.Debug("Tab %d: usage callback received: %v", tab.ID, usage)
+		m.program.Send(OpenRouterUsageMsg{
+			TabID: tab.ID,
+			Usage: usage,
+		})
+		return nil
+	}
+
+	// Submit to tab's orchestrator in goroutine
+	return func() tea.Msg {
+		go func() {
+			ctx := runtime.ctx
+			err := runtime.Orchestrator.ProcessPrompt(
+				ctx,
+				input,
+				progressCallback,
+				nil,                   // contextCallback - not needed for TUI
+				authorizationCallback, // authorization callback
+				toolCallCallback,      // tool call callback
+				toolResultCallback,    // tool result callback
+				usageCallback,         // usage callback
+			)
+
+			if err != nil {
+				m.program.Send(TabGenerationCompleteMsg{
+					TabID: tab.ID,
+					Error: err,
+				})
+			} else {
+				m.program.Send(TabGenerationCompleteMsg{
+					TabID: tab.ID,
+				})
+			}
+		}()
+		return nil
+	}
+}
+
+func (m *Model) startPrompt(tabIdx int, input string) tea.Cmd {
+	// In concurrent mode, directly start the prompt for the specified tab
+	return m.startPromptForTab(tabIdx, input)
 }
 
 func (m *Model) queuePrompt(tabIdx int, input string) {
-	if m.generationTabIdx < 0 {
-		m.generationTabIdx = tabIdx
-	}
 	m.queuedPrompts[tabIdx] = append(m.queuedPrompts[tabIdx], input)
 	preview := formatQueuedPreview(input)
 	m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Queued prompt #%d: %s", len(m.queuedPrompts[tabIdx]), preview))
+}
+
+// processNextQueuedPromptForTab processes the next queued prompt for a specific tab (tab-aware version)
+func (m *Model) processNextQueuedPromptForTab(tabIdx int) tea.Cmd {
+	if tabIdx < 0 || tabIdx >= len(m.sessions) {
+		return nil
+	}
+
+	queue := m.queuedPrompts[tabIdx]
+	if len(queue) == 0 {
+		return nil
+	}
+
+	// Dequeue the next prompt
+	next := queue[0]
+	m.queuedPrompts[tabIdx] = queue[1:]
+
+	preview := formatQueuedPreview(next)
+	remaining := len(m.queuedPrompts[tabIdx])
+	if remaining > 0 {
+		m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Processing queued prompt: %s (%d remaining)", preview, remaining))
+	} else {
+		m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Processing queued prompt: %s", preview))
+	}
+
+	// Start prompt for this specific tab
+	return m.startPromptForTab(tabIdx, next)
 }
 
 func (m *Model) processNextQueuedPrompt(tabIdx int) tea.Cmd {
@@ -1515,15 +2101,49 @@ func (m *Model) processNextQueuedPrompt(tabIdx int) tea.Cmd {
 	return m.startPrompt(tabIdx, next)
 }
 
-// processOpenRouterUsage processes OpenRouter usage data and stores it for display
-func (m *Model) processOpenRouterUsage(usage map[string]interface{}) {
-	logger.Debug("OpenRouter usage data received: %v", usage)
-	m.openRouterUsage = usage
+func (m *Model) nextQueuedTab(preferred ...int) int {
+	seen := make(map[int]struct{})
+	for _, idx := range preferred {
+		if idx < 0 || !m.validTabIndex(idx) {
+			continue
+		}
+		seen[idx] = struct{}{}
+		if len(m.queuedPrompts[idx]) > 0 {
+			return idx
+		}
+	}
 
-	// Extract thinking/reasoning tokens if available
-	m.thinkingTokens = extractThinkingTokens(usage)
-	if m.thinkingTokens > 0 {
-		logger.Debug("Extracted thinking tokens: %d", m.thinkingTokens)
+	for i := range m.sessions {
+		if _, ok := seen[i]; ok {
+			continue
+		}
+		if len(m.queuedPrompts[i]) > 0 {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// processOpenRouterUsage processes OpenRouter usage data and stores it for display
+func (m *Model) processOpenRouterUsage(tabIdx int, usage map[string]interface{}) {
+	if !m.validTabIndex(tabIdx) {
+		logger.Warn("processOpenRouterUsage called with invalid tab index: %d", tabIdx)
+		return
+	}
+
+	logger.Debug("OpenRouter usage data received for tab %d: %v", tabIdx, usage)
+	m.sessions[tabIdx].OpenRouterUsage = usage
+
+	thinkingTokens := extractThinkingTokens(usage)
+	m.sessions[tabIdx].ThinkingTokens = thinkingTokens
+
+	if tabIdx == m.activeSessionIdx {
+		m.openRouterUsage = usage
+		m.thinkingTokens = thinkingTokens
+		if thinkingTokens > 0 {
+			logger.Debug("Extracted thinking tokens for active tab: %d", thinkingTokens)
+		}
 	}
 }
 
@@ -1628,7 +2248,7 @@ func (m *Model) View() string {
 		} else {
 			footerLeft = statusStyle.Render(fmt.Sprintf("⚙️  %s", statusText))
 		}
-	} else if m.generating {
+	} else if m.isCurrentTabGenerating() {
 		var generatingText string
 
 		// Show thinking tokens only if we haven't received content yet (still in thinking phase)
@@ -1659,6 +2279,22 @@ func (m *Model) View() string {
 	}
 
 	mainContent := sb.String()
+
+	// Show authorization dialog as overlay if open
+	if m.authorizationDialogOpen {
+		dialogView := m.authorizationDialog.View()
+		// Center the dialog
+		overlay := lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			dialogView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("0")),
+		)
+		return overlay
+	}
 
 	if !m.showTodoPanel {
 		return mainContent
@@ -1696,14 +2332,67 @@ func (m *Model) renderFooter(left, right string) string {
 	return left + strings.Repeat(" ", space) + right
 }
 
+func cachedTokensFromUsage(usage map[string]interface{}) float64 {
+	if usage == nil {
+		return 0
+	}
+
+	toFloat := func(v interface{}) float64 {
+		switch n := v.(type) {
+		case float64:
+			return n
+		case float32:
+			return float64(n)
+		case int:
+			return float64(n)
+		case int32:
+			return float64(n)
+		case int64:
+			return float64(n)
+		case uint:
+			return float64(n)
+		case uint32:
+			return float64(n)
+		case uint64:
+			return float64(n)
+		default:
+			return 0
+		}
+	}
+
+	var total float64
+	if v, ok := usage["cached_tokens"]; ok {
+		total += toFloat(v)
+	}
+	if details, ok := usage["input_tokens_details"].(map[string]interface{}); ok {
+		if v, ok2 := details["cached_tokens"]; ok2 {
+			total += toFloat(v)
+		}
+	}
+	if details, ok := usage["output_tokens_details"].(map[string]interface{}); ok {
+		if v, ok2 := details["cached_tokens"]; ok2 {
+			total += toFloat(v)
+		}
+	}
+	return total
+}
+
 func (m *Model) contextDisplay() string {
 	var parts []string
+
+	// Determine caching state
+	cachedTokens := cachedTokensFromUsage(m.openRouterUsage)
+	cacheActive := cachedTokens > 0
 
 	// Add context file info
 	if strings.TrimSpace(m.contextFile) == "" {
 		parts = append(parts, "Context: (none)")
 	} else {
-		parts = append(parts, fmt.Sprintf("Context: %s", m.contextFile))
+		contextLabel := fmt.Sprintf("Context: %s", m.contextFile)
+		if cacheActive {
+			contextLabel += " (cache on)"
+		}
+		parts = append(parts, contextLabel)
 	}
 
 	// Add OpenRouter usage if available
@@ -1714,8 +2403,8 @@ func (m *Model) contextDisplay() string {
 		}
 
 		// Show caching if available
-		if cachedTokens, ok := m.openRouterUsage["cached_tokens"].(float64); ok && cachedTokens > 0 {
-			if totalTokens, ok2 := m.openRouterUsage["total_tokens"].(float64); ok2 && totalTokens > 0 {
+		if cachedTokens > 0 {
+			if totalTokens, ok := m.openRouterUsage["total_tokens"].(float64); ok && totalTokens > 0 {
 				cachePercent := (cachedTokens / totalTokens) * 100
 				parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
 			}
@@ -2004,30 +2693,14 @@ func (m *Model) storeMessagesForTab(tabIdx int, msgs []message, updateViewport b
 }
 
 func (m *Model) targetGenerationTab() int {
-	if m.validTabIndex(m.generationTabIdx) {
-		return m.generationTabIdx
-	}
+	// In concurrent mode, just return active tab (legacy function for compatibility)
 	if m.validTabIndex(m.activeSessionIdx) {
 		return m.activeSessionIdx
 	}
 	return -1
 }
 
-func (m *Model) applyPendingSessionSwitch() {
-	if !m.validTabIndex(m.pendingSessionIdx) {
-		m.pendingSessionIdx = -1
-		return
-	}
-
-	if m.onSwitchSession != nil {
-		target := m.sessions[m.pendingSessionIdx]
-		if err := m.onSwitchSession(target.Session); err != nil {
-			logger.Warn("Failed to switch orchestrator session: %v", err)
-			m.AddSystemMessage(fmt.Sprintf("Error switching session: %v", err))
-		}
-	}
-	m.pendingSessionIdx = -1
-}
+// applyPendingSessionSwitch - REMOVED: Obsolete in concurrent generation system
 
 func (m *Model) addMessageForTab(tabIdx int, role, content string) {
 	timestamp := time.Now().Format("15:04:05")
@@ -2104,6 +2777,23 @@ func (m *Model) summarizeLastToolResultForTab(tabIdx int) {
 		lastMsg.summarized = true
 		m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
 	}
+}
+
+// appendToTabMessage appends content to a tab's last message without updating the viewport
+// Used when a background tab receives streaming content
+func (m *Model) appendToTabMessage(tabIdx int, content string) {
+	if tabIdx < 0 || tabIdx >= len(m.sessions) {
+		return
+	}
+
+	tabMessages := m.sessions[tabIdx].Messages
+	if len(tabMessages) == 0 {
+		return
+	}
+
+	lastIdx := len(tabMessages) - 1
+	tabMessages[lastIdx].content += content
+	m.sessions[tabIdx].Messages = tabMessages
 }
 
 func (m *Model) appendAssistantChunkForTab(tabIdx int, content string) {
@@ -2781,7 +3471,7 @@ func (m *Model) updateViewport() {
 	}
 
 	// Check if we should auto-scroll (user is at or near bottom)
-	shouldScroll := m.viewport.AtBottom() || m.generating
+	shouldScroll := m.viewport.AtBottom() || m.isCurrentTabGenerating()
 
 	m.viewport.SetContent(rendered.String())
 
@@ -2795,15 +3485,8 @@ func (m *Model) updateViewport() {
 }
 
 func (m *Model) handleSubmit(input string) tea.Cmd {
-	return func() tea.Msg {
-		if m.onSubmit != nil {
-			if err := m.onSubmit(input); err != nil {
-				return ErrMsg(err)
-			}
-		}
-		// Don't send CompleteMsg here - it will be sent by the streaming callback
-		return nil
-	}
+	// In concurrent mode, directly call startPrompt for active tab
+	return m.startPrompt(m.activeSessionIdx, input)
 }
 
 func (m *Model) handleCommand(input string) tea.Cmd {
@@ -2858,6 +3541,35 @@ func (m *Model) AppendAssistantChunk(chunk string) {
 	m.appendAssistantChunkForTab(targetTab, chunk)
 }
 
+func (m *Model) stopGeneration(reason string) {
+	// In concurrent mode, stop the current tab's generation
+	if !m.isCurrentTabGenerating() {
+		return
+	}
+
+	currentTab := m.activeSessionIdx
+	m.processingStatus = ""
+	m.contentReceived = false
+	m.thinkingTokens = 0
+	if !m.animationsDisabled {
+		m.spinnerActive = false
+	}
+
+	if m.onStop != nil {
+		if err := m.onStop(); err != nil {
+			m.addMessageForTab(m.activeSessionIdx, "System", fmt.Sprintf("Failed to stop generation: %v", err))
+		}
+	}
+
+	if reason != "" && currentTab >= 0 {
+		m.addMessageForTab(currentTab, "System", reason)
+	}
+
+	if currentTab >= 0 && currentTab < len(m.sessions) {
+		m.sessions[currentTab].ThinkingTokens = 0
+	}
+}
+
 func (m *Model) AddSystemMessage(msg string) {
 	m.addMessage("System", msg)
 }
@@ -2886,12 +3598,9 @@ func (m *Model) RestoreLoadedSession(info *LoadedSessionInfo) {
 	}
 
 	// Reset generation-related state
-	m.generating = false
 	m.processingStatus = ""
 	m.contentReceived = false
 	m.thinkingTokens = 0
-	m.generationTabIdx = -1
-	m.pendingSessionIdx = -1
 	if !m.animationsDisabled {
 		m.spinnerActive = false
 	}

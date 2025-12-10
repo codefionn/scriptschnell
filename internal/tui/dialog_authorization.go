@@ -71,22 +71,17 @@ func (d authChoiceDelegate) Render(w io.Writer, m list.Model, index int, listIte
 	fmt.Fprintf(w, "%s\n%s", title, desc)
 }
 
-// AuthorizationRequest contains the details of an authorization request
-type AuthorizationRequest struct {
-	ToolName   string
-	Parameters map[string]interface{}
-	Reason     string
-}
-
 // AuthorizationDialog presents a dialog to approve or deny a tool execution
+// Note: AuthorizationRequest is now defined in tui.go with TabID and ResponseChan
 type AuthorizationDialog struct {
-	request  AuthorizationRequest
+	request  *AuthorizationRequest // Changed to pointer since it's defined in tui.go
 	list     list.Model
 	choice   bool
 	approved bool
 	quitting bool
 	width    int
 	height   int
+	tabName  string // Display name of the tab requesting authorization
 }
 
 // AuthorizationApprovedMsg is sent when user approves the authorization
@@ -113,7 +108,7 @@ func (m AuthorizationDialog) listSize() (int, int) {
 }
 
 // NewAuthorizationDialog constructs a dialog for authorization approval
-func NewAuthorizationDialog(req AuthorizationRequest) AuthorizationDialog {
+func NewAuthorizationDialog(req *AuthorizationRequest, tabName string) AuthorizationDialog {
 	items := []list.Item{
 		authChoiceItem{
 			label: "Approve",
@@ -129,6 +124,7 @@ func NewAuthorizationDialog(req AuthorizationRequest) AuthorizationDialog {
 
 	dialog := AuthorizationDialog{
 		request: req,
+		tabName: tabName,
 		width:   authDialogDefaultWidth,
 		height:  authDialogDefaultHeight,
 	}
@@ -196,8 +192,12 @@ func (m AuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m AuthorizationDialog) View() string {
 	var sb strings.Builder
 
-	// Title
-	sb.WriteString(authTitleStyle.Render("⚠️  Authorization Required"))
+	// Title with tab name
+	title := "⚠️  Authorization Required"
+	if m.tabName != "" {
+		title = fmt.Sprintf("⚠️  Authorization Required [Tab: %s]", m.tabName)
+	}
+	sb.WriteString(authTitleStyle.Render(title))
 	sb.WriteString("\n\n")
 
 	// Tool name

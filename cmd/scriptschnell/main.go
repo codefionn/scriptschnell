@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/codefionn/scriptschnell/internal/acp"
@@ -17,10 +16,8 @@ import (
 	"github.com/codefionn/scriptschnell/internal/cli"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/logger"
-	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secrets"
-	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tui"
 	"golang.org/x/term"
 )
@@ -380,71 +377,60 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create orchestrator
-	// TUI mode is interactive, so pass cliMode=false
-	orch, err := tui.NewOrchestrator(cfg, providerMgr, false)
+	// Create RuntimeFactory for multi-tab concurrent generation
+	factory, err := tui.NewRuntimeFactory(cfg, providerMgr, cfg.WorkingDir, false)
 	if err != nil {
-		logger.Error("Failed to create orchestrator: %v", err)
-		return fmt.Errorf("failed to create orchestrator: %w", err)
+		logger.Error("Failed to create RuntimeFactory: %v", err)
+		return fmt.Errorf("failed to create RuntimeFactory: %w", err)
 	}
-	defer orch.Close()
+	defer factory.Close()
 
-	// Create TUI model
-	model := tui.New(orch.GetCurrentModel(), orch.GetExtendedContextFile(), cfg.DisableAnimations)
-	model.SetConfig(cfg)
-	model.SetActiveMCPProvider(func() []string {
-		return orch.GetActiveMCPServers()
-	})
+	// Create TUI model with factory
+	model := tui.NewWithFactory(factory, cfg, providerMgr)
 
 	// Set filesystem for filepath autocomplete
-	model.SetFilesystem(orch.GetFilesystem(), orch.GetWorkingDir())
-	model.SetTodoClient(orch.GetTodoClient())
-	model.SetOnPromptActivity(orch.TriggerPreconnect)
+	model.SetFilesystem(factory.GetSharedFilesystem(), factory.GetWorkingDir())
 
-	// Set session switch callback for tab switching
-	model.SetOnSwitchSession(func(newSession *session.Session) error {
-		orch.SetSession(newSession)
-		return nil
-	})
-
-	// Set session save callback for tab close autosave
-	model.SetOnSaveSession(func(sess *session.Session) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return orch.SaveCurrentSession(ctx)
+	// MCP provider callback (will be set per-tab via orchestrator)
+	model.SetActiveMCPProvider(func() []string {
+		// Get active tab's runtime
+		tab := model.GetActiveTab()
+		if tab != nil && tab.Runtime != nil {
+			return tab.Runtime.Orchestrator.GetActiveMCPServers()
+		}
+		return []string{}
 	})
 
 	// Declare program variable first (will be assigned later)
 	var program *tea.Program
 
-	// Create progress callback
-	progressCallback := func(update progress.Update) error {
-		normalized := progress.Normalize(update)
-		if program != nil && normalized.ShouldStatus() {
-			statusMsg := strings.TrimRight(normalized.Message, "\n")
-			program.Send(tui.ProcessingStatusMsg{Status: statusMsg})
-		}
-		if program != nil && normalized.Message != "" && normalized.ShouldStream() {
-			program.Send(tui.GeneratingMsg{Content: normalized.Message})
+	// Helper to get active tab's orchestrator
+	getActiveOrchestrator := func() *tui.Orchestrator {
+		tab := model.GetActiveTab()
+		if tab != nil && tab.Runtime != nil {
+			return tab.Runtime.Orchestrator
 		}
 		return nil
 	}
 
-	// Create command handler with streaming support
-	cmdHandler := tui.NewCommandHandler(ctx, cfg, providerMgr, orch)
-	cmdHandler.SetProgressCallback(progressCallback)
-	cmdHandler.SetContextCallback(func(percent int, contextWindow int) error {
-		if program != nil {
-			program.Send(tui.ContextUsageMsg{FreePercent: percent, ContextWindow: contextWindow})
+	// Helper to update models for all tab runtimes
+	updateAllTabModels := func() error {
+		for _, tab := range model.GetAllTabs() {
+			if tab.Runtime != nil && tab.Runtime.Orchestrator != nil {
+				if err := tab.Runtime.Orchestrator.UpdateModels(); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
-	})
-	cmdHandler.SetUsageCallback(func(usage map[string]interface{}) error {
-		if program != nil {
-			program.Send(tui.OpenRouterUsageMsg{Usage: usage})
-		}
-		return nil
-	})
+	}
+
+	// Create command handler (note: orchestrator will be nil, per-tab runtimes used instead)
+	cmdHandler := tui.NewCommandHandler(ctx, cfg, providerMgr, nil)
+
+	// Set up multi-tab support
+	cmdHandler.SetFactory(factory)
+	cmdHandler.SetGetActiveTab(model.GetActiveTab)
 
 	// Helper to run overlay menus while managing terminal state
 	runOverlayMenu := func(run func() error) (retErr error) {
@@ -477,101 +463,9 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 		return retErr
 	}
 
-	// Set up callbacks
-	model.SetOnSubmit(func(input string) error {
-		model.SetContextFile(orch.GetExtendedContextFile())
-		// Tool call callback
-		toolCallCallback := func(toolName, toolID string, parameters map[string]interface{}) error {
-			if program != nil {
-				program.Send(tui.ToolCallMsg{ToolName: toolName, ToolID: toolID, Parameters: parameters})
-			}
-			return nil
-		}
-		// Tool result callback
-		toolResultCallback := func(toolName, toolID, result, errorMsg string) error {
-			if program != nil {
-				program.Send(tui.ToolResultMsg{ToolName: toolName, ToolID: toolID, Result: result, Error: errorMsg})
-			}
-			return nil
-		}
-		// Process prompt in a goroutine and send chunks via tea.Cmd
-		go func() {
-			err := orch.ProcessPrompt(ctx, input, progressCallback, func(percent int, contextWindow int) error {
-				if program != nil {
-					program.Send(tui.ContextUsageMsg{FreePercent: percent, ContextWindow: contextWindow})
-				}
-				return nil
-			}, func(toolName string, params map[string]interface{}, reason string) (bool, error) {
-				// Authorization callback - show dialog and wait for user response
-				responseChan := make(chan bool, 1)
-				errorChan := make(chan error, 1)
-
-				// Release terminal and show authorization dialog
-				go func() {
-					model.SetOverlayActive(true)
-					defer model.SetOverlayActive(false)
-
-					if program != nil {
-						if err := program.ReleaseTerminal(); err != nil {
-							errorChan <- fmt.Errorf("failed to release terminal: %w", err)
-							return
-						}
-						defer func() {
-							if err := program.RestoreTerminal(); err != nil {
-								// Log error but don't fail
-								fmt.Fprintf(os.Stderr, "Warning: failed to restore terminal: %v\n", err)
-							}
-						}()
-					}
-
-					// Show authorization dialog
-					authDialog := tui.NewAuthorizationDialog(tui.AuthorizationRequest{
-						ToolName:   toolName,
-						Parameters: params,
-						Reason:     reason,
-					})
-					authProgram := tea.NewProgram(authDialog, tea.WithAltScreen())
-					finalModel, err := authProgram.Run()
-					if err != nil {
-						errorChan <- fmt.Errorf("authorization dialog error: %w", err)
-						return
-					}
-
-					// Get user's decision
-					if authModel, ok := finalModel.(tui.AuthorizationDialog); ok {
-						responseChan <- authModel.GetApproved()
-					} else {
-						responseChan <- false
-					}
-				}()
-
-				// Wait for response
-				select {
-				case err := <-errorChan:
-					return false, err
-				case approved := <-responseChan:
-					return approved, nil
-				case <-ctx.Done():
-					return false, ctx.Err()
-				}
-			}, toolCallCallback, toolResultCallback, func(usage map[string]interface{}) error {
-				if program != nil {
-					program.Send(tui.OpenRouterUsageMsg{Usage: usage})
-				}
-				return nil
-			})
-
-			// Send complete message or error
-			if program != nil {
-				if err != nil {
-					program.Send(tui.ErrMsg(err))
-				} else {
-					program.Send(tui.CompleteMsg{})
-				}
-			}
-		}()
-		return nil
-	})
+	// Note: SetOnSubmit is no longer needed - prompt handling is done via per-tab runtimes
+	// in startPromptForTab() method. All callbacks (authorization, progress, tool) are created
+	// per-tab in createProgressCallbackForTab() and startPromptForTab().
 
 	model.SetOnCommand(func(input string) (err error) {
 		menuResult, err := cmdHandler.HandleCommand(input)
@@ -654,10 +548,12 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 								continue
 							}
 
-							if err := orch.UpdateModels(); err != nil {
+							if err := updateAllTabModels(); err != nil {
 								return fmt.Errorf("failed to refresh orchestrator models: %w", err)
 							}
-							model.UpdateModel(orch.GetCurrentModel())
+							if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+								model.UpdateModel(activeOrch.GetCurrentModel())
+							}
 
 							// Continue the loop to optionally configure the other model type
 						}
@@ -665,7 +561,9 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					if err != nil {
 						return err
 					}
-					model.SetContextFile(orch.GetExtendedContextFile())
+					if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+						model.SetContextFile(activeOrch.GetExtendedContextFile())
+					}
 					return nil
 
 				case tui.MenuTypeProvider:
@@ -682,7 +580,9 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 						return err
 					}
 					model.AddSystemMessage("Provider menu closed")
-					model.SetContextFile(orch.GetExtendedContextFile())
+					if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+						model.SetContextFile(activeOrch.GetExtendedContextFile())
+					}
 					return nil
 
 				case tui.MenuTypeSearch:
@@ -709,7 +609,9 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					} else {
 						model.AddSystemMessage("Search settings closed")
 					}
-					model.SetContextFile(orch.GetExtendedContextFile())
+					if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+						model.SetContextFile(activeOrch.GetExtendedContextFile())
+					}
 					return nil
 				case tui.MenuTypeSecrets:
 					var (
@@ -758,7 +660,14 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 							if err := cfg.Save(config.GetConfigPath()); err != nil {
 								return "", err
 							}
-							errList := orch.RefreshMCPTools()
+							// Refresh MCP tools for all tab runtimes
+							var errList []error
+							for _, tab := range model.GetAllTabs() {
+								if tab.Runtime != nil && tab.Runtime.Orchestrator != nil {
+									tabErrs := tab.Runtime.Orchestrator.RefreshMCPTools()
+									errList = append(errList, tabErrs...)
+								}
+							}
 							if len(errList) > 0 {
 								messages := make([]string, 0, len(errList))
 								for _, e := range errList {
@@ -771,10 +680,14 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 								}
 							}
 							if validate && serverName != "" {
-								if err := orch.TestMCPServer(serverName); err != nil {
-									return "", fmt.Errorf("validation failed for '%s': %w", serverName, err)
+								// Test MCP server using active tab's orchestrator
+								if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+									if err := activeOrch.TestMCPServer(serverName); err != nil {
+										return "", fmt.Errorf("validation failed for '%s': %w", serverName, err)
+									}
+									return fmt.Sprintf("MCP server '%s' validated successfully", serverName), nil
 								}
-								return fmt.Sprintf("MCP server '%s' validated successfully", serverName), nil
+								return "", fmt.Errorf("no active orchestrator available for validation")
 							}
 							return "", nil
 						}
@@ -798,7 +711,9 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					} else {
 						model.AddSystemMessage("MCP configuration closed")
 					}
-					model.SetContextFile(orch.GetExtendedContextFile())
+					if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+						model.SetContextFile(activeOrch.GetExtendedContextFile())
+					}
 					return nil
 
 				case tui.MenuTypeSettings:
@@ -848,9 +763,9 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					// Open session management menu
 					var loadedSessionInfo *tui.LoadedSessionInfo
 					err := runOverlayMenu(func() error {
-						// Get session storage actor
-						storageRef, exists := orch.GetActor("session_storage")
-						if !exists {
+						// Get session storage actor from factory
+						storageRef := factory.GetSessionStorageRef()
+						if storageRef == nil {
 							return fmt.Errorf("session storage not initialized")
 						}
 
@@ -896,8 +811,10 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 									}
 								}
 
-								// Replace current session in orchestrator
-								orch.SetSession(loadedSession)
+								// Replace current session in active tab's orchestrator
+								if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+									activeOrch.SetSession(loadedSession)
+								}
 
 								// Store loaded session info to be restored after menu closes
 								loadedSessionInfo = &tui.LoadedSessionInfo{
@@ -951,64 +868,49 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 		}
 
 		// Update model name if changed
-		model.UpdateModel(orch.GetCurrentModel())
+		if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+			model.UpdateModel(activeOrch.GetCurrentModel())
+		}
 
-		// Refresh orchestrator if needed
-		if err := orch.UpdateModels(); err != nil {
+		// Refresh orchestrator models for all tabs if needed
+		if err := updateAllTabModels(); err != nil {
 			return fmt.Errorf("failed to refresh orchestrator models: %w", err)
 		}
-		model.SetContextFile(orch.GetExtendedContextFile())
+		if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+			model.SetContextFile(activeOrch.GetExtendedContextFile())
+		}
 
 		return nil
 	})
 
 	model.SetOnStop(func() error {
-		orch.Stop()
+		// Stop all tab runtimes
+		for _, tab := range model.GetAllTabs() {
+			if tab.Runtime != nil && tab.Runtime.Orchestrator != nil {
+				tab.Runtime.Orchestrator.Stop()
+			}
+		}
 		return nil
 	})
 
 	model.SetOnBackground(func() error {
-		return orch.BackgroundCurrentShellJob()
+		// Background current shell job on active tab
+		if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+			return activeOrch.BackgroundCurrentShellJob()
+		}
+		return nil
 	})
 
-	// Set up user input callback for planning questions
-	orch.SetUserInputCallback(func(question string) (string, error) {
-		// Create channels for response
-		responseChan := make(chan string, 1)
-		errorChan := make(chan error, 1)
-
-		// Send message to TUI to handle user input
-		if program != nil {
-			if strings.Contains(question, "a) ") && strings.Contains(question, "b) ") && strings.Contains(question, "c) ") {
-				// This looks like multiple choice questions
-				program.Send(tui.UserMultipleQuestionsRequestMsg{
-					Questions: question,
-					Response:  responseChan,
-					Error:     errorChan,
-				})
-			} else {
-				// Single question
-				program.Send(tui.UserInputRequestMsg{
-					Question: question,
-					Response: responseChan,
-					Error:    errorChan,
-				})
-			}
-		}
-
-		// Wait for response
-		select {
-		case answer := <-responseChan:
-			return answer, nil
-		case err := <-errorChan:
-			return "", err
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
-	})
+	// TODO: Set up user input callback for planning questions on per-tab orchestrators
+	// This needs to be set when creating each tab runtime in CreateTabRuntime()
+	// For now, we'll add this functionality to the runtime creation process
 
 	// Run TUI
 	program = tea.NewProgram(model, tea.WithAltScreen())
+
+	// Set program reference for self-messaging (critical for per-tab message routing)
+	model.SetProgram(program)
+
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
 	}

@@ -349,6 +349,174 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	return orch, nil
 }
 
+// NewOrchestratorWithSharedResources creates an orchestrator with shared resources
+// Used by RuntimeFactory for per-tab orchestrators with shared session storage and filesystem
+func NewOrchestratorWithSharedResources(
+	cfg *config.Config,
+	providerMgr *provider.Manager,
+	cliMode bool,
+	sharedFS fs.FileSystem,
+	sess *session.Session,
+	sharedSessionStorage *actor.ActorRef,
+) (*Orchestrator, error) {
+	logger.Debug("Creating orchestrator with shared resources for session %s", sess.ID)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Use provided shared filesystem
+	filesystem := sharedFS
+	logger.Debug("Using shared filesystem")
+
+	// Create orchestrator (without authorization actor yet)
+	orch := &Orchestrator{
+		fs:           filesystem,
+		session:      sess, // Use provided session instead of creating new one
+		providerMgr:  providerMgr,
+		config:       cfg,
+		workingDir:   sess.WorkingDir,
+		ctx:          ctx,
+		cancel:       cancel,
+		actorSystem:  actor.NewSystem(),
+		cliMode:      cliMode,
+		loopDetector: loopdetector.NewLoopDetector(),
+		featureFlags: features.NewFeatureFlags(),
+	}
+	orch.mcpManager = mcp.NewManager(cfg, sess.WorkingDir, providerMgr)
+
+	// Initialize clients first so we have summarize client for authorization actor
+	if err := orch.initializeClients(); err != nil {
+		// Non-fatal, user can configure later
+		fmt.Printf("Warning: %v\n", err)
+	}
+
+	// Set up authorization actor with summarize client
+	authorizationCtx, authorizationCancel := context.WithCancel(context.Background())
+	allowedCommandPrefixes := make([]string, 0, len(cfg.AuthorizedCommands))
+	for prefix, enabled := range cfg.AuthorizedCommands {
+		if enabled {
+			allowedCommandPrefixes = append(allowedCommandPrefixes, prefix)
+		}
+	}
+
+	allowedDomainPatterns := make([]string, 0, len(cfg.AuthorizedDomains))
+	for domain, enabled := range cfg.AuthorizedDomains {
+		if enabled {
+			allowedDomainPatterns = append(allowedDomainPatterns, domain)
+		}
+	}
+
+	authOpts := &tools.AuthorizationOptions{
+		AllowedCommands: allowedCommandPrefixes,
+		AllowedDomains:  allowedDomainPatterns,
+	}
+
+	authActor := tools.NewAuthorizationActor("authorization", filesystem, sess, orch.summarizeClient, authOpts)
+	authRef, err := orch.actorSystem.Spawn(authorizationCtx, "authorization", authActor, 32)
+	if err != nil {
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start authorization actor: %v", err)
+		return nil, fmt.Errorf("failed to start authorization actor: %w", err)
+	}
+	logger.Debug("Authorization actor spawned")
+	orch.authorizer = tools.NewAuthorizationActorClient(authRef)
+	orch.actorCancel = authorizationCancel
+
+	// Set up todo actor
+	todoCtx, todoCancel := context.WithCancel(context.Background())
+	var todoActor actor.Actor = tools.NewTodoActor("todo")
+	logger.Debug("Using default todo actor")
+	todoRef, err := orch.actorSystem.SpawnWithOptions(todoCtx, "todo", todoActor, 16, actor.WithSequentialProcessing())
+	if err != nil {
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start todo actor: %v", err)
+		return nil, fmt.Errorf("failed to start todo actor: %w", err)
+	}
+	logger.Debug("Todo actor spawned")
+	orch.todoClient = tools.NewTodoActorClient(todoRef)
+	orch.todoActor = todoActor.(tools.TodoActorInterface)
+	orch.todoActorCancel = todoCancel
+
+	// Set up shell actor for shell execution
+	shellCtx, shellCancel := context.WithCancel(context.Background())
+	shellActor := actor.NewShellActor("shell", sess)
+	shellRef, err := orch.actorSystem.Spawn(shellCtx, "shell", shellActor, 64)
+	if err != nil {
+		shellCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start shell actor: %v", err)
+		return nil, fmt.Errorf("failed to start shell actor: %w", err)
+	}
+	logger.Debug("Shell actor spawned")
+	orch.shellActorClient = actor.NewShellActorClient(shellRef)
+	orch.shellActorCancel = shellCancel
+
+	// Use shared session storage actor - DO NOT create new one
+	orch.sessionStorageRef = sharedSessionStorage
+	orch.sessionStorageCancel = nil // Don't own the cancel function - shared lifecycle
+	logger.Debug("Using shared session storage actor")
+
+	// Start autosave for this session if enabled
+	if orch.config.AutoSave.Enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		sessionName := actor.GenerateSessionName("")
+		if err := actor.StartAutoSaveViaActor(ctx, orch.sessionStorageRef, orch.session, sessionName); err != nil {
+			logger.Warn("Failed to start autosave for session %s: %v", orch.session.ID, err)
+		} else {
+			logger.Info("Started autosave for session %s", orch.session.ID)
+		}
+		cancel()
+	}
+
+	// Set up error judge actor with summarize client
+	errorJudgeCtx, errorJudgeCancel := context.WithCancel(context.Background())
+	errorJudgeActor := tools.NewErrorJudgeActor("error_judge", orch.summarizeClient)
+	errorJudgeRef, err := orch.actorSystem.Spawn(errorJudgeCtx, "error_judge", errorJudgeActor, 8)
+	if err != nil {
+		errorJudgeCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start error judge actor: %v", err)
+		return nil, fmt.Errorf("failed to start error judge actor: %w", err)
+	}
+	logger.Debug("Error judge actor spawned")
+	orch.errorJudge = tools.NewErrorJudgeActorClient(errorJudgeRef)
+	orch.errorJudgeCancel = errorJudgeCancel
+
+	// Register tools
+	if toolErrs := orch.rebuildTools(false); len(toolErrs) > 0 {
+		for _, terr := range toolErrs {
+			if terr != nil {
+				logger.Warn("Tool registration warning: %v", terr)
+			}
+		}
+	}
+
+	// Set up tool executor actor
+	toolExecutorCtx, toolExecutorCancel := context.WithCancel(context.Background())
+	toolExecutorActor := tools.NewToolExecutorActor("tool_executor", orch.toolRegistry)
+	toolExecutorRef, err := orch.actorSystem.Spawn(toolExecutorCtx, "tool_executor", toolExecutorActor, 32)
+	if err != nil {
+		toolExecutorCancel()
+		errorJudgeCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start tool executor actor: %v", err)
+		return nil, fmt.Errorf("failed to start tool executor actor: %w", err)
+	}
+	logger.Debug("Tool executor actor spawned")
+	orch.toolExecutor = tools.NewToolExecutorActorClient(toolExecutorRef)
+	orch.toolExecutorCancel = toolExecutorCancel
+
+	logger.Info("Orchestrator created successfully with shared resources for session %s", sess.ID)
+	return orch, nil
+}
+
 func (o *Orchestrator) initializeClients() error {
 	o.clientInitMu.Lock()
 	defer o.clientInitMu.Unlock()

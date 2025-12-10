@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
@@ -120,13 +121,17 @@ func getDefaultCommandDefinitions() []commandDefinition {
 // CommandHandler handles TUI commands
 type CommandHandler struct {
 	providerMgr      *provider.Manager
-	orchestrator     *Orchestrator
+	orchestrator     *Orchestrator // Deprecated: Use factory + getActiveTab instead
 	config           *config.Config
 	ctx              context.Context
 	progressCallback ProgressCallback
 	contextCallback  ContextUsageCallback
 	usageCallback    OpenRouterUsageCallback
 	commands         map[string]commandDefinition
+
+	// Multi-tab support
+	factory      *RuntimeFactory
+	getActiveTab func() *TabSession
 }
 
 func NewCommandHandler(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, orchestrator *Orchestrator) *CommandHandler {
@@ -146,6 +151,16 @@ func (ch *CommandHandler) initCommands() {
 	for _, def := range definitions {
 		ch.commands[def.Name] = def
 	}
+}
+
+// SetFactory sets the RuntimeFactory for multi-tab support
+func (ch *CommandHandler) SetFactory(factory *RuntimeFactory) {
+	ch.factory = factory
+}
+
+// SetGetActiveTab sets the function to get the active tab
+func (ch *CommandHandler) SetGetActiveTab(fn func() *TabSession) {
+	ch.getActiveTab = fn
 }
 
 // SetProgressCallback sets the callback for progress/status updates
@@ -850,9 +865,49 @@ func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
 }
 
 func (ch *CommandHandler) handleClear(_ []string) (MenuResult, error) {
+	// Get active tab
+	var tab *TabSession
+	var orch *Orchestrator
+
+	if ch.getActiveTab != nil {
+		tab = ch.getActiveTab()
+		if tab != nil && tab.Runtime != nil {
+			orch = tab.Runtime.Orchestrator
+		}
+	} else if ch.orchestrator != nil {
+		// Fallback for non-multi-tab mode
+		orch = ch.orchestrator
+	}
+
+	if orch == nil {
+		return MenuResult{}, fmt.Errorf("no active session to clear")
+	}
+
 	// Clear the session in the orchestrator
-	if err := ch.orchestrator.ClearSession(); err != nil {
+	if err := orch.ClearSession(); err != nil {
 		return MenuResult{}, fmt.Errorf("failed to clear session: %w", err)
+	}
+
+	// If we have a tab and factory, create a fresh session
+	if tab != nil && ch.factory != nil {
+		// Destroy old runtime
+		if tab.Runtime != nil {
+			if err := ch.factory.DestroyTabRuntime(tab.ID); err != nil {
+				logger.Warn("Failed to destroy runtime during clear: %v", err)
+			}
+			tab.Runtime = nil
+		}
+
+		// Create new session with fresh ID
+		sessionID := fmt.Sprintf("tab-%d-%d", tab.ID, time.Now().Unix())
+		workingDir := ch.factory.GetWorkingDir()
+		if tab.WorktreePath != "" {
+			workingDir = tab.WorktreePath
+		}
+		newSession := session.NewSession(sessionID, workingDir)
+		tab.Session = newSession
+
+		logger.Info("Created new session %s for tab %d after clear", sessionID, tab.ID)
 	}
 
 	return NewClearSessionResult(), nil

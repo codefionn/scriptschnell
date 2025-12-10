@@ -299,19 +299,87 @@ func (c *GroqClient) convertGroqResponsesResponse(resp *groqResponsesResponse) *
 		stopReason = resp.Status
 	}
 
+	toFloat := func(v interface{}) (float64, bool) {
+		switch n := v.(type) {
+		case float64:
+			return n, true
+		case float32:
+			return float64(n), true
+		case int:
+			return float64(n), true
+		case int32:
+			return float64(n), true
+		case int64:
+			return float64(n), true
+		case uint:
+			return float64(n), true
+		case uint32:
+			return float64(n), true
+		case uint64:
+			return float64(n), true
+		case json.Number:
+			if f, err := n.Float64(); err == nil {
+				return f, true
+			}
+			return 0, false
+		default:
+			return 0, false
+		}
+	}
+
 	// Convert usage data to map[string]interface{}
 	var usage map[string]interface{}
 	if resp.Usage != nil {
 		usage = make(map[string]interface{})
-		usage["input_tokens"] = resp.Usage.InputTokens
-		usage["output_tokens"] = resp.Usage.OutputTokens
-		usage["total_tokens"] = resp.Usage.TotalTokens
+		usage["input_tokens"] = float64(resp.Usage.InputTokens)
+		usage["output_tokens"] = float64(resp.Usage.OutputTokens)
+		usage["total_tokens"] = float64(resp.Usage.TotalTokens)
 
+		// Add OpenAI-style aliases so UI usage displays work across providers
+		usage["prompt_tokens"] = float64(resp.Usage.InputTokens)
+		usage["completion_tokens"] = float64(resp.Usage.OutputTokens)
+
+		var cachedTotal float64
 		if resp.Usage.InputTokensDetails != nil {
-			usage["input_tokens_details"] = resp.Usage.InputTokensDetails
+			inputDetails := make(map[string]interface{}, len(resp.Usage.InputTokensDetails))
+			for k, v := range resp.Usage.InputTokensDetails {
+				if f, ok := toFloat(v); ok {
+					inputDetails[k] = f
+				} else {
+					inputDetails[k] = v
+				}
+			}
+			usage["input_tokens_details"] = inputDetails
+
+			// Surface cached tokens prominently if provided
+			if cached, ok := inputDetails["cached_tokens"].(float64); ok {
+				cachedTotal += cached
+			}
 		}
 		if resp.Usage.OutputTokensDetails != nil {
-			usage["output_tokens_details"] = resp.Usage.OutputTokensDetails
+			outputDetails := make(map[string]interface{}, len(resp.Usage.OutputTokensDetails))
+			for k, v := range resp.Usage.OutputTokensDetails {
+				if f, ok := toFloat(v); ok {
+					outputDetails[k] = f
+				} else {
+					outputDetails[k] = v
+				}
+			}
+			usage["output_tokens_details"] = outputDetails
+
+			// Bubble up reasoning tokens if present
+			if reasoning, ok := outputDetails["reasoning_tokens"].(float64); ok {
+				usage["reasoning_tokens"] = reasoning
+			}
+
+			// Surface cached tokens from output side too
+			if cached, ok := outputDetails["cached_tokens"].(float64); ok {
+				cachedTotal += cached
+			}
+		}
+
+		if cachedTotal > 0 {
+			usage["cached_tokens"] = cachedTotal
 		}
 	}
 

@@ -55,6 +55,7 @@ type CachedFS struct {
 	maxEntries int
 	watcher    *fsnotify.Watcher
 	stopWatch  chan struct{}
+	closeOnce  sync.Once
 }
 
 type dirCacheEntry struct {
@@ -88,11 +89,14 @@ func NewCachedFS(baseDir string, cacheTTL time.Duration, maxEntries int) *Cached
 
 // Close closes the filesystem watcher
 func (cfs *CachedFS) Close() error {
-	close(cfs.stopWatch)
-	if cfs.watcher != nil {
-		return cfs.watcher.Close()
-	}
-	return nil
+	var err error
+	cfs.closeOnce.Do(func() {
+		close(cfs.stopWatch)
+		if cfs.watcher != nil {
+			err = cfs.watcher.Close()
+		}
+	})
+	return err
 }
 
 // watchFiles monitors filesystem events and invalidates cache

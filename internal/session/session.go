@@ -2,6 +2,9 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -29,6 +32,7 @@ type Message struct {
 // Session manages a conversation session
 type Session struct {
 	ID                  string
+	Title               string          // Auto-generated title for the session
 	WorkingDir          string
 	Messages            []*Message
 	FilesRead           map[string]string // path -> content
@@ -47,6 +51,8 @@ type Session struct {
 	mu                  sync.RWMutex
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	LastSavedAt         time.Time
+	Dirty               bool // true when there are unsaved changes
 }
 
 // BackgroundJob represents a running background process
@@ -83,7 +89,18 @@ func NewSession(id, workingDir string) *Session {
 		AuthorizedCommands: make([]string, 0),
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
+		Dirty:              true, // new session needs an initial save
 	}
+}
+
+// GenerateID creates a random session ID (base32-ish hex, 12 chars).
+func GenerateID() string {
+	var buf [6]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		timestamp := time.Now().UnixNano()
+		return fmt.Sprintf("sess-%d", timestamp)
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // AddMessage adds a message to the session
@@ -93,6 +110,7 @@ func (s *Session) AddMessage(msg *Message) {
 	msg.Timestamp = time.Now()
 	s.Messages = append(s.Messages, msg)
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // GetMessages returns all messages
@@ -111,6 +129,7 @@ func (s *Session) TrackFileRead(path, content string) {
 	defer s.mu.Unlock()
 	s.FilesRead[path] = content
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // WasFileRead checks if a file was read in this session
@@ -127,6 +146,7 @@ func (s *Session) TrackFileModified(path string) {
 	defer s.mu.Unlock()
 	s.FilesModified[path] = true
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // GetModifiedFiles returns list of modified files
@@ -146,6 +166,7 @@ func (s *Session) AddBackgroundJob(job *BackgroundJob) {
 	defer s.mu.Unlock()
 	s.BackgroundJobs[job.ID] = job
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // GetBackgroundJob retrieves a background job
@@ -185,6 +206,7 @@ func (s *Session) SetPlanningActive(active bool, objective string) {
 		s.PlanningStartTime = time.Time{}
 	}
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // GetPlanningStatus returns the current planning status
@@ -208,6 +230,22 @@ func (s *Session) Clear() {
 	s.PlanningObjective = ""
 	s.PlanningStartTime = time.Time{}
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// IsDirty reports whether the session has unsaved changes.
+func (s *Session) IsDirty() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Dirty
+}
+
+// MarkSaved updates bookkeeping after a successful save.
+func (s *Session) MarkSaved(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LastSavedAt = t
+	s.Dirty = false
 }
 
 // AuthorizeDomain marks a domain as authorized for network access
@@ -221,6 +259,7 @@ func (s *Session) AuthorizeDomain(domain string) {
 	defer s.mu.Unlock()
 	s.AuthorizedDomains[domain] = true
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // IsDomainAuthorized checks if a domain is authorized for network access
@@ -304,6 +343,7 @@ func (s *Session) AuthorizeCommand(commandPrefix string) {
 
 	s.AuthorizedCommands = append(s.AuthorizedCommands, commandPrefix)
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // IsCommandAuthorized checks if a command is authorized based on session-level authorized prefixes
@@ -366,6 +406,7 @@ func (s *Session) CompactWithSummary(original []*Message, summary string) bool {
 	newMessages = append(newMessages, s.Messages[len(original):]...)
 	s.Messages = newMessages
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 
 	return true
 }
@@ -378,6 +419,7 @@ func (s *Session) SetLastSandboxOutput(exitCode int, stdout, stderr string) {
 	s.LastSandboxStdout = stdout
 	s.LastSandboxStderr = stderr
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // GetLastSandboxOutput retrieves the output from the last sandbox execution
@@ -394,6 +436,7 @@ func (s *Session) SetCurrentProvider(provider, modelFamily string) {
 	s.CurrentProvider = provider
 	s.CurrentModelFamily = modelFamily
 	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }
 
 // GetCurrentProvider returns the current provider/model family
@@ -417,4 +460,20 @@ func (s *Session) NeedsConversion(provider, modelFamily string) bool {
 	}
 
 	return false
+}
+
+// SetTitle updates the session title
+func (s *Session) SetTitle(title string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Title = title
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// GetTitle returns the session title
+func (s *Session) GetTitle() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Title
 }

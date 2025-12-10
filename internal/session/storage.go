@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -68,7 +69,8 @@ type StoredSession struct {
 	Version             int
 	ID                  string
 	WorkingDir          string
-	Name                string // Optional human-readable name
+	Name                string // Optional human-readable name (deprecated, use Title)
+	Title               string // Auto-generated title for the session
 	Messages            []*StoredMessage
 	FilesRead           map[string]string
 	FilesModified       map[string]bool
@@ -84,12 +86,14 @@ type StoredSession struct {
 	CurrentModelFamily  string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	LastSavedAt         time.Time
 }
 
 // SessionMetadata contains lightweight session information for listing
 type SessionMetadata struct {
 	ID           string    `json:"id"`
-	Name         string    `json:"name"`
+	Name         string    `json:"name"` // Deprecated, use Title
+	Title        string    `json:"title"`
 	WorkingDir   string    `json:"working_dir"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -99,7 +103,7 @@ type SessionMetadata struct {
 // SessionStorage manages session persistence
 type SessionStorage struct {
 	baseDir string
-	
+
 	// Auto-save configuration
 	autoSave       bool
 	saveInterval   time.Duration
@@ -108,8 +112,8 @@ type SessionStorage struct {
 	stopChan       chan struct{}
 	wg             sync.WaitGroup
 	activeSaves    int
-	maxSaves     int
-	configFunc   func() *config.AutoSaveConfig
+	maxSaves       int
+	configFunc     func() *config.AutoSaveConfig
 }
 
 // NewSessionStorage creates a new SessionStorage instance
@@ -213,9 +217,43 @@ func (s *SessionStorage) getSessionPath(workingDir, sessionID string) string {
 	return filepath.Join(workspaceDir, sessionID+".gob")
 }
 
+// sanitizeSessionID produces a filesystem-safe session ID and falls back to a timestamp if needed.
+// The session ID is the single source of truth for the filename; we do not
+// derive it from the display name to avoid mismatches.
+func sanitizeSessionID(sessionID string) string {
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		id = fmt.Sprintf("session-%d", time.Now().Unix())
+	}
+
+	id = strings.ReplaceAll(id, string(os.PathSeparator), "-")
+	nonAlnum := regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+	id = nonAlnum.ReplaceAllString(id, "-")
+	id = strings.Trim(id, "-")
+
+	if id == "" {
+		id = fmt.Sprintf("session-%d", time.Now().Unix())
+	}
+
+	return id
+}
+
 // SaveSession saves a session to disk
 func (s *SessionStorage) SaveSession(session *Session, name string) error {
 	logger.Debug("SaveSession: starting save for session %s to workspace %s", session.ID, session.WorkingDir)
+
+	// Skip if there is nothing new to persist
+	if !session.IsDirty() {
+		logger.Debug("SaveSession: session %s is already persisted; skipping", session.ID)
+		return nil
+	}
+
+	// Skip saving sessions with no messages
+	messages := session.GetMessages()
+	if len(messages) == 0 {
+		logger.Debug("SaveSession: session %s has no messages; skipping save", session.ID)
+		return nil
+	}
 
 	// Ensure workspace directory exists
 	workspaceDir := s.getWorkspaceDir(session.WorkingDir)
@@ -231,8 +269,17 @@ func (s *SessionStorage) SaveSession(session *Session, name string) error {
 	stored := s.ToStoredSession(session, name)
 	logger.Debug("SaveSession: converted to storage format")
 
+	// Ensure we have a safe, non-empty session ID for the filename
+	storedID := sanitizeSessionID(stored.ID)
+	if storedID != stored.ID {
+		logger.Warn("SaveSession: normalized session ID from '%s' to '%s' for storage", stored.ID, storedID)
+		stored.ID = storedID
+		// Keep the live session in sync so future saves use the normalized ID
+		session.ID = storedID
+	}
+
 	// Write to temporary file first (atomic write)
-	tempPath := s.getSessionPath(session.WorkingDir, session.ID) + ".tmp"
+	tempPath := s.getSessionPath(session.WorkingDir, storedID) + ".tmp"
 	logger.Debug("SaveSession: creating temp file: %s", tempPath)
 
 	file, err := os.Create(tempPath)
@@ -255,7 +302,7 @@ func (s *SessionStorage) SaveSession(session *Session, name string) error {
 	file.Close()
 
 	// Atomic rename
-	finalPath := s.getSessionPath(session.WorkingDir, session.ID)
+	finalPath := s.getSessionPath(session.WorkingDir, storedID)
 	logger.Debug("SaveSession: renaming %s to %s", tempPath, finalPath)
 
 	if err := os.Rename(tempPath, finalPath); err != nil {
@@ -265,6 +312,9 @@ func (s *SessionStorage) SaveSession(session *Session, name string) error {
 	}
 
 	logger.Info("SaveSession: successfully saved session %s to %s", session.ID, finalPath)
+
+	// Mark the session as saved so we can skip redundant saves
+	session.MarkSaved(time.Now())
 	return nil
 }
 
@@ -336,6 +386,7 @@ func (s *SessionStorage) ListSessions(workingDir string) ([]SessionMetadata, err
 		sessions = append(sessions, SessionMetadata{
 			ID:           stored.ID,
 			Name:         stored.Name,
+			Title:        stored.Title,
 			WorkingDir:   stored.WorkingDir,
 			CreatedAt:    stored.CreatedAt,
 			UpdatedAt:    stored.UpdatedAt,
@@ -403,6 +454,7 @@ func (s *SessionStorage) ToStoredSession(session *Session, name string) *StoredS
 		ID:                  session.ID,
 		WorkingDir:          session.WorkingDir,
 		Name:                name,
+		Title:               session.Title,
 		Messages:            storedMessages,
 		FilesRead:           session.FilesRead,
 		FilesModified:       session.FilesModified,
@@ -418,6 +470,7 @@ func (s *SessionStorage) ToStoredSession(session *Session, name string) *StoredS
 		CurrentModelFamily:  session.CurrentModelFamily,
 		CreatedAt:           session.CreatedAt,
 		UpdatedAt:           session.UpdatedAt,
+		LastSavedAt:         session.LastSavedAt,
 	}
 }
 
@@ -443,6 +496,7 @@ func (s *SessionStorage) FromStoredSession(stored *StoredSession) *Session {
 	}
 
 	// Copy other fields (they're shallow copies, which is fine)
+	session.Title = stored.Title
 	session.FilesRead = stored.FilesRead
 	session.FilesModified = stored.FilesModified
 	session.AuthorizedDomains = stored.AuthorizedDomains
@@ -456,6 +510,8 @@ func (s *SessionStorage) FromStoredSession(stored *StoredSession) *Session {
 	session.CurrentModelFamily = stored.CurrentModelFamily
 	session.CreatedAt = stored.CreatedAt
 	session.UpdatedAt = stored.UpdatedAt
+	session.LastSavedAt = stored.LastSavedAt
+	session.Dirty = false
 
 	// Convert background jobs
 	session.BackgroundJobs = make(map[string]*BackgroundJob)
@@ -487,9 +543,15 @@ func (s *SessionStorage) StartAutoSave(session *Session, name string) {
 		return
 	}
 
+	// Ensure we always have a fresh stop channel (may have been closed previously)
+	if s.stopChan == nil {
+		s.stopChan = make(chan struct{})
+	}
+
 	s.autoSaveActive = true
 	s.wg.Add(1)
 
+	stopChan := s.stopChan
 	go func() {
 		defer s.wg.Done()
 		ticker := time.NewTicker(s.saveInterval)
@@ -511,7 +573,7 @@ func (s *SessionStorage) StartAutoSave(session *Session, name string) {
 						s.mu.Lock()
 						s.activeSaves++
 						s.mu.Unlock()
-						
+
 						logger.Debug("Auto-saving session %s", session.ID)
 						err := s.SaveSession(session, name)
 						if err != nil {
@@ -524,7 +586,7 @@ func (s *SessionStorage) StartAutoSave(session *Session, name string) {
 					}()
 				}
 
-			case <-s.stopChan:
+			case <-stopChan:
 				logger.Info("Auto-save stopped for session %s", session.ID)
 				return
 			}
@@ -535,14 +597,22 @@ func (s *SessionStorage) StartAutoSave(session *Session, name string) {
 // StopAutoSave stops the automatic session saving process
 func (s *SessionStorage) StopAutoSave() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if !s.autoSaveActive {
+		s.mu.Unlock()
 		return
 	}
 
-	close(s.stopChan)
+	stopChan := s.stopChan
+	// Prepare a new stop channel so autosave can be restarted after stopping
+	s.stopChan = make(chan struct{})
 	s.autoSaveActive = false
+	s.mu.Unlock()
+
+	// Close outside the lock so in-flight saves can finish and decrement counters
+	if stopChan != nil {
+		close(stopChan)
+	}
 	s.wg.Wait()
 }
 
@@ -557,7 +627,7 @@ func (s *SessionStorage) RefreshAutoSaveConfig() bool {
 
 	cfg := s.configFunc()
 	originalEnabled := s.autoSave
-	
+
 	s.autoSave = cfg.Enabled
 	s.saveInterval = time.Duration(cfg.SaveIntervalSeconds) * time.Second
 	s.maxSaves = cfg.MaxConcurrentSaves

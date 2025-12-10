@@ -67,7 +67,7 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	}
 
 	// Create a new session for the investigation
-	investigationSession := session.NewSession("investigation", a.orch.workingDir)
+	investigationSession := session.NewSession(session.GenerateID(), a.orch.workingDir)
 
 	// Add initial objective message - this must remain immutable for prompt caching
 	investigationSession.AddMessage(&session.Message{

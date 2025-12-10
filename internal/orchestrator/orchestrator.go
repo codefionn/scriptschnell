@@ -161,8 +161,8 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	}
 
 	// Create session
-	sess := session.NewSession("main", cfg.WorkingDir)
-	logger.Debug("Session created: id=main")
+	sess := session.NewSession(session.GenerateID(), cfg.WorkingDir)
+	logger.Debug("Session created: id=%s", sess.ID)
 
 	// Create orchestrator (without authorization actor yet)
 	orch := &Orchestrator{
@@ -291,6 +291,18 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	logger.Debug("Session storage actor spawned")
 	orch.sessionStorageRef = sessionStorageRef
 	orch.sessionStorageCancel = sessionStorageCancel
+
+	// Start autosave for the initial session if enabled
+	if orch.config.AutoSave.Enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		sessionName := actor.GenerateSessionName("")
+		if err := actor.StartAutoSaveViaActor(ctx, orch.sessionStorageRef, orch.session, sessionName); err != nil {
+			logger.Warn("Failed to start autosave for initial session: %v", err)
+		} else {
+			logger.Info("Started autosave for session %s", orch.session.ID)
+		}
+		cancel()
+	}
 
 	// Set up error judge actor with summarize client
 	errorJudgeCtx, errorJudgeCancel := context.WithCancel(context.Background())
@@ -1410,7 +1422,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		Role:    "user",
 		Content: prompt,
 	})
-	
+
 	// Auto-save the session if enabled
 	if o.config.AutoSave.Enabled {
 		go func() {
@@ -1614,7 +1626,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 
 		o.session.AddMessage(assistantMsg)
 		o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
-		
+
 		// Auto-save the session if enabled
 		if o.config.AutoSave.Enabled {
 			go func() {
@@ -2639,11 +2651,32 @@ func (o *Orchestrator) Close() error {
 		o.shellActorCancel()
 	}
 
+	var firstErr error
+
+	// Final save and stop autosave for the current session BEFORE cancelling the actor
+	if o.session != nil && o.sessionStorageRef != nil && o.config.AutoSave.Enabled {
+		// Try to save the session one final time
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := o.SaveCurrentSession(saveCtx); err != nil {
+			logger.Warn("Failed to save session on shutdown: %v", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		saveCancel()
+
+		// Stop the autosave process
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := actor.StopAutoSaveViaActor(stopCtx, o.sessionStorageRef); err != nil {
+			logger.Warn("Failed to stop autosave on shutdown: %v", err)
+		}
+		stopCancel()
+	}
+
+	// Now cancel the session storage actor after we've finished using it
 	if o.sessionStorageCancel != nil {
 		o.sessionStorageCancel()
 	}
-
-	var firstErr error
 
 	if o.planningAgent != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2937,11 +2970,32 @@ func (o *Orchestrator) GetSession() *session.Session {
 
 // SetSession replaces the current session with a new one
 func (o *Orchestrator) SetSession(newSession *session.Session) {
+	// Stop autosave for the current session if any
+	if o.session != nil && o.sessionStorageRef != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := actor.StopAutoSaveViaActor(ctx, o.sessionStorageRef); err != nil {
+			logger.Warn("Failed to stop autosave for previous session: %v", err)
+		}
+	}
+
 	// Ensure the session has the same working directory
 	newSession.WorkingDir = o.workingDir
 
 	// Replace the session
 	o.session = newSession
+
+	// Start autosave for the new session if enabled
+	if o.sessionStorageRef != nil && o.config.AutoSave.Enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		sessionName := actor.GenerateSessionName("")
+		if err := actor.StartAutoSaveViaActor(ctx, o.sessionStorageRef, o.session, sessionName); err != nil {
+			logger.Warn("Failed to start autosave for new session: %v", err)
+		} else {
+			logger.Info("Started autosave for session %s", o.session.ID)
+		}
+	}
 
 	// Rebuild tools to ensure they use the new session
 	// This is important so tools like read_file respect the new session's file tracking
@@ -2961,7 +3015,7 @@ func (o *Orchestrator) SaveCurrentSession(ctx context.Context) error {
 	}
 
 	sessionName := actor.GenerateSessionName("")
-	
+
 	err := actor.SaveSessionViaActor(ctx, o.sessionStorageRef, o.session, sessionName)
 	if err != nil {
 		return fmt.Errorf("failed to save session: %w", err)
@@ -2974,6 +3028,51 @@ func (o *Orchestrator) SaveCurrentSession(ctx context.Context) error {
 // SetUserInputCallback sets the callback for user input during planning
 func (o *Orchestrator) SetUserInputCallback(callback UserInputCallback) {
 	o.userInputCb = callback
+}
+
+// GenerateSessionTitle generates an auto-title for the current session based on
+// the first user message and session context. This should be called before saving.
+func (o *Orchestrator) GenerateSessionTitle(ctx context.Context) error {
+	// Don't regenerate if title already exists
+	if o.session.GetTitle() != "" {
+		logger.Debug("Session already has title: %s", o.session.GetTitle())
+		return nil
+	}
+
+	// Get the first user message
+	messages := o.session.GetMessages()
+	var userPrompt string
+	for _, msg := range messages {
+		if msg.Role == "user" {
+			userPrompt = msg.Content
+			break
+		}
+	}
+
+	if userPrompt == "" {
+		logger.Debug("No user messages found, skipping title generation")
+		return nil
+	}
+
+	// Create title generator
+	titleGen := session.NewTitleGenerator(o.summarizeClient)
+
+	// Get workspace files (we'll use files that were read as context)
+	filesRead := o.session.FilesRead
+	workspaceFiles := session.ExtractFilesList(filesRead)
+
+	// Generate the title
+	title, err := titleGen.GenerateTitle(ctx, userPrompt, workspaceFiles, filesRead)
+	if err != nil {
+		logger.Warn("Failed to generate session title: %v", err)
+		return err
+	}
+
+	// Set the title on the session
+	o.session.SetTitle(title)
+	logger.Info("Generated session title: %s", title)
+
+	return nil
 }
 
 // rebuildSessionTools rebuilds tools that depend on the session

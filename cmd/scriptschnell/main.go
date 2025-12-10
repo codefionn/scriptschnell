@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/codefionn/scriptschnell/internal/acp"
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/cli"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -403,6 +405,13 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	model.SetOnSwitchSession(func(newSession *session.Session) error {
 		orch.SetSession(newSession)
 		return nil
+	})
+
+	// Set session save callback for tab close autosave
+	model.SetOnSaveSession(func(sess *session.Session) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return orch.SaveCurrentSession(ctx)
 	})
 
 	// Declare program variable first (will be assigned later)
@@ -835,10 +844,105 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 					}
 					return nil
 
+				case tui.MenuTypeSession:
+					// Open session management menu
+					var loadedSessionInfo *tui.LoadedSessionInfo
+					err := runOverlayMenu(func() error {
+						// Get session storage actor
+						storageRef, exists := orch.GetActor("session_storage")
+						if !exists {
+							return fmt.Errorf("session storage not initialized")
+						}
+
+						menu := tui.NewSessionMenu(ctx, storageRef, cfg.WorkingDir, 0, 0)
+						subProgram := tea.NewProgram(menu, tea.WithAltScreen())
+						finalModel, err := subProgram.Run()
+						if err != nil {
+							return fmt.Errorf("menu error: %w", err)
+						}
+
+						// Handle menu result
+						if sessionMenu, ok := finalModel.(*tui.SessionMenuModel); ok {
+							action, selectedItem := sessionMenu.GetAction()
+
+							// Only process if an action was taken
+							if action == "" {
+								return nil
+							}
+
+							sessionID := selectedItem.GetSessionID()
+							if sessionID == "" {
+								return fmt.Errorf("invalid session selected")
+							}
+
+							switch action {
+							case "load":
+								// Load the session using actor
+								loadedSession, err := actor.LoadSessionViaActor(ctx, storageRef, cfg.WorkingDir, sessionID)
+								if err != nil {
+									return fmt.Errorf("failed to load session: %w", err)
+								}
+
+								// Get session name for display
+								sessions, _ := actor.ListSessionsViaActor(ctx, storageRef, cfg.WorkingDir)
+								var sessionName string
+								for _, sess := range sessions {
+									if sess.ID == sessionID {
+										sessionName = sess.Name
+										if sessionName == "" {
+											sessionName = sess.Title
+										}
+										break
+									}
+								}
+
+								// Replace current session in orchestrator
+								orch.SetSession(loadedSession)
+
+								// Store loaded session info to be restored after menu closes
+								loadedSessionInfo = &tui.LoadedSessionInfo{
+									Session: loadedSession,
+									Name:    sessionName,
+								}
+								model.AddSystemMessage(fmt.Sprintf("Loaded session: %s", selectedItem.Title()))
+
+							case "delete":
+								// Delete the session using actor
+								deleteMsg := actor.SessionStorageDeleteMsg{
+									WorkingDir:   cfg.WorkingDir,
+									SessionID:    sessionID,
+									ResponseChan: make(chan actor.SessionStorageDeleteResponse, 1),
+								}
+								storageRef.Send(deleteMsg)
+								response := <-deleteMsg.ResponseChan
+								if response.Err != nil {
+									return fmt.Errorf("failed to delete session: %w", response.Err)
+								}
+								model.AddSystemMessage(fmt.Sprintf("Deleted session: %s", selectedItem.Title()))
+							}
+						}
+
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+
+					// Restore UI state if a saved session was loaded
+					if loadedSessionInfo != nil {
+						model.RestoreLoadedSession(loadedSessionInfo)
+					}
+					return nil
+
 				default:
 					return nil
 				}
 			}
+		}
+
+		// Restore UI state if a saved session was loaded
+		if menuResult.LoadedSession != nil {
+			model.RestoreLoadedSession(menuResult.LoadedSession)
 		}
 
 		// Display any message from the result

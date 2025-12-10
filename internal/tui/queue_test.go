@@ -22,7 +22,10 @@ func TestQueuedPromptsProcessAfterCompletion(t *testing.T) {
 	m = model.(*Model)
 
 	if got := len(m.queuedPrompts); got != 1 {
-		t.Fatalf("expected 1 queued prompt, got %d", got)
+		t.Fatalf("expected 1 queued prompt bucket, got %d", got)
+	}
+	if got := len(m.queuedPrompts[m.activeSessionIdx]); got != 1 {
+		t.Fatalf("expected 1 queued prompt in active tab, got %d", got)
 	}
 
 	if len(m.messages) == 0 {
@@ -36,8 +39,8 @@ func TestQueuedPromptsProcessAfterCompletion(t *testing.T) {
 	model, cmd := m.Update(CompleteMsg{})
 	m = model.(*Model)
 
-	if len(m.queuedPrompts) != 0 {
-		t.Fatalf("expected queued prompt to start processing, queue has %d remaining", len(m.queuedPrompts))
+	if len(m.queuedPrompts[m.activeSessionIdx]) != 0 {
+		t.Fatalf("expected queued prompt to start processing, queue has %d remaining", len(m.queuedPrompts[m.activeSessionIdx]))
 	}
 
 	if !m.generating {

@@ -119,7 +119,7 @@ type Model struct {
 	spinner              spinner.Model
 	spinnerActive        bool
 	animationsDisabled   bool
-	queuedPrompts        []string
+	queuedPrompts        map[int][]string // queued prompts per tab
 	err                  error
 	errVisibleUntil      time.Time
 	ctrlCCount           int
@@ -165,6 +165,11 @@ type Model struct {
 	activeSessionIdx int
 	sessionIDCounter int
 	onSwitchSession  func(*session.Session) error
+	onSaveSession    func(*session.Session) error // Callback to save a session
+
+	// Generation anchoring
+	generationTabIdx  int // Tab index where the current generation started
+	pendingSessionIdx int // Tab index queued to switch orchestrator to after generation
 }
 
 // ErrMsg is an error message type
@@ -294,6 +299,9 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		animationsDisabled: disableAnimations,
 		contextFreePercent: 100,
 		renderWrapWidth:    80,
+		queuedPrompts:      make(map[int][]string),
+		generationTabIdx:   -1,
+		pendingSessionIdx:  -1,
 	}
 
 	if width, height, ok := detectTerminalSize(); ok {
@@ -322,6 +330,14 @@ func detectTerminalSize() (int, int, bool) {
 
 // addToolMessage adds a tool message with metadata for potential summary replacement
 func (m *Model) addToolMessage(toolName, toolID, content, fullResult string, summarized bool) {
+	m.addToolMessageForTab(m.targetGenerationTab(), toolName, toolID, content, fullResult, summarized)
+}
+
+func (m *Model) addToolMessageForTab(tabIdx int, toolName, toolID, content, fullResult string, summarized bool) {
+	if !m.validTabIndex(tabIdx) {
+		return
+	}
+
 	msg := message{
 		role:       "Tool",
 		content:    content,
@@ -331,8 +347,8 @@ func (m *Model) addToolMessage(toolName, toolID, content, fullResult string, sum
 		fullResult: fullResult,
 		summarized: summarized,
 	}
-	m.messages = append(m.messages, msg)
-	m.updateViewport()
+	msgs := append(m.sessions[tabIdx].Messages, msg)
+	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
 }
 
 // SetFilesystem sets the filesystem and working directory for filepath autocomplete
@@ -379,6 +395,11 @@ func (m *Model) SetActiveMCPProvider(provider func() []string) {
 // SetOnSwitchSession registers a callback for when the user switches sessions
 func (m *Model) SetOnSwitchSession(callback func(*session.Session) error) {
 	m.onSwitchSession = callback
+}
+
+// SetOnSaveSession registers a callback for when a session needs to be saved
+func (m *Model) SetOnSaveSession(callback func(*session.Session) error) {
+	m.onSaveSession = callback
 }
 
 func (m *Model) scheduleViewportRefresh() tea.Cmd {
@@ -1288,11 +1309,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if m.generating {
-				m.queuePrompt(input)
+				m.queuePrompt(m.activeSessionIdx, input)
 				return m, baseCmd
 			}
 
-			return m, tea.Batch(baseCmd, m.startPrompt(input))
+			return m, tea.Batch(baseCmd, m.startPrompt(m.activeSessionIdx, input))
 		}
 
 		return m, baseCmd
@@ -1354,28 +1375,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case GeneratingMsg:
 		if msg.Content != "" {
 			m.contentReceived = true // Mark that content has started streaming
-
-			// If this is the first chunk of assistant content, summarize any previous tool results
-			if len(m.messages) == 0 || m.messages[len(m.messages)-1].role != "Assistant" {
-				m.summarizeLastToolResult()
+			targetTab := m.targetGenerationTab()
+			if targetTab >= 0 {
+				m.appendAssistantChunkForTab(targetTab, msg.Content)
 			}
-			if len(m.messages) == 0 || m.messages[len(m.messages)-1].role != "Assistant" {
-				m.addMessage("Assistant", "")
-			}
-			m.appendToLastMessage(msg.Content)
-			m.updateViewport()
 		}
 		return m, baseCmd
 
 	case CompleteMsg:
+		tabIdx := m.generationTabIdx
 		m.generating = false
 		m.processingStatus = ""
 		m.thinkingTokens = 0      // Reset thinking tokens when generation completes
 		m.contentReceived = false // Reset content flag for clarity
+		m.generationTabIdx = -1
 		if !m.animationsDisabled {
 			m.spinnerActive = false
 		}
-		next := m.processNextQueuedPrompt()
+		if m.pendingSessionIdx >= 0 {
+			m.applyPendingSessionSwitch()
+		}
+		next := m.processNextQueuedPrompt(tabIdx)
 		if next != nil {
 			return m, tea.Batch(baseCmd, next)
 		}
@@ -1417,12 +1437,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(baseCmd, tea.Quit)
 		}
 		m.err = msg
+		tabIdx := m.generationTabIdx
 		m.errVisibleUntil = time.Now().Add(errorDisplayDuration)
 		m.generating = false
+		m.generationTabIdx = -1
 		if !m.animationsDisabled {
 			m.spinnerActive = false
 		}
-		next := m.processNextQueuedPrompt()
+		if m.pendingSessionIdx >= 0 {
+			m.applyPendingSessionSwitch()
+		}
+		next := m.processNextQueuedPrompt(tabIdx)
 		if next != nil {
 			return m, tea.Batch(baseCmd, next)
 		}
@@ -1443,11 +1468,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, baseCmd
 }
 
-func (m *Model) startPrompt(input string) tea.Cmd {
+func (m *Model) startPrompt(tabIdx int, input string) tea.Cmd {
 	m.processingStatus = ""
 	m.thinkingTokens = 0      // Reset thinking tokens for new prompt
 	m.contentReceived = false // Reset content flag for new generation
-	m.addMessage("You", input)
+	m.generationTabIdx = tabIdx
+	m.pendingSessionIdx = -1
+	m.addMessageForTab(tabIdx, "You", input)
 	m.generating = true
 	var cmds []tea.Cmd
 	if !m.animationsDisabled {
@@ -1458,26 +1485,34 @@ func (m *Model) startPrompt(input string) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *Model) queuePrompt(input string) {
-	m.queuedPrompts = append(m.queuedPrompts, input)
+func (m *Model) queuePrompt(tabIdx int, input string) {
+	if m.generationTabIdx < 0 {
+		m.generationTabIdx = tabIdx
+	}
+	m.queuedPrompts[tabIdx] = append(m.queuedPrompts[tabIdx], input)
 	preview := formatQueuedPreview(input)
-	m.AddSystemMessage(fmt.Sprintf("Queued prompt #%d: %s", len(m.queuedPrompts), preview))
+	m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Queued prompt #%d: %s", len(m.queuedPrompts[tabIdx]), preview))
 }
 
-func (m *Model) processNextQueuedPrompt() tea.Cmd {
-	if len(m.queuedPrompts) == 0 {
+func (m *Model) processNextQueuedPrompt(tabIdx int) tea.Cmd {
+	if tabIdx < 0 {
 		return nil
 	}
-	next := m.queuedPrompts[0]
-	m.queuedPrompts = m.queuedPrompts[1:]
-	preview := formatQueuedPreview(next)
-	remaining := len(m.queuedPrompts)
-	if remaining > 0 {
-		m.AddSystemMessage(fmt.Sprintf("Processing queued prompt: %s (%d remaining)", preview, remaining))
-	} else {
-		m.AddSystemMessage(fmt.Sprintf("Processing queued prompt: %s", preview))
+
+	queue := m.queuedPrompts[tabIdx]
+	if len(queue) == 0 {
+		return nil
 	}
-	return m.startPrompt(next)
+	next := queue[0]
+	m.queuedPrompts[tabIdx] = queue[1:]
+	preview := formatQueuedPreview(next)
+	remaining := len(m.queuedPrompts[tabIdx])
+	if remaining > 0 {
+		m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Processing queued prompt: %s (%d remaining)", preview, remaining))
+	} else {
+		m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Processing queued prompt: %s", preview))
+	}
+	return m.startPrompt(tabIdx, next)
 }
 
 // processOpenRouterUsage processes OpenRouter usage data and stores it for display
@@ -1950,24 +1985,88 @@ func (m *Model) renderTodoTree(content *strings.Builder, items []*tools.TodoItem
 	}
 }
 
-func (m *Model) addMessage(role, content string) {
+func (m *Model) validTabIndex(tabIdx int) bool {
+	return tabIdx >= 0 && tabIdx < len(m.sessions)
+}
+
+func (m *Model) storeMessagesForTab(tabIdx int, msgs []message, updateViewport bool) {
+	if !m.validTabIndex(tabIdx) {
+		return
+	}
+
+	m.sessions[tabIdx].Messages = msgs
+	if tabIdx == m.activeSessionIdx {
+		m.messages = msgs
+		if updateViewport {
+			m.updateViewport()
+		}
+	}
+}
+
+func (m *Model) targetGenerationTab() int {
+	if m.validTabIndex(m.generationTabIdx) {
+		return m.generationTabIdx
+	}
+	if m.validTabIndex(m.activeSessionIdx) {
+		return m.activeSessionIdx
+	}
+	return -1
+}
+
+func (m *Model) applyPendingSessionSwitch() {
+	if !m.validTabIndex(m.pendingSessionIdx) {
+		m.pendingSessionIdx = -1
+		return
+	}
+
+	if m.onSwitchSession != nil {
+		target := m.sessions[m.pendingSessionIdx]
+		if err := m.onSwitchSession(target.Session); err != nil {
+			logger.Warn("Failed to switch orchestrator session: %v", err)
+			m.AddSystemMessage(fmt.Sprintf("Error switching session: %v", err))
+		}
+	}
+	m.pendingSessionIdx = -1
+}
+
+func (m *Model) addMessageForTab(tabIdx int, role, content string) {
 	timestamp := time.Now().Format("15:04:05")
-	m.messages = append(m.messages, message{
+
+	if !m.validTabIndex(tabIdx) {
+		m.messages = append(m.messages, message{
+			role:      role,
+			content:   content,
+			timestamp: timestamp,
+		})
+		m.updateViewport()
+		return
+	}
+
+	msgs := append(m.sessions[tabIdx].Messages, message{
 		role:      role,
 		content:   content,
 		timestamp: timestamp,
 	})
-	m.updateViewport()
+	m.storeMessagesForTab(tabIdx, msgs, true)
 }
 
-func (m *Model) appendToLastMessage(content string) {
-	if len(m.messages) == 0 {
-		m.addMessage("Assistant", content)
+func (m *Model) addMessage(role, content string) {
+	m.addMessageForTab(m.activeSessionIdx, role, content)
+}
+
+func (m *Model) appendToLastMessageForTab(tabIdx int, content string) {
+	if !m.validTabIndex(tabIdx) {
+		return
+	}
+
+	msgs := m.sessions[tabIdx].Messages
+	if len(msgs) == 0 {
+		m.addMessageForTab(tabIdx, "Assistant", content)
 		return
 	}
 
 	// Check if the last message is an unsimplified tool result and summarize it
-	lastMsg := &m.messages[len(m.messages)-1]
+	lastMsg := &msgs[len(msgs)-1]
 	if lastMsg.role == "Tool" && !lastMsg.summarized && lastMsg.fullResult != "" {
 		// Replace with summary
 		summary := m.generateEnhancedToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
@@ -1975,25 +2074,61 @@ func (m *Model) appendToLastMessage(content string) {
 		lastMsg.summarized = true
 	}
 
-	m.messages[len(m.messages)-1].content += content
+	msgs[len(msgs)-1].content += content
+	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
+}
+
+func (m *Model) appendToLastMessage(content string) {
+	m.appendToLastMessageForTab(m.activeSessionIdx, content)
 }
 
 // summarizeLastToolResult summarizes the last tool result if it hasn't been summarized yet
 func (m *Model) summarizeLastToolResult() {
-	if len(m.messages) == 0 {
+	m.summarizeLastToolResultForTab(m.activeSessionIdx)
+}
+
+func (m *Model) summarizeLastToolResultForTab(tabIdx int) {
+	if !m.validTabIndex(tabIdx) {
 		return
 	}
 
-	lastMsg := &m.messages[len(m.messages)-1]
+	msgs := m.sessions[tabIdx].Messages
+	if len(msgs) == 0 {
+		return
+	}
+
+	lastMsg := &msgs[len(msgs)-1]
 	if lastMsg.role == "Tool" && !lastMsg.summarized && lastMsg.fullResult != "" {
 		summary := m.generateEnhancedToolSummary(lastMsg.toolName, lastMsg.fullResult, false)
 		lastMsg.content = summary
 		lastMsg.summarized = true
-		m.updateViewport()
+		m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
 	}
 }
 
+func (m *Model) appendAssistantChunkForTab(tabIdx int, content string) {
+	if !m.validTabIndex(tabIdx) || content == "" {
+		return
+	}
+
+	msgs := m.sessions[tabIdx].Messages
+	if len(msgs) == 0 || msgs[len(msgs)-1].role != "Assistant" {
+		m.summarizeLastToolResultForTab(tabIdx)
+		msgs = m.sessions[tabIdx].Messages
+		if len(msgs) == 0 || msgs[len(msgs)-1].role != "Assistant" {
+			m.addMessageForTab(tabIdx, "Assistant", "")
+			msgs = m.sessions[tabIdx].Messages
+		}
+	}
+
+	m.appendToLastMessageForTab(tabIdx, content)
+}
+
 func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[string]interface{}) {
+	m.addToolCallMessageForTab(m.targetGenerationTab(), toolName, toolID, parameters)
+}
+
+func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID string, parameters map[string]interface{}) {
 	isPlanning := strings.HasPrefix(toolName, "Planning: ")
 	realToolName := toolName
 	if isPlanning {
@@ -2059,10 +2194,14 @@ func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[strin
 		content = "📋 **Planning:** " + content
 	}
 
-	m.addMessage("Tool", content)
+	m.addMessageForTab(tabIdx, "Tool", content)
 }
 
 func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) {
+	m.addToolResultMessageForTab(m.targetGenerationTab(), toolName, toolID, result, errorMsg)
+}
+
+func (m *Model) addToolResultMessageForTab(tabIdx int, toolName, toolID, result, errorMsg string) {
 	isPlanning := strings.HasPrefix(toolName, "Planning: ")
 	realToolName := toolName
 	if isPlanning {
@@ -2075,13 +2214,13 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 		if isPlanning {
 			content = "📋 **Planning Error:** " + errorMsg
 		}
-		m.addToolMessage(realToolName, toolID, content, "", false)
+		m.addToolMessageForTab(tabIdx, realToolName, toolID, content, "", false)
 	} else if result == "" {
 		content = m.generateToolSummary(realToolName, result, true)
 		if isPlanning {
 			content = "📋 **Planning:** " + content
 		}
-		m.addToolMessage(realToolName, toolID, content, "", true)
+		m.addToolMessageForTab(tabIdx, realToolName, toolID, content, "", true)
 	} else {
 		// Check if this is a pre-formatted UIResult (already has markdown formatting)
 		if isAlreadyFormatted(result) {
@@ -2091,7 +2230,7 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 			} else {
 				content = result
 			}
-			m.addToolMessage(realToolName, toolID, content, result, false)
+			m.addToolMessageForTab(tabIdx, realToolName, toolID, content, result, false)
 		} else if strings.HasPrefix(result, "---") || strings.HasPrefix(result, "diff --git") {
 			// Git diff format - wrap in diff code block
 			summary := m.generateToolSummary(realToolName, result, false)
@@ -2100,7 +2239,7 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 			}
 			displayResult := m.truncateToolResult(result)
 			fullContent := fmt.Sprintf("%s\n```diff\n%s\n```", summary, displayResult)
-			m.addToolMessage(realToolName, toolID, fullContent, result, false)
+			m.addToolMessageForTab(tabIdx, realToolName, toolID, fullContent, result, false)
 		} else {
 			// Raw output - wrap in code block
 			displayResult := m.truncateToolResult(result)
@@ -2108,7 +2247,7 @@ func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) 
 			if isPlanning {
 				fullContent = "📋 **Planning Result:**\n```\n" + displayResult + "\n```"
 			}
-			m.addToolMessage(realToolName, toolID, fullContent, result, false)
+			m.addToolMessageForTab(tabIdx, realToolName, toolID, fullContent, result, false)
 		}
 	}
 }
@@ -2712,12 +2851,11 @@ func (m *Model) SetContextFile(path string) {
 }
 
 func (m *Model) AppendAssistantChunk(chunk string) {
-	if len(m.messages) == 0 || m.messages[len(m.messages)-1].role != "Assistant" {
-		m.addMessage("Assistant", chunk)
-	} else {
-		m.appendToLastMessage(chunk)
+	targetTab := m.targetGenerationTab()
+	if targetTab < 0 {
+		targetTab = m.activeSessionIdx
 	}
-	m.updateViewport()
+	m.appendAssistantChunkForTab(targetTab, chunk)
 }
 
 func (m *Model) AddSystemMessage(msg string) {
@@ -2729,8 +2867,84 @@ func (m *Model) UpdateModel(modelName string) {
 }
 
 func (m *Model) ClearMessages() {
-	m.messages = []message{}
+	if m.validTabIndex(m.activeSessionIdx) {
+		m.storeMessagesForTab(m.activeSessionIdx, []message{}, true)
+	} else {
+		m.messages = []message{}
+		m.updateViewport()
+	}
+}
+
+// RestoreLoadedSession replaces the active tab's session and UI messages with a saved session
+func (m *Model) RestoreLoadedSession(info *LoadedSessionInfo) {
+	if info == nil || info.Session == nil {
+		return
+	}
+
+	if len(m.sessions) == 0 || m.activeSessionIdx < 0 || m.activeSessionIdx >= len(m.sessions) {
+		return
+	}
+
+	// Reset generation-related state
+	m.generating = false
+	m.processingStatus = ""
+	m.contentReceived = false
+	m.thinkingTokens = 0
+	m.generationTabIdx = -1
+	m.pendingSessionIdx = -1
+	if !m.animationsDisabled {
+		m.spinnerActive = false
+	}
+
+	// Convert persisted messages into TUI message format
+	converted := sessionMessagesToTuiMessages(info.Session.GetMessages())
+	m.messages = converted
+
+	// Update active tab to reference the loaded session
+	activeTab := m.sessions[m.activeSessionIdx]
+	activeTab.Session = info.Session
+	activeTab.Messages = converted
+	activeTab.LastActiveAt = time.Now()
+	if info.Name != "" {
+		activeTab.Name = info.Name
+	}
+
+	// Persist tab metadata if possible
+	if err := m.saveTabState(); err != nil {
+		logger.Warn("Failed to save tab state after session restore: %v", err)
+	}
+
 	m.updateViewport()
+}
+
+// sessionMessagesToTuiMessages converts persisted session messages into the TUI's display format
+func sessionMessagesToTuiMessages(stored []*session.Message) []message {
+	messages := make([]message, 0, len(stored))
+	for _, msg := range stored {
+		role := msg.Role
+		switch strings.ToLower(msg.Role) {
+		case "user":
+			role = "You"
+		case "assistant":
+			role = "Assistant"
+		case "tool":
+			role = "Tool"
+		}
+
+		timestamp := ""
+		if !msg.Timestamp.IsZero() {
+			timestamp = msg.Timestamp.Format("15:04:05")
+		}
+
+		messages = append(messages, message{
+			role:      role,
+			content:   msg.Content,
+			timestamp: timestamp,
+			toolName:  msg.ToolName,
+			toolID:    msg.ToolID,
+		})
+	}
+	return messages
 }
 
 // handleUserInputRequest handles single question user input requests

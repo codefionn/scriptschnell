@@ -1,5 +1,7 @@
 package tui
 
+import "github.com/codefionn/scriptschnell/internal/session"
+
 // MenuType represents the type of menu to display
 type MenuType int
 
@@ -22,6 +24,8 @@ const (
 	MenuTypeClearSession
 	// MenuTypeNewTab indicates a new tab should be created
 	MenuTypeNewTab
+	// MenuTypeSession indicates the session management menu
+	MenuTypeSession
 )
 
 // ModelRole represents the role a model can have
@@ -44,6 +48,14 @@ type MenuResult struct {
 	ModelRole ModelRole
 	// TabName is used for MenuTypeNewTab to specify the tab name
 	TabName string
+	// LoadedSession carries session data when a saved session is restored
+	LoadedSession *LoadedSessionInfo
+}
+
+// LoadedSessionInfo contains data needed to restore a saved session in the UI
+type LoadedSessionInfo struct {
+	Session *session.Session
+	Name    string // Optional user-provided name for the session
 }
 
 // NewMenuResult creates a MenuResult with just a message (no menu)
@@ -110,5 +122,12 @@ func NewNewTabResult(name string) MenuResult {
 	return MenuResult{
 		Type:    MenuTypeNewTab,
 		TabName: name,
+	}
+}
+
+// NewSessionMenuResult creates a MenuResult for the session management menu
+func NewSessionMenuResult() MenuResult {
+	return MenuResult{
+		Type: MenuTypeSession,
 	}
 }

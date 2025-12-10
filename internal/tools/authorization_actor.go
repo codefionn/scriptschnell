@@ -365,6 +365,8 @@ func (a *AuthorizationActor) authorize(ctx context.Context, toolName string, par
 		return a.authorizeSandboxDomain(ctx, params)
 	case ToolNameShell:
 		return a.authorizeShell(ctx, params)
+	case ToolNameCommand:
+		return a.authorizeShell(ctx, params)
 	default:
 		return &AuthorizationDecision{Allowed: true}, nil
 	}

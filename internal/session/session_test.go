@@ -1,6 +1,8 @@
 package session
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestCompactWithSummarySuccess(t *testing.T) {
 	s := NewSession("test", ".")
@@ -42,5 +44,85 @@ func TestCompactWithSummaryMismatch(t *testing.T) {
 
 	if ok := s.CompactWithSummary(original, "noop"); ok {
 		t.Fatal("expected compaction to fail when messages do not match session head")
+	}
+}
+
+func TestSaveEmptySession(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	
+	// Create session storage
+	storage, err := NewSessionStorage()
+	if err != nil {
+		t.Fatalf("Failed to create session storage: %v", err)
+	}
+	
+	// Test 1: Try to save an empty session
+	emptySession := NewSession("test-empty", tempDir)
+	err = storage.SaveSession(emptySession, "Empty Session")
+	if err != nil {
+		t.Errorf("Unexpected error saving empty session: %v", err)
+	}
+	
+	// Verify no session was saved
+	sessions, err := storage.ListSessions(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to list sessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("Expected 0 sessions after saving empty session, got %d", len(sessions))
+	}
+	
+	// Test 2: Save a session with messages
+	sessionWithMessages := NewSession("test-with-messages", tempDir)
+	sessionWithMessages.AddMessage(&Message{
+			Role:    "user",
+			Content: "Hello, world!",
+		})
+	err = storage.SaveSession(sessionWithMessages, "Session with Messages")
+	if err != nil {
+		t.Errorf("Unexpected error saving session with messages: %v", err)
+	}
+	
+	// Verify session was saved
+	sessions, err = storage.ListSessions(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("Expected 1 session after saving with messages, got %d", len(sessions))
+	}
+	if sessions[0].MessageCount != 1 {
+		t.Errorf("Expected 1 message in saved session, got %d", sessions[0].MessageCount)
+	}
+}
+
+func TestSaveSessionStorageDirectoryOverride(t *testing.T) {
+	// This test validates the behavior when we need to test with a specific directory
+	// In practice, the actual tests above work with the system's session storage
+	tempDir := t.TempDir()
+	
+	// Create a session
+	s := NewSession("test", tempDir)
+	
+	// Initially it should be dirty
+	if !s.IsDirty() {
+		t.Error("New session should be dirty")
+	}
+	
+	// Add a message
+	s.AddMessage(&Message{Role: "user", Content: "test"})
+	
+	// Should still be dirty
+	if !s.IsDirty() {
+		t.Error("Session with new message should be dirty")
+	}
+	
+	// Mark as saved
+	s.MarkSaved(s.UpdatedAt)
+	
+	// Should no longer be dirty
+	if s.IsDirty() {
+		t.Error("Session should not be dirty after being marked as saved")
 	}
 }

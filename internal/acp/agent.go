@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -502,6 +503,12 @@ func (a *ScriptschnellAIAgent) handleSessionSave(name string) (string, error) {
 		name = actor.GenerateSessionName(name)
 	}
 
+	// Generate session title if not already present
+	if err := activeSession.orchestrator.GenerateSessionTitle(context.Background()); err != nil {
+		// Continue with save even if title generation fails
+		logger.Warn("Failed to generate session title: %v", err)
+	}
+
 	// Save the session
 	currentSession := activeSession.orchestrator.GetSession()
 	if err := actor.SaveSessionViaActor(context.Background(), storageRef, currentSession, name); err != nil {
@@ -530,6 +537,16 @@ func (a *ScriptschnellAIAgent) handleSessionList() (string, error) {
 		return "", fmt.Errorf("failed to list sessions: %w", err)
 	}
 
+	// Sort sessions by creation time (most recent first)
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].CreatedAt.After(sessions[j].CreatedAt)
+	})
+
+	// Limit to last 5 sessions
+	if len(sessions) > 5 {
+		sessions = sessions[:5]
+	}
+
 	if len(sessions) == 0 {
 		return "No saved sessions found for this workspace.\n\nUse /session save [name] to save the current session.", nil
 	}
@@ -538,11 +555,15 @@ func (a *ScriptschnellAIAgent) handleSessionList() (string, error) {
 	sb.WriteString(fmt.Sprintf("💾 Saved sessions for workspace: %s\n\n", a.config.WorkingDir))
 
 	for i, sess := range sessions {
-		name := sess.Name
-		if name == "" {
-			name = "Unnamed"
+		// Display title if available, otherwise fall back to name
+		displayTitle := sess.Title
+		if displayTitle == "" {
+			displayTitle = sess.Name
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, name))
+		if displayTitle == "" {
+			displayTitle = "Unnamed"
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, displayTitle))
 		sb.WriteString(fmt.Sprintf("   ID: %s\n", sess.ID))
 		sb.WriteString(fmt.Sprintf("   Created: %s\n", sess.CreatedAt.Format("2006-01-02 15:04:05")))
 		sb.WriteString(fmt.Sprintf("   Updated: %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05")))
@@ -579,6 +600,11 @@ func (a *ScriptschnellAIAgent) handleSessionLoad(sessionID string) (string, erro
 
 	// Replace current session in orchestrator
 	activeSession.orchestrator.SetSession(loadedSession)
+
+	// Stream the restored conversation back to the client so the UI reflects the loaded session
+	if err := a.streamSessionHistory(sessionID, loadedSession); err != nil {
+		logger.Warn("Failed to stream session history for %s: %v", sessionID, err)
+	}
 
 	// Get session name for display
 	var name string
@@ -628,6 +654,55 @@ func (a *ScriptschnellAIAgent) handleSessionLoadWithMenu(storageRef *actor.Actor
 	sb.WriteString("Example: /session load abc123def456")
 
 	return sb.String(), nil
+}
+
+// streamSessionHistory replays a loaded session's conversation to the ACP client
+func (a *ScriptschnellAIAgent) streamSessionHistory(sessionID string, sess *session.Session) error {
+	if sess == nil || a.conn == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	messages := sess.GetMessages()
+	for idx, msg := range messages {
+		update, ok := sessionMessageToUpdate(msg)
+		if !ok {
+			continue
+		}
+
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: acp.SessionId(sessionID),
+			Update:    update,
+		}); err != nil {
+			return fmt.Errorf("failed to stream history message %d: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+// sessionMessageToUpdate converts a stored session message into an ACP session update
+func sessionMessageToUpdate(msg *session.Message) (acp.SessionUpdate, bool) {
+	if msg == nil {
+		return acp.SessionUpdate{}, false
+	}
+
+	switch strings.ToLower(msg.Role) {
+	case "user":
+		return acp.UpdateUserMessageText(msg.Content), true
+	case "assistant":
+		return acp.UpdateAgentMessageText(msg.Content), true
+	case "tool":
+		content := msg.Content
+		if msg.ToolName != "" {
+			content = fmt.Sprintf("🛠️ %s: %s", msg.ToolName, msg.Content)
+		}
+		return acp.UpdateAgentMessageText(content), true
+	default:
+		return acp.UpdateAgentMessageText(msg.Content), true
+	}
 }
 
 func (a *ScriptschnellAIAgent) handleSessionDelete(sessionID string) (string, error) {

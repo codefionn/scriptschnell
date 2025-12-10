@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -978,7 +979,12 @@ func (ch *CommandHandler) handleContextRemove(args []string) (MenuResult, error)
 }
 
 func (ch *CommandHandler) handleSession(args []string) (MenuResult, error) {
-	if len(args) == 0 || args[0] == "help" {
+	if len(args) == 0 {
+		// No arguments - open interactive session menu
+		return NewSessionMenuResult(), nil
+	}
+
+	if args[0] == "help" {
 		return NewMenuResult(ch.sessionHelp()), nil
 	}
 
@@ -1040,6 +1046,12 @@ func (ch *CommandHandler) handleSessionSave(args []string) (MenuResult, error) {
 		name = actor.GenerateSessionName(name)
 	}
 
+	// Generate session title if not already present
+	if err := ch.orchestrator.GenerateSessionTitle(ch.ctx); err != nil {
+		logger.Warn("handleSessionSave: failed to generate title: %v", err)
+		// Continue with save even if title generation fails
+	}
+
 	// Save the session
 	currentSession := ch.orchestrator.GetSession()
 	logger.Info("handleSessionSave: attempting to save session %s as '%s'", currentSession.ID, name)
@@ -1075,6 +1087,16 @@ func (ch *CommandHandler) handleSessionList() (MenuResult, error) {
 		return MenuResult{}, fmt.Errorf("failed to list sessions: %w", err)
 	}
 
+	// Sort sessions by creation time (most recent first)
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].CreatedAt.After(sessions[j].CreatedAt)
+	})
+
+	// Limit to last 5 sessions
+	if len(sessions) > 5 {
+		sessions = sessions[:5]
+	}
+
 	if len(sessions) == 0 {
 		return NewMenuResult("No saved sessions found for this workspace."), nil
 	}
@@ -1083,11 +1105,15 @@ func (ch *CommandHandler) handleSessionList() (MenuResult, error) {
 	sb.WriteString(fmt.Sprintf("Saved sessions for workspace: %s\n\n", ch.config.WorkingDir))
 
 	for i, sess := range sessions {
-		name := sess.Name
-		if name == "" {
-			name = "Unnamed"
+		// Display title if available, otherwise fall back to name
+		displayTitle := sess.Title
+		if displayTitle == "" {
+			displayTitle = sess.Name
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, name))
+		if displayTitle == "" {
+			displayTitle = "Unnamed"
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, displayTitle))
 		sb.WriteString(fmt.Sprintf("   ID: %s\n", sess.ID))
 		sb.WriteString(fmt.Sprintf("   Created: %s\n", sess.CreatedAt.Format("2006-01-02 15:04:05")))
 		sb.WriteString(fmt.Sprintf("   Updated: %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05")))
@@ -1124,24 +1150,29 @@ func (ch *CommandHandler) handleSessionLoad(args []string) (MenuResult, error) {
 	// Replace current session in orchestrator
 	ch.orchestrator.SetSession(loadedSession)
 
-	var name string
-	if len(loadedSession.GetMessages()) == 0 {
-		name = "Unnamed"
-	} else {
+	var storedName string
+	displayName := "Unnamed"
+	if len(loadedSession.GetMessages()) > 0 {
 		// Try to get the name from storage metadata
 		sessions, _ := actor.ListSessionsViaActor(ch.ctx, storageRef, ch.config.WorkingDir)
 		for _, sess := range sessions {
 			if sess.ID == sessionID {
-				name = sess.Name
-				if name == "" {
-					name = "Unnamed"
-				}
+				storedName = sess.Name
 				break
 			}
 		}
 	}
+	if storedName != "" {
+		displayName = storedName
+	}
 
-	return NewMenuResult(fmt.Sprintf("Loaded session '%s' (ID: %s) with %d messages", name, sessionID, len(loadedSession.GetMessages()))), nil
+	return MenuResult{
+		Message: fmt.Sprintf("Loaded session '%s' (ID: %s) with %d messages", displayName, sessionID, len(loadedSession.GetMessages())),
+		LoadedSession: &LoadedSessionInfo{
+			Session: loadedSession,
+			Name:    storedName,
+		},
+	}, nil
 }
 
 func (ch *CommandHandler) handleSessionLoadWithMenu(storageRef *actor.ActorRef) (MenuResult, error) {
@@ -1158,11 +1189,15 @@ func (ch *CommandHandler) handleSessionLoadWithMenu(storageRef *actor.ActorRef) 
 	// Build menu options
 	var options []string
 	for _, sess := range sessions {
-		name := sess.Name
-		if name == "" {
-			name = "Unnamed"
+		// Display title if available, otherwise fall back to name
+		displayTitle := sess.Title
+		if displayTitle == "" {
+			displayTitle = sess.Name
 		}
-		options = append(options, fmt.Sprintf("%s (%s) - %d messages", name, sess.ID, sess.MessageCount))
+		if displayTitle == "" {
+			displayTitle = "Unnamed"
+		}
+		options = append(options, fmt.Sprintf("%s (%s) - %d messages", displayTitle, sess.ID, sess.MessageCount))
 	}
 
 	var sb strings.Builder

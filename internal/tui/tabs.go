@@ -113,7 +113,16 @@ func (m *Model) handleSwitchTab(newIdx int) tea.Cmd {
 	newTabSession := m.sessions[newIdx]
 
 	// Switch orchestrator session (via callback if available)
-	if m.onSwitchSession != nil {
+	shouldSwitchSession := true
+	if m.generating && m.validTabIndex(m.generationTabIdx) && newIdx != m.generationTabIdx {
+		// Keep orchestrator pinned to the generating tab, apply switch after completion
+		m.pendingSessionIdx = newIdx
+		shouldSwitchSession = false
+	} else {
+		m.pendingSessionIdx = -1
+	}
+
+	if shouldSwitchSession && m.onSwitchSession != nil {
 		if err := m.onSwitchSession(newTabSession.Session); err != nil {
 			logger.Warn("Failed to switch orchestrator session: %v", err)
 			m.AddSystemMessage(fmt.Sprintf("Error switching session: %v", err))
@@ -154,8 +163,17 @@ func (m *Model) handleCloseTab(idx int) tea.Cmd {
 
 	// Auto-save session if it has messages
 	if len(closingTab.Session.GetMessages()) > 0 {
-		// TODO: Implement auto-save via session storage actor
 		logger.Info("Auto-saving session %s on tab close", closingTab.Session.ID)
+		if m.onSaveSession != nil {
+			if err := m.onSaveSession(closingTab.Session); err != nil {
+				logger.Warn("Failed to auto-save session on tab close: %v", err)
+				m.AddSystemMessage(fmt.Sprintf("Warning: Failed to auto-save session: %v", err))
+			} else {
+				logger.Info("Successfully auto-saved session %s on tab close", closingTab.Session.ID)
+			}
+		} else {
+			logger.Warn("No session save callback available for tab close autosave")
+		}
 	}
 
 	// Note: We do NOT delete the worktree (per user requirement)

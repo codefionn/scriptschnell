@@ -76,6 +76,18 @@ func (a *SessionStorageActor) Receive(ctx context.Context, msg Message) error {
 		logger.Debug("SessionStorageActor: DeleteSession returned err=%v", err)
 		m.ResponseChan <- SessionStorageDeleteResponse{Err: err}
 		return nil
+	case SessionStorageStartAutoSaveMsg:
+		logger.Debug("SessionStorageActor: received start autosave message for session %s", m.Session.ID)
+		a.storage.StartAutoSave(m.Session, m.Name)
+		logger.Debug("SessionStorageActor: StartAutoSave completed")
+		m.ResponseChan <- SessionStorageStartAutoSaveResponse{Err: nil}
+		return nil
+	case SessionStorageStopAutoSaveMsg:
+		logger.Debug("SessionStorageActor: received stop autosave message")
+		a.storage.StopAutoSave()
+		logger.Debug("SessionStorageActor: StopAutoSave completed")
+		m.ResponseChan <- SessionStorageStopAutoSaveResponse{Err: nil}
+		return nil
 	default:
 		return fmt.Errorf("unknown session storage actor message type: %T", msg)
 	}
@@ -129,6 +141,28 @@ type SessionStorageDeleteMsg struct {
 func (SessionStorageDeleteMsg) Type() string { return "sessionStorageDeleteMsg" }
 
 type SessionStorageDeleteResponse struct {
+	Err error
+}
+
+type SessionStorageStartAutoSaveMsg struct {
+	Session      *session.Session
+	Name         string
+	ResponseChan chan SessionStorageStartAutoSaveResponse
+}
+
+func (SessionStorageStartAutoSaveMsg) Type() string { return "sessionStorageStartAutoSaveMsg" }
+
+type SessionStorageStartAutoSaveResponse struct {
+	Err error
+}
+
+type SessionStorageStopAutoSaveMsg struct {
+	ResponseChan chan SessionStorageStopAutoSaveResponse
+}
+
+func (SessionStorageStopAutoSaveMsg) Type() string { return "sessionStorageStopAutoSaveMsg" }
+
+type SessionStorageStopAutoSaveResponse struct {
 	Err error
 }
 
@@ -223,6 +257,60 @@ func DeleteSessionViaActor(ctx context.Context, storageRef *ActorRef, workingDir
 	case response := <-responseChan:
 		return response.Err
 	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// StartAutoSaveViaActor starts automatic saving for a session
+func StartAutoSaveViaActor(ctx context.Context, storageRef *ActorRef, session *session.Session, name string) error {
+	logger.Debug("StartAutoSaveViaActor: starting autosave for session %s with name %s", session.ID, name)
+
+	responseChan := make(chan SessionStorageStartAutoSaveResponse, 1)
+
+	msg := SessionStorageStartAutoSaveMsg{
+		Session:      session,
+		Name:         name,
+		ResponseChan: responseChan,
+	}
+
+	if err := storageRef.Send(msg); err != nil {
+		logger.Error("StartAutoSaveViaActor: failed to send message: %v", err)
+		return err
+	}
+	logger.Debug("StartAutoSaveViaActor: message sent, waiting for response")
+
+	select {
+	case response := <-responseChan:
+		logger.Debug("StartAutoSaveViaActor: received response with err=%v", response.Err)
+		return response.Err
+	case <-ctx.Done():
+		logger.Error("StartAutoSaveViaActor: context cancelled: %v", ctx.Err())
+		return ctx.Err()
+	}
+}
+
+// StopAutoSaveViaActor stops automatic saving for the current session
+func StopAutoSaveViaActor(ctx context.Context, storageRef *ActorRef) error {
+	logger.Debug("StopAutoSaveViaActor: stopping autosave")
+
+	responseChan := make(chan SessionStorageStopAutoSaveResponse, 1)
+
+	msg := SessionStorageStopAutoSaveMsg{
+		ResponseChan: responseChan,
+	}
+
+	if err := storageRef.Send(msg); err != nil {
+		logger.Error("StopAutoSaveViaActor: failed to send message: %v", err)
+		return err
+	}
+	logger.Debug("StopAutoSaveViaActor: message sent, waiting for response")
+
+	select {
+	case response := <-responseChan:
+		logger.Debug("StopAutoSaveViaActor: received response with err=%v", response.Err)
+		return response.Err
+	case <-ctx.Done():
+		logger.Error("StopAutoSaveViaActor: context cancelled: %v", ctx.Err())
 		return ctx.Err()
 	}
 }

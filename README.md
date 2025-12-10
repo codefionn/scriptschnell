@@ -60,6 +60,7 @@ On first run, it will download tinygo (if not in PATH).
 - [ ] Server mode
 - [ ] Split config in runtime config and user config
 - [ ] Fix agent client protocol output (zed editor)
+- [ ] Implement proper shell sandbox
 
 ## Goals
 

@@ -215,6 +215,7 @@ func groqFallbackModels() []*ModelInfo {
 		{"llama-3.1-8b-instant", "meta", 8192},
 		{"mixtral-8x7b-32768", "mistralai", 32768},
 		{"gemma2-9b-it", "google", 8192},
+		{"openai/gpt-oss-120b", "openai", 131072},
 	}
 
 	result := make([]*ModelInfo, 0, len(models))
@@ -240,8 +241,9 @@ func groqFallbackModels() []*ModelInfo {
 	return result
 }
 
-// NewGroqClient creates a Groq client backed by the native OpenAI-compatible implementation.
-func NewGroqClient(apiKey, modelID string) (Client, error) {
+// NewOpenAICompatibleGroqClient creates a Groq client backed by the native OpenAI-compatible implementation.
+// This is a fallback for backward compatibility.
+func NewOpenAICompatibleGroqClient(apiKey, modelID string) (Client, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("API key is required")
 	}

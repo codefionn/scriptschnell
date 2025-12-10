@@ -122,6 +122,7 @@ func (c *OpenAICompatibleClient) CompleteWithRequest(ctx context.Context, req *C
 		Content:    content,
 		ToolCalls:  convertOpenAIToolCalls(first.Message.ToolCalls),
 		StopReason: stopReason,
+		Usage:      chatResp.Usage,
 	}, nil
 }
 

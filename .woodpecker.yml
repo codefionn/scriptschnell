@@ -1,0 +1,68 @@
+when:
+  - event: push
+    branch:
+      - main
+      - develop
+  - event: pull_request
+
+variables:
+  # Use the same Go version as specified in go.mod
+  GOLANG_VERSION: "1.25"
+  # TinyGo version as used in Dockerfile
+  TINYGO_VERSION: "0.39.0"
+
+# Cache configuration for Go modules
+caches:
+  - path: /go/pkg/mod
+    when:
+      - event: push
+      - event: pull_request
+
+pipeline:
+  # Lint step - runs golangci-lint
+  lint:
+    image: golang:${GOLANG_VERSION}-alpine
+    commands:
+      - apk add --no-cache git
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - go mod download
+      - echo "Running golangci-lint..."
+      - golangci-lint run --timeout=5m
+    when:
+      - event: push
+      - event: pull_request
+
+  # Test step - runs unit tests with short flag
+  test:
+    image: golang:${GOLANG_VERSION}-alpine
+    commands:
+      - apk add --no-cache git ca-certificates tzdata
+      - update-ca-certificates
+      - go mod download
+      - echo "Running tests with -short flag..."
+      - go test -short ./...
+    when:
+      - event: push
+      - event: pull_request
+
+  # Build step - compiles the main binary
+  build:
+    image: golang:${GOLANG_VERSION}-alpine
+    commands:
+      - apk add --no-cache git ca-certificates tzdata
+      - update-ca-certificates
+      # Install TinyGo (required for the project)
+      - wget https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.apk
+      - apk add --allow-untrusted tinygo_${TINYGO_VERSION}_amd64.apk
+      - rm tinygo_${TINYGO_VERSION}_amd64.apk
+      - export PATH="/usr/local/tinygo/bin:${PATH}"
+      # Download dependencies and build
+      - go mod download
+      - echo "Building main binary..."
+      - CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o scriptschnell ./cmd/scriptschnell
+      - echo "Building debug HTML tool..."
+      - CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o debug_html ./cmd/debug_html
+      - ls -la scriptschnell debug_html
+    when:
+      - event: push
+      - event: pull_request

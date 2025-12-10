@@ -18,37 +18,9 @@ On first run, it will download tinygo (if not in PATH).
     - Summarization: summarizes and makes *small* choices
     - Planning: Plans the next steps
 - Read only contexts like external documentation, library sources, etc.
-- **Agent Client Protocol (ACP) support** for integration with code editors
+- Experimental agent client protocol support
 
 ![Screenshot of scriptschnell after prompting ls](docs/Screenshot_TUI_ls.png)
-
-## Agent Client Protocol (ACP) Mode
-
-scriptschnell supports the [Agent Client Protocol](https://agentclientprotocol.com/), enabling seamless integration with code editors that support ACP. This allows you to use scriptschnell's capabilities directly within your preferred development environment.
-
-### Using ACP Mode
-
-```bash
-# Start scriptschnell in ACP mode
-./scriptschnell --acp
-
-# Or with go run
-go run ./cmd/scriptschnell --acp
-```
-
-When running in ACP mode, scriptschnell communicates via stdio using the ACP protocol, allowing code editors to:
-- Send prompts and receive streaming responses
-- Handle tool execution with permission requests
-- Manage sessions and context
-- Access all scriptschnell features including file operations, web search, and sandbox execution
-
-### ACP Features
-
-- **Streaming Responses**: Real-time text generation as the LLM processes your request
-- **Tool Integration**: All scriptschnell tools (file operations, shell commands, web search, etc.) are available via ACP
-- **Permission Management**: Secure control over sensitive operations through the client's authorization UI
-- **Session Management**: Persistent conversation context across multiple interactions
-- **Error Handling**: Comprehensive error reporting and recovery
 
 ## TODO
 
@@ -56,15 +28,15 @@ When running in ACP mode, scriptschnell communicates via stdio using the ACP pro
 - [ ] Better authorization UI
 - [ ] More e2e tests using other programming languages than Go
 - [ ] Custom system prompt
-- [ ] System prompt optimized for current codebase
-- [ ] Better `/init` command for generating AGENTS.md
-- [ ] Fix write diff
+- [x] System prompt optimized for current codebase
+- [x] Better `/init` command for generating AGENTS.md
+- [x] Fix write diff
 - [x] [agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol) for better editor integration
 - [ ] Better UI experience for `parallel_tools` call
 - [ ] Encourage LLMs to use the `parallel_tools` call (only gemini seems to do this)
-- [ ] Limit the auto-continue judge so it doesn't get stuck in a loop
-- [ ] Unify the model/provider detection (context window size/model specific workarounds)
-- [ ] Fix auto compaction (seems to be really broken)
+- [x] Limit the auto-continue judge so it doesn't get stuck in a loop
+- [x] Unify the model/provider detection (context window size/model specific workarounds)
+- [ ] Fix auto compaction
 - [ ] Get rid of magic literals in the codebase
 - [ ] General UI improvements around tool calls
 - [x] Todo task are not showing up in the UI
@@ -75,21 +47,25 @@ When running in ACP mode, scriptschnell communicates via stdio using the ACP pro
 - [ ] Implement persistent authorization on a per-project basis
 - [ ] Unify tui command programming
 - [ ] Filter models by provider in models menu
-- [ ] Fix models menu (weird scrolling behavior, layout issues)
+- [x] Fix models menu (weird scrolling behavior, layout issues)
 - [ ] On configuring the first provider, choose a default model
 - [ ] Fix mistral model performance
-- [ ] Use token usage response from provider if available
-- [ ] Output credit usage per session
-- [ ] Weird kimi k2 context window problems
-- [ ] Deadlock problem when model used invalid tool call (the session cannot continue)
-- [ ] Multi session support in the tui
+- [x] Use token usage response from provider if available
+- [ ] Output credit usage per session (currently just openrouter, implement cost estimation)
+- [x] Weird kimi k2 context window problems
+- [x] Deadlock problem when model used invalid tool call (the session cannot continue)
+- [x] Multi session support in the tui
 - [ ] Anthropic Prompt Caching
 - [ ] Auto session saving
+- [ ] Server mode
+- [ ] Split config in runtime config and user config
+- [ ] Fix agent client protocol output (zed editor)
 
 ## Goals
 
 - Universal codebase LLM editing experience (cli, tui, code editor, web browser)
 - Compatible with many LLM providers
+- Promoting usage of open weight models
 
 ### Maybes
 
@@ -166,7 +142,7 @@ Supported providers:
 - Ollama
 - OpenAI-compatible
 
-Recommended since 2025-12-04:
-- Orchestrator model: Google Gemini 3 Pro
+Recommended since 2025-12-10:
+- Orchestrator model: Google Gemini 3 Pro or zai-glm-4.6
 - Summarization model: Mistral Codestral 2508
 - Planning model: Claude Opus 4.5

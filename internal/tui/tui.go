@@ -329,7 +329,7 @@ type NewTabMsg struct {
 
 func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your prompt here... (@ for files, Shift+Enter for newline, Ctrl+X for commands)"
+	ta.Placeholder = "Type your prompt here... (@ for files, Alt+Enter or Ctrl+J for newline, Ctrl+X for commands)"
 	ta.Focus()
 	ta.Prompt = "│ "
 	ta.CharLimit = 10000
@@ -337,8 +337,7 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	ta.SetHeight(3)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.ShowLineNumbers = false
-	ta.KeyMap.InsertNewline.SetEnabled(true)
-	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "enter", "ctrl+m")
+	ta.KeyMap.InsertNewline.SetEnabled(false)
 
 	vp := viewport.New(80, 20)
 	vp.SetContent("")
@@ -902,26 +901,16 @@ func extractFilepathContext(input string, cursorPos int) (int, string, bool) {
 }
 
 // shouldTreatAsMultilineEnter returns true when the given key message represents
-// an Enter press that should insert a newline instead of submitting the prompt.
-// Terminals vary in how they encode Shift+Enter, so we consider multiple
-// representations (explicit shift modifier, alt-modified enter, and raw newline runes).
+// a key combination that should insert a newline instead of submitting the prompt.
+// Note: Most terminals don't send Shift modifier for Enter, so we use Alt+Enter and Ctrl+J instead.
 func shouldTreatAsMultilineEnter(msg tea.KeyMsg) bool {
-	keyStr := msg.String()
-	if strings.Contains(keyStr, "shift+enter") {
-		return true
-	}
-
-	if msg.Type == tea.KeyCtrlJ {
-		return true
-	}
-
-	// Some terminals send a bare newline rune when Shift+Enter is pressed.
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == '\n' {
-		return true
-	}
-
-	// Alt+Enter often maps to the same intent; treat it as newline to give users a fallback.
+	// Alt+Enter is the primary newline key
 	if msg.Type == tea.KeyEnter && msg.Alt {
+		return true
+	}
+
+	// Ctrl+J is traditionally line feed
+	if msg.Type == tea.KeyCtrlJ {
 		return true
 	}
 
@@ -1291,6 +1280,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	wasReady := m.ready
 
+	// Handle Alt+Enter and Ctrl+J before textarea processing to manually insert newline
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if shouldTreatAsMultilineEnter(keyMsg) {
+			// Manually insert newline and return early
+			currentValue := m.textarea.Value()
+			m.textarea.SetValue(currentValue + "\n")
+			return m, tea.Batch(tiCmd, vpCmd)
+		}
+	}
+
 	shouldBlockTextarea := false
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if len(m.suggestions) > 0 {
@@ -1362,9 +1361,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.overlayActive {
-			return m, baseCmd
-		}
-		if shouldTreatAsMultilineEnter(msg) {
 			return m, baseCmd
 		}
 		switch msg.String() {
@@ -1505,7 +1501,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.textarea.Reset()
-			m.textarea.Placeholder = "Type your prompt here... (@ for files, Shift+Enter for newline, Ctrl+X for commands)"
+			m.textarea.Placeholder = "Type your prompt here... (@ for files, Alt+Enter or Ctrl+J for newline, Ctrl+X for commands)"
 			m.sanitizeState = ansiSanitizeState{}
 			m.suggestions = nil
 			m.selectedSuggIndex = 0

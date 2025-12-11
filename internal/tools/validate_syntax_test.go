@@ -59,13 +59,9 @@ func TestValidateSyntaxToolSpec_Parameters(t *testing.T) {
 
 func TestValidateSyntaxTool_ValidateFile_ValidGo(t *testing.T) {
 	mockFS := fs.NewMockFS()
-	executor := &ValidateSyntaxToolExecutor{
-		fs:        mockFS,
-		validator: nil, // Will be set by factory
-	}
 	// Use factory to get properly initialized executor
 	factory := NewValidateSyntaxToolFactory(mockFS)
-	executor = factory(nil).(*ValidateSyntaxToolExecutor)
+	executor := factory(nil).(*ValidateSyntaxToolExecutor)
 
 	// Write valid Go code
 	validGoCode := `package main

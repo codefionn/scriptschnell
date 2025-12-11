@@ -739,6 +739,57 @@ func RemoveDir(path string, recursive bool) string {
 	return result // Error message from host
 }
 
+//go:wasmimport env convert_html
+func convertHTMLHost(htmlPtr *byte, htmlLen int32, markdownPtr *byte, markdownCap int32) int32
+
+// ConvertHTML converts HTML content to markdown
+// Uses auto-detection to determine if input is HTML
+// Returns markdown if HTML detected, otherwise returns original input
+func ConvertHTML(html string) string {
+	htmlBytes := []byte(html)
+	var htmlPtr *byte
+	if len(htmlBytes) > 0 {
+		htmlPtr = &htmlBytes[0]
+	}
+
+	// Prepare markdown buffer (10MB for large HTML documents)
+	markdownBuffer := make([]byte, 10*1024*1024)
+	var markdownPtr *byte
+	if len(markdownBuffer) > 0 {
+		markdownPtr = &markdownBuffer[0]
+	}
+
+	// Call host convert_html function
+	statusCode := convertHTMLHost(
+		htmlPtr, int32(len(htmlBytes)),
+		markdownPtr, int32(len(markdownBuffer)),
+	)
+
+	// Find actual length of markdown
+	markdownLen := 0
+	for i, b := range markdownBuffer {
+		if b == 0 {
+			markdownLen = i
+			break
+		}
+	}
+	if markdownLen == 0 && len(markdownBuffer) > 0 && markdownBuffer[0] != 0 {
+		markdownLen = len(markdownBuffer)
+	}
+
+	result := string(markdownBuffer[:markdownLen])
+
+	// Check status code (0 = success, negative = error)
+	if statusCode < 0 {
+		if result == "" {
+			return fmt.Sprintf("Error: HTML conversion failed (status %d)", statusCode)
+		}
+		return result // Error message from host
+	}
+
+	return result
+}
+
 // END STATCODE_AI_INTERNAL
 
 // User code begins here:

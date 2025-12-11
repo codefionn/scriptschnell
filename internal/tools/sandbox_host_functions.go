@@ -11,6 +11,8 @@ import (
 
 	. "github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+
+	"github.com/codefionn/scriptschnell/internal/htmlconv"
 )
 
 // registerFetchHostFunction registers the fetch host function
@@ -809,4 +811,40 @@ func (t *SandboxTool) registerGetLastStderrHostFunction(envBuilder HostModuleBui
 			return int32(len(stderrBytes))
 		}).
 		Export("get_last_stderr")
+}
+
+// registerConvertHTMLHostFunction registers the convert_html host function
+func (t *SandboxTool) registerConvertHTMLHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+	// convert_html(html_ptr, html_len, markdown_ptr, markdown_cap) -> int32
+	envBuilder.NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, htmlPtr, htmlLen, markdownPtr, markdownCap uint32) int32 {
+			memory := m.Memory()
+
+			// Read HTML from WASM memory
+			htmlBytes, ok := memory.Read(htmlPtr, htmlLen)
+			if !ok {
+				return -1 // Error: invalid memory access
+			}
+			html := string(htmlBytes)
+
+			// Perform conversion using htmlconv package
+			markdown, _ := htmlconv.ConvertIfHTML(html)
+			// Note: We ignore the 'converted' boolean because we always want to return
+			// the result (either converted markdown or original text if not HTML)
+
+			// Track operation
+			tracker.record("convert_html", fmt.Sprintf("%d bytes -> %d bytes", htmlLen, len(markdown)))
+
+			// Write result to WASM memory
+			markdownBytes := []byte(markdown)
+			if uint32(len(markdownBytes)) > markdownCap {
+				markdownBytes = markdownBytes[:markdownCap]
+			}
+			if markdownCap > 0 && len(markdownBytes) > 0 {
+				memory.Write(markdownPtr, markdownBytes)
+			}
+
+			return 0 // Success
+		}).
+		Export("convert_html")
 }

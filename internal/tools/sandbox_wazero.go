@@ -74,6 +74,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	t.registerListFilesHostFunction(envBuilder, callTracker)
 	t.registerRemoveFileHostFunction(envBuilder, callTracker)
 	t.registerRemoveDirHostFunction(envBuilder, callTracker)
+	t.registerConvertHTMLHostFunction(envBuilder, callTracker)
 	t.registerGetLastExitCodeHostFunction(envBuilder)
 	t.registerGetLastStdoutHostFunction(envBuilder)
 	t.registerGetLastStderrHostFunction(envBuilder)

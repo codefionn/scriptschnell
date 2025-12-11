@@ -784,6 +784,7 @@ type statcodeSession struct {
 	isActive      bool
 	toolLocations map[string][]acp.ToolCallLocation
 	toolParams    map[string]map[string]interface{}
+	toolProgress  map[string]*strings.Builder // Accumulated progress output per tool ID
 	mu            sync.Mutex
 }
 
@@ -818,17 +819,38 @@ func (a *ScriptschnellAIAgent) getToolLocations(session *statcodeSession, toolID
 	return out
 }
 
-func (a *ScriptschnellAIAgent) popToolContext(session *statcodeSession, toolID string) (map[string]interface{}, []acp.ToolCallLocation) {
+func (a *ScriptschnellAIAgent) accumulateToolProgress(session *statcodeSession, toolID, message string) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if session.toolProgress == nil {
+		session.toolProgress = make(map[string]*strings.Builder)
+	}
+
+	if _, exists := session.toolProgress[toolID]; !exists {
+		session.toolProgress[toolID] = &strings.Builder{}
+	}
+
+	session.toolProgress[toolID].WriteString(message)
+}
+
+func (a *ScriptschnellAIAgent) popToolContext(session *statcodeSession, toolID string) (map[string]interface{}, []acp.ToolCallLocation, string) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
 	params := session.toolParams[toolID]
 	locations := session.toolLocations[toolID]
+	var progressText string
+
+	if builder, exists := session.toolProgress[toolID]; exists {
+		progressText = builder.String()
+		delete(session.toolProgress, toolID)
+	}
 
 	delete(session.toolParams, toolID)
 	delete(session.toolLocations, toolID)
 
-	return params, locations
+	return params, locations, progressText
 }
 
 var (
@@ -981,6 +1003,7 @@ func (a *ScriptschnellAIAgent) NewSession(ctx context.Context, params acp.NewSes
 		isActive:      true,
 		toolLocations: make(map[string][]acp.ToolCallLocation),
 		toolParams:    make(map[string]map[string]interface{}),
+		toolProgress:  make(map[string]*strings.Builder),
 	}
 
 	a.mu.Lock()
@@ -1725,34 +1748,20 @@ func (a *ScriptschnellAIAgent) resolveDiffPath(fd *godiff.FileDiff, params map[s
 	return filepath.Clean(candidate)
 }
 
-// sendToolCallProgress sends intermediate progress updates for long-running tools
+// sendToolCallProgress accumulates intermediate progress updates for long-running tools
+// Instead of sending individual ACP updates that replace content, we accumulate
+// the progress and include it in the final result to avoid content replacement issues
 func (a *ScriptschnellAIAgent) sendToolCallProgress(session *statcodeSession, toolID string, message string) error {
-	opts := []acp.ToolCallUpdateOpt{
-		acp.WithUpdateContent([]acp.ToolCallContent{
-			acp.ToolContent(acp.TextBlock(message)),
-		}),
-	}
-
-	if locations := a.getToolLocations(session, toolID); len(locations) > 0 {
-		opts = append(opts, acp.WithUpdateLocations(locations))
-	}
-
-	if err := a.conn.SessionUpdate(session.promptCtx, acp.SessionNotification{
-		SessionId: acp.SessionId(session.sessionID),
-		Update: acp.UpdateToolCall(
-			acp.ToolCallId(toolID),
-			opts...,
-		),
-	}); err != nil {
-		logger.Warn("Failed to send tool call progress update: %v", err)
-		return err
-	}
+	// Accumulate the progress message locally instead of sending immediate ACP updates
+	// This prevents the ACP client from replacing content with each progress update
+	a.accumulateToolProgress(session, toolID, message)
+	logger.Debug("sendToolCallProgress[%s]: accumulated progress for tool %s: %q", session.sessionID, toolID, truncateForLog(message))
 	return nil
 }
 
 // handleToolCallResult handles the completion of a tool call
 func (a *ScriptschnellAIAgent) handleToolCallResult(session *statcodeSession, toolName, toolID, result, errorMsg string) error {
-	params, locations := a.popToolContext(session, toolID)
+	params, locations, progressText := a.popToolContext(session, toolID)
 
 	status := acp.ToolCallStatusCompleted
 	var content []acp.ToolCallContent
@@ -1761,11 +1770,24 @@ func (a *ScriptschnellAIAgent) handleToolCallResult(session *statcodeSession, to
 		status = acp.ToolCallStatusFailed
 		content = append(content, acp.ToolContent(acp.TextBlock(fmt.Sprintf("Error: %s", errorMsg))))
 	} else {
-		content = a.formatToolResultContent(toolName, result, params)
+		// Include accumulated progress output along with the final result
+		combinedResult := result
+		if progressText != "" {
+			// Combine progress and final result, with progress first to show the stream
+			if combinedResult != "" {
+				combinedResult = progressText + combinedResult
+			} else {
+				combinedResult = progressText
+			}
+		}
+		content = a.formatToolResultContent(toolName, combinedResult, params)
 	}
 
 	// Update the client about the tool call result
 	rawOutput := map[string]interface{}{"result": result}
+	if progressText != "" {
+		rawOutput["progress_output"] = progressText
+	}
 	if errorMsg != "" {
 		rawOutput["error"] = errorMsg
 	}
@@ -1790,7 +1812,7 @@ func (a *ScriptschnellAIAgent) handleToolCallResult(session *statcodeSession, to
 		return err
 	}
 
-	logger.Debug("handleToolCallResult[%s]: tool %s completed with status %s", session.sessionID, toolName, status)
+	logger.Debug("handleToolCallResult[%s]: tool %s completed with status %s (progressLen=%d, resultLen=%d)", session.sessionID, toolName, status, len(progressText), len(result))
 	return nil
 }
 

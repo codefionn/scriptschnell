@@ -144,6 +144,7 @@ func TestHandleToolCallResult_UpdatedContent(t *testing.T) {
 		promptCtx:     context.Background(),
 		toolLocations: make(map[string][]acp.ToolCallLocation),
 		toolParams:    make(map[string]map[string]interface{}),
+		toolProgress:  make(map[string]*strings.Builder),
 	}
 
 	// Create a temporary test file
@@ -216,8 +217,8 @@ func TestHandleToolCallResult_UpdatedContent(t *testing.T) {
 			}
 
 			// Verify the tool context was cleaned up
-			params, locations := agent.popToolContext(session, tt.toolID)
-			if params != nil || len(locations) != 0 {
+			params, locations, progressText := agent.popToolContext(session, tt.toolID)
+			if params != nil || len(locations) != 0 || progressText != "" {
 				t.Error("tool context was not cleaned up after result handling")
 			}
 		})
@@ -342,6 +343,7 @@ func TestToolCallContentUpdates(t *testing.T) {
 		promptCtx:     context.Background(),
 		toolLocations: make(map[string][]acp.ToolCallLocation),
 		toolParams:    make(map[string]map[string]interface{}),
+		toolProgress:  make(map[string]*strings.Builder),
 	}
 
 	// Create a test file
@@ -383,12 +385,15 @@ func TestToolCallContentUpdates(t *testing.T) {
 	}
 
 	// Verify tool context was cleaned up
-	storedParams, storedLocations := agent.popToolContext(session, toolID)
+	storedParams, storedLocations, progressText := agent.popToolContext(session, toolID)
 	if storedParams != nil {
 		t.Error("tool context was not cleaned up after result handling")
 	}
 	if len(storedLocations) != 0 {
 		t.Error("tool locations were not cleaned up after result handling")
+	}
+	if progressText != "" {
+		t.Error("tool progress was not cleaned up after result handling")
 	}
 
 	// Verify the file was actually modified

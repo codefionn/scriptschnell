@@ -253,7 +253,7 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 	if hasNativeFormat {
 		// Use native format directly to preserve caching metadata
 		logger.Debug("Using native Anthropic message format (%d messages)", len(req.Messages))
-		systemBlocks, chatMessages, err = extractNativeAnthropicMessages(req.Messages)
+		systemBlocks, chatMessages, err = extractNativeAnthropicMessages(req.Messages, req.EnableCaching, req.CacheTTL)
 		if err != nil {
 			logger.Warn("Failed to extract native messages, falling back to conversion: %v", err)
 			// Fall back to conversion
@@ -312,7 +312,7 @@ func (c *AnthropicClient) buildMessageParams(req *CompletionRequest) (anthropic.
 }
 
 // extractNativeAnthropicMessages extracts native Anthropic messages from Message objects
-func extractNativeAnthropicMessages(messages []*Message) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {
+func extractNativeAnthropicMessages(messages []*Message, enableCaching bool, cacheTTL string) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {
 	systemBlocks := make([]anthropic.BetaTextBlockParam, 0)
 	chatMessages := make([]anthropic.BetaMessageParam, 0, len(messages))
 
@@ -329,6 +329,12 @@ func extractNativeAnthropicMessages(messages []*Message) ([]anthropic.BetaTextBl
 				if err == nil {
 					var blocks []anthropic.BetaTextBlockParam
 					if err := json.Unmarshal(data, &blocks); err == nil {
+						if enableCaching {
+							cacheControl := makeCacheControl(cacheTTL)
+							for i := range blocks {
+								blocks[i].CacheControl = cacheControl
+							}
+						}
 						systemBlocks = append(systemBlocks, blocks...)
 					}
 				}
@@ -345,6 +351,11 @@ func extractNativeAnthropicMessages(messages []*Message) ([]anthropic.BetaTextBl
 		var betaMsg anthropic.BetaMessageParam
 		if err := json.Unmarshal(data, &betaMsg); err != nil {
 			return nil, nil, fmt.Errorf("failed to unmarshal to BetaMessageParam: %w", err)
+		}
+
+		// Reapply cache control for requests that toggle it dynamically
+		if enableCaching && msg.CacheControl {
+			applyCacheControlToBlocks(betaMsg.Content, enableCaching, cacheTTL)
 		}
 
 		chatMessages = append(chatMessages, betaMsg)

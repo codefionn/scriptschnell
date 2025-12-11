@@ -289,6 +289,27 @@ func TestAuthorizationActorAuthorizeSandboxDomainAllowAllNetwork(t *testing.T) {
 	}
 }
 
+func TestAuthorizationActorAuthorizeWebFetchRequiresApproval(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameWebFetch, map[string]interface{}{"url": "https://example.com/docs"})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected domain access to require approval for new domain")
+	}
+	if !decision.RequiresUserInput {
+		t.Fatalf("expected decision to require user input")
+	}
+}
+
 func TestAuthorizationActorDangerouslyAllowAllBypassesChecks(t *testing.T) {
 	ctx := context.Background()
 	mockFS := fs.NewMockFS()

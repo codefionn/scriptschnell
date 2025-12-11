@@ -363,6 +363,8 @@ func (a *AuthorizationActor) authorize(ctx context.Context, toolName string, par
 		return a.authorizeCreateFile(ctx, params)
 	case ToolNameGoSandboxDomain:
 		return a.authorizeSandboxDomain(ctx, params)
+	case ToolNameWebFetch:
+		return a.authorizeWebFetch(ctx, params)
 	case ToolNameShell:
 		return a.authorizeShell(ctx, params)
 	case ToolNameCommand:
@@ -458,6 +460,25 @@ func (a *AuthorizationActor) authorizeSandboxDomain(ctx context.Context, params 
 	}
 
 	return a.judgeDomainWithLLM(ctx, displayDomain)
+}
+
+func (a *AuthorizationActor) authorizeWebFetch(ctx context.Context, params map[string]interface{}) (*AuthorizationDecision, error) {
+	rawURL := GetStringParam(params, "url", "")
+	if rawURL == "" {
+		return &AuthorizationDecision{Allowed: false, Reason: "url is required"}, nil
+	}
+
+	parsed, err := normalizeFetchURL(rawURL)
+	if err != nil {
+		return &AuthorizationDecision{Allowed: false, Reason: fmt.Sprintf("invalid url: %v", err)}, nil
+	}
+
+	domain := parsed.Hostname()
+	if domain == "" {
+		return &AuthorizationDecision{Allowed: false, Reason: "url missing host"}, nil
+	}
+
+	return a.authorizeSandboxDomain(ctx, map[string]interface{}{"domain": domain})
 }
 
 // authorizeShell checks if a shell command is safe to execute

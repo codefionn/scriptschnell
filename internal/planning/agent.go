@@ -978,6 +978,12 @@ func (a *RealToolAdapter) Parameters() map[string]interface{} { return a.spec.Pa
 
 func (a *RealToolAdapter) Execute(ctx context.Context, params map[string]interface{}) *PlanningToolResult {
 	res := a.executor.Execute(ctx, params)
+	if res.RequiresUserInput {
+		if res.AuthReason != "" {
+			return &PlanningToolResult{Error: res.AuthReason}
+		}
+		return &PlanningToolResult{Error: "tool execution requires user approval"}
+	}
 	if res.Error != "" {
 		return &PlanningToolResult{Error: res.Error}
 	}

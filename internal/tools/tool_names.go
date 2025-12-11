@@ -14,6 +14,7 @@ const (
 	ToolNameGoSandbox            = "go_sandbox"
 	ToolNameGoSandboxDomain      = "go_sandbox_domain"
 	ToolNameWebSearch            = "web_search"
+	ToolNameWebFetch             = "web_fetch"
 	ToolNameToolSummarize        = "tool_summarize"
 	ToolNameTodo                 = "todo"
 	ToolNameSearchFiles          = "search_files"

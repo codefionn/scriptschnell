@@ -656,49 +656,54 @@ func (o *Orchestrator) initializePlanningAgent() {
 	_, planningCancel := context.WithCancel(context.Background())
 	investigator := NewCodebaseInvestigatorAgent(o)
 	o.planningAgent = planning.NewPlanningAgent("planning", o.fs, o.session, o.planningClient, investigator)
+	// Add web_fetch to planning tools (with authorization and summarize model if available)
+	o.planningAgent.SetExternalTools([]planning.PlanningTool{
+		planning.NewRealToolAdapter(
+			&tools.WebFetchToolSpec{},
+			tools.NewWebFetchTool(nil, o.summarizeClient, o.authorizer),
+		),
+	})
 	o.planningAgentCancel = planningCancel
 
 	logger.Debug("Planning agent initialized")
 }
 
 const (
-	cacheControlTokenInterval  = 5000
+	cacheControlTokenInterval  = 10000
 	cacheControlMaxBreakpoints = 4
 )
 
 func markCacheControlBreakpoints(messages []*llm.Message, intervalTokens, maxBreakpoints int) {
-	if intervalTokens <= 0 || maxBreakpoints <= 0 || len(messages) == 0 {
-		return
-	}
-
-	var (
-		cumulativeTokens int
-		candidates       []int
-	)
-
-	for idx, msg := range messages {
-		if msg == nil {
-			continue
-		}
-
-		cumulativeTokens += llm.EstimateTokenCountForMessage(msg)
-		if cumulativeTokens >= intervalTokens {
-			candidates = append(candidates, idx)
-			cumulativeTokens = 0
-		}
-	}
-
-	if len(candidates) > maxBreakpoints {
-		candidates = candidates[len(candidates)-maxBreakpoints:]
-	}
-
 	for _, msg := range messages {
 		if msg != nil {
 			msg.CacheControl = false
 		}
 	}
 
-	for _, idx := range candidates {
+	if intervalTokens <= 0 || maxBreakpoints <= 0 || len(messages) == 0 {
+		return
+	}
+
+	nextThreshold := intervalTokens
+	totalTokens := 0
+	breakpoints := make([]int, 0, maxBreakpoints)
+
+	for idx, msg := range messages {
+		if msg == nil {
+			continue
+		}
+
+		totalTokens += llm.EstimateTokenCountForMessage(msg)
+		if totalTokens >= nextThreshold {
+			breakpoints = append(breakpoints, idx)
+			if len(breakpoints) == maxBreakpoints {
+				break
+			}
+			nextThreshold *= 2
+		}
+	}
+
+	for _, idx := range breakpoints {
 		if idx >= 0 && idx < len(messages) {
 			messages[idx].CacheControl = true
 		}
@@ -1540,7 +1545,7 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		})
 
 		dispatchProgress(progressCallback, progress.Update{
-			Message:    formatPlanForDisplay(response.Plan),
+			Message:    "\n\n" + formatPlanForDisplay(response.Plan) + "\n",
 			AddNewLine: false,
 			Mode:       progress.ReportNoStatus,
 		})

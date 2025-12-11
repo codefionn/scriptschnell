@@ -75,8 +75,8 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 		Content: fmt.Sprintf("Investigation Objective: %s", objective),
 	})
 
-	// Create limited registry
-	registry := tools.NewRegistry(nil) // No authorizer needed for internal safe tools
+	// Create limited registry (with authorizer to enforce network/domain rules)
+	registry := tools.NewRegistry(a.orch.authorizer)
 
 	// Register tools
 	modelFamily := llm.DetectModelFamily(a.orch.getSummarizeModelID())
@@ -87,6 +87,12 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	// Search tools
 	registry.Register(tools.NewSearchFilesTool(a.orch.fs))
 	registry.Register(tools.NewSearchFileContentTool(a.orch.fs))
+
+	// Web fetch (domain-authorized)
+	registry.RegisterSpec(
+		&tools.WebFetchToolSpec{},
+		tools.NewWebFetchToolFactory(nil, a.orch.summarizeClient, a.orch.authorizer),
+	)
 
 	// Parallel execution tool (allows the investigator to speed up by running multiple tools concurrently)
 	registry.Register(tools.NewParallelTool(registry))

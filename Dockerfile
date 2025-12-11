@@ -8,8 +8,8 @@ FROM tinygo/tinygo:0.39.0 AS tinygo
 FROM golang:1.25-alpine AS base
 WORKDIR /app
 
-# Install git and other build tools
-RUN apk add --no-cache git ca-certificates tzdata \
+# Install git, C development tools, and other build tools
+RUN apk add --no-cache git ca-certificates tzdata gcc musl-dev \
     && update-ca-certificates
 
 COPY --from=tinygo /usr/local/tinygo /usr/local/tinygo
@@ -28,9 +28,9 @@ RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 # Copy source code
 COPY . .
 
-# Run linters
+# Run linters with CGO enabled for tree-sitter
 RUN echo "Running golangci-lint..." && \
-    golangci-lint run --timeout=5m
+    CGO_ENABLED=1 golangci-lint run --timeout=5m
 
 # Testing stage
 FROM base AS test
@@ -38,9 +38,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-# Run tests
+# Run tests with CGO enabled for tree-sitter
 ARG CI=1
-RUN go test -short ./...
+RUN CGO_ENABLED=1 go test -short ./...
 
 # Build stage for main binary
 FROM base AS build

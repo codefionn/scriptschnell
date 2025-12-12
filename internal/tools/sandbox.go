@@ -550,6 +550,10 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 				"type":        "integer",
 				"description": "Timeout in seconds (default 30, max 3600). When running testsuites or compute intensive tasks, consider increasing the timeout.",
 			},
+			"working_dir": map[string]interface{}{
+				"type":        "string",
+				"description": "Working directory for sandbox execution (optional, defaults to the tool working directory).",
+			},
 			"libraries": map[string]interface{}{
 				"type":        "array",
 				"description": "Additional Go module dependencies (e.g., ['github.com/foo/bar@v1.0.0'])",
@@ -592,10 +596,63 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 		}
 	}
 
+	workingDirParam := GetStringParam(params, "working_dir", "")
+
+	sessionDir := ""
+	if t.session != nil {
+		sessionDir = t.session.WorkingDir
+	}
+
+	defaultWorkingDir := t.workingDir
+	if defaultWorkingDir == "" {
+		defaultWorkingDir = sessionDir
+	}
+	if defaultWorkingDir == "" {
+		defaultWorkingDir = "."
+	}
+
+	workingDir := workingDirParam
+	if workingDir == "" {
+		workingDir = defaultWorkingDir
+	}
+
+	if sessionDir != "" {
+		sessionAbs, err := filepath.Abs(sessionDir)
+		if err != nil {
+			return &ToolResult{Error: fmt.Sprintf("failed to resolve session working directory: %v", err)}
+		}
+
+		if !filepath.IsAbs(workingDir) {
+			workingDir = filepath.Join(sessionAbs, workingDir)
+		}
+
+		absWorkingDir, err := filepath.Abs(workingDir)
+		if err != nil {
+			return &ToolResult{Error: fmt.Sprintf("failed to resolve working directory: %v", err)}
+		}
+
+		rel, err := filepath.Rel(sessionAbs, absWorkingDir)
+		if err != nil {
+			return &ToolResult{Error: fmt.Sprintf("failed to validate working directory: %v", err)}
+		}
+
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return &ToolResult{Error: fmt.Sprintf("working_dir must be a subdirectory of the session working directory (%s)", sessionAbs)}
+		}
+
+		workingDir = absWorkingDir
+	} else {
+		absWorkingDir, err := filepath.Abs(workingDir)
+		if err != nil {
+			return &ToolResult{Error: fmt.Sprintf("failed to resolve working directory: %v", err)}
+		}
+		workingDir = absWorkingDir
+	}
+
 	background := GetBoolParam(params, "background", false)
 
 	if background {
-		result, err := t.executeBackground(ctx, code, timeout, libraries)
+		result, err := t.executeBackground(ctx, code, timeout, libraries, workingDir)
 		if err != nil {
 			return &ToolResult{Error: err.Error()}
 		}
@@ -623,7 +680,7 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 	sendStatus("→ Compiling sandbox program with TinyGo")
 
 	// Use builder to execute
-	result, err := t.executeWithBuilder(ctx, code, timeout, libraries)
+	result, err := t.executeWithBuilder(ctx, code, timeout, libraries, workingDir)
 	if err != nil {
 		sendStatus(fmt.Sprintf("✗ Sandbox failed: %v", err))
 		return &ToolResult{Error: err.Error()}
@@ -673,12 +730,12 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 }
 
 // executeWithBuilder uses the SandboxBuilder to execute code
-func (t *SandboxTool) executeWithBuilder(ctx context.Context, code string, timeout int, libraries []string) (interface{}, error) {
+func (t *SandboxTool) executeWithBuilder(ctx context.Context, code string, timeout int, libraries []string, workingDir string) (interface{}, error) {
 	// Create builder with current tool configuration
 	builder := NewSandboxBuilder().
 		SetCode(code).
 		SetTimeout(timeout).
-		SetWorkingDir(t.workingDir).
+		SetWorkingDir(workingDir).
 		SetTempDir(t.tempDir)
 
 	// Add libraries if any

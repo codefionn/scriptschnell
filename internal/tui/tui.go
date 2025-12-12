@@ -1841,6 +1841,10 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 		}
 	}
 
+	if tabIdx == m.activeSessionIdx {
+		m.updateTodoClientForTab(tabIdx)
+	}
+
 	// Mark tab as generating
 	m.setTabGenerating(tabIdx, true)
 	m.addMessageForTab(tabIdx, "You", input)
@@ -2433,11 +2437,11 @@ func (m *Model) renderSuggestions() string {
 }
 
 func (m *Model) renderTodoPanel() string {
-	if m.todoClient == nil {
-		return ""
+	var todoList *tools.TodoList
+	var err error
+	if m.todoClient != nil {
+		todoList, err = m.todoClient.List()
 	}
-
-	todoList, err := m.todoClient.List()
 
 	var content strings.Builder
 
@@ -2469,6 +2473,8 @@ func (m *Model) renderTodoPanel() string {
 	content.WriteString("\n")
 
 	switch {
+	case m.todoClient == nil:
+		content.WriteString(todoEmptyStyle.Render("Todo list not available yet."))
 	case err != nil:
 		content.WriteString(todoErrorStyle.Render(fmt.Sprintf("Error: %v", err)))
 	case todoList == nil || len(todoList.Items) == 0:
@@ -2564,6 +2570,20 @@ func (m *Model) renderTodoTree(content *strings.Builder, items []*tools.TodoItem
 
 		// Recursively render children
 		m.renderTodoTree(content, items, item.ID, depth+1)
+	}
+}
+
+// updateTodoClientForTab syncs the todo client with the active tab's runtime
+func (m *Model) updateTodoClientForTab(tabIdx int) {
+	if !m.validTabIndex(tabIdx) {
+		return
+	}
+
+	runtime := m.sessions[tabIdx].Runtime
+	if runtime != nil && runtime.Orchestrator != nil {
+		m.todoClient = runtime.Orchestrator.GetTodoClient()
+	} else if tabIdx == m.activeSessionIdx {
+		m.todoClient = nil
 	}
 }
 

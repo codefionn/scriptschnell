@@ -123,6 +123,19 @@ func (s *Session) GetMessages() []*Message {
 	return messages
 }
 
+// UserMessageCount returns how many user messages are present in the session.
+func (s *Session) UserMessageCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, msg := range s.Messages {
+		if msg != nil && msg.Role == "user" {
+			count++
+		}
+	}
+	return count
+}
+
 // TrackFileRead tracks that a file was read
 func (s *Session) TrackFileRead(path, content string) {
 	s.mu.Lock()

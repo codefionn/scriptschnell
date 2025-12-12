@@ -1447,6 +1447,12 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		return nil
 	}
 
+	// Only allow planning on the first user message of a session
+	if o.session != nil && o.session.UserMessageCount() > 1 {
+		logger.Debug("Skipping planning phase: only allowed on first user message")
+		return nil
+	}
+
 	if o.planningClient == nil {
 		return nil
 	}

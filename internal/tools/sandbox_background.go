@@ -11,7 +11,7 @@ import (
 )
 
 // executeBackground executes the sandbox code in the background
-func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeout int, libraries []string) (interface{}, error) {
+func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeout int, libraries []string, workingDir string) (interface{}, error) {
 	if t.session == nil {
 		return nil, fmt.Errorf("background execution requires session support for %s", ToolNameGoSandbox)
 	}
@@ -22,7 +22,7 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 	job := &session.BackgroundJob{
 		ID:         jobID,
 		Command:    commandSummary,
-		WorkingDir: t.workingDir,
+		WorkingDir: workingDir,
 		StartTime:  time.Now(),
 		Completed:  false,
 		Stdout:     make([]string, 0),
@@ -40,7 +40,7 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 		defer cancel()
 		defer close(job.Done)
 
-		result, err := t.executeWithBuilder(execCtx, code, timeout, libraries)
+		result, err := t.executeWithBuilder(execCtx, code, timeout, libraries, workingDir)
 		job.Mu.Lock()
 		job.Completed = true
 

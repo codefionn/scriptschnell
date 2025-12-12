@@ -124,6 +124,7 @@ func (m *Model) handleSwitchTab(newIdx int) tea.Cmd {
 	if newTabSession.Runtime != nil {
 		m.contextFile = newTabSession.Runtime.Orchestrator.GetExtendedContextFile()
 	}
+	m.updateTodoClientForTab(newIdx)
 
 	// Update processing status/spinner based on new tab's state
 	if newTabSession.IsGenerating() {

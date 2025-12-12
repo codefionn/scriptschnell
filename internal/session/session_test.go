@@ -126,3 +126,20 @@ func TestSaveSessionStorageDirectoryOverride(t *testing.T) {
 		t.Error("Session should not be dirty after being marked as saved")
 	}
 }
+
+func TestUserMessageCount(t *testing.T) {
+	s := NewSession("count-test", ".")
+
+	if count := s.UserMessageCount(); count != 0 {
+		t.Fatalf("expected 0 user messages, got %d", count)
+	}
+
+	s.AddMessage(&Message{Role: "system", Content: "setup"})
+	s.AddMessage(&Message{Role: "user", Content: "first"})
+	s.AddMessage(&Message{Role: "assistant", Content: "reply"})
+	s.AddMessage(&Message{Role: "user", Content: "second"})
+
+	if count := s.UserMessageCount(); count != 2 {
+		t.Fatalf("expected 2 user messages, got %d", count)
+	}
+}

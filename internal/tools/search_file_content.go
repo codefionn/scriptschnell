@@ -124,7 +124,7 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 		}
 
 		// Skip binary files
-		if isBinary(contentBytes) {
+		if isLikelyBinaryFile(path, contentBytes) {
 			return nil
 		}
 
@@ -295,19 +295,6 @@ func (t *SearchFileContentTool) matchComplexGlob(path, pattern string) (bool, er
 		return false, err
 	}
 	return re.MatchString(path), nil
-}
-
-func isBinary(data []byte) bool {
-	checkLen := len(data)
-	if checkLen > 512 {
-		checkLen = 512
-	}
-	for i := 0; i < checkLen; i++ {
-		if data[i] == 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // NewSearchFileContentToolFactory creates a factory for SearchFileContentTool

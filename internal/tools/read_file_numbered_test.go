@@ -56,6 +56,26 @@ func TestReadFileNumberedExecutor_ReadEntireFile(t *testing.T) {
 	}
 }
 
+func TestReadFileNumberedExecutor_RejectsBinaryFile(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test-session", ".")
+	executor := NewReadFileNumberedExecutor(mockFS, sess)
+
+	_ = mockFS.WriteFile(context.Background(), "binary.exe", []byte{0x00, 0x01, 0x02, 0x03})
+
+	result := executor.Execute(context.Background(), map[string]interface{}{
+		"path": "binary.exe",
+	})
+
+	if result.Error == "" {
+		t.Fatal("expected error for binary file")
+	}
+
+	if !strings.Contains(result.Error, "binary") {
+		t.Errorf("expected binary error, got: %s", result.Error)
+	}
+}
+
 func TestReadFileNumberedExecutor_ReadSingleSection(t *testing.T) {
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test-session", ".")

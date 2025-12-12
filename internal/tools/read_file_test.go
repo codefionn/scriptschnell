@@ -286,6 +286,27 @@ func TestReadFileTool_FileNotFound(t *testing.T) {
 	}
 }
 
+func TestReadFileTool_RejectsBinaryFile(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test-session", ".")
+	tool := NewReadFileTool(mockFS, sess)
+
+	binaryContent := []byte{0x7f, 'E', 'L', 'F', 0x00, 0x01}
+	_ = mockFS.WriteFile(context.Background(), "binary.so", binaryContent)
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"path": "binary.so",
+	})
+
+	if result.Error == "" {
+		t.Fatal("expected error for binary file")
+	}
+
+	if !strings.Contains(result.Error, "binary") {
+		t.Errorf("expected binary error, got: %s", result.Error)
+	}
+}
+
 func TestReadFileTool_TracksFileInSession(t *testing.T) {
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test-session", ".")

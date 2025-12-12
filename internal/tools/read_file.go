@@ -103,6 +103,9 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 	if err != nil {
 		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
 	}
+	if isLikelyBinaryFile(path, data) {
+		return &ToolResult{Error: fmt.Sprintf("cannot read binary file: %s", path)}
+	}
 	content := string(data)
 
 	// Check line limit
@@ -213,6 +216,9 @@ func (t *ReadFileTool) executeMultiSection(ctx context.Context, path string, sec
 	fileData, err := t.fs.ReadFile(ctx, path)
 	if err != nil {
 		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
+	}
+	if isLikelyBinaryFile(path, fileData) {
+		return &ToolResult{Error: fmt.Sprintf("cannot read binary file: %s", path)}
 	}
 	totalFileLines := strings.Count(string(fileData), "\n") + 1
 

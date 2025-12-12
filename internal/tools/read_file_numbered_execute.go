@@ -62,6 +62,9 @@ func (e *ReadFileNumberedExecutor) Execute(ctx context.Context, params map[strin
 	if err != nil {
 		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
 	}
+	if isLikelyBinaryFile(path, data) {
+		return &ToolResult{Error: fmt.Sprintf("cannot read binary file: %s", path)}
+	}
 	rawContent := string(data)
 	totalLineCount := strings.Count(rawContent, "\n") + 1
 
@@ -152,6 +155,14 @@ func (e *ReadFileNumberedExecutor) executeMultiSection(ctx context.Context, path
 	// Read all sections
 	var contentParts []string
 	var err error
+
+	fileData, err := e.fs.ReadFile(ctx, path)
+	if err != nil {
+		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
+	}
+	if isLikelyBinaryFile(path, fileData) {
+		return &ToolResult{Error: fmt.Sprintf("cannot read binary file: %s", path)}
+	}
 
 	for i, r := range ranges {
 		var lines []string

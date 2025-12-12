@@ -90,6 +90,9 @@ func (t *SummarizeFileTool) Execute(ctx context.Context, params map[string]inter
 	if err != nil {
 		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
 	}
+	if isLikelyBinaryFile(path, data) {
+		return &ToolResult{Error: fmt.Sprintf("cannot summarize binary file: %s", path)}
+	}
 
 	content := string(data)
 

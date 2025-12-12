@@ -150,6 +150,28 @@ func TestSummarizeFileTool_FileNotFound(t *testing.T) {
 	}
 }
 
+func TestSummarizeFileTool_RejectsBinaryFile(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test-session", ".")
+	client := &MockSummarizeClient{response: "summary"}
+	tool := NewSummarizeFileTool(mockFS, sess, client)
+
+	_ = mockFS.WriteFile(context.Background(), "lib.dylib", []byte{0x7f, 'E', 'L', 'F', 0x00})
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"path": "lib.dylib",
+		"goal": "summarize",
+	})
+
+	if result.Error == "" {
+		t.Fatal("expected error for binary file")
+	}
+
+	if !strings.Contains(result.Error, "binary") {
+		t.Errorf("expected binary error, got: %s", result.Error)
+	}
+}
+
 func TestSummarizeFileTool_SuccessfulSummarization(t *testing.T) {
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test-session", ".")

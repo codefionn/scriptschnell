@@ -85,6 +85,14 @@ EXPECTED OUTPUT:
 
 START NOW. Build the calculator."
 
+# Verify tests and build succeed after AI modifications to reduce flakiness
+echo ""
+echo "Running go test to confirm..."
+go test ./...
+
+echo "Building calculator binary..."
+go build -o calculator .
+
 # Verify the calculator was created
 echo ""
 echo "Verifying calculator was built..."

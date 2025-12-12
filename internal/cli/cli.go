@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -23,6 +25,7 @@ type Options struct {
 	AllowedDomains      []string
 	Model               string
 	Provider            string
+	JSONOutput          bool
 }
 
 // CLI handles command-line interface using the orchestrator
@@ -83,6 +86,9 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 
 	// Progress callback: print streaming to stdout and status to stderr
 	progressCallback := func(update progress.Update) error {
+		if c.options != nil && c.options.JSONOutput {
+			return nil
+		}
 		normalized := progress.Normalize(update)
 		if normalized.ShouldStatus() {
 			if normalized.Message == "" {
@@ -162,12 +168,14 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 
 		// Helper to add numeric values
 		addNumeric := func(key string, value interface{}) {
-			if num, ok := value.(float64); ok {
-				if existing, ok := c.accumulatedUsage[key].(float64); ok {
-					c.accumulatedUsage[key] = existing + num
-				} else {
-					c.accumulatedUsage[key] = num
-				}
+			num, ok := toFloat64(value)
+			if !ok {
+				return
+			}
+			if existing, ok := c.accumulatedUsage[key].(float64); ok {
+				c.accumulatedUsage[key] = existing + num
+			} else {
+				c.accumulatedUsage[key] = num
 			}
 		}
 
@@ -178,8 +186,11 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		addNumeric("cached_tokens", usage["cached_tokens"])
 		addNumeric("input_tokens", usage["input_tokens"])
 		addNumeric("output_tokens", usage["output_tokens"])
+		addNumeric("cache_creation_input_tokens", usage["cache_creation_input_tokens"])
+		addNumeric("cache_read_input_tokens", usage["cache_read_input_tokens"])
 		// OpenRouter returns "cost" not "total_cost"
 		addNumeric("cost", usage["cost"])
+		addNumeric("total_cost", usage["total_cost"])
 
 		return nil
 	}
@@ -190,55 +201,224 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		return fmt.Errorf("failed to process prompt: %w", err)
 	}
 
-	fmt.Println() // Final newline
+	if c.options == nil || !c.options.JSONOutput {
+		fmt.Println() // Final newline
+	}
 
 	// Print accumulated usage statistics
-	if len(c.accumulatedUsage) > 0 {
+	if len(c.accumulatedUsage) > 0 && (c.options == nil || !c.options.JSONOutput) {
 		fmt.Fprintf(os.Stderr, "\n--- Usage Statistics ---\n")
 
 		// Calculate total tokens (try multiple field combinations)
-		var totalTokens float64
-		if total, ok := c.accumulatedUsage["total_tokens"].(float64); ok {
-			totalTokens = total
-		} else {
-			// For providers that use input_tokens + output_tokens
-			if input, ok := c.accumulatedUsage["input_tokens"].(float64); ok {
-				totalTokens += input
-			}
-			if output, ok := c.accumulatedUsage["output_tokens"].(float64); ok {
-				totalTokens += output
-			}
-			// For providers that use prompt_tokens + completion_tokens
-			if prompt, ok := c.accumulatedUsage["prompt_tokens"].(float64); ok {
-				totalTokens += prompt
-			}
-			if completion, ok := c.accumulatedUsage["completion_tokens"].(float64); ok {
-				totalTokens += completion
-			}
-		}
-
+		totalTokens := c.calculateTotalTokens()
 		if totalTokens > 0 {
 			fmt.Fprintf(os.Stderr, "Total tokens: %.0f\n", totalTokens)
 		}
 
 		// Show cached tokens if available
-		if cached, ok := c.accumulatedUsage["cached_tokens"].(float64); ok && cached > 0 {
+		if cached := c.getUsageValue("cached_tokens"); cached > 0 {
 			percentage := (cached / totalTokens) * 100
 			fmt.Fprintf(os.Stderr, "Cached tokens: %.0f (%.1f%%)\n", cached, percentage)
 		}
 
 		// Show cost if available (OpenRouter returns "cost" in dollars)
-		if cost, ok := c.accumulatedUsage["cost"].(float64); ok && cost > 0 {
+		cost := c.getUsageValue("cost")
+		if cost == 0 {
+			cost = c.getUsageValue("total_cost")
+		}
+		if cost > 0 {
 			fmt.Fprintf(os.Stderr, "Total cost: $%.6f\n", cost)
 		}
 
 		fmt.Fprintf(os.Stderr, "------------------------\n")
 	}
 
+	if c.options != nil && c.options.JSONOutput {
+		return c.outputJSON()
+	}
+
 	// Note: Modified files tracking would require exposing the session from orchestrator
 	// For now, tool output will show which files were written
 
 	return nil
+}
+
+// outputJSON marshals the last assistant response and available usage into JSON.
+func (c *CLI) outputJSON() error {
+	result := map[string]interface{}{
+		"message": c.lastAssistantMessage(),
+	}
+
+	if usage := c.buildUsageSummary(); len(usage) > 0 {
+		result["usage"] = usage
+	}
+
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON output: %w", err)
+	}
+
+	fmt.Println(string(data))
+	return nil
+}
+
+// lastAssistantMessage returns the content of the latest assistant message.
+func (c *CLI) lastAssistantMessage() string {
+	if c.orchestrator == nil {
+		return ""
+	}
+
+	session := c.orchestrator.GetSession()
+	if session == nil {
+		return ""
+	}
+
+	messages := session.GetMessages()
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg == nil || msg.Role != "assistant" {
+			continue
+		}
+		if strings.TrimSpace(msg.Content) == "" {
+			continue
+		}
+		return msg.Content
+	}
+
+	return ""
+}
+
+// buildUsageSummary prepares usage information suitable for JSON output.
+func (c *CLI) buildUsageSummary() map[string]interface{} {
+	summary := make(map[string]interface{})
+
+	totalTokens := c.calculateTotalTokens()
+	if totalTokens > 0 {
+		summary["total_tokens"] = int(totalTokens)
+	}
+
+	cachedTokens := c.getUsageValue("cached_tokens")
+	if cachedTokens > 0 {
+		summary["cached_tokens"] = int(cachedTokens)
+	}
+
+	cacheCreation := c.getUsageValue("cache_creation_input_tokens")
+	if cacheCreation > 0 {
+		summary["cache_creation_input_tokens"] = int(cacheCreation)
+	}
+
+	cacheRead := c.getUsageValue("cache_read_input_tokens")
+	if cacheRead > 0 {
+		summary["cache_read_input_tokens"] = int(cacheRead)
+	}
+
+	cachePercent := c.cacheHitPercent(totalTokens, cachedTokens, cacheRead)
+	if cachePercent > 0 {
+		summary["cache_hit_percent"] = cachePercent
+	}
+
+	cost := c.getUsageValue("cost")
+	if cost == 0 {
+		cost = c.getUsageValue("total_cost")
+	}
+	if cost > 0 {
+		summary["cost"] = cost
+	}
+
+	return summary
+}
+
+// cacheHitPercent calculates prompt cache hit percentage when available.
+func (c *CLI) cacheHitPercent(totalTokens, cachedTokens, cacheReadTokens float64) float64 {
+	if totalTokens <= 0 {
+		return 0
+	}
+
+	var cachedBasis float64
+	switch {
+	case cachedTokens > 0:
+		cachedBasis = cachedTokens
+	case cacheReadTokens > 0:
+		cachedBasis = cacheReadTokens
+	default:
+		return 0
+	}
+
+	return math.Round(((cachedBasis/totalTokens)*100)*10) / 10
+}
+
+// getUsageValue retrieves an accumulated usage field as float64.
+func (c *CLI) getUsageValue(key string) float64 {
+	if c.accumulatedUsage == nil {
+		return 0
+	}
+	if value, ok := c.accumulatedUsage[key]; ok {
+		if num, ok := value.(float64); ok {
+			return num
+		}
+	}
+	return 0
+}
+
+// calculateTotalTokens computes total tokens from available usage fields.
+func (c *CLI) calculateTotalTokens() float64 {
+	if c.accumulatedUsage == nil {
+		return 0
+	}
+
+	if total := c.getUsageValue("total_tokens"); total > 0 {
+		return total
+	}
+
+	var totalTokens float64
+
+	// For providers that use input_tokens + output_tokens
+	if input := c.getUsageValue("input_tokens"); input > 0 {
+		totalTokens += input
+	}
+	if output := c.getUsageValue("output_tokens"); output > 0 {
+		totalTokens += output
+	}
+
+	// For providers that use prompt_tokens + completion_tokens
+	if prompt := c.getUsageValue("prompt_tokens"); prompt > 0 {
+		totalTokens += prompt
+	}
+	if completion := c.getUsageValue("completion_tokens"); completion > 0 {
+		totalTokens += completion
+	}
+
+	return totalTokens
+}
+
+// toFloat64 converts various numeric types to float64 for accumulation.
+func toFloat64(value interface{}) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint64:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	case json.Number:
+		num, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return num, true
+	default:
+		return 0, false
+	}
 }
 
 // configureProviderFromOptions configures a provider based on CLI options

@@ -86,26 +86,22 @@ func run() (err error) {
 		}
 	}()
 
-	// Load configuration
-	fmt.Fprintf(os.Stderr, "[Main] About to load config from: %s\n", config.GetConfigPath())
-	fmt.Fprintf(os.Stderr, "[Main] Environment vars: SCRIPTSCHNELL_LOG_LEVEL=%q SCRIPTSCHNELL_LOG_PATH=%q\n",
-		os.Getenv("STATCODE_LOG_LEVEL"), os.Getenv("STATCODE_LOG_PATH"))
+	configPath := config.GetConfigPath()
+	envLogLevel := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_LEVEL"))
+	envLogPath := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_PATH"))
 
-	cfg, err := config.Load(config.GetConfigPath())
+	// Load configuration
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "[Main] Config loaded successfully\n")
-
 	// Allow environment variables to override config file values for logging.
-	if envLevel := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_LEVEL")); envLevel != "" {
-		fmt.Fprintf(os.Stderr, "[Main] Overriding log level from environment: %s\n", envLevel)
-		cfg.LogLevel = envLevel
+	if envLogLevel != "" {
+		cfg.LogLevel = envLogLevel
 	}
-	if envPath := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_LOG_PATH")); envPath != "" {
-		fmt.Fprintf(os.Stderr, "[Main] Overriding log path from environment: %s\n", envPath)
-		cfg.LogPath = envPath
+	if envLogPath != "" {
+		cfg.LogPath = envLogPath
 	}
 
 	secretsPassword, err := ensureSecretsPassword(cfg)
@@ -116,18 +112,14 @@ func run() (err error) {
 	// Initialize logger
 	logLevel := logger.ParseLevel(cfg.LogLevel)
 
-	// Print log configuration to stderr for debugging (especially in CLI mode)
-	if len(os.Args) > 1 {
-		fmt.Fprintf(os.Stderr, "[Debug] Log level: %s, Log path: %s\n", cfg.LogLevel, cfg.LogPath)
-	}
-
 	if initErr := logger.Init(logLevel, cfg.LogPath); initErr != nil {
 		return fmt.Errorf("failed to initialize logger: %w", initErr)
 	}
 	loggerInitialized = true
 
 	logger.Info("scriptschnell starting")
-	logger.Debug("Configuration loaded: working_dir=%s, log_level=%s, log_path=%s", cfg.WorkingDir, cfg.LogLevel, cfg.LogPath)
+	logger.Debug("Configuration loaded: path=%s working_dir=%s log_level=%s log_path=%s env_log_level=%q env_log_path=%q",
+		configPath, cfg.WorkingDir, cfg.LogLevel, cfg.LogPath, envLogLevel, envLogPath)
 
 	// Ensure temp directory exists
 	if err := os.MkdirAll(cfg.TempDir, 0755); err != nil {
@@ -298,6 +290,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		model        string
 		provider     string
 		acpMode      bool
+		jsonOutput   bool
 	)
 
 	fs.BoolVar(&dangerous, "dangerous-allow-all", false, "Bypass all authorization checks (dangerous)")
@@ -308,6 +301,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs.StringVar(&model, "model", "", "Model to use (e.g., gpt-5, claude-sonnet-4.5, gemini-2.5-pro)")
 	fs.StringVar(&provider, "provider", "", "Provider name (e.g., openai, anthropic, google)")
 	fs.BoolVar(&acpMode, "acp", false, "Run in Agent Client Protocol (ACP) mode for integration with code editors")
+	fs.BoolVar(&jsonOutput, "json", false, "Output final assistant message and usage as JSON")
 	fs.BoolVar(&showHelp, "help", false, "Show CLI usage information")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0])
@@ -362,6 +356,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		AllowedDomains:      allowDomains.toStrings(),
 		Model:               model,
 		Provider:            provider,
+		JSONOutput:          jsonOutput,
 	}
 	if dangerous {
 		opts.AllowAllNetwork = true

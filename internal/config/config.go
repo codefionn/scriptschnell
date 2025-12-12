@@ -478,6 +478,9 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 		Secrets:            c.Secrets,
 		EnablePromptCache:  c.EnablePromptCache,
 		AutoSave:           c.AutoSave,
+		PromptCacheTTL:     c.PromptCacheTTL,
+		ContextDirectories: c.ContextDirectories,
+		OpenTabs:           c.OpenTabs,
 		secretsPassword:    c.secretsPassword,
 	}
 

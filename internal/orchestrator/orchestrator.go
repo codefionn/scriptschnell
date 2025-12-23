@@ -1439,8 +1439,22 @@ func formatPlanForDisplay(plan []string) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// isInitPrompt checks if the given prompt is the init command prompt
+func (o *Orchestrator) isInitPrompt(prompt string) bool {
+	// Look for the unique signature of the init prompt
+	return strings.Contains(prompt, "Your ONLY task is to analyze this codebase and CREATE an AGENTS.md file using the create_file tool") &&
+		strings.Contains(prompt, "## NON-NEGOTIABLE REQUIREMENTS") &&
+		strings.Contains(prompt, "**YOU MUST END THIS CONVERSATION BY CALLING create_file WITH path=\"AGENTS.md\"**")
+}
+
 // runPlanningPhaseIfNeeded executes a planning pass before entering the main orchestration loop.
 func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt string, progressCallback progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) error {
+	// Check if this is an init prompt - if so, skip planning since it has specific instructions
+	if o.isInitPrompt(prompt) {
+		logger.Debug("Skipping planning phase: detected /init command prompt")
+		return nil
+	}
+
 	// Check if planning is enabled via feature flags
 	if !o.featureFlags.IsPlanningEnabled() {
 		logger.Debug("Planning phase disabled via feature flags")

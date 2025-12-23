@@ -1818,6 +1818,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, baseCmd
 }
 
+// CreateProgressCallbackForTab creates a progress callback that tags messages with tab ID (public method)
+func (m *Model) CreateProgressCallbackForTab(tabID int) progress.Callback {
+	return m.createProgressCallbackForTab(tabID)
+}
+
 // createProgressCallbackForTab creates a progress callback that tags messages with tab ID
 func (m *Model) createProgressCallbackForTab(tabID int) progress.Callback {
 	return func(update progress.Update) error {

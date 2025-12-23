@@ -130,8 +130,9 @@ type CommandHandler struct {
 	commands         map[string]commandDefinition
 
 	// Multi-tab support
-	factory      *RuntimeFactory
-	getActiveTab func() *TabSession
+	factory             *RuntimeFactory
+	getActiveTab        func() *TabSession
+	getProgressCallback func() progress.Callback
 }
 
 func NewCommandHandler(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, orchestrator *Orchestrator) *CommandHandler {
@@ -161,6 +162,11 @@ func (ch *CommandHandler) SetFactory(factory *RuntimeFactory) {
 // SetGetActiveTab sets the function to get the active tab
 func (ch *CommandHandler) SetGetActiveTab(fn func() *TabSession) {
 	ch.getActiveTab = fn
+}
+
+// SetGetProgressCallback sets the function to get the progress callback for the active tab
+func (ch *CommandHandler) SetGetProgressCallback(fn func() progress.Callback) {
+	ch.getProgressCallback = fn
 }
 
 // SetProgressCallback sets the callback for progress/status updates
@@ -826,32 +832,75 @@ func (ch *CommandHandler) handleProvider(args []string) (MenuResult, error) {
 }
 
 func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
+	// Get active tab
+	var tab *TabSession
+	var orch *Orchestrator
+	var progressCallback progress.Callback
+
+	if ch.getActiveTab != nil {
+		tab = ch.getActiveTab()
+		if tab != nil {
+			// Get or create runtime for this tab (same logic as startPromptForTab)
+			if ch.factory != nil && tab.Runtime == nil {
+				runtime, ok := ch.factory.GetTabRuntime(tab.ID)
+				if !ok {
+					var err error
+					runtime, err = ch.factory.CreateTabRuntime(tab.ID, tab.Session)
+					if err != nil {
+						return MenuResult{}, fmt.Errorf("failed to create runtime for tab %d: %w", tab.ID, err)
+					}
+					tab.Runtime = runtime
+					logger.Info("Created runtime for tab %d in handleInit", tab.ID)
+				}
+			}
+			if tab.Runtime != nil {
+				orch = tab.Runtime.Orchestrator
+			}
+		}
+	} else if ch.orchestrator != nil {
+		// Fallback for non-multi-tab mode
+		orch = ch.orchestrator
+	}
+
+	// Get progress callback
+	if ch.getProgressCallback != nil {
+		progressCallback = ch.getProgressCallback()
+	} else {
+		// Fallback for non-multi-tab mode
+		progressCallback = ch.progressCallback
+	}
+
 	// Check if orchestration model is configured
 	orchModelID := ch.providerMgr.GetOrchestrationModel()
 	if orchModelID == "" {
 		return MenuResult{}, fmt.Errorf("no orchestration model configured. Use /models to set one")
 	}
 
+	// Check if we have an orchestrator
+	if orch == nil {
+		return MenuResult{}, fmt.Errorf("no orchestrator available in this context")
+	}
+
 	// Check if we have a progress callback
-	if ch.progressCallback == nil {
+	if progressCallback == nil {
 		return MenuResult{}, fmt.Errorf("streaming not available in this context")
 	}
 
 	dispatch := func(update progress.Update) {
-		if err := progress.Dispatch(ch.progressCallback, update); err != nil {
+		if err := progress.Dispatch(progressCallback, update); err != nil {
 			log.Printf("Failed to send progress update: %v", err)
 		}
 	}
 
 	// Get init prompt
-	initPrompt := ch.orchestrator.GetInitPrompt()
+	initPrompt := orch.GetInitPrompt()
 
 	// Set initial status
 	dispatch(progress.Update{Message: "Analyzing codebase to generate AGENTS.md", Mode: progress.ReportJustStatus, Ephemeral: true})
 
 	// Process through orchestrator with streaming (in background)
 	go func() {
-		if err := ch.orchestrator.ProcessPrompt(ch.ctx, initPrompt, ch.progressCallback, ch.contextCallback, nil, nil, nil, ch.usageCallback); err != nil {
+		if err := orch.ProcessPrompt(ch.ctx, initPrompt, progressCallback, ch.contextCallback, nil, nil, nil, ch.usageCallback); err != nil {
 			// Error will be handled by orchestrator's error handling
 			// Clear status on error
 			dispatch(progress.Update{Message: "", Mode: progress.ReportJustStatus, Ephemeral: true})

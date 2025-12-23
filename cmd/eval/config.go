@@ -11,18 +11,18 @@ import (
 type EvalConfig struct {
 	// OpenRouter API configuration
 	OpenRouterAPIKey string `json:"openrouter_api_key"`
-	
+
 	// Models to evaluate
 	Models []ModelConfig `json:"models"`
-	
+
 	// Test cases to run
 	TestCases []TestCase `json:"test_cases"`
-	
+
 	// Evaluation settings
 	MaxTokens   int           `json:"max_tokens"`
 	Temperature float64       `json:"temperature"`
 	Timeout     time.Duration `json:"timeout"`
-	
+
 	// Output settings
 	OutputFile string `json:"output_file"`
 	Verbose    bool   `json:"verbose"`
@@ -30,11 +30,11 @@ type EvalConfig struct {
 
 // ModelConfig represents a model to evaluate
 type ModelConfig struct {
-	ID           string `json:"id"`            // e.g., "mistralai/devstral-2512"
-	DisplayName  string `json:"display_name"`  // Human-readable name
-	Provider     string `json:"provider"`      // Should be "openrouter" for all
-	Enabled      bool   `json:"enabled"`       // Whether to include in evaluation
-	MaxTokens    int    `json:"max_tokens"`    // Model-specific token limit (optional)
+	ID          string `json:"id"`           // e.g., "mistralai/devstral-2512"
+	DisplayName string `json:"display_name"` // Human-readable name
+	Provider    string `json:"provider"`     // Should be "openrouter" for all
+	Enabled     bool   `json:"enabled"`      // Whether to include in evaluation
+	MaxTokens   int    `json:"max_tokens"`   // Model-specific token limit (optional)
 }
 
 // TestCase represents a test case to run
@@ -43,8 +43,8 @@ type TestCase struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Prompt      string                 `json:"prompt"`
-	Expected    interface{}            `json:"expected"` // Expected response type or content
-	Category    string                 `json:"category"` // e.g., "calculator", "reasoning", "coding"
+	Expected    interface{}            `json:"expected"`   // Expected response type or content
+	Category    string                 `json:"category"`   // e.g., "calculator", "reasoning", "coding"
 	Parameters  map[string]interface{} `json:"parameters"` // Additional parameters for this test case
 }
 
@@ -134,14 +134,14 @@ func LoadConfig(configPath string) (*EvalConfig, error) {
 	if configPath == "" {
 		configPath = "eval_config.json"
 	}
-	
+
 	// Try to load from file
 	if data, err := os.ReadFile(configPath); err == nil {
 		var config EvalConfig
 		if err := json.Unmarshal(data, &config); err != nil {
 			return nil, fmt.Errorf("failed to parse config file: %w", err)
 		}
-		
+
 		// Set defaults for missing fields
 		if config.MaxTokens == 0 {
 			config.MaxTokens = 4096
@@ -155,18 +155,18 @@ func LoadConfig(configPath string) (*EvalConfig, error) {
 		if config.OutputFile == "" {
 			config.OutputFile = "eval_results.json"
 		}
-		
+
 		return &config, nil
 	}
-	
+
 	// Return default config if file doesn't exist
 	config := DefaultEvalConfig()
-	
+
 	// Override with environment variables if available
 	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
 		config.OpenRouterAPIKey = apiKey
 	}
-	
+
 	return config, nil
 }
 
@@ -176,7 +176,7 @@ func (c *EvalConfig) SaveConfig(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	
+
 	return os.WriteFile(path, data, 0644)
 }
 
@@ -185,26 +185,26 @@ func (c *EvalConfig) Validate() error {
 	if c.OpenRouterAPIKey == "" {
 		return fmt.Errorf("OpenRouter API key is required")
 	}
-	
+
 	if len(c.Models) == 0 {
 		return fmt.Errorf("at least one model must be configured")
 	}
-	
+
 	if len(c.TestCases) == 0 {
 		return fmt.Errorf("at least one test case must be configured")
 	}
-	
+
 	enabledModels := 0
 	for _, model := range c.Models {
 		if model.Enabled {
 			enabledModels++
 		}
 	}
-	
+
 	if enabledModels == 0 {
 		return fmt.Errorf("at least one model must be enabled")
 	}
-	
+
 	return nil
 }
 

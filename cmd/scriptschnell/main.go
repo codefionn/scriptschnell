@@ -16,6 +16,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/cli"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secrets"
 	"github.com/codefionn/scriptschnell/internal/tui"
@@ -426,6 +427,14 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	// Set up multi-tab support
 	cmdHandler.SetFactory(factory)
 	cmdHandler.SetGetActiveTab(model.GetActiveTab)
+
+	// Set up progress callback getter for multi-tab support
+	cmdHandler.SetGetProgressCallback(func() progress.Callback {
+		if activeTab := model.GetActiveTab(); activeTab != nil {
+			return model.CreateProgressCallbackForTab(activeTab.ID)
+		}
+		return nil
+	})
 
 	// Helper to run overlay menus while managing terminal state
 	runOverlayMenu := func(run func() error) (retErr error) {

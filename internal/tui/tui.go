@@ -97,6 +97,8 @@ const (
 	resizeViewportDebounce = 75 * time.Millisecond
 )
 
+const defaultInputPlaceholder = "Type your prompt here... (@ for files, Alt+Enter or Ctrl+J for newline, Ctrl+X for commands)"
+
 // Message represents a chat message with metadata
 type message struct {
 	role       string
@@ -271,6 +273,13 @@ type TabGenerationCompleteMsg struct {
 	Error error
 }
 
+// TabContextUsageMsg updates free context for a specific tab
+type TabContextUsageMsg struct {
+	TabID         int
+	FreePercent   int
+	ContextWindow int
+}
+
 // TabAuthorizationRequiredMsg is sent when a tab needs authorization
 type TabAuthorizationRequiredMsg struct {
 	TabID  int
@@ -329,7 +338,7 @@ type NewTabMsg struct {
 
 func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your prompt here... (@ for files, Alt+Enter or Ctrl+J for newline, Ctrl+X for commands)"
+	ta.Placeholder = defaultInputPlaceholder
 	ta.Focus()
 	ta.Prompt = "│ "
 	ta.CharLimit = 10000
@@ -1279,6 +1288,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	wasReady := m.ready
+	prevValue := m.textarea.Value()
 
 	// Handle Alt+Enter and Ctrl+J before textarea processing to manually insert newline
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
@@ -1310,7 +1320,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if !(m.overlayActive && isKeyMsg(msg)) && !shouldBlockTextarea {
-		prevValue := m.textarea.Value()
 		m.textarea, tiCmd = m.textarea.Update(msg)
 
 		// Sanitize ANSI sequences
@@ -1362,6 +1371,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.overlayActive {
 			return m, baseCmd
+		}
+		if cmdStr, ok := m.commandShortcutForKey(msg, prevValue); ok {
+			m.commandMode = false
+			m.resetInputState()
+			return m, tea.Batch(baseCmd, m.handleCommand(cmdStr))
 		}
 		switch msg.String() {
 		case "ctrl+c":
@@ -1481,15 +1495,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter":
-			// If we have autocomplete suggestions, apply the selected one and clear suggestions
+			// Process the prompt, but handle autocomplete first.
+			rawInput := sanitizePromptInput(m.textarea.Value(), &m.sanitizeState)
+			input := strings.TrimSpace(rawInput)
+
+			// If we have autocomplete suggestions:
+			// - file suggestions: Enter applies the suggestion
+			// - command suggestions: Enter submits when already exact; otherwise apply suggestion
 			if len(m.suggestions) > 0 {
-				m.applySelectedSuggestion()
-				return m, baseCmd
+				if (m.commandMode || strings.HasPrefix(input, "/")) && m.selectedSuggIndex >= 0 && m.selectedSuggIndex < len(m.suggestions) {
+					selected := m.suggestions[m.selectedSuggIndex]
+					if strings.EqualFold(input, selected) {
+						// fall through and submit
+					} else {
+						m.applySelectedSuggestion()
+						return m, baseCmd
+					}
+				} else {
+					m.applySelectedSuggestion()
+					return m, baseCmd
+				}
 			}
 
 			// Otherwise, process the prompt normally
-			rawInput := sanitizePromptInput(m.textarea.Value(), &m.sanitizeState)
-			input := strings.TrimSpace(rawInput)
 			if input == "" {
 				return m, baseCmd
 			}
@@ -1500,13 +1528,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.AddSystemMessage("Converted HTML to markdown")
 			}
 
-			m.textarea.Reset()
-			m.textarea.Placeholder = "Type your prompt here... (@ for files, Alt+Enter or Ctrl+J for newline, Ctrl+X for commands)"
-			m.sanitizeState = ansiSanitizeState{}
-			m.suggestions = nil
-			m.selectedSuggIndex = 0
-			m.originalSuggestions = nil
-			m.originalInput = ""
+			m.resetInputState()
 
 			isCommand := m.commandMode || strings.HasPrefix(input, "/")
 			if isCommand {
@@ -1609,6 +1631,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ContextUsageMsg:
 		m.contextFreePercent = msg.FreePercent
 		m.contextWindow = msg.ContextWindow
+		if m.activeSessionIdx >= 0 && m.activeSessionIdx < len(m.sessions) {
+			m.sessions[m.activeSessionIdx].ContextFreePercent = msg.FreePercent
+			m.sessions[m.activeSessionIdx].ContextWindow = msg.ContextWindow
+		}
 		return m, baseCmd
 
 	case OpenRouterUsageMsg:
@@ -1758,6 +1784,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeAuthorizationID = ""
 		m.authorizationMu.Unlock()
 
+		return m, baseCmd
+
+	case TabContextUsageMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx >= 0 {
+			m.sessions[tabIdx].ContextFreePercent = msg.FreePercent
+			m.sessions[tabIdx].ContextWindow = msg.ContextWindow
+			if tabIdx == m.activeSessionIdx {
+				m.contextFreePercent = msg.FreePercent
+				m.contextWindow = msg.ContextWindow
+			}
+		} else {
+			logger.Warn("Received TabContextUsageMsg for unknown tab ID: %d", msg.TabID)
+		}
 		return m, baseCmd
 
 	case TabToolCallMsg:
@@ -1944,6 +1984,16 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 		return nil
 	}
 
+	// Create context usage callback for this tab
+	contextCallback := func(freePercent int, contextWindow int) error {
+		m.program.Send(TabContextUsageMsg{
+			TabID:         tab.ID,
+			FreePercent:   freePercent,
+			ContextWindow: contextWindow,
+		})
+		return nil
+	}
+
 	// Create usage callback for this tab
 	usageCallback := func(usage map[string]interface{}) error {
 		logger.Debug("Tab %d: usage callback received: %v", tab.ID, usage)
@@ -1954,6 +2004,29 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 		return nil
 	}
 
+	// Wire planning user-input callback so the planning agent can ask clarifying questions
+	runtime.Orchestrator.SetUserInputCallback(func(question string) (string, error) {
+		responseChan := make(chan string, 1)
+		errChan := make(chan error, 1)
+
+		// Choose dialog based on the question format
+		if isLikelyMultipleChoicePrompt(question) {
+			m.program.Send(UserMultipleQuestionsRequestMsg{
+				Questions: question,
+				Response:  responseChan,
+				Error:     errChan,
+			})
+		} else {
+			m.program.Send(UserInputRequestMsg{
+				Question: question,
+				Response: responseChan,
+				Error:    errChan,
+			})
+		}
+
+		return m.awaitUserResponse(runtime.ctx, responseChan, errChan)
+	})
+
 	// Submit to tab's orchestrator in goroutine
 	return func() tea.Msg {
 		go func() {
@@ -1962,7 +2035,7 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 				ctx,
 				input,
 				progressCallback,
-				nil,                   // contextCallback - not needed for TUI
+				contextCallback,       // context usage callback (tab-aware)
 				authorizationCallback, // authorization callback
 				toolCallCallback,      // tool call callback
 				toolResultCallback,    // tool result callback
@@ -3381,6 +3454,41 @@ func (m *Model) handleCommand(input string) tea.Cmd {
 	}
 }
 
+func (m *Model) resetInputState() {
+	m.textarea.Reset()
+	m.textarea.Placeholder = defaultInputPlaceholder
+	m.sanitizeState = ansiSanitizeState{}
+	m.suggestions = nil
+	m.selectedSuggIndex = 0
+	m.originalSuggestions = nil
+	m.originalInput = ""
+	m.tabCycleIndex = 0
+}
+
+func (m *Model) commandShortcutForKey(msg tea.KeyMsg, prevValue string) (string, bool) {
+	if !m.commandMode {
+		return "", false
+	}
+	if strings.TrimSpace(prevValue) != "" {
+		return "", false
+	}
+
+	switch strings.ToLower(msg.String()) {
+	case "m":
+		return "/models", true
+	case "p":
+		return "/provider", true
+	case "i":
+		return "/init", true
+	case "h":
+		return "/help", true
+	case "q":
+		return "/quit", true
+	default:
+		return "", false
+	}
+}
+
 func (m *Model) SetOnSubmit(fn func(string) error) {
 	m.onSubmit = fn
 }
@@ -3645,5 +3753,29 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 			msg.Response <- formattedAnswers.String()
 		}
 		return nil
+	}
+}
+
+// isLikelyMultipleChoicePrompt detects the formatted prompt produced by the planning agent's ask_user_multiple tool.
+func isLikelyMultipleChoicePrompt(question string) bool {
+	q := strings.TrimSpace(question)
+	// Look for numbered questions plus a/b/c options
+	return strings.Contains(q, "\n") &&
+		(strings.Contains(q, "1.") || strings.Contains(q, "1)")) &&
+		strings.Contains(q, "a)") && strings.Contains(q, "b)") && strings.Contains(q, "c)")
+}
+
+// awaitUserResponse waits for a response/err with a safeguard timeout to prevent planner hangs.
+func (m *Model) awaitUserResponse(ctx context.Context, resp <-chan string, errc <-chan error) (string, error) {
+	timeout := time.After(2 * time.Minute)
+	select {
+	case r := <-resp:
+		return r, nil
+	case err := <-errc:
+		return "", err
+	case <-timeout:
+		return "", fmt.Errorf("timed out waiting for user input")
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
 }

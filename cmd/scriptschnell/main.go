@@ -898,9 +898,7 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 		return nil
 	})
 
-	// TODO: Set up user input callback for planning questions on per-tab orchestrators
-	// This needs to be set when creating each tab runtime in CreateTabRuntime()
-	// For now, we'll add this functionality to the runtime creation process
+	// Planning questions are handled via the per-tab user input callbacks configured in the TUI.
 
 	// Run TUI
 	program = tea.NewProgram(model, tea.WithAltScreen())

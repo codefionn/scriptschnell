@@ -1,0 +1,53 @@
+{
+  "id": "calculator-agentic",
+  "name": "Calculator CLI - Agentic Implementation",
+  "description": "AI autonomously designs, implements, tests, and validates a Go CLI calculator with proper operator precedence and parentheses support",
+  
+  "task_dir": "../../e2e-tests/calculator-agentic/workspace",
+  "prompt": "You need to create a command-line calculator in Go that takes arithmetic expressions as command line arguments and evaluates them.
+
+Requirements:
+1. Create a Go program in main.go that implements a calculator
+2. The calculator should support +, -, *, / operations with proper operator precedence
+3. Support parentheses ( and ) for grouping
+4. Parse expressions from command line arguments
+5. Print the result as a number (integer for integer results, float for division)
+6. Write comprehensive tests in main_test.go
+7. Make sure all tests pass
+8. Build this into a binary called 'calculator'
+
+The program should work like:
+./calculator \"8 * 10 + 2\"    # should output 82
+./calculator \"(2 + 3) * 4\"    # should output 20
+./calculator \"100 / 4\"         # should output 25
+
+You have full autonomy to design the implementation. Please write the code, test it, and ensure it works correctly.",
+  
+  "expected_results": {
+    "binary_exists": "calculator",
+    "source_exists": "main.go",
+    "tests_exist": "main_test.go"
+  },
+  
+  "validation_script": "#!/bin/bash\nset -e\n\necho \"Running validation...\"\n\n# Check that required files exist\nif [ ! -f \"calculator\" ]; then\n    echo \"ERROR: calculator binary not found\"\n    exit 1\nfi\n\nif [ ! -f \"main.go\" ]; then\n    echo \"ERROR: main.go not found\"\n    exit 1\nfi\n\nif [ ! -f \"main_test.go\" ]; then\n    echo \"ERROR: main_test.go not found\"\n    exit 1\nfi\n\n# Run Go tests\necho \"Running Go tests...\"\nif ! go test -v .; then\n    echo \"ERROR: Go tests failed\"\n    exit 1\nfi\n\n# Run specific test cases\necho \"Running functionality tests...\"\n\ntest_cases=(\n    \"8 * 10 + 2:82\"\n    \"2 * 3 + 5:11\"\n    \"10 + 5 * 2:20\"\n    \"100 / 4:25\"\n    \"(2 + 3) * 4:20\"\n    \"50 - 10 * 2:30\"\n    \"1 + 2 + 3 + 4:10\"\n    \"100 / 10 / 2:5\"\n)\n\nfor test_case in \"${test_cases[@]}\"; do\n    expression=\"${test_case%:*}\"\n    expected=\"${test_case#*:}\"\n    \n    echo \"Testing: $expression = $expected\"\n    result=$(./calculator \"$expression\" 2>/dev/null | tr -d '\\n' | xargs)\n    \n    if [ \"$result\" != \"$expected\" ]; then\n        echo \"ERROR: Expected $expected, got $result\"\n        exit 1\n    fi\n    \n    echo \"✓ PASS\"\ndone\n\necho \"All validation tests passed!\"",
+  
+  "success_criteria": {
+    "file_exists": "calculator",
+    "file_exists": "main.go", 
+    "file_exists": "main_test.go",
+    "contains_code": "package main",
+    "compiles": true,
+    "tests_pass": true
+  },
+  
+  "category": "coding",
+  "difficulty": "medium",
+  "timeout": "10m",
+  
+  "parameters": {
+    "language": "go",
+    "requires_compilation": true,
+    "requires_testing": true,
+    "max_files": 3
+  }
+}

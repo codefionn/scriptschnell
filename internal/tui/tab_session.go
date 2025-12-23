@@ -17,8 +17,10 @@ type TabSession struct {
 	CreatedAt    time.Time
 	LastActiveAt time.Time
 	// Per-tab usage data
-	OpenRouterUsage map[string]interface{}
-	ThinkingTokens  int
+	ContextFreePercent int
+	ContextWindow      int
+	OpenRouterUsage    map[string]interface{}
+	ThinkingTokens     int
 
 	// Per-tab runtime state
 	Runtime        *TabRuntime // Orchestrator runtime for this tab (lazy-loaded)

@@ -78,16 +78,17 @@ func (m *Model) handleNewTab(name string) tea.Cmd {
 
 	// Create TabSession wrapper
 	tabSession := &TabSession{
-		ID:             tabID,
-		Session:        sess,
-		Name:           name,
-		WorktreePath:   worktreePath,
-		Messages:       []message{},
-		CreatedAt:      time.Now(),
-		LastActiveAt:   time.Now(),
-		Runtime:        nil,   // Lazy-loaded on first prompt
-		Generating:     false, // Not generating initially
-		WaitingForAuth: false, // Not waiting for auth initially
+		ID:                 tabID,
+		Session:            sess,
+		Name:               name,
+		WorktreePath:       worktreePath,
+		Messages:           []message{},
+		CreatedAt:          time.Now(),
+		LastActiveAt:       time.Now(),
+		ContextFreePercent: 100,
+		Runtime:            nil,   // Lazy-loaded on first prompt
+		Generating:         false, // Not generating initially
+		WaitingForAuth:     false, // Not waiting for auth initially
 	}
 
 	// Add to sessions list
@@ -118,6 +119,8 @@ func (m *Model) handleSwitchTab(newIdx int) tea.Cmd {
 	m.messages = newTabSession.Messages
 	m.openRouterUsage = newTabSession.OpenRouterUsage
 	m.thinkingTokens = newTabSession.ThinkingTokens
+	m.contextFreePercent = newTabSession.ContextFreePercent
+	m.contextWindow = newTabSession.ContextWindow
 	m.updateViewport()
 
 	// Update context file if new tab has a runtime
@@ -337,13 +340,14 @@ func (m *Model) restoreTabs() error {
 		sess := session.NewSession(sessionID, workingDir)
 
 		tabSession := &TabSession{
-			ID:           tabID,
-			Session:      sess,
-			Name:         name,
-			WorktreePath: worktreePath,
-			Messages:     []message{},
-			CreatedAt:    time.Now(),
-			LastActiveAt: time.Now(),
+			ID:                 tabID,
+			Session:            sess,
+			Name:               name,
+			WorktreePath:       worktreePath,
+			Messages:           []message{},
+			CreatedAt:          time.Now(),
+			LastActiveAt:       time.Now(),
+			ContextFreePercent: 100,
 		}
 
 		m.sessions = append(m.sessions, tabSession)
@@ -371,13 +375,14 @@ func (m *Model) createDefaultTab() error {
 	defaultSession := session.NewSession("tab-1", m.workingDir)
 
 	defaultTab := &TabSession{
-		ID:           1,
-		Session:      defaultSession,
-		Name:         "",
-		WorktreePath: "",
-		Messages:     []message{},
-		CreatedAt:    time.Now(),
-		LastActiveAt: time.Now(),
+		ID:                 1,
+		Session:            defaultSession,
+		Name:               "",
+		WorktreePath:       "",
+		Messages:           []message{},
+		CreatedAt:          time.Now(),
+		LastActiveAt:       time.Now(),
+		ContextFreePercent: 100,
 	}
 
 	m.sessions = []*TabSession{defaultTab}

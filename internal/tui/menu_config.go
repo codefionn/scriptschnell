@@ -284,6 +284,7 @@ func (m SettingsMenuModel) updateInputMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case actionEditPerplexityKey:
 				m.cfg.Search.Perplexity.APIKey = v
 			}
+			m.saveConfig()
 			// Refresh items to show masked values
 			m.initLists()
 			m.inputMode = false
@@ -299,7 +300,7 @@ func (m SettingsMenuModel) updateProviderMode(msg tea.Msg) (tea.Model, tea.Cmd) 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c", "esc", "q":
 			m.providerMode = false
 			return m, nil
 		case "enter":
@@ -319,6 +320,7 @@ func (m SettingsMenuModel) updateProviderMode(msg tea.Msg) (tea.Model, tea.Cmd) 
 			case providerDisplayName("perplexity"):
 				m.cfg.Search.Provider = "perplexity"
 			}
+			m.saveConfig()
 			m.providerMode = false
 			m.initLists()
 			return m, nil

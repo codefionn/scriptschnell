@@ -1,0 +1,52 @@
+package templates
+
+import "fmt"
+
+type DashboardStats struct {
+	TotalRuns  int
+	PassRate   float64
+	TokensUsed int64
+	TotalCost  float64
+}
+
+type DashboardProps struct {
+	Stats DashboardStats
+}
+
+templ StatCard(title string, value string) {
+	@Card("") {
+		<div class="p-6">
+			<div class="text-sm text-gray-500">{ title }</div>
+			<div class="text-2xl font-bold">{ value }</div>
+		</div>
+	}
+}
+
+templ QuickActionCard(title string, description string, href string) {
+	<a href={ href } class="block p-6 border-2 border-dashed rounded-lg text-center hover:border-gray-400">
+		<div class="font-medium">{ title }</div>
+		<div class="text-sm text-gray-500">{ description }</div>
+	</a>
+}
+
+templ Dashboard(props DashboardProps) {
+	<div class="space-y-6">
+		<h2 class="text-2xl font-bold">Dashboard</h2>
+		
+		<!-- Stats Grid -->
+		<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+			@StatCard("Total Eval Runs", fmt.Sprintf("%d", props.Stats.TotalRuns))
+			@StatCard("Pass Rate", fmt.Sprintf("%.1f%%", props.Stats.PassRate))
+			@StatCard("Tokens Used", fmt.Sprintf("%d", props.Stats.TokensUsed))
+			@StatCard("Total Cost", fmt.Sprintf("$%.4f", props.Stats.TotalCost))
+		</div>
+
+		<!-- Quick Actions -->
+		<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+			@QuickActionCard("Manage Models", "Select models for evaluation", "/models")
+			@QuickActionCard("Run Evals", "Start evaluation runs", "/evals")
+			@QuickActionCard("View Results", "Analyze evaluation results", "/results")
+			@QuickActionCard("Configuration", "Manage API tokens", "/setup")
+		</div>
+	</div>
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Message represents a message sent between actors
@@ -35,6 +36,7 @@ type ActorRef struct {
 	sequential bool
 	sequenceMu sync.Mutex
 	ctx        context.Context
+	health     *HealthCheckable
 }
 
 // NewActorRef creates a new actor reference
@@ -55,6 +57,14 @@ func NewActorRef(id string, actor Actor, mailboxSize int, opts ...ActorRefOption
 		actor:   actor,
 		mailbox: make(chan Message, mailboxSize),
 	}
+
+	// Initialize health monitoring
+	var metricsProvider func() interface{}
+	if _, ok := actor.(HealthCheckActor); ok {
+		metricsProvider = func() interface{} { return nil } // Default provider
+	}
+	ref.health = NewHealthCheckable(id, ref.mailbox, metricsProvider)
+
 	for _, opt := range opts {
 		opt(ref)
 	}
@@ -77,11 +87,19 @@ func (ref *ActorRef) Send(msg Message) error {
 	ctx := ref.ctx
 	ref.mu.RUnlock()
 
+	// Record activity for health monitoring
+	if ref.health != nil {
+		ref.health.RecordActivity()
+	}
+
 	if sequential {
 		ref.sequenceMu.Lock()
 		defer ref.sequenceMu.Unlock()
 		if err := ref.actor.Receive(ctx, msg); err != nil {
 			fmt.Printf("Actor %s error processing message: %v\n", ref.id, err)
+			if ref.health != nil {
+				ref.health.RecordError(err)
+			}
 		}
 		return nil
 	}
@@ -153,9 +171,32 @@ func (ref *ActorRef) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case msg := <-ref.mailbox:
+			// Record activity for health monitoring
+			if ref.health != nil {
+				ref.health.RecordActivity()
+			}
+
+			// Handle health check messages first
+			if hActor, ok := ref.actor.(HealthCheckActor); ok {
+				// Actor supports health checks, delegate to the actor
+				if err := hActor.Receive(ctx, msg); err == nil {
+					// Health check message handled
+					continue
+				}
+			} else if ref.health != nil {
+				// Fall back to ref-level health checking
+				if err := ref.health.HealthCheckHandler(ctx, msg); err == nil {
+					// Health check message handled successfully
+					continue
+				}
+			}
+
 			if err := ref.actor.Receive(ctx, msg); err != nil {
 				// Log error but continue processing
 				fmt.Printf("Actor %s error processing message: %v\n", ref.id, err)
+				if ref.health != nil {
+					ref.health.RecordError(err)
+				}
 			}
 		}
 	}
@@ -217,6 +258,55 @@ func (s *System) Stop(ctx context.Context, id string) error {
 	s.mu.Unlock()
 
 	return ref.Stop(ctx)
+}
+
+// HealthCheck performs health checks on all actors in the system
+func (s *System) HealthCheck(ctx context.Context) map[string]HealthReport {
+	s.mu.RLock()
+	actorRefs := make([]*ActorRef, 0, len(s.actors))
+	for _, ref := range s.actors {
+		actorRefs = append(actorRefs, ref)
+	}
+	s.mu.RUnlock()
+
+	reports := make(map[string]HealthReport)
+	for _, ref := range actorRefs {
+		if ref.health != nil {
+			reports[ref.ID()] = ref.health.GenerateHealthReport()
+		} else {
+			// Create a basic report for actors without health monitoring
+			reports[ref.ID()] = HealthReport{
+				ActorID:   ref.ID(),
+				Status:    HealthStatusUnknown,
+				Message:   "Health monitoring not available",
+				Timestamp: time.Now(),
+			}
+		}
+	}
+
+	return reports
+}
+
+// GetActorHealth returns the health report for a specific actor
+func (s *System) GetActorHealth(ctx context.Context, actorID string) (HealthReport, error) {
+	s.mu.RLock()
+	ref, exists := s.actors[actorID]
+	s.mu.RUnlock()
+
+	if !exists {
+		return HealthReport{}, fmt.Errorf("actor %s not found", actorID)
+	}
+
+	if ref.health != nil {
+		return ref.health.GenerateHealthReport(), nil
+	}
+
+	return HealthReport{
+		ActorID:   actorID,
+		Status:    HealthStatusUnknown,
+		Message:   "Health monitoring not available",
+		Timestamp: time.Now(),
+	}, nil
 }
 
 // StopAll stops all actors in the system

@@ -15,6 +15,7 @@ import (
 type SessionStorageActor struct {
 	name    string
 	storage *session.SessionStorage
+	health  *HealthCheckable
 }
 
 func NewSessionStorageActor(name string) (*SessionStorageActor, error) {
@@ -34,10 +35,15 @@ func NewSessionStorageActorWithConfig(name string, configFunc func() *config.Aut
 		return nil, err
 	}
 
-	return &SessionStorageActor{
+	actor := &SessionStorageActor{
 		name:    name,
 		storage: storage,
-	}, nil
+	}
+
+	// Initialize health monitoring
+	actor.health = NewHealthCheckable(name, make(chan Message, 10), actor.getSessionStorageMetrics)
+
+	return actor, nil
 }
 
 func (a *SessionStorageActor) ID() string { return a.name }
@@ -51,29 +57,46 @@ func (a *SessionStorageActor) Stop(ctx context.Context) error {
 }
 
 func (a *SessionStorageActor) Receive(ctx context.Context, msg Message) error {
+	// Record activity for health monitoring
+	if a.health != nil {
+		a.health.RecordActivity()
+	}
+
 	switch m := msg.(type) {
 	case SessionStorageSaveMsg:
 		logger.Debug("SessionStorageActor: received save message for session %s", m.Session.ID)
 		err := a.storage.SaveSession(m.Session, m.Name)
 		logger.Debug("SessionStorageActor: SaveSession returned err=%v", err)
+		if err != nil && a.health != nil {
+			a.health.RecordError(err)
+		}
 		m.ResponseChan <- SessionStorageSaveResponse{Err: err}
 		return nil
 	case SessionStorageLoadMsg:
 		logger.Debug("SessionStorageActor: received load message for session %s", m.SessionID)
 		session, err := a.storage.LoadSession(m.WorkingDir, m.SessionID)
 		logger.Debug("SessionStorageActor: LoadSession returned err=%v", err)
+		if err != nil && a.health != nil {
+			a.health.RecordError(err)
+		}
 		m.ResponseChan <- SessionStorageLoadResponse{Session: session, Err: err}
 		return nil
 	case SessionStorageListMsg:
 		logger.Debug("SessionStorageActor: received list message for workspace %s", m.WorkingDir)
 		sessions, err := a.storage.ListSessions(m.WorkingDir)
 		logger.Debug("SessionStorageActor: ListSessions returned %d sessions, err=%v", len(sessions), err)
+		if err != nil && a.health != nil {
+			a.health.RecordError(err)
+		}
 		m.ResponseChan <- SessionStorageListResponse{Sessions: sessions, Err: err}
 		return nil
 	case SessionStorageDeleteMsg:
 		logger.Debug("SessionStorageActor: received delete message for session %s", m.SessionID)
 		err := a.storage.DeleteSession(m.WorkingDir, m.SessionID)
 		logger.Debug("SessionStorageActor: DeleteSession returned err=%v", err)
+		if err != nil && a.health != nil {
+			a.health.RecordError(err)
+		}
 		m.ResponseChan <- SessionStorageDeleteResponse{Err: err}
 		return nil
 	case SessionStorageStartAutoSaveMsg:
@@ -89,6 +112,12 @@ func (a *SessionStorageActor) Receive(ctx context.Context, msg Message) error {
 		m.ResponseChan <- SessionStorageStopAutoSaveResponse{Err: nil}
 		return nil
 	default:
+		// Try health check handler first
+		if a.health != nil {
+			if err := a.health.HealthCheckHandler(ctx, msg); err == nil {
+				return nil // Health check message handled
+			}
+		}
 		return fmt.Errorf("unknown session storage actor message type: %T", msg)
 	}
 }
@@ -313,6 +342,32 @@ func StopAutoSaveViaActor(ctx context.Context, storageRef *ActorRef) error {
 		logger.Error("StopAutoSaveViaActor: context cancelled: %v", ctx.Err())
 		return ctx.Err()
 	}
+}
+
+// Health Check methods
+
+// GetHealthMetrics returns current health metrics for session storage
+func (a *SessionStorageActor) GetHealthMetrics() HealthMetrics {
+	return a.health.GetHealthMetrics()
+}
+
+// IsHealthy returns true if the session storage actor is healthy
+func (a *SessionStorageActor) IsHealthy() bool {
+	return a.health.IsHealthy()
+}
+
+// GetSessionStorageMetrics provides custom metrics for session storage
+func (a *SessionStorageActor) getSessionStorageMetrics() interface{} {
+	// Collect session storage specific metrics
+	metrics := map[string]interface{}{
+		"storage_type": "filesystem",
+	}
+
+	// Add session count if we can determine working directory
+	// Note: This would require tracking working directory in the actor
+	// For now, just basic metrics
+
+	return metrics
 }
 
 // GenerateSessionName generates a session name with timestamp

@@ -1,0 +1,62 @@
+{
+  "id": "number-sorter",
+  "name": "Number Sorter CLI",
+  "description": "A command-line application that sorts numbers in ascending order",
+  "image": "golang:1.25-bookworm",
+  "user_prompt": "You are an autonomous software engineer. Build and test a Go command-line number sorter.\n\nREQUIREMENTS:\n- Accept numbers as CLI args: ./sorter 12 34 13\n- Sort the numbers in ascending order\n- Print the sorted numbers to stdout, space-separated on a single line\n- Exit 0 on success, 1 on error\n- Handle invalid input (non-numeric values) gracefully\n\nEXAMPLES (must pass):\n  ./sorter 12 34 13       → 12 13 34\n  ./sorter 5 2 8 1 9     → 1 2 5 8 9\n  ./sorter 42            → 42\n  ./sorter 10 5 5 3      → 3 5 5 10\n  ./sorter -5 0 10       → -5 0 10\n\nYOUR AUTONOMOUS WORKFLOW:\n1. Create main.go with number sorter implementation\n2. Write test cases (as Go tests or shell commands)\n3. Run your tests\n4. Fix any failures\n5. Build the sorter binary: go build -o sorter .\n\nDO NOT ask for permission or clarification. You have full authority to:\n- Choose any implementation (sort package, custom sorting, etc.)\n- Write comprehensive tests\n- Iterate and debug\n- Make design decisions\n\nEXPECTED OUTPUT:\n- main.go (working implementation)\n- sorter (compiled binary, this must be done for our cicd test suite, `go build -o sorter .`)\n- Test results showing all tests pass\n\nSTART NOW. Build the number sorter.",
+  "expected_files": {
+    "main.go": "Go source file with number sorter implementation",
+    "sorter": "Compiled binary from Go source"
+  },
+  "run_file": "sorter",
+  "cli_tests": [
+    {
+      "id": "test_1",
+      "args": ["12", "34", "13"],
+      "expected": "12 13 34",
+      "description": "Basic sorting of three numbers"
+    },
+    {
+      "id": "test_2",
+      "args": ["5", "2", "8", "1", "9"],
+      "expected": "1 2 5 8 9",
+      "description": "Sorting five numbers"
+    },
+    {
+      "id": "test_3",
+      "args": ["42"],
+      "expected": "42",
+      "description": "Single number input"
+    },
+    {
+      "id": "test_4",
+      "args": ["10", "5", "5", "3"],
+      "expected": "3 5 5 10",
+      "description": "Sorting with duplicate numbers"
+    },
+    {
+      "id": "test_5",
+      "args": ["-5", "0", "10"],
+      "expected": "-5 0 10",
+      "description": "Sorting with negative numbers"
+    },
+    {
+      "id": "test_6",
+      "args": ["100", "50", "25", "75", "0"],
+      "expected": "0 25 50 75 100",
+      "description": "Sorting multiple numbers including zero"
+    },
+    {
+      "id": "test_7",
+      "args": ["3", "1", "4", "1", "5", "9", "2", "6", "5"],
+      "expected": "1 1 2 3 4 5 5 6 9",
+      "description": "Sorting many numbers with multiple duplicates"
+    },
+    {
+      "id": "test_8",
+      "args": ["1000", "1", "500", "-1000"],
+      "expected": "-1000 1 500 1000",
+      "description": "Sorting large positive and negative numbers"
+    }
+  ]
+}

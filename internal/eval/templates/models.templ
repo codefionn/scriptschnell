@@ -1,0 +1,277 @@
+package templates
+
+import (
+	"fmt"
+	"strings"
+)
+
+type Model struct {
+	ID            string
+	Name          string
+	Provider      string
+	Description   string
+	ContextWindow int
+	Selected      bool
+}
+
+type ModelsProps struct {
+	Models []Model
+	Error  string
+}
+
+type SearchResultsProps struct {
+	Models     []Model
+	SearchQuery string
+	Total      int
+	Error      string
+}
+
+// sanitizeID replaces characters that are invalid in CSS selectors
+func sanitizeID(id string) string {
+	// Replace forward slashes, dots, colons, and other special chars with hyphens
+	replacer := strings.NewReplacer(
+		"/", "-",
+		".", "-",
+		":", "-",
+		"@", "-",
+		" ", "-",
+		"[", "-",
+		"]", "-",
+		"(", "-",
+		")", "-",
+	)
+	return replacer.Replace(id)
+}
+
+templ ModelCard(model Model, searchQuery string) {
+	@Card("h-full hover:shadow-lg transition-shadow duration-200") {
+		<div class="p-4">
+			<div class="flex items-start justify-between">
+				<div class="flex-1 min-w-0">
+					<div class="flex items-center space-x-2">
+						<h3 class="text-lg font-medium text-gray-900 truncate" title={ model.Name }>{ model.Name }</h3>
+						<span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded" title={ model.ID }>{ model.ID }</span>
+					</div>
+					<p class="text-sm text-gray-500 truncate" title={ model.Provider }>{ model.Provider }</p>
+					<p class="text-sm text-gray-600 mt-1 line-clamp-2" title={ model.Description }>{ model.Description }</p>
+					if model.ContextWindow > 0 {
+						<p class="text-xs text-gray-500 mt-2">Context: { fmt.Sprintf("%d", model.ContextWindow) } tokens</p>
+					}
+				</div>
+				<div class="ml-4 flex-shrink-0" id={ fmt.Sprintf("model-button-%s", sanitizeID(model.ID)) }>
+					if model.Selected {
+						<button
+							hx-post="/models/deselect"
+							hx-vals={ fmt.Sprintf(`{"model_id": "%s"}`, model.ID) }
+							hx-target={ fmt.Sprintf("#model-button-%s", sanitizeID(model.ID)) }
+							hx-swap="outerHTML"
+							class="px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 bg-green-600 text-white hover:bg-green-700 focus:ring-green-500"
+						>
+							Selected ✓
+						</button>
+					} else {
+						<button
+							hx-post="/models/select"
+							hx-vals={ fmt.Sprintf(`{"model_id": "%s"}`, model.ID) }
+							hx-target={ fmt.Sprintf("#model-button-%s", sanitizeID(model.ID)) }
+							hx-swap="outerHTML"
+							class="px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500"
+						>
+							Select
+						</button>
+					}
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ SearchResults(props SearchResultsProps) {
+	@Card("p-6") {
+		<div class="flex justify-between items-center mb-6">
+			<div>
+				<p class="text-sm text-gray-600">
+					if props.SearchQuery != "" {
+						<span class="font-medium">{ len(props.Models) }</span> models found matching <span class="font-semibold text-blue-600">"{ props.SearchQuery }"</span>
+						if len(props.Models) > 0 {
+							<span class="text-green-600 ml-2">✓</span>
+						}
+					} else {
+						Showing <span class="font-medium">{ len(props.Models) }</span> available models
+					}
+				</p>
+				if props.SearchQuery != "" && len(props.Models) > 0 {
+					<p class="text-xs text-gray-500 mt-1">
+						Found { len(props.Models) } of { props.Total } total models ({ fmt.Sprintf("%.1f", float64(len(props.Models))/float64(props.Total)*100) }%)
+					</p>
+				}
+			</div>
+			<div>
+				if props.SearchQuery != "" && len(props.Models) == 0 {
+					<button 
+						hx-get="/models/search?q="
+						hx-target="#models-container"
+						hx-swap="innerHTML"
+						hx-push-url="true"
+						class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+					>
+						Clear search
+					</button>
+				}
+			</div>
+		</div>
+
+		if props.Error != "" {
+			@Alert(props.Error, "error")
+		}
+
+		<div id="models-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+			for _, model := range props.Models {
+				@ModelCard(model, props.SearchQuery)
+			}
+		</div>
+		
+		if len(props.Models) == 0 {
+			<div class="text-center py-12">
+				<svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+				</svg>
+				<h3 class="mt-2 text-sm font-medium text-gray-900">No models found</h3>
+				<p class="mt-1 text-sm text-gray-500">
+					if props.SearchQuery == "" {
+						No models available. Refresh models from OpenRouter to get started.
+					} else {
+						No models match your search. Try a different search term.
+					}
+				</p>
+			</div>
+		}
+	}
+}
+
+templ SearchResultsPage(props SearchResultsProps) {
+	<div class="space-y-6">
+		<div class="flex justify-between items-center">
+			<h2 class="text-2xl font-bold">Models</h2>
+			<div class="flex space-x-4">
+				<form hx-post="/models/refresh" hx-target="#models-container" hx-swap="innerHTML">
+					@PrimaryButton("Refresh Models")
+				</form>
+				<div class="flex items-center space-x-2">
+				<form id="search-form" hx-get="/models/search" hx-target="#models-container" hx-swap="innerHTML" hx-indicator="#search-indicator" hx-push-url="true">
+					<div class="relative">
+						<input 
+							type="search" 
+							name="q"
+							value={ props.SearchQuery }
+							placeholder="Search models by name, provider, or ID..." 
+							hx-trigger="keyup[keyCode==13] search changed delay:300ms"
+							hx-include="#search-form"
+							class="px-3 py-2 pr-10 border border-gray-300 rounded-md w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						/>
+						<div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+							<svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+							</svg>
+						</div>
+					</div>
+				</form>
+				<button 
+					type="button"
+					hx-get="/models/search?q="
+					hx-target="#models-container"
+					hx-swap="innerHTML"
+					hx-push-url="true"
+					class="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+					title="Clear search"
+				>
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+			<div id="search-indicator" class="htmx-indicator hidden">
+				<svg class="animate-spin h-4 w-4 mr-2 inline" viewBox="0 0 24 24">
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+				</svg>
+				<span class="text-sm text-gray-600">Searching...</span>
+			</div>
+			</div>
+		</div>
+
+		<div id="models-container">
+			@SearchResults(props)
+		</div>
+	</div>
+}
+
+templ Models(props ModelsProps) {
+	<div class="space-y-6">
+		<div class="flex justify-between items-center">
+			<h2 class="text-2xl font-bold">Models</h2>
+			<div class="flex space-x-4">
+				<form hx-post="/models/refresh" hx-target="#models-container" hx-swap="innerHTML">
+					@PrimaryButton("Refresh Models")
+				</form>
+				<div class="flex items-center space-x-2">
+				<form id="search-form" hx-get="/models/search" hx-target="#models-container" hx-swap="innerHTML" hx-indicator="#search-indicator" hx-push-url="true">
+					<div class="relative">
+						<input 
+							type="search" 
+							name="q"
+							placeholder="Search models by name, provider, or ID..." 
+							hx-trigger="keyup[keyCode==13] search changed delay:300ms"
+							hx-include="#search-form"
+							class="px-3 py-2 pr-10 border border-gray-300 rounded-md w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						/>
+						<div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+							<svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+							</svg>
+						</div>
+					</div>
+				</form>
+				<button 
+					type="button"
+					hx-get="/models/search?q="
+					hx-target="#models-container"
+					hx-swap="innerHTML"
+					hx-push-url="true"
+					class="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+					title="Clear search"
+				>
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+				<div id="search-indicator" class="htmx-indicator hidden">
+					<svg class="animate-spin h-4 w-4 mr-2 inline" viewBox="0 0 24 24">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+					</svg>
+					<span class="text-sm text-gray-600">Searching...</span>
+				</div>
+			</div>
+		</div>
+
+		if props.Error != "" {
+			@Alert(props.Error, "error")
+		}
+
+		<div id="models-container">
+			<div id="models-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+				for _, model := range props.Models {
+					@ModelCard(model, "")
+				}
+			</div>
+			if len(props.Models) == 0 {
+				<div class="text-center py-12">
+					<h3 class="mt-2 text-sm font-medium text-gray-900">No models found</h3>
+					<p class="mt-1 text-sm text-gray-500">Refresh models to get started.</p>
+				</div>
+			}
+		</div>
+	</div>
+}

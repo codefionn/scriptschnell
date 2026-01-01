@@ -208,7 +208,7 @@ func (c *OpenRouterClient) Stream(ctx context.Context, req *CompletionRequest, c
 func (c *OpenRouterClient) buildChatRequest(req *CompletionRequest, stream bool) (*openRouterChatRequest, error) {
 	logger.Debug("OpenRouter: building chat request for model %s, stream=%v", c.model, stream)
 
-	messages, err := convertMessagesToOpenRouter(req)
+	messages, err := c.convertMessagesToOpenRouter(req)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +238,31 @@ func (c *OpenRouterClient) buildChatRequest(req *CompletionRequest, stream bool)
 	return payload, nil
 }
 
+// getUnderlyingProvider extracts the underlying provider from OpenRouter model ID
+// e.g., "mistralai/codestral-2508" -> "mistralai"
+func (c *OpenRouterClient) getUnderlyingProvider() string {
+	parts := strings.Split(c.model, "/")
+	if len(parts) > 1 {
+		return strings.ToLower(parts[0])
+	}
+	return ""
+}
+
+// providerSupportsMultipartCache returns true if the provider supports multipart content format with cache_control
+func (c *OpenRouterClient) providerSupportsMultipartCache() bool {
+	provider := c.getUnderlyingProvider()
+	switch provider {
+	case "openai", "anthropic", "google":
+		return true
+	case "":
+		// If we can't determine the provider (e.g., model doesn't have /), be conservative
+		return false
+	default:
+		// Mistral, Cerebras, Cohere, DeepSeek, etc. don't support multipart format
+		return false
+	}
+}
+
 func (c *OpenRouterClient) newChatRequest(ctx context.Context, payload *openRouterChatRequest) (*http.Request, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -262,7 +287,7 @@ func (c *OpenRouterClient) newChatRequest(ctx context.Context, payload *openRout
 	return req, nil
 }
 
-func convertMessagesToOpenRouter(req *CompletionRequest) ([]openRouterChatMessage, error) {
+func (c *OpenRouterClient) convertMessagesToOpenRouter(req *CompletionRequest) ([]openRouterChatMessage, error) {
 	if req == nil {
 		return nil, fmt.Errorf("openrouter completion request cannot be nil")
 	}
@@ -275,16 +300,16 @@ func convertMessagesToOpenRouter(req *CompletionRequest) ([]openRouterChatMessag
 		messages, err := extractNativeOpenRouterMessages(req.Messages, req.SystemPrompt)
 		if err != nil {
 			logger.Warn("Failed to extract native OpenRouter messages, falling back to conversion: %v", err)
-			return convertMessagesToOpenRouterFromUnified(req)
+			return c.convertMessagesToOpenRouterFromUnified(req)
 		}
 		return messages, nil
 	}
 
-	return convertMessagesToOpenRouterFromUnified(req)
+	return c.convertMessagesToOpenRouterFromUnified(req)
 }
 
-func convertMessagesToOpenRouterFromUnified(req *CompletionRequest) ([]openRouterChatMessage, error) {
-	logger.Debug("convertMessagesToOpenRouterFromUnified: converting %d messages with system_prompt=%d chars, caching=%v", len(req.Messages), len(req.SystemPrompt), req.EnableCaching)
+func (c *OpenRouterClient) convertMessagesToOpenRouterFromUnified(req *CompletionRequest) ([]openRouterChatMessage, error) {
+	logger.Debug("convertMessagesToOpenRouterFromUnified: converting %d messages for model %s, system_prompt=%d chars, caching=%v", len(req.Messages), c.model, len(req.SystemPrompt), req.EnableCaching)
 
 	messages := make([]openRouterChatMessage, 0, len(req.Messages)+1)
 
@@ -294,8 +319,9 @@ func convertMessagesToOpenRouterFromUnified(req *CompletionRequest) ([]openRoute
 			Role: "system",
 		}
 
-		// Use multipart content with cache_control for caching support
-		if req.EnableCaching {
+		// Check if the underlying provider supports multipart content format with cache_control
+		// Some providers (like Mistral) expect simple string content and fail with 422 on multipart format
+		if req.EnableCaching && c.providerSupportsMultipartCache() {
 			sysMsg.Content = []openRouterContentBlock{
 				{
 					Type:         "text",
@@ -303,10 +329,14 @@ func convertMessagesToOpenRouterFromUnified(req *CompletionRequest) ([]openRoute
 					CacheControl: map[string]interface{}{"type": "ephemeral"},
 				},
 			}
-			logger.Debug("convertMessagesToOpenRouterFromUnified: added system prompt with caching enabled")
+			logger.Debug("convertMessagesToOpenRouterFromUnified: added system prompt with caching enabled (multipart format)")
 		} else {
 			sysMsg.Content = system
-			logger.Debug("convertMessagesToOpenRouterFromUnified: added system prompt without caching")
+			if req.EnableCaching {
+				logger.Debug("convertMessagesToOpenRouterFromUnified: added system prompt with caching disabled (provider %s doesn't support multipart format)", c.getUnderlyingProvider())
+			} else {
+				logger.Debug("convertMessagesToOpenRouterFromUnified: added system prompt without caching")
+			}
 		}
 
 		messages = append(messages, sysMsg)
@@ -330,7 +360,12 @@ func convertMessagesToOpenRouterFromUnified(req *CompletionRequest) ([]openRoute
 		}
 
 		if role == "assistant" && len(msg.ToolCalls) > 0 {
-			oMsg.ToolCalls = msg.ToolCalls
+			// Mistral (via OpenRouter) rejects tool calls with call_id field - only id is allowed
+			if c.getUnderlyingProvider() == "mistralai" {
+				oMsg.ToolCalls = removeCallIDFromToolCalls(msg.ToolCalls)
+			} else {
+				oMsg.ToolCalls = msg.ToolCalls
+			}
 		}
 
 		if role == "tool" && msg.ToolID != "" {
@@ -416,6 +451,23 @@ func convertOpenRouterToolCalls(toolCalls []openRouterToolCall) []map[string]int
 	}
 
 	logger.Debug("convertOpenRouterToolCalls: successfully converted %d tool calls", len(result))
+	return result
+}
+
+// removeCallIDFromToolCalls removes the call_id field from tool calls
+// This is needed for Mistral which rejects call_id and only accepts id
+func removeCallIDFromToolCalls(toolCalls []map[string]interface{}) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(toolCalls))
+	for i, tc := range toolCalls {
+		// Create a new map without call_id
+		cleanCall := make(map[string]interface{})
+		for k, v := range tc {
+			if k != "call_id" {
+				cleanCall[k] = v
+			}
+		}
+		result[i] = cleanCall
+	}
 	return result
 }
 

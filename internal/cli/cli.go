@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
@@ -26,6 +27,7 @@ type Options struct {
 	Model               string
 	Provider            string
 	JSONOutput          bool
+	JSONExtended        bool
 }
 
 // CLI handles command-line interface using the orchestrator
@@ -38,6 +40,29 @@ type CLI struct {
 }
 
 func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI, error) {
+	// Priority order for model/provider selection:
+	// 1. CLI flags (-model, -provider)
+	// 2. Environment variables (SCRIPTSCHNELL_MODEL, SCRIPTSCHNELL_PROVIDER)
+	// 3. Auto-detect from provider API keys
+
+	// Check environment variables first if no CLI options
+	if opts == nil || (opts.Model == "" && opts.Provider == "") {
+		envModel := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_MODEL"))
+		envProvider := strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_PROVIDER"))
+
+		if envModel != "" || envProvider != "" {
+			if opts == nil {
+				opts = &Options{}
+			}
+			if envModel != "" {
+				opts.Model = envModel
+			}
+			if envProvider != "" {
+				opts.Provider = envProvider
+			}
+		}
+	}
+
 	// Handle CLI model/provider options or auto-detect from environment
 	if opts != nil && (opts.Model != "" || opts.Provider != "") {
 		if err := configureProviderFromOptions(providerMgr, opts); err != nil {
@@ -86,7 +111,7 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 
 	// Progress callback: print streaming to stdout and status to stderr
 	progressCallback := func(update progress.Update) error {
-		if c.options != nil && c.options.JSONOutput {
+		if c.options != nil && (c.options.JSONOutput || c.options.JSONExtended) {
 			return nil
 		}
 		normalized := progress.Normalize(update)
@@ -201,12 +226,12 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		return fmt.Errorf("failed to process prompt: %w", err)
 	}
 
-	if c.options == nil || !c.options.JSONOutput {
+	if c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended) {
 		fmt.Println() // Final newline
 	}
 
 	// Print accumulated usage statistics
-	if len(c.accumulatedUsage) > 0 && (c.options == nil || !c.options.JSONOutput) {
+	if len(c.accumulatedUsage) > 0 && (c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended)) {
 		fmt.Fprintf(os.Stderr, "\n--- Usage Statistics ---\n")
 
 		// Calculate total tokens (try multiple field combinations)
@@ -237,6 +262,10 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		return c.outputJSON()
 	}
 
+	if c.options != nil && c.options.JSONExtended {
+		return c.outputJSONExtended()
+	}
+
 	// Note: Modified files tracking would require exposing the session from orchestrator
 	// For now, tool output will show which files were written
 
@@ -259,6 +288,74 @@ func (c *CLI) outputJSON() error {
 	}
 
 	fmt.Println(string(data))
+	return nil
+}
+
+// outputJSONExtended outputs all messages as JSON one-liners plus usage statistics.
+func (c *CLI) outputJSONExtended() error {
+	if c.orchestrator == nil {
+		return fmt.Errorf("orchestrator not initialized")
+	}
+
+	session := c.orchestrator.GetSession()
+	if session == nil {
+		return fmt.Errorf("no session available")
+	}
+
+	messages := session.GetMessages()
+	
+	// Output each message as a JSON one-liner
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		
+		// Build message object for output
+		msgObj := map[string]interface{}{
+			"role": msg.Role,
+			"timestamp": msg.Timestamp.Format(time.RFC3339),
+		}
+		
+		if msg.Content != "" {
+			msgObj["content"] = msg.Content
+		}
+		
+		if msg.ToolID != "" {
+			msgObj["tool_id"] = msg.ToolID
+		}
+		
+		if msg.ToolName != "" {
+			msgObj["tool_name"] = msg.ToolName
+		}
+		
+		if len(msg.ToolCalls) > 0 {
+			msgObj["tool_calls"] = msg.ToolCalls
+		}
+		
+		// Marshal to single-line JSON
+		data, err := json.Marshal(msgObj)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message: %w", err)
+		}
+		fmt.Println(string(data))
+	}
+	
+	// Output final usage statistics
+	usageObj := map[string]interface{}{
+		"role": "usage",
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+	
+	if usage := c.buildUsageSummary(); len(usage) > 0 {
+		usageObj["usage"] = usage
+	}
+	
+	data, err := json.Marshal(usageObj)
+	if err != nil {
+		return fmt.Errorf("failed to marshal usage: %w", err)
+	}
+	fmt.Println(string(data))
+	
 	return nil
 }
 
@@ -295,6 +392,14 @@ func (c *CLI) buildUsageSummary() map[string]interface{} {
 	totalTokens := c.calculateTotalTokens()
 	if totalTokens > 0 {
 		summary["total_tokens"] = int(totalTokens)
+	}
+
+	// Add separate input and output tokens for eval tracking
+	if input := c.calculateInputTokens(); input > 0 {
+		summary["input_tokens"] = int(input)
+	}
+	if output := c.calculateOutputTokens(); output > 0 {
+		summary["output_tokens"] = int(output)
 	}
 
 	cachedTokens := c.getUsageValue("cached_tokens")
@@ -389,6 +494,34 @@ func (c *CLI) calculateTotalTokens() float64 {
 	}
 
 	return totalTokens
+}
+
+// calculateInputTokens computes input tokens from available usage fields.
+func (c *CLI) calculateInputTokens() float64 {
+	if c.accumulatedUsage == nil {
+		return 0
+	}
+
+	if input := c.getUsageValue("input_tokens"); input > 0 {
+		return input
+	}
+
+	// Fallback to prompt_tokens for providers that use that naming
+	return c.getUsageValue("prompt_tokens")
+}
+
+// calculateOutputTokens computes output tokens from available usage fields.
+func (c *CLI) calculateOutputTokens() float64 {
+	if c.accumulatedUsage == nil {
+		return 0
+	}
+
+	if output := c.getUsageValue("output_tokens"); output > 0 {
+		return output
+	}
+
+	// Fallback to completion_tokens for providers that use that naming
+	return c.getUsageValue("completion_tokens")
 }
 
 // toFloat64 converts various numeric types to float64 for accumulation.

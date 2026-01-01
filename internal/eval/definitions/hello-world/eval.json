@@ -1,0 +1,20 @@
+{
+  "id": "hello-world",
+  "name": "Hello World (Basic)",
+  "description": "A simple hello world program that prints to stdout",
+  "image": "golang:1.25-bookworm",
+  "user_prompt": "You are an autonomous software engineer. Create a simple hello world program in Go.\n\nREQUIREMENTS:\n- Create a Go program that prints exactly 'Hello, world!' to stdout\n- The output should be exactly as specified (no extra spaces, no extra lines)\n- Exit with code 0\n\nYOUR TASK:\n1. Create main.go with the hello world implementation\n2. Test that it runs and produces the correct output\n3. Build the binary: go build -o hello .\n\nDO NOT ask for permission. Just create the working program.",
+  "expected_files": {
+    "main.go": "Go source file with hello world implementation",
+    "hello": "Compiled binary from Go source"
+  },
+  "run_file": "hello",
+  "cli_tests": [
+    {
+      "id": "test_1",
+      "args": [],
+      "expected": "Hello, world!",
+      "description": "Basic hello world output"
+    }
+  ]
+}

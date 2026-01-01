@@ -1,0 +1,74 @@
+{
+  "id": "calculator-agentic",
+  "name": "Calculator CLI (Agentic)",
+  "description": "Build a command-line calculator that evaluates math expressions",
+  "image": "golang:1.25-bookworm",
+  "user_prompt": "You are an autonomous software engineer. Build and test a Go command-line calculator.\n\nREQUIREMENTS:\n- Accept math expressions as CLI args: ./calculator \"8 * 10 + 2\"\n- Support: +, -, *, /, parentheses\n- Correct operator precedence (*, / before +, -)\n- Print only the number to stdout\n- Exit 0 on success, 1 on error\n\nEXAMPLES (must pass):\n  ./calculator \"8 * 10 + 2\"     → 82\n  ./calculator \"(2 + 3) * 4\"    → 20\n  ./calculator \"100 / 10 / 2\"   → 5\n\nYOUR AUTONOMOUS WORKFLOW:\n1. Create main.go with calculator implementation\n2. Write test cases (as Go tests or shell commands)\n3. Run your tests\n4. Fix any failures\n5. Build the calculator binary: go build -o calculator .\n\nDO NOT ask for permission or clarification. You have full authority to:\n- Choose any implementation (recursive descent, Shunting Yard, etc.)\n- Write comprehensive tests\n- Iterate and debug\n- Make design decisions\n\nEXPECTED OUTPUT:\n- main.go (working implementation)\n- calculator (compiled binary, this must be done for our cicd test suite, `go build -o calculator .`)\n- Test results showing all tests pass\n\nSTART NOW. Build the calculator.",
+  "expected_files": {
+    "main.go": "Go source file with calculator implementation",
+    "calculator": "Compiled binary from Go source"
+  },
+  "run_file": "calculator",
+  "cli_tests": [
+    {
+      "id": "test_1",
+      "args": ["8 * 10 + 2"],
+      "expected": "82",
+      "description": "Basic multiplication and addition with correct precedence"
+    },
+    {
+      "id": "test_2", 
+      "args": ["2 * 3 + 5"],
+      "expected": "11",
+      "description": "Multiplication before addition"
+    },
+    {
+      "id": "test_3",
+      "args": ["10 + 5 * 2"],
+      "expected": "20",
+      "description": "Multiplication before addition"
+    },
+    {
+      "id": "test_4",
+      "args": ["100 / 4"],
+      "expected": "25",
+      "description": "Division"
+    },
+    {
+      "id": "test_5",
+      "args": ["(2 + 3) * 4"],
+      "expected": "20",
+      "description": "Parentheses override precedence"
+    },
+    {
+      "id": "test_6",
+      "args": ["50 - 10 * 2"],
+      "expected": "30",
+      "description": "Multiplication before subtraction"
+    },
+    {
+      "id": "test_7",
+      "args": ["1 + 2 + 3 + 4"],
+      "expected": "10",
+      "description": "Sequential addition"
+    },
+    {
+      "id": "test_8",
+      "args": ["100 / 10 / 2"],
+      "expected": "5",
+      "description": "Sequential division (left-associative)"
+    },
+    {
+      "id": "test_9",
+      "args": ["3 * 4 + 5 * 6"],
+      "expected": "42",
+      "description": "Mixed operations with precedence"
+    },
+    {
+      "id": "test_10",
+      "args": ["(10 - 5) * (3 + 2)"],
+      "expected": "25",
+      "description": "Multiple parentheses"
+    }
+  ]
+}

@@ -57,3 +57,17 @@ build/
 .cache/
 
 /cmd/eval/eval-server-simple
+
+/eval
+/eval-webui
+/eval.db
+/eval-complete
+/eval-final
+/eval-fixed
+/eval-test
+/eval-with-samples
+/test-server
+/test-eval-*
+/eval-*
+
+*_templ.go

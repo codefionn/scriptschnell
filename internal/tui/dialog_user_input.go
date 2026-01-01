@@ -12,6 +12,8 @@ type UserInputDialog struct {
 	question string
 	textarea textarea.Model
 	quitting bool
+	width    int
+	height   int
 }
 
 // NewUserInputDialog creates a dialog for single question user input
@@ -44,12 +46,22 @@ func (d UserInputDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
-			d.quitting = true
-			return d, tea.Quit
+			// Cancel - send EndUserQuestionsMsg to close dialog
+			return d, func() tea.Msg { return EndUserQuestionsMsg{} }
 		case tea.KeyEnter:
-			d.quitting = true
-			return d, tea.Quit
+			// Submit - send EndUserQuestionsMsg to close dialog and return answer
+			return d, func() tea.Msg { return EndUserQuestionsMsg{} }
 		}
+	case tea.WindowSizeMsg:
+		// Handle window resize
+		d.width = msg.Width
+		d.height = msg.Height
+		// Update textarea width to be responsive
+		// Use most of the dialog width (85%) with max of 100 chars
+		dialogWidth := min(max(80, d.width*90/100), 120)
+		textareaWidth := min(dialogWidth-8, 100) // Account for padding and border
+		d.textarea.SetWidth(textareaWidth)
+		return d, cmd
 	}
 
 	d.textarea, cmd = d.textarea.Update(msg)
@@ -61,24 +73,30 @@ func (d UserInputDialog) View() string {
 		return ""
 	}
 
+	// Calculate responsive dialog width
+	dialogWidth := min(max(80, d.width*90/100), 120)
+
+	// Build content
+	content := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("62")).
+		Bold(true).
+		Render("Question:\n\n") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("200")).
+			Render(d.question+"\n\n") +
+		d.textarea.View() +
+		"\n\n" +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("Enter to submit, Esc to cancel")
+
+	// Apply dialog box styling with responsive width
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
 		Padding(1, 2).
-		Render(
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("62")).
-				Bold(true).
-				Render("Question:\n\n")+
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("200")).
-					Render(d.question+"\n\n")+
-				d.textarea.View()+
-				"\n\n"+
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("240")).
-					Render("Enter to submit, Esc to cancel"),
-		) + "\n"
+		Width(dialogWidth).
+		Render(content)
 }
 
 func (d UserInputDialog) GetAnswer() string {

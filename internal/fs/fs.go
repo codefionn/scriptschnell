@@ -114,11 +114,12 @@ func (cfs *CachedFS) watchFiles() {
 			cfs.cacheMu.Lock()
 			delete(cfs.dirCache, dir)
 			cfs.cacheMu.Unlock()
-		case err, ok := <-cfs.watcher.Errors:
+		case _, ok := <-cfs.watcher.Errors:
 			if !ok {
 				return
 			}
-			log.Printf("Filesystem watcher error: %v", err)
+			// Silently handle filesystem watcher errors to avoid TUI interference
+			// log.Printf("Filesystem watcher error: %v", err)
 		}
 	}
 }
@@ -209,8 +210,9 @@ func (cfs *CachedFS) WriteFile(ctx context.Context, path string, data []byte) er
 
 	// Watch the parent directory if not already watched
 	if cfs.watcher != nil {
+		// Silently handle watcher setup failures to avoid TUI interference
 		if err := cfs.watcher.Add(filepath.Dir(absPath)); err != nil {
-			log.Printf("CachedFS: failed to add watcher for %s: %v", absPath, err)
+			// log.Printf("CachedFS: failed to add watcher for %s: %v", absPath, err)
 		}
 	}
 
@@ -288,8 +290,9 @@ func (cfs *CachedFS) ListDir(ctx context.Context, path string) ([]*FileInfo, err
 
 	// Watch this directory for changes
 	if cfs.watcher != nil {
+		// Silently handle watcher setup failures to avoid TUI interference
 		if err := cfs.watcher.Add(absPath); err != nil {
-			log.Printf("CachedFS: failed to add watcher for %s: %v", absPath, err)
+			// log.Printf("CachedFS: failed to add watcher for %s: %v", absPath, err)
 		}
 	}
 

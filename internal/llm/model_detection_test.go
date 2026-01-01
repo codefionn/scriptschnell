@@ -144,6 +144,47 @@ func TestGetModelDescription_Claude(t *testing.T) {
 	}
 }
 
+func TestDetectModelFamily_Devstral(t *testing.T) {
+	tests := []struct {
+		modelID  string
+		expected ModelFamily
+	}{
+		{"devstral-small-latest", FamilyDevstral},
+		{"devstral-small-2505", FamilyDevstral},
+		{"mistral-devstral", FamilyDevstral},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			got := DetectModelFamily(tt.modelID)
+			if got != tt.expected {
+				t.Errorf("DetectModelFamily(%q) = %v, want %v", tt.modelID, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDetectContextWindow_Mistral(t *testing.T) {
+	tests := []struct {
+		modelID  string
+		family   ModelFamily
+		expected int
+	}{
+		{"mistral-large-latest", FamilyMistralLarge, 128000},
+		{"devstral-small-latest", FamilyDevstral, 128000},
+		{"codestral-latest", FamilyCodestral, 128000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			got := DetectContextWindow(tt.modelID, tt.family)
+			if got != tt.expected {
+				t.Errorf("DetectContextWindow(%q) = %d, want %d", tt.modelID, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestIsMistralModel(t *testing.T) {
 	tests := []struct {
 		modelID  string
@@ -158,6 +199,7 @@ func TestIsMistralModel(t *testing.T) {
 		{"mistral/Mistral-Large", true},
 		{"open-mistral-7b", true},
 		{"open-mistral-nemo", true},
+		{"devstral-small-latest", true},
 
 		// Non-Mistral models
 		{"gpt-4o", false},

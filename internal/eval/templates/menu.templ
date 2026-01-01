@@ -1,0 +1,32 @@
+package templates
+
+templ MenuItem(href string, text string, active bool) {
+	<a 
+		href={ href }
+		class={ 
+			"text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium",
+			templ.KV("bg-blue-50 border-b-2 border-blue-500 text-blue-700", active),
+		}
+	>
+		{ text }
+	</a>
+}
+
+templ Menu(activePage string) {
+	<nav class="bg-white shadow-sm border-b border-gray-200">
+		<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+			<div class="flex justify-between h-16">
+				<div class="flex items-center">
+					<h1 class="text-xl font-semibold text-gray-900">LLM Eval System</h1>
+				</div>
+				<div class="flex items-center space-x-4">
+					@MenuItem("/", "Dashboard", activePage == "dashboard")
+					@MenuItem("/models", "Models", activePage == "models")
+					@MenuItem("/evals", "Evals", activePage == "evals")
+					@MenuItem("/results", "Results", activePage == "results")
+					@MenuItem("/setup", "Setup", activePage == "setup")
+				</div>
+			</div>
+		</div>
+	</nav>
+}

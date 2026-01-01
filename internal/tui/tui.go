@@ -182,7 +182,16 @@ type Model struct {
 	activeAuthorizationID   string                           // Currently displayed authorization
 	authorizationDialogOpen bool                             // Is authorization dialog visible
 	authorizationDialog     AuthorizationDialog              // The authorization dialog component
+
+	// User Question Dialog state
+	userQuestionDialogOpen bool        // Is user question dialog visible
+	userQuestionDialog     tea.Model   // The user question dialog component
+	userQuestionResponse   chan string // Channel to send the answer back
+	userQuestionError      chan error  // Channel to send any error
 }
+
+// EndUserQuestionsMsg is sent when the user finishes answering questions
+type EndUserQuestionsMsg struct{}
 
 // ErrMsg is an error message type
 type ErrMsg error
@@ -1144,9 +1153,9 @@ func (m *Model) applySelectedSuggestion() {
 	var newValue string
 	if atPos, _, found := extractFilepathContext(input, len(input)); found {
 		prefix := input[:atPos]
-		newValue = prefix + "@" + selectedSugg
+		newValue = prefix + "@" + selectedSugg + " "
 	} else {
-		newValue = selectedSugg
+		newValue = selectedSugg + " "
 	}
 
 	m.textarea.SetValue(newValue)
@@ -1276,6 +1285,57 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleUserQuestionDialog handles messages when user question dialog is open
+func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	// Check for EndUserQuestionsMsg
+	if _, ok := msg.(EndUserQuestionsMsg); ok {
+		// Collect answers based on dialog type
+		var response string
+
+		if dialog, ok := m.userQuestionDialog.(UserQuestionDialog); ok {
+			// Multiple choice dialog
+			answers := dialog.GetAnswers()
+			var formattedAnswers strings.Builder
+			for i, answer := range answers {
+				if answer != "" {
+					formattedAnswers.WriteString(fmt.Sprintf("Question %d: %s\n", i+1, answer))
+				}
+			}
+			response = formattedAnswers.String()
+		} else if dialog, ok := m.userQuestionDialog.(UserInputDialog); ok {
+			// Single text input dialog
+			response = dialog.GetAnswer()
+		}
+
+		// Send response
+		if response != "" {
+			select {
+			case m.userQuestionResponse <- response:
+			default:
+			}
+		}
+
+		// Close dialog
+		m.userQuestionDialogOpen = false
+		m.userQuestionDialog = nil
+
+		// Clear overlay and restore focus to textarea
+		m.SetOverlayActive(false)
+		m.textarea.Focus()
+
+		return m, nil
+	}
+
+	// Update the dialog
+	if m.userQuestionDialog != nil {
+		m.userQuestionDialog, cmd = m.userQuestionDialog.Update(msg)
+	}
+
+	return m, cmd
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		tiCmd tea.Cmd
@@ -1285,6 +1345,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle authorization dialog if open
 	if m.authorizationDialogOpen {
 		return m.handleAuthorizationDialog(msg)
+	}
+
+	// Handle user question dialog if open
+	if m.userQuestionDialogOpen {
+		return m.handleUserQuestionDialog(msg)
 	}
 
 	wasReady := m.ready
@@ -1740,12 +1805,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, baseCmd
 
 	case ShowAuthorizationDialogMsg:
-		// Create and display authorization dialog
-		m.authorizationMu.Lock()
-		m.activeAuthorizationID = msg.Request.AuthID
-		m.authorizationDialogOpen = true
-		m.authorizationMu.Unlock()
-
 		// Get tab name for display
 		tabIdx := m.findTabIndexByID(msg.Request.TabID)
 		tabName := fmt.Sprintf("Tab %d", tabIdx+1)
@@ -1753,8 +1812,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tabName = m.sessions[tabIdx].Name
 		}
 
-		// Create authorization dialog
-		m.authorizationDialog = NewAuthorizationDialog(msg.Request, tabName)
+		// Create authorization dialog BEFORE setting the flag
+		authDialog := NewAuthorizationDialog(msg.Request, tabName)
+
+		// Now atomically update the state
+		m.authorizationMu.Lock()
+		m.activeAuthorizationID = msg.Request.AuthID
+		m.authorizationDialog = authDialog
+		m.authorizationDialogOpen = true
+		m.authorizationMu.Unlock()
+
 		logger.Info("Showing authorization dialog for tab %d (authID: %s)", msg.Request.TabID, msg.Request.AuthID)
 
 		return m, baseCmd
@@ -2258,6 +2325,22 @@ func (m *Model) View() string {
 	// Show authorization dialog as overlay if open
 	if m.authorizationDialogOpen {
 		dialogView := m.authorizationDialog.View()
+		// Center the dialog
+		overlay := lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			dialogView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("0")),
+		)
+		return overlay
+	}
+
+	// Show user question dialog as overlay if open
+	if m.userQuestionDialogOpen && m.userQuestionDialog != nil {
+		dialogView := m.userQuestionDialog.View()
 		// Center the dialog
 		overlay := lipgloss.Place(
 			m.width,
@@ -3655,20 +3738,21 @@ func (m *Model) handleUserInputRequest(msg UserInputRequestMsg) tea.Cmd {
 	// Create user input dialog
 	dialog := NewUserInputDialog(msg.Question)
 
-	// Return a command that runs the dialog and sends the result
-	return func() tea.Msg {
-		p := tea.NewProgram(dialog, tea.WithAltScreen())
-		result, err := p.Run()
-		if err != nil {
-			msg.Error <- err
-			return nil
-		}
+	// Initialize with current window size
+	var cmd tea.Cmd
+	var model tea.Model
+	model, cmd = dialog.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 
-		if userInputDialog, ok := result.(UserInputDialog); ok {
-			msg.Response <- userInputDialog.GetAnswer()
-		}
-		return nil
-	}
+	// Store dialog state
+	m.userQuestionDialog = model
+	m.userQuestionDialogOpen = true
+	m.userQuestionResponse = msg.Response
+	m.userQuestionError = msg.Error
+
+	// Set overlay active to blur textarea and prevent input
+	m.SetOverlayActive(true)
+
+	return cmd
 }
 
 // handleUserMultipleQuestionsRequest handles multiple choice question requests
@@ -3695,21 +3779,41 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 			continue
 		}
 
-		// Check if this is a question line (starts with number)
-		if len(line) > 2 && line[0] >= '1' && line[0] <= '9' && line[1] == '.' {
-			// Save previous question if exists
-			if currentQuestion.Question != "" {
-				questions = append(questions, currentQuestion)
+		// Check if this is a question line (starts with number followed by separator)
+		// Support formats: "1. ", "1) ", "1: ", "1- ", etc.
+		if len(line) > 2 && line[0] >= '0' && line[0] <= '9' {
+			// Find the separator after the number
+			sepIdx := -1
+			for i := 1; i < len(line) && i < 4; i++ { // Check up to 3 digits (for question numbers up to 999)
+				if line[i] < '0' || line[i] > '9' {
+					if line[i] == '.' || line[i] == ')' || line[i] == ':' || line[i] == '-' {
+						sepIdx = i
+					}
+					break
+				}
 			}
-			// Start new question
-			currentQuestion = QuestionWithOptions{
-				Question: strings.TrimSpace(line[2:]),
-				Options:  make([]string, 0, 3),
+
+			if sepIdx > 0 && sepIdx+1 < len(line) {
+				// Save previous question if exists
+				if currentQuestion.Question != "" {
+					questions = append(questions, currentQuestion)
+				}
+				// Start new question
+				currentQuestion = QuestionWithOptions{
+					Question: strings.TrimSpace(line[sepIdx+1:]),
+					Options:  make([]string, 0),
+				}
 			}
-		} else if len(line) > 0 && line[0] >= 'a' && line[0] <= 'c' && line[1] == ')' {
-			// This is an option line
-			option := strings.TrimSpace(line[2:])
-			currentQuestion.Options = append(currentQuestion.Options, option)
+		} else if len(line) > 1 {
+			// Check if this is an option line (starts with letter followed by separator)
+			// Support formats: "a) ", "a. ", "a: ", "a- ", "A) ", "A. ", etc.
+			firstChar := line[0]
+			isOptionLetter := (firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z')
+
+			if isOptionLetter && (line[1] == ')' || line[1] == '.' || line[1] == ':' || line[1] == '-') {
+				option := strings.TrimSpace(line[2:])
+				currentQuestion.Options = append(currentQuestion.Options, option)
+			}
 		}
 	}
 
@@ -3718,9 +3822,9 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 		questions = append(questions, currentQuestion)
 	}
 
-	// Validate questions
+	// Validate questions - each must have at least 2 options, max 10
 	for _, q := range questions {
-		if len(q.Options) != 3 {
+		if len(q.Options) < 2 || len(q.Options) > 10 {
 			// If parsing failed, fall back to asking as single question
 			return m.handleUserInputRequest(UserInputRequestMsg{
 				Question: msg.Questions,
@@ -3738,36 +3842,68 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 	// Create user questions dialog
 	dialog := NewUserQuestionDialog(questions)
 
-	// Return a command that runs the dialog and sends the result
-	return func() tea.Msg {
-		p := tea.NewProgram(&dialog, tea.WithAltScreen())
-		result, err := p.Run()
-		if err != nil {
-			msg.Error <- err
-			return nil
-		}
+	// Initialize with current window size
+	var cmd tea.Cmd
+	var model tea.Model
+	model, cmd = dialog.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 
-		if questionsDialog, ok := result.(*UserQuestionDialog); ok {
-			answers := questionsDialog.GetAnswers()
-			var formattedAnswers strings.Builder
-			for i, answer := range answers {
-				if answer != "" {
-					formattedAnswers.WriteString(fmt.Sprintf("Question %d: %s\n", i+1, answer))
-				}
-			}
-			msg.Response <- formattedAnswers.String()
-		}
-		return nil
-	}
+	m.userQuestionDialog = model
+	m.userQuestionDialogOpen = true
+	m.userQuestionResponse = msg.Response
+	m.userQuestionError = msg.Error
+
+	// Set overlay active to blur textarea and prevent input
+	m.SetOverlayActive(true)
+
+	return cmd
 }
 
 // isLikelyMultipleChoicePrompt detects the formatted prompt produced by the planning agent's ask_user_multiple tool.
 func isLikelyMultipleChoicePrompt(question string) bool {
 	q := strings.TrimSpace(question)
-	// Look for numbered questions plus a/b/c options
-	return strings.Contains(q, "\n") &&
-		(strings.Contains(q, "1.") || strings.Contains(q, "1)")) &&
-		strings.Contains(q, "a)") && strings.Contains(q, "b)") && strings.Contains(q, "c)")
+	if !strings.Contains(q, "\n") {
+		return false // Must be multi-line
+	}
+
+	// Check for numbered questions (1., 1), 1:, 10., etc.)
+	// Look for a digit followed by a separator at the start of a line
+	hasNumberedQuestions := false
+	lines := strings.Split(q, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) > 1 && line[0] >= '0' && line[0] <= '9' {
+			// Check if there's a separator after the number(s)
+			for i := 1; i < len(line) && i < 4; i++ {
+				if line[i] < '0' || line[i] > '9' {
+					if line[i] == '.' || line[i] == ')' || line[i] == ':' || line[i] == '-' {
+						hasNumberedQuestions = true
+						break
+					}
+					break
+				}
+			}
+			if hasNumberedQuestions {
+				break
+			}
+		}
+	}
+	if !hasNumberedQuestions {
+		return false
+	}
+
+	// Check for at least 2 lettered options (a/b, A/B with various separators)
+	optionCount := 0
+	for _, letter := range []string{"a", "b", "c", "d", "A", "B", "C", "D"} {
+		for _, sep := range []string{")", ".", ":", "-"} {
+			pattern := letter + sep
+			if strings.Contains(q, pattern) {
+				optionCount++
+				break // Found this letter, check next one
+			}
+		}
+	}
+
+	return optionCount >= 2 // Need at least 2 options to be considered multiple choice
 }
 
 // awaitUserResponse waits for a response/err with a safeguard timeout to prevent planner hangs.

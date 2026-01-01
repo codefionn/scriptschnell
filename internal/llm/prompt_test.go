@@ -5,7 +5,7 @@ import "testing"
 func TestModelSpecificPrompt_MistralFamily(t *testing.T) {
 	pb := &PromptBuilder{}
 
-	got := pb.modelSpecificPrompt("mistral-large")
+	got := pb.modelSpecificPrompt("mistral-large", []map[string]interface{}{})
 	if got == "" {
 		t.Fatalf("expected modelSpecificPrompt to return text for mistral models")
 	}

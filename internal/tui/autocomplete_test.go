@@ -870,9 +870,9 @@ func TestEnterKeyAppliesSelectedSuggestion(t *testing.T) {
 	t.Logf("After Enter - Input: %q", m.textarea.Value())
 	t.Logf("After Enter - Suggestions: %v", m.suggestions)
 
-	// Check that textarea value was updated with main.go and suggestions cleared
-	if m.textarea.Value() != "read @main.go" {
-		t.Errorf("expected textarea value 'read @main.go', got %q", m.textarea.Value())
+	// Check that textarea value was updated with main.go and a trailing space, and suggestions cleared
+	if m.textarea.Value() != "read @main.go " {
+		t.Errorf("expected textarea value 'read @main.go ' (with trailing space), got %q", m.textarea.Value())
 	}
 
 	if len(m.suggestions) != 0 {

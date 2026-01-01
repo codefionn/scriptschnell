@@ -88,30 +88,19 @@ func (c *OpenRouterConverterImpl) GetModelFamily(modelID string) string {
 }
 
 func (c *OpenRouterConverterImpl) SupportsNativeStorage() bool {
-	return true // OpenRouter supports some caching
+	return false // Disabled - some providers like Mistral don't support cache_control ephemeral
 }
 
 func (c *OpenRouterConverterImpl) ConvertToNative(messages []*Message, systemPrompt string, enableCaching bool, cacheTTL string) ([]interface{}, error) {
-	// OpenRouter uses OpenAI-compatible format with cache control
+	// OpenRouter uses OpenAI-compatible format
+	// Note: Disable caching as some providers (like Mistral) don't support cache_control ephemeral
 	result := make([]interface{}, 0, len(messages)+1)
 
 	if system := strings.TrimSpace(systemPrompt); system != "" {
-		sysMsg := map[string]interface{}{
-			"role": "system",
-		}
-		if enableCaching {
-			// OpenRouter uses multipart content for caching
-			sysMsg["content"] = []map[string]interface{}{
-				{
-					"type":          "text",
-					"text":          system,
-					"cache_control": map[string]interface{}{"type": "ephemeral"},
-				},
-			}
-		} else {
-			sysMsg["content"] = system
-		}
-		result = append(result, sysMsg)
+		result = append(result, map[string]interface{}{
+			"role":    "system",
+			"content": system,
+		})
 	}
 
 	for _, msg := range messages {

@@ -171,6 +171,18 @@ func (p *MistralProvider) getFallbackModels() []*ModelInfo {
 			Capabilities:        []string{"function-calling"},
 		},
 		{
+			ID:                  "devstral-small-latest",
+			Name:                "Devstral Small",
+			Provider:            "mistral",
+			Description:         "Agentic model for software engineering tasks",
+			ContextWindow:       128000,
+			MaxOutputTokens:     32000,
+			SupportsToolCalling: true,
+			SupportsStreaming:   true,
+			OwnedBy:             "mistralai",
+			Capabilities:        []string{"function-calling"},
+		},
+		{
 			ID:                  "pixtral-12b-latest",
 			Name:                "Pixtral 12B",
 			Provider:            "mistral",

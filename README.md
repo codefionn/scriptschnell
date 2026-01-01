@@ -62,6 +62,9 @@ On first run, it will download tinygo (if not in PATH).
 - [ ] Fix agent client protocol output (zed editor)
 - [ ] Implement proper shell sandbox
 - [ ] Continue implementing the eval tooling
+- [ ] After auto compaction tell the model that this happend and it should
+      verify that requested changes were fully implemented, if thinks that these were
+      fully implemented
 
 ## Goals
 

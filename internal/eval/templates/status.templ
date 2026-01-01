@@ -1,0 +1,27 @@
+package templates
+
+// StatusBadgeForText gets badge with custom text
+func StatusBadgeForText(text string, status string) templ.Component {
+	statusClasses := "inline-flex px-2 py-1 text-xs font-semibold rounded-full "
+	switch status {
+	case "passed", "completed", "success":
+		statusClasses += "bg-green-100 text-green-800"
+	case "failed", "error":
+		statusClasses += "bg-red-100 text-red-800"
+	case "running", "in_progress":
+		statusClasses += "bg-yellow-100 text-yellow-800"
+	default:
+		statusClasses += "bg-gray-100 text-gray-800"
+	}
+	
+	return templ.Raw(`<span class="` + statusClasses + `">` + text + `</span>`)
+}
+
+// GetTableRowClass returns CSS class for table rows based on test case status
+func GetTableRowClass(testCaseID string) string {
+	// Get alternating row colors for better readability
+	if len(testCaseID)%2 == 0 {
+		return "bg-white"
+	}
+	return "bg-gray-50"
+}

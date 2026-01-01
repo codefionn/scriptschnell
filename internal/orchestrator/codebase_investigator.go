@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -26,6 +27,102 @@ func NewCodebaseInvestigatorAgent(orch *Orchestrator) *CodebaseInvestigatorAgent
 	}
 }
 
+// ToolCallRecord tracks a tool call for loop detection
+type ToolCallRecord struct {
+	Timestamp time.Time
+	ToolName  string
+	Arguments map[string]interface{}
+}
+
+// LoopDetector detects repeated tool calls to prevent infinite loops
+type LoopDetector struct {
+	callHistory []ToolCallRecord
+	maxHistory  int
+	threshold   int // Number of repetitions to consider a loop
+}
+
+// NewLoopDetector creates a new loop detector
+func NewLoopDetector(maxHistory, threshold int) *LoopDetector {
+	return &LoopDetector{
+		callHistory: make([]ToolCallRecord, 0, maxHistory),
+		maxHistory:  maxHistory,
+		threshold:   threshold,
+	}
+}
+
+// RecordCall records a tool call and checks for loops
+func (ld *LoopDetector) RecordCall(toolCall map[string]interface{}) bool {
+	if fn, ok := toolCall["function"].(map[string]interface{}); ok {
+		toolName := ""
+		arguments := make(map[string]interface{})
+
+		if name, found := fn["name"].(string); found {
+			toolName = name
+		}
+		if args, found := fn["arguments"].(string); found {
+			// Parse JSON arguments
+			parsed := make(map[string]interface{})
+			if err := json.Unmarshal([]byte(args), &parsed); err == nil {
+				arguments = parsed
+			}
+		}
+
+		record := ToolCallRecord{
+			Timestamp: time.Now(),
+			ToolName:  toolName,
+			Arguments: arguments,
+		}
+
+		// Add to history
+		ld.callHistory = append(ld.callHistory, record)
+
+		// Keep history size under control
+		if len(ld.callHistory) > ld.maxHistory {
+			ld.callHistory = ld.callHistory[1:]
+		}
+
+		// Check for loops by counting recent identical calls
+		return ld.checkForLoops(&record)
+	}
+	return false
+}
+
+// checkForLoops checks if the current call repeats too frequently
+func (ld *LoopDetector) checkForLoops(current *ToolCallRecord) bool {
+	// Count identical calls in recent history
+	count := 0
+	for i := len(ld.callHistory) - 1; i >= 0; i-- {
+		record := &ld.callHistory[i]
+		// Compare tool name and arguments
+		if record.ToolName == current.ToolName && ld.argsEqual(record.Arguments, current.Arguments) {
+			count++
+		} else {
+			break // Stop counting when we hit a different call type
+		}
+	}
+
+	// Consider it a loop if we've seen this exact call too many times
+	return count >= ld.threshold
+}
+
+// argsEqual checks if two argument maps are equal
+func (ld *LoopDetector) argsEqual(a, b map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, valA := range a {
+		valB, exists := b[key]
+		if !exists {
+			return false
+		}
+		// Simple equality check - might need refinement for complex types
+		if fmt.Sprintf("%v", valA) != fmt.Sprintf("%v", valB) {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *CodebaseInvestigatorAgent) Investigate(ctx context.Context, objective string) (string, error) {
 	return a.investigateInternal(ctx, objective, nil)
 }
@@ -35,6 +132,9 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	if progressCb == nil {
 		progressCb = a.orch.GetCurrentProgressCallback()
 	}
+
+	// Initialize loop detector for this investigation
+	loopDetector := NewLoopDetector(12, 3) // Keep last 12 calls, trigger on 3 identical consecutive calls
 
 	sendStatus := func(msg string) {
 		dispatchProgress(progressCb, progress.Update{
@@ -208,6 +308,41 @@ The requested logic is found in internal/module/file.go function DoWork().
 			sendStream("✓ Investigation complete\n\n")
 			sendStatus("✓ Investigation complete")
 			return extractAnswer(resp.Content), nil
+		}
+
+		// Check for loops in tool calls and handle them
+		if len(resp.ToolCalls) > 0 {
+			for _, tc := range resp.ToolCalls {
+				// Check if this call creates a loop
+				if loopDetector.RecordCall(tc) {
+					sendStream("⚠️ **Loop detected!** Multiple identical tool calls detected. Stopping investigation to prevent infinite loops.\n")
+					sendStatus("⚠️ Loop detected - stopping investigation")
+
+					// Try to extract partial results before terminating
+					partialObjective := fmt.Sprintf("Based on the investigation attempted for: %s\n\nPlease provide a summary of what (if anything) was discovered so far about this objective, even if incomplete.", objective)
+
+					// Create summary with loop warning
+					completionReq := &llm.CompletionRequest{
+						Messages: []*llm.Message{{
+							Role:    "user",
+							Content: partialObjective,
+						}},
+						Tools:        []map[string]interface{}{},
+						Temperature:  0,
+						MaxTokens:    1024,
+						SystemPrompt: "You are a helpful assistant. Help provide available insights about a codebase investigation that was terminated early due to detected loops.",
+					}
+
+					summaryResp, err := client.CompleteWithRequest(ctx, completionReq)
+					if err == nil && summaryResp.Content != "" {
+						sendStream("📝 Providing partial results due to loop detection\n\n")
+						return extractAnswer(summaryResp.Content), nil
+					}
+
+					// Fallback if summary fails
+					return extractAnswer("Investigation stopped due to detected loop - no significant findings were discovered before termination."), nil
+				}
+			}
 		}
 
 		// Send progress update for tool calls with details

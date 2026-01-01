@@ -2,9 +2,27 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	docStyle = lipgloss.NewStyle().Margin(1, 2)
+
+	// Dialog box styling - responsive width will be set dynamically
+	dialogBoxBaseStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Padding(1, 2).
+				Background(lipgloss.Color("235"))
+
+	dialogTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("205")).
+				Padding(0, 1)
 )
 
 // UserQuestionDialog presents questions to the user with multiple choice options
@@ -13,6 +31,8 @@ type UserQuestionDialog struct {
 	list      list.Model
 	answers   []string
 	current   int
+	width     int
+	height    int
 }
 
 type QuestionWithOptions struct {
@@ -41,11 +61,12 @@ func NewUserQuestionDialog(questions []QuestionWithOptions) UserQuestionDialog {
 		items[i] = questionItem{question: q, index: i}
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 80, 20)
-	l.Title = "Planning Questions"
+	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "" // No title, we render our own
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
+	l.SetShowTitle(false)
 
 	return UserQuestionDialog{
 		questions: questions,
@@ -64,18 +85,33 @@ func (d UserQuestionDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
-			return d, tea.Quit
+			return d, func() tea.Msg { return EndUserQuestionsMsg{} }
 		case tea.KeyEnter:
 			// Get current selection
 			if selected, ok := d.list.SelectedItem().(questionItem); ok {
 				// Show options for the selected question
-				return d.showOptions(selected), nil
+				options := d.showOptions(selected)
+				// Pass current size to the options dialog
+				if optDialog, ok := options.(QuestionOptionsDialog); ok {
+					optDialog.width = d.width
+					optDialog.height = d.height
+					return optDialog, nil
+				}
+				return options, nil
 			}
 		case tea.KeyUp, tea.KeyDown:
 			var cmd tea.Cmd
 			d.list, cmd = d.list.Update(msg)
 			return d, cmd
 		}
+	case tea.WindowSizeMsg:
+		d.width = msg.Width
+		d.height = msg.Height
+		// Set list size to fit within dialog box
+		// Use most of the screen width (90%) with max of 120 chars
+		dialogWidth := min(max(80, d.width*90/100), 120)
+		boxH, boxV := dialogBoxBaseStyle.GetFrameSize()
+		d.list.SetSize(dialogWidth-boxH, msg.Height-boxV-6) // Leave room for title and instructions
 	}
 
 	var cmd tea.Cmd
@@ -89,7 +125,39 @@ func (d UserQuestionDialog) showOptions(selected questionItem) tea.Model {
 }
 
 func (d UserQuestionDialog) View() string {
-	return d.list.View()
+	var sb strings.Builder
+
+	// Title
+	sb.WriteString(dialogTitleStyle.Render("📋 Planning Questions"))
+	sb.WriteString("\n\n")
+
+	// Instructions
+	helpText := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Render("Use ↑/↓ to navigate, Enter to select, Esc to cancel")
+	sb.WriteString(helpText)
+	sb.WriteString("\n\n")
+
+	// List
+	sb.WriteString(d.list.View())
+
+	// Progress indicator
+	answered := 0
+	for _, ans := range d.answers {
+		if ans != "" {
+			answered++
+		}
+	}
+	progress := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("242")).
+		Render(fmt.Sprintf("\nProgress: %d/%d questions answered", answered, len(d.questions)))
+	sb.WriteString(progress)
+
+	// Calculate responsive dialog width
+	dialogWidth := min(max(80, d.width*90/100), 120)
+	dialogBoxStyle := dialogBoxBaseStyle.Width(dialogWidth)
+
+	return dialogBoxStyle.Render(sb.String())
 }
 
 func (d UserQuestionDialog) GetAnswers() []string {
@@ -101,6 +169,8 @@ type QuestionOptionsDialog struct {
 	question questionItem
 	parent   *UserQuestionDialog
 	list     list.Model
+	width    int
+	height   int
 }
 
 func NewQuestionOptionsDialog(question questionItem, parent *UserQuestionDialog) QuestionOptionsDialog {
@@ -109,11 +179,25 @@ func NewQuestionOptionsDialog(question questionItem, parent *UserQuestionDialog)
 		items[i] = optionItem{option: opt, index: i, letter: string(rune('a' + i))}
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 80, 20)
-	l.Title = "Select an option"
+	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "" // No title, we render our own
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
+	l.SetShowTitle(false)
+
+	// Inherit size from parent if possible, or wait for resize?
+	// The parent has the size.
+	if parent != nil {
+		// Use responsive width matching parent dialog
+		dialogWidth := min(max(80, parent.width*90/100), 120)
+		boxH, boxV := dialogBoxBaseStyle.GetFrameSize()
+		listWidth := dialogWidth - boxH
+		listHeight := parent.height - boxV - 6
+		if listWidth > 0 && listHeight > 0 {
+			l.SetSize(listWidth, listHeight)
+		}
+	}
 
 	return QuestionOptionsDialog{
 		question: question,
@@ -146,9 +230,17 @@ func (d QuestionOptionsDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if selected, ok := d.list.SelectedItem().(optionItem); ok {
 				// Store the answer
 				d.parent.answers[d.question.index] = fmt.Sprintf("%d) %s", selected.index+1, selected.option)
-				// Move to next question
-				if d.question.index+1 < len(d.parent.questions) {
-					d.list.Select(d.question.index + 1)
+				// Check if all questions are answered
+				allAnswered := true
+				for _, ans := range d.parent.answers {
+					if ans == "" {
+						allAnswered = false
+						break
+					}
+				}
+				// If all answered, close dialog, otherwise go back to question list
+				if allAnswered {
+					return d, func() tea.Msg { return EndUserQuestionsMsg{} }
 				}
 				return d.parent, nil
 			}
@@ -157,6 +249,14 @@ func (d QuestionOptionsDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			d.list, cmd = d.list.Update(msg)
 			return d, cmd
 		}
+	case tea.WindowSizeMsg:
+		d.width = msg.Width
+		d.height = msg.Height
+		// Set list size to fit within dialog box
+		// Use responsive width matching parent dialog
+		dialogWidth := min(max(80, d.width*90/100), 120)
+		boxH, boxV := dialogBoxBaseStyle.GetFrameSize()
+		d.list.SetSize(dialogWidth-boxH, msg.Height-boxV-6)
 	}
 
 	var cmd tea.Cmd
@@ -165,5 +265,34 @@ func (d QuestionOptionsDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (d QuestionOptionsDialog) View() string {
-	return d.list.View()
+	var sb strings.Builder
+
+	// Title with question number
+	questionNum := d.question.index + 1
+	title := fmt.Sprintf("Question %d of %d", questionNum, len(d.parent.questions))
+	sb.WriteString(dialogTitleStyle.Render(title))
+	sb.WriteString("\n\n")
+
+	// The question text
+	questionStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("214"))
+	sb.WriteString(questionStyle.Render(d.question.question.Question))
+	sb.WriteString("\n\n")
+
+	// Instructions
+	helpText := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Render("Use ↑/↓ to navigate, Enter to select, Esc to go back")
+	sb.WriteString(helpText)
+	sb.WriteString("\n\n")
+
+	// Options list
+	sb.WriteString(d.list.View())
+
+	// Calculate responsive dialog width
+	dialogWidth := min(max(80, d.width*90/100), 120)
+	dialogBoxStyle := dialogBoxBaseStyle.Width(dialogWidth)
+
+	return dialogBoxStyle.Render(sb.String())
 }

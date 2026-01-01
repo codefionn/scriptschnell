@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -57,7 +58,7 @@ func NewPromptBuilder(filesystem fs.FileSystem, workingDir string, cfg *config.C
 }
 
 // BuildSystemPrompt builds the system prompt including AGENTS.md and model-specific guidance
-func (pb *PromptBuilder) BuildSystemPrompt(ctx context.Context, modelName string, cliMode bool) (string, error) {
+func (pb *PromptBuilder) BuildSystemPrompt(ctx context.Context, modelName string, cliMode bool, availableTools []map[string]interface{}) (string, error) {
 	files, err := pb.listWorkingDirFiles(ctx)
 	if err != nil || len(files) == 0 {
 		files = nil
@@ -84,7 +85,7 @@ func (pb *PromptBuilder) BuildSystemPrompt(ctx context.Context, modelName string
 		WorkingDir:       pb.workingDir,
 		Files:            files,
 		ProjectContext:   pb.projectSpecificContext(ctx),
-		ModelSpecific:    pb.modelSpecificPrompt(modelName),
+		ModelSpecific:    pb.modelSpecificPrompt(modelName, availableTools),
 		Tools:            tools,
 		IsCLIMode:        cliMode,
 		OS:               runtime.GOOS,
@@ -137,7 +138,7 @@ func (pb *PromptBuilder) projectSpecificContext(ctx context.Context) string {
 	return strings.TrimSpace(string(data))
 }
 
-func (pb *PromptBuilder) modelSpecificPrompt(modelName string) string {
+func (pb *PromptBuilder) modelSpecificPrompt(modelName string, availableTools []map[string]interface{}) string {
 	modelFamily := DetectModelFamily(modelName)
 
 	switch {
@@ -152,6 +153,27 @@ func (pb *PromptBuilder) modelSpecificPrompt(modelName string) string {
 		return `Always use the todo tool calls to track progress and plan ahead.
 Create new todos, sub-todos and check them if done successfully.
 `
+	case modelFamily == FamilyKimi:
+		toolCount := len(availableTools)
+		toolNames := make([]string, 0, len(availableTools))
+		for _, tool := range availableTools {
+			if fn, ok := tool["function"].(map[string]interface{}); ok {
+				if name, ok := fn["name"].(string); ok {
+					toolNames = append(toolNames, name)
+				}
+			}
+		}
+
+		toolsInfo := ""
+		if toolCount > 0 {
+			toolsInfo = fmt.Sprintf("Available tools: %s. ", strings.Join(toolNames, ", "))
+		}
+
+		return fmt.Sprintf(`%sWhen making tool calls, you MUST include a unique tool_call_id field for each tool call.
+This is critical for Kimi K2 models to properly track and manage tool executions.
+Each tool call should have a unique ID in the format: call_<unique_identifier>
+Example format: {"type": "function", "function": {"name": "tool_name", "arguments": {...}}, "tool_call_id": "call_123"}
+`, toolsInfo)
 	default:
 		return ""
 	}

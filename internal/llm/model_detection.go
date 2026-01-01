@@ -39,6 +39,7 @@ const (
 	FamilyCodestral
 	FamilyPixtral
 	FamilyMixtral
+	FamilyDevstral
 	// Other families
 	FamilyQwen
 	FamilyGemma
@@ -46,6 +47,8 @@ const (
 	FamilyDeepSeek
 	FamilyCommand
 	FamilyZaiGLM
+	FamilyKimi
+	FamilyMiniMax
 )
 
 // Model identifier constants for pattern matching
@@ -118,6 +121,7 @@ const (
 	ModelIDMistralLarge  = "mistral-large"
 	ModelIDMistralMedium = "mistral-medium"
 	ModelIDMistralSmall  = "mistral-small"
+	ModelIDDevstral      = "devstral"
 	ModelIDOpenMistral   = "open-mistral"
 	ModelIDMedium        = "medium"
 	ModelIDSmall         = "small"
@@ -129,6 +133,10 @@ const (
 	ModelIDDeepSeek = "deepseek"
 	ModelIDCommand  = "command"
 	ModelIDZaiGLM   = "zai-glm"
+	ModelIDKimi     = "kimi"
+	ModelIDK2       = "k2"
+	ModelIDMoonshot = "moonshot"
+	ModelIDMiniMax  = "minimax"
 
 	// Size indicators
 	ModelID128K   = "128k"
@@ -226,6 +234,9 @@ func DetectModelFamily(modelID string) ModelFamily {
 	}
 
 	// Mistral families
+	if strings.Contains(id, ModelIDDevstral) {
+		return FamilyDevstral
+	}
 	if strings.Contains(id, ModelIDCodestral) {
 		return FamilyCodestral
 	}
@@ -264,6 +275,12 @@ func DetectModelFamily(modelID string) ModelFamily {
 	if strings.Contains(id, ModelIDZaiGLM) {
 		return FamilyZaiGLM
 	}
+	if strings.Contains(id, ModelIDKimi) || strings.Contains(id, ModelIDK2) || strings.Contains(id, ModelIDMoonshot) {
+		return FamilyKimi
+	}
+	if strings.Contains(id, ModelIDMiniMax) {
+		return FamilyMiniMax
+	}
 
 	return FamilyUnknown
 }
@@ -272,7 +289,7 @@ func DetectModelFamily(modelID string) ModelFamily {
 func IsMistralModel(modelID string) bool {
 	family := DetectModelFamily(modelID)
 	switch family {
-	case FamilyMistralLarge, FamilyMistralMedium, FamilyMistralSmall, FamilyCodestral, FamilyPixtral:
+	case FamilyMistralLarge, FamilyMistralMedium, FamilyMistralSmall, FamilyCodestral, FamilyPixtral, FamilyDevstral:
 		return true
 	default:
 		return false
@@ -434,6 +451,8 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 		return 128000
 	case FamilyMixtral:
 		return 32000
+	case FamilyDevstral:
+		return 128000
 
 	// Other families
 	case FamilyQwen:
@@ -451,6 +470,10 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 		return 128000
 	case FamilyZaiGLM:
 		return 131072
+	case FamilyKimi:
+		return 200000
+	case FamilyMiniMax:
+		return 245760
 	}
 
 	// Default fallback
@@ -516,6 +539,8 @@ func DetectMaxOutputTokens(modelID string, family ModelFamily, contextWindow int
 		return 8192
 	case FamilyMixtral:
 		return 8192
+	case FamilyDevstral:
+		return 32000
 
 	// Other families
 	case FamilyQwen:
@@ -529,6 +554,10 @@ func DetectMaxOutputTokens(modelID string, family ModelFamily, contextWindow int
 	case FamilyCommand:
 		return 4096
 	case FamilyZaiGLM:
+		return 8192
+	case FamilyKimi:
+		return 8192
+	case FamilyMiniMax:
 		return 8192
 	}
 
@@ -569,11 +598,15 @@ func SupportsToolCalling(modelID string, family ModelFamily) bool {
 		return true
 	case FamilyGemini2, FamilyGemini15, FamilyGemini1:
 		return true
-	case FamilyMistralLarge, FamilyMistralMedium, FamilyMistralSmall:
+	case FamilyMistralLarge, FamilyMistralMedium, FamilyMistralSmall, FamilyDevstral:
 		return true
 	case FamilyCommand:
 		return true
 	case FamilyZaiGLM:
+		return true
+	case FamilyKimi:
+		return true
+	case FamilyMiniMax:
 		return true
 	}
 
@@ -626,6 +659,18 @@ func FormatModelDisplayName(modelID string, family ModelFamily) string {
 		return "Claude 3"
 	case FamilyClaude2:
 		return "Claude 2"
+	case FamilyDevstral:
+		if strings.Contains(normalizeModelID(id), "small") {
+			return "Devstral Small"
+		}
+		return "Devstral"
+	case FamilyMiniMax:
+		// Extract variant from model ID (e.g., "minimax-01" -> "MiniMax 01")
+		parts := strings.Split(normalizeModelID(id), "-")
+		if len(parts) > 1 {
+			return "MiniMax " + strings.ToUpper(parts[1])
+		}
+		return "MiniMax"
 	}
 
 	// Generic formatting: capitalize, replace hyphens/underscores with spaces
@@ -728,11 +773,17 @@ func GetModelDescription(modelID string, family ModelFamily) string {
 		return "Multimodal vision model"
 	case FamilyMixtral:
 		return "Mixture of experts model"
+	case FamilyDevstral:
+		return "Agentic model for software engineering tasks"
 
 	case FamilyCommand:
 		return "Cohere's command model for text generation"
 	case FamilyZaiGLM:
 		return "Zhipu AI's GLM model for text generation"
+	case FamilyKimi:
+		return "Moonshot AI's Kimi model with advanced reasoning capabilities"
+	case FamilyMiniMax:
+		return "MiniMax AI's multimodal model with long-context support"
 	}
 
 	return "Language model"

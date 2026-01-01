@@ -1,0 +1,113 @@
+package templates
+
+import "strings"
+
+// Button component with variants
+templ Button(text string, class string) {
+	<button 
+		class={ "px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 " + class }
+	>
+		{ text }
+	</button>
+}
+
+// Primary button
+templ PrimaryButton(text string) {
+	@Button(text, "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500")
+}
+
+// Secondary button
+templ SecondaryButton(text string) {
+	@Button(text, "bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500")
+}
+
+// Success button
+templ SuccessButton(text string) {
+	@Button(text, "bg-green-600 text-white hover:bg-green-700 focus:ring-green-500")
+}
+
+// Card component
+templ Card(classes ...string) {
+	<div class={ "bg-white border border-gray-200 rounded-lg shadow-sm " + strings.Join(classes, " ") }>
+		{ children... }
+	</div>
+}
+
+// StatusBadge returns a status badge with appropriate styling and text
+func StatusBadge(status string) templ.Component {
+	statusText := status
+	if status == "completed" {
+		statusText = "passed"
+	}
+	if status == "failed" {
+		statusText = "failed"
+	}
+	statusClasses := "inline-flex px-2 py-1 text-xs font-semibold rounded-full "
+	switch status {
+	case "passed", "completed", "success":
+		statusClasses += "bg-green-100 text-green-800"
+	case "failed", "error":
+		statusClasses += "bg-red-100 text-red-800"
+	case "running", "in_progress":
+		statusClasses += "bg-yellow-100 text-yellow-800"
+	default:
+		statusClasses += "bg-gray-100 text-gray-800"
+	}
+	
+	return templ.Raw(`<span class="` + statusClasses + `">` + statusText + `</span>`)
+}
+
+// AlertClassesFromType returns CSS classes for alert styling based on type
+func AlertClassesFromType(typeStr string) string {
+	switch typeStr {
+	case "error":
+		return "bg-red-50 border-red-200 text-red-800"
+	case "warning":
+		return "bg-yellow-50 border-yellow-200 text-yellow-800"
+	case "success":
+		return "bg-green-50 border-green-200 text-green-800"
+	case "info":
+		return "bg-blue-50 border-blue-200 text-blue-800"
+	default:
+		return "bg-gray-50 border-gray-200 text-gray-800"
+	}
+}
+
+// Alert components
+templ Alert(message string, typeStr string) {
+	<div class={ "p-4 rounded-md border " + AlertClassesFromType(typeStr) }>
+		<div class="text-sm">{ message }</div>
+	</div>
+}
+
+// Loading spinner
+templ LoadingSpinner() {
+	<div class="flex items-center justify-center">
+		<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+		<span class="ml-2 text-sm text-gray-600">Loading...</span>
+	</div>
+}
+
+// Loading button (for actions in progress)
+templ LoadingButton(text string) {
+	<button
+		disabled
+		class="px-4 py-2 rounded-md font-medium text-sm bg-blue-400 text-white cursor-not-allowed inline-flex items-center"
+	>
+		<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+			<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+			<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+		</svg>
+		{ text }
+	</button>
+}
+
+// Search loading spinner with message
+templ SearchLoading() {
+	@Card("p-6") {
+		<div class="flex justify-center items-center py-8">
+			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-3"></div>
+			<span class="text-gray-600">Searching models...</span>
+		</div>
+	}
+}

@@ -88,6 +88,7 @@ type Orchestrator struct {
 	clientInitMu          sync.Mutex
 	cachedSystemPrompt    string
 	systemPromptMu        sync.RWMutex
+	healthManager         *actor.SessionHealthManager
 	planningAgent         *planning.PlanningAgent
 	planningAgentCancel   context.CancelFunc
 	featureFlags          *features.FeatureFlags
@@ -95,9 +96,12 @@ type Orchestrator struct {
 }
 
 const (
-	autoContinueMaxAttempts = 3
-	errorRetryMaxAttempts   = 5
-	preconnectThrottle      = 2 * time.Second
+	defaultAutoContinueMaxAttempts  = 3
+	kimiK2AutoContinueMaxAttempts   = 32
+	minimaxAutoContinueMaxAttempts  = 32
+	deepSeekAutoContinueMaxAttempts = 12
+	errorRetryMaxAttempts           = 5
+	preconnectThrottle              = 2 * time.Second
 )
 
 var toolCallValidationRegex = regexp.MustCompile(`(?i)tool call validation failed.*?missing required parameter ['"]?([^'"]+)['"]?.*?in ['"]?([^'"]+)['"]?(?: function call)?`)
@@ -166,17 +170,18 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 
 	// Create orchestrator (without authorization actor yet)
 	orch := &Orchestrator{
-		fs:           filesystem,
-		session:      sess,
-		providerMgr:  providerMgr,
-		config:       cfg,
-		workingDir:   cfg.WorkingDir,
-		ctx:          ctx,
-		cancel:       cancel,
-		actorSystem:  actor.NewSystem(),
-		cliMode:      cliMode,
-		loopDetector: loopdetector.NewLoopDetector(),
-		featureFlags: features.NewFeatureFlags(),
+		fs:            filesystem,
+		session:       sess,
+		providerMgr:   providerMgr,
+		config:        cfg,
+		workingDir:    cfg.WorkingDir,
+		ctx:           ctx,
+		cancel:        cancel,
+		actorSystem:   actor.NewSystem(),
+		cliMode:       cliMode,
+		loopDetector:  loopdetector.NewLoopDetector(),
+		featureFlags:  features.NewFeatureFlags(),
+		healthManager: actor.NewSessionHealthManager(actor.NewSystem(), ""),
 	}
 	orch.mcpManager = mcp.NewManager(cfg, cfg.WorkingDir, providerMgr)
 
@@ -368,17 +373,18 @@ func NewOrchestratorWithSharedResources(
 
 	// Create orchestrator (without authorization actor yet)
 	orch := &Orchestrator{
-		fs:           filesystem,
-		session:      sess, // Use provided session instead of creating new one
-		providerMgr:  providerMgr,
-		config:       cfg,
-		workingDir:   sess.WorkingDir,
-		ctx:          ctx,
-		cancel:       cancel,
-		actorSystem:  actor.NewSystem(),
-		cliMode:      cliMode,
-		loopDetector: loopdetector.NewLoopDetector(),
-		featureFlags: features.NewFeatureFlags(),
+		fs:            filesystem,
+		session:       sess, // Use provided session instead of creating new one
+		providerMgr:   providerMgr,
+		config:        cfg,
+		workingDir:    sess.WorkingDir,
+		ctx:           ctx,
+		cancel:        cancel,
+		actorSystem:   actor.NewSystem(),
+		cliMode:       cliMode,
+		loopDetector:  loopdetector.NewLoopDetector(),
+		featureFlags:  features.NewFeatureFlags(),
+		healthManager: actor.NewSessionHealthManager(actor.NewSystem(), ""),
 	}
 	orch.mcpManager = mcp.NewManager(cfg, sess.WorkingDir, providerMgr)
 
@@ -1091,6 +1097,23 @@ func (o *Orchestrator) resolveMCPServerNames(keys []string) []string {
 	return resolved
 }
 
+// getAutoContinueMaxAttempts returns the appropriate auto-continue limit based on model family
+func (o *Orchestrator) getAutoContinueMaxAttempts() int {
+	modelID := o.providerMgr.GetOrchestrationModel()
+	modelFamily := llm.DetectModelFamily(modelID)
+
+	if modelFamily == llm.FamilyKimi {
+		return kimiK2AutoContinueMaxAttempts
+	}
+	if modelFamily == llm.FamilyDeepSeek {
+		return deepSeekAutoContinueMaxAttempts
+	}
+	if modelFamily == llm.FamilyMiniMax {
+		return minimaxAutoContinueMaxAttempts
+	}
+	return defaultAutoContinueMaxAttempts
+}
+
 func (o *Orchestrator) lookupServerBySanitizedKey(key string) string {
 	if o.config == nil {
 		return ""
@@ -1631,10 +1654,12 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 	}()
 
 	// Add user message
+	logger.Debug("ProcessPrompt: Adding user message with prompt (len=%d): %q", len(prompt), prompt)
 	o.session.AddMessage(&session.Message{
 		Role:    "user",
 		Content: prompt,
 	})
+	logger.Debug("ProcessPrompt: Session now has %d messages", len(o.session.GetMessages()))
 
 	// Auto-save the session if enabled
 	if o.config.AutoSave.Enabled {
@@ -1878,15 +1903,30 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		// Check if response was truncated due to token limits
 		isTruncated := response.StopReason == "length" || response.StopReason == "max_tokens"
 
+		// Check if content ends with incomplete indication (colon or colon with newline)
+		contentEndsIncomplete := false
+		if response.Content != "" {
+			trimmedContent := strings.TrimSpace(response.Content)
+			contentEndsIncomplete = strings.HasSuffix(trimmedContent, ":") || strings.HasSuffix(trimmedContent, ":\n")
+		}
+
 		// Check if there are tool calls to execute
 		if len(response.ToolCalls) == 0 {
 			// No tool calls - check if we should auto-continue
 			shouldContinue, judgeOutput := o.shouldAutoContinue(ctx, systemPrompt)
+
+			// Also consider auto-continue if content ends with incomplete indicators
+			if contentEndsIncomplete && !shouldContinue {
+				logger.Debug("Auto-continue triggered by incomplete content ending (colon)")
+				shouldContinue = true
+				judgeOutput = "Auto-continue triggered by incomplete content ending (colon)"
+			}
+
 			logger.Debug("Auto-continue judge called (no tool calls): shouldContinue=%v, output=%q", shouldContinue, judgeOutput)
 
-			if shouldContinue && autoContinueAttempts < autoContinueMaxAttempts {
+			if shouldContinue && autoContinueAttempts < o.getAutoContinueMaxAttempts() {
 				autoContinueAttempts++
-				logger.Info("Auto-continue triggered (attempt %d/%d)", autoContinueAttempts, autoContinueMaxAttempts)
+				logger.Info("Auto-continue triggered (attempt %d/%d)", autoContinueAttempts, o.getAutoContinueMaxAttempts())
 				sendStream("\n⏭ Auto-continue requested.\n", false)
 				sendStatus("Continuing...")
 				o.session.AddMessage(&session.Message{
@@ -1904,23 +1944,13 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 			break
 		}
 
-		// Tool calls present - check if response was truncated AND we should auto-continue
-		if isTruncated {
-			shouldContinue, judgeOutput := o.shouldAutoContinue(ctx, systemPrompt)
-			logger.Debug("Auto-continue judge called (truncated with tool calls): shouldContinue=%v, output=%q", shouldContinue, judgeOutput)
-
-			if shouldContinue && autoContinueAttempts < autoContinueMaxAttempts {
-				autoContinueAttempts++
-				logger.Info("Auto-continue triggered due to truncation (attempt %d/%d)", autoContinueAttempts, autoContinueMaxAttempts)
-				sendStream("\n⏭ Response truncated, auto-continuing...\n", false)
-				sendStatus("Continuing...")
-				o.session.AddMessage(&session.Message{
-					Role:    "user",
-					Content: "continue",
-				})
-				o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
-				continue
-			}
+		// Tool calls present - DO NOT auto-continue here
+		// We need to execute the tools first and add tool result messages
+		// Otherwise we'd create invalid message history: assistant[tool_calls] -> user[continue]
+		// The auto-continue decision will be made in the next iteration after tool results are added
+		if isTruncated || contentEndsIncomplete {
+			logger.Debug("Response truncated with tool calls present (iteration %d). Will execute tools first, then auto-continue decision in next iteration.", iteration)
+			sendStream("\n⏭ Response truncated, executing tools first...\n", false)
 		}
 
 		// Execute each tool call
@@ -2794,7 +2824,7 @@ func heuristicContextWindow(modelID string) int {
 	if strings.HasPrefix(model, "gpt-3.5") {
 		return 4096
 	}
-	if strings.Contains(model, "turbo") || strings.Contains(model, "4o") || strings.Contains(model, "o1") || strings.Contains(model, "o3") {
+	if strings.Contains(model, "turbo") || strings.Contains(model, "4o") || strings.Contains(model, "o1") || strings.Contains(model, "o3") || strings.Contains(model, "devstral") {
 		return 128000
 	}
 	if strings.HasPrefix(model, "gpt-4") {
@@ -2858,6 +2888,10 @@ func (o *Orchestrator) Close() error {
 
 	if o.planningAgentCancel != nil {
 		o.planningAgentCancel()
+	}
+
+	if o.healthManager != nil {
+		o.healthManager.Stop()
 	}
 
 	if o.shellActorCancel != nil {
@@ -3164,7 +3198,7 @@ func (o *Orchestrator) getOrBuildSystemPrompt(ctx context.Context, modelID strin
 	// Build the system prompt
 	logger.Debug("Building new system prompt for session")
 	promptBuilder := llm.NewPromptBuilder(o.fs, o.workingDir, o.config)
-	systemPrompt, err := promptBuilder.BuildSystemPrompt(ctx, modelID, o.cliMode)
+	systemPrompt, err := promptBuilder.BuildSystemPrompt(ctx, modelID, o.cliMode, o.toolRegistry.ToJSONSchema())
 	if err != nil {
 		return "", err
 	}

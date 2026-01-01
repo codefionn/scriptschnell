@@ -1081,7 +1081,7 @@ func (c *trivialCodeChecker) isFunctionCallSubstantial(call *ast.CallExpr) bool 
 	if fun, ok := call.Fun.(*ast.SelectorExpr); ok {
 		if x, ok := fun.X.(*ast.Ident); ok && x.Name == "fmt" {
 			switch fun.Sel.Name {
-			case "Print", "Println", "Printf":
+			case "Print", "Println", "Printf", "println", "printf", "print":
 				// Check if the arguments contain substantial expressions
 				for _, arg := range call.Args {
 					if c.isExpressionSubstantial(arg) {

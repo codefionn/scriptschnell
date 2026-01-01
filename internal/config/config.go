@@ -107,7 +107,7 @@ type Config struct {
 	Search             SearchConfig                  `json:"search"`                        // Web search provider configuration
 	MCP                MCPConfig                     `json:"mcp,omitempty"`                 // Custom MCP server configuration
 	Secrets            SecretsSettings               `json:"secrets,omitempty"`             // Encryption settings
-	EnablePromptCache  bool                          `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI, OpenRouter)
+	EnablePromptCache  bool                          `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI). Disabled by default as some providers like Mistral don't support cache_control ephemeral
 	PromptCacheTTL     string                        `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
 	ContextDirectories map[string][]string           `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
 	OpenTabs           map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
@@ -196,7 +196,7 @@ func DefaultConfig() *Config {
 			Servers: make(map[string]*MCPServerConfig),
 		},
 		Secrets:            SecretsSettings{},
-		EnablePromptCache:  true,                      // Enable by default for cost savings
+		EnablePromptCache:  false,                     // Disabled by default - some providers like Mistral don't support cache_control ephemeral
 		PromptCacheTTL:     "1h",                      // Default to 1 hour for longer sessions
 		ContextDirectories: make(map[string][]string), // No context directories by default
 		AutoSave: AutoSaveConfig{

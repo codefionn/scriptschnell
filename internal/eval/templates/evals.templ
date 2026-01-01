@@ -1,0 +1,200 @@
+package templates
+
+type CLITest struct {
+	ID          string
+	Name        string
+	Description string
+	Command     string
+	Expected    string
+	Timeout     int
+}
+
+type EvalDefinition struct {
+	ID       string
+	Name     string
+	Desc     string
+	RunFile  string
+	CLITests []CLITest
+}
+
+type EvalsProps struct {
+	Evals          []EvalDefinition
+	SelectedModels []Model
+	Error          string
+	SearchQuery    string
+	Total          int
+}
+
+type EvalsSearchResultsProps struct {
+	Evals       []EvalDefinition
+	SearchQuery string
+	Total       int
+	Error       string
+}
+
+templ EvalCard(eval EvalDefinition, hasSelectedModels bool) {
+	@Card("h-full") {
+		<div class="p-6">
+			<div class="flex items-start justify-between">
+				<div class="flex-1">
+					<h3 class="text-lg font-medium text-gray-900">{ eval.Name }</h3>
+					<p class="text-sm text-gray-500 mt-1">ID: { eval.ID }</p>
+					<p class="text-sm text-gray-600 mt-2">{ eval.Desc }</p>
+					
+					<div class="mt-4 flex items-center space-x-6 text-sm text-gray-500">
+						<div>
+							<span class="font-medium">Tests:</span> { len(eval.CLITests) }
+						</div>
+						<div>
+							<span class="font-medium">Run file:</span> { eval.RunFile }
+						</div>
+					</div>
+				</div>
+				
+				<div class="ml-6">
+					if hasSelectedModels {
+						<div id={ "eval-button-" + eval.ID }>
+							<form
+								hx-post={ "/evals/" + eval.ID + "/run" }
+								hx-target={ "#eval-result-" + eval.ID }
+								hx-swap="innerHTML"
+								hx-indicator={ "#eval-loading-" + eval.ID }
+								class="inline"
+							>
+								@PrimaryButton("Run Eval")
+							</form>
+						</div>
+						<div id={ "eval-loading-" + eval.ID } class="htmx-indicator">
+							@LoadingButton("Running...")
+						</div>
+					} else {
+						@SecondaryButton("Run Eval")
+					}
+				</div>
+			</div>
+			
+			<div id={ "eval-result-" + eval.ID } class="mt-4"></div>
+		</div>
+	}
+}
+
+templ EvalsSearchResults(props EvalsSearchResultsProps) {
+	<div id="evals-container">
+		@Card("p-6") {
+			<div class="flex justify-between items-center mb-6">
+				<div>
+					<p class="text-sm text-gray-600">
+						Showing { len(props.Evals) } evaluations
+						if props.SearchQuery != "" {
+							<span> matching "{ props.SearchQuery }"</span>
+							if len(props.Evals) > 0 {
+								<span class="text-green-600 ml-2">✓</span>
+							}
+						}
+					</p>
+					if props.SearchQuery != "" && len(props.Evals) > 0 {
+						<p class="text-xs text-gray-500 mt-1">
+							Found { len(props.Evals) } of { props.Total } evaluations
+						</p>
+					}
+				</div>
+				<div>
+					if props.SearchQuery != "" && len(props.Evals) == 0 {
+						<form 
+							hx-post="/evals-search"
+							hx-target="#evals-container"
+							hx-swap="innerHTML"
+							method="post"
+							class="inline"
+						>
+							<button 
+								type="submit"
+								name="search"
+								value=""
+								class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+							>
+								Clear search
+							</button>
+						</form>
+					}
+				</div>
+			</div>
+
+			if props.Error != "" {
+				@Alert(props.Error, "error")
+			}
+
+			<div id="evals-grid" class="grid grid-cols-1 gap-6">
+				for _, eval := range props.Evals {
+					@EvalCard(eval, false)
+				}
+			</div>
+			
+			if len(props.Evals) == 0 {
+				<div class="text-center py-12">
+					<svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+					</svg>
+					<h3 class="mt-2 text-sm font-medium text-gray-900">No evaluations found</h3>
+					<p class="mt-1 text-sm text-gray-500">
+						if props.SearchQuery == "" {
+							No evaluation definitions found. Evaluation definitions should be placed in the evals directory as JSON files.
+						} else {
+							No evaluations match your search. Try a different search term.
+						}
+					</p>
+				</div>
+			}
+		}
+	</div>
+}
+
+templ Evals(props EvalsProps) {
+	<div class="space-y-6">
+		<div class="flex justify-between items-center">
+			<h2 class="text-2xl font-bold">Available Evaluations</h2>
+			<div class="flex space-x-4">
+				<input 
+					type="search" 
+					placeholder="Search evaluations..." 
+					hx-post="/evals-search"
+					hx-trigger="keyup[keyCode==13] search changed delay:500ms"
+					hx-target="#evals-container"
+					hx-swap="innerHTML"
+					hx-indicator="#evals-search-indicator"
+					class="px-3 py-2 border border-gray-300 rounded-md"
+				/>
+				<div id="evals-search-indicator" class="htmx-indicator hidden">
+					<svg class="animate-spin h-4 w-4 mr-2 inline" viewBox="0 0 24 24">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+					</svg>
+					<span class="text-sm text-gray-600">Searching...</span>
+				</div>
+			</div>
+		</div>
+
+		if len(props.SelectedModels) == 0 {
+			@Alert("No models selected. Please select models before running evaluations.", "warning")
+		}
+
+		<div id="evals-container">
+			if props.Error != "" {
+				@Alert(props.Error, "error")
+			}
+
+			if len(props.Evals) == 0 {
+				<div class="text-center py-12">
+					<h3 class="mt-2 text-sm font-medium text-gray-900">No evaluation definitions found</h3>
+					<p class="mt-1 text-sm text-gray-500">Evaluation definitions should be placed in the evals directory as JSON files.</p>
+				</div>
+			}
+
+			<div id="evals-grid" class="grid grid-cols-1 gap-6">
+				for _, eval := range props.Evals {
+					@EvalCard(eval, len(props.SelectedModels) > 0)
+				}
+			</div>
+		</div>
+	</div>
+}

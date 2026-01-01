@@ -1,0 +1,251 @@
+package templates
+
+import (
+	"fmt"
+)
+
+// TestResult provides comprehensive view of a single test case
+type TestResult struct {
+	RunID                int64
+	TestCaseID          string
+	Passed              bool
+	ExpectedOutput      string
+	ActualOutput        string
+	ContainerName       string
+	ErrorInfo           string
+	RawOutput           string
+	DetailedExecInfo    string
+	ExecutionTime       int // in milliseconds
+}
+
+type DetailedResultsProps struct {
+	RunID               int64
+	EvalID              string
+	ModelID             string
+	StartedAt           string
+	Status              string
+	AgentOutput         string
+	AgentExitCode       int
+	TotalTests          int
+	PassedTests         int
+	PassRate            float64
+	TestResults         []TestResult
+	Error               string
+}
+
+templ passedFailed(result TestResult) {
+	if result.Passed {
+		passed
+	} else {
+		failed
+	}
+}
+
+// DetailedTestResultCard shows comprehensive test case information including execution details
+templ DetailedTestResultCard(result TestResult) {
+	@Card("mb-4") {
+		<div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+			<div class="flex items-center justify-between">
+				<h3 class="text-lg font-semibold text-gray-900">{ result.TestCaseID }</h3>
+				<div class="flex items-center space-x-2">
+					@StatusBadge(func() string {
+						if result.Passed {
+							return "completed"
+						} else {
+							return "failed"
+						}
+					}())
+					@passedFailed(result)
+				</div>
+			</div>
+			<div class="mt-1 text-sm text-gray-600">
+				Container: { result.ContainerName } | Execution Time: { fmt.Sprintf("%dms", result.ExecutionTime) }
+			</div>
+		</div>
+
+		<div class="px-6 py-4">
+			<div class="grid md:grid-cols-2 gap-4 mb-4">
+				<div>
+					<div class="text-sm font-medium text-gray-500 mb-2">Expected Output:</div>
+					<pre class="text-xs bg-gray-50 p-3 rounded border border-gray-200">{ result.ExpectedOutput }</pre>
+				</div>
+				<div>
+					<div class="text-sm font-medium text-gray-500 mb-2">Actual Output:</div>
+					<pre class="text-xs bg-gray-50 p-3 rounded border border-gray-200">{ result.ActualOutput }</pre>
+				</div>
+			</div>
+
+			if result.ErrorInfo != "" || result.RawOutput != "" || result.DetailedExecInfo != "" {
+				<div class="bg-gray-50 p-3 rounded border border-gray-200">
+					if result.ErrorInfo != "" {
+						<div class="mb-3">
+							<div class="text-sm font-medium text-red-600 mb-1">Error Information:</div>
+							<pre class="text-xs text-red-700 bg-red-50 p-2 rounded">{ result.ErrorInfo }</pre>
+						</div>
+					}
+					if result.RawOutput != "" {
+						<div class="mb-3">
+							<div class="text-sm font-medium text-gray-600 mb-1">Raw Output:</div>
+							<pre class="text-xs text-gray-700 bg-gray-100 p-2 rounded">
+								{ result.RawOutput }
+							</pre>
+						</div>
+					}
+					if result.DetailedExecInfo != "" {
+						<div>
+							<div class="text-sm font-medium text-gray-600 mb-1">Execution Details:</div>
+							<pre class="text-xs text-blue-700 bg-blue-50 p-2 rounded border-l-4 border-blue-200">
+								{ result.DetailedExecInfo }
+							</pre>
+						</div>
+					}
+				</div>
+			} else {
+				<div class="text-sm text-gray-500">
+					No additional execution details available.
+				</div>
+			}
+		</div>
+	}
+}
+
+// DetailedResultsSummary shows overview stats and container information
+templ DetailedResultsSummary(props DetailedResultsProps) {
+	<div class="space-y-6">
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold text-gray-900">Detailed Evaluation Results</h1>
+			<a href="/results" class="text-sm text-gray-600 hover:text-gray-900">
+				← Back to Results
+			</a>
+		</div>
+
+		// Summary Card with key metrics
+		@Card("mb-6") {
+			<div class="px-6 py-4 border-b border-gray-200">
+				<h2 class="text-lg font-semibold text-gray-900">Summary</h2>
+			</div>
+			<div class="px-6 py-4">
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+					<div>
+						<div class="text-sm text-gray-500">Eval ID</div>
+						<div class="text-sm font-medium text-gray-900">{ props.EvalID }</div>
+					</div>
+					<div>
+						<div class="text-sm text-gray-500">Model</div>
+						<div class="text-sm font-medium text-gray-900">{ props.ModelID }</div>
+					</div>
+					<div>
+						<div class="text-sm text-gray-500">Status</div>
+						<div class="text-sm font-medium text-gray-900">
+							@StatusBadge(props.Status)
+						</div>
+					</div>
+					<div>
+						<div class="text-sm text-gray-500">Started At</div>
+						<div class="text-sm font-medium text-gray-900">{ props.StartedAt }</div>
+					</div>
+				</div>
+
+				<div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+					<div>
+						<div class="text-sm text-gray-500">Total Tests</div>
+						<div class="text-lg font-bold">{ fmt.Sprintf("%d", props.TotalTests) }</div>
+					</div>
+					<div>
+						<div class="text-sm text-gray-500">Passed Tests</div>
+						<div class="text-lg font-bold text-green-600">{ fmt.Sprintf("%d", props.PassedTests) }</div>
+					</div>
+					<div>
+						<div class="text-sm text-gray-500">Pass Rate</div>
+						<div class="text-lg font-bold">{ fmt.Sprintf("%.1f%%", props.PassRate) }</div>
+					</div>
+					<div>
+						<div class="text-sm text-gray-500">Run ID</div>
+						<div class="text-lg font-medium">{ fmt.Sprintf("#%d", props.RunID) }</div>
+					</div>
+				</div>
+			</div>
+		}
+
+		@ContainerInformationSelector(props)
+	</div>
+}
+
+templ ContainerInformationSelector(props DetailedResultsProps) {
+	// Container Information Section
+	@Card("mb-6") {
+		<div class="px-6 py-4 border-b border-gray-200">
+			<h2 class="text-lg font-semibold text-gray-900">Container Executions</h2>
+		</div>
+		<div class="px-6 py-4">
+			for _, result := range props.TestResults {
+				<div class="mb-2 last:mb-0">
+					<div class="flex items-center justify-between text-sm">
+						<span class="text-gray-600">{ result.TestCaseID }</span>
+						<span class="text-gray-900">Container: { result.ContainerName }</span>
+					</div>
+					<div class="w-full bg-gray-200 rounded-full h-1 mt-1">
+						if result.Passed {
+							<div class="h-1 rounded-full bg-green-400" style="width: 100%"></div>
+						} else {
+							<div class="h-1 rounded-full bg-red-400" style="width: 50%"></div>
+						}
+					</div>
+				</div>
+			}
+		</div>
+	}
+}
+
+templ DetailedResults(props DetailedResultsProps) {
+	<div class="max-w-6xl mx-auto p-4">
+		if props.Error != "" {
+			@Alert(props.Error, "error")
+		}
+
+		@DetailedResultsSummary(props)
+
+		// Agent Interaction / Solution Generation phase
+		<div class="mb-8">
+			<h2 class="text-xl font-semibold text-gray-900 mb-4">Solution Generation Phase (Agent Interaction)</h2>
+			@Card("mb-4") {
+				<div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+					<h3 class="text-lg font-semibold text-gray-900">scriptschnell Agent Run</h3>
+					<div class="flex items-center space-x-2">
+						@StatusBadge(func() string {
+							if props.AgentExitCode == 0 {
+								return "completed"
+							} else {
+								return "failed"
+							}
+						}())
+					</div>
+				</div>
+				<div class="px-6 py-4">
+					if props.AgentOutput != "" {
+						<div class="text-sm font-medium text-gray-600 mb-2">Agent Reasoning & Execution Log:</div>
+						<pre class="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-x-auto max-h-[500px] whitespace-pre-wrap font-mono">
+							{ props.AgentOutput }
+						</pre>
+					} else {
+						<div class="text-sm text-gray-500 italic">
+							No agent output recorded for this run.
+						</div>
+					}
+				</div>
+			}
+		</div>
+
+		<div class="mb-8">
+			<h2 class="text-xl font-semibold text-gray-900 mb-4">Detailed Test Results</h2>
+			for _, result := range props.TestResults {
+				@DetailedTestResultCard(result)
+			}
+		</div>
+
+		<div class="mt-8 bg-gray-50 p-4 rounded-lg border border-gray-200">
+			<h3 class="text-md font-semibold text-gray-900 mb-2">Container Execution Notes</h3>
+			<p class="text-sm text-gray-600">Each container execution includes detailed logging, error capture, and performance metrics. Click on individual test cards above to see comprehensive execution details including runtime output, container names, timing information, and any errors encountered during evaluation.</p>
+		</div>
+	</div>
+}

@@ -24,6 +24,7 @@ type shellActorImpl struct {
 	session *session.Session
 	jobs    map[string]*shellJob
 	mu      sync.RWMutex
+	health  *HealthCheckable
 }
 
 // shellJob represents a running background job
@@ -44,11 +45,16 @@ type shellJob struct {
 
 // NewShellActor creates a new shell actor
 func NewShellActor(id string, sess *session.Session) ShellActor {
-	return &shellActorImpl{
+	actor := &shellActorImpl{
 		id:      id,
 		session: sess,
 		jobs:    make(map[string]*shellJob),
 	}
+
+	// Initialize health monitoring
+	actor.health = NewHealthCheckable(id, make(chan Message, 100), actor.getShellMetrics)
+
+	return actor
 }
 
 func (a *shellActorImpl) ID() string {
@@ -77,6 +83,11 @@ func (a *shellActorImpl) Stop(ctx context.Context) error {
 }
 
 func (a *shellActorImpl) Receive(ctx context.Context, msg Message) error {
+	// Record activity for health monitoring
+	if a.health != nil {
+		a.health.RecordActivity()
+	}
+
 	switch m := msg.(type) {
 	case ShellExecuteRequest:
 		response := a.handleExecuteRequest(ctx, m)
@@ -107,6 +118,12 @@ func (a *shellActorImpl) Receive(ctx context.Context, msg Message) error {
 			return ctx.Err()
 		}
 	default:
+		// Try health check handler first
+		if a.health != nil {
+			if err := a.health.HealthCheckHandler(ctx, msg); err == nil {
+				return nil // Health check message handled
+			}
+		}
 		return fmt.Errorf("unknown message type: %T", msg)
 	}
 	return nil
@@ -480,6 +497,44 @@ func resolveProgramPath(program string, workingDir string) (string, error) {
 		return resolved, nil
 	}
 	return abs, nil
+}
+
+// Health Check methods
+
+// GetHealthMetrics returns current health metrics for shell actor
+func (a *shellActorImpl) GetHealthMetrics() HealthMetrics {
+	return a.health.GetHealthMetrics()
+}
+
+// IsHealthy returns true if the shell actor is healthy
+func (a *shellActorImpl) IsHealthy() bool {
+	return a.health.IsHealthy()
+}
+
+// GetShellMetrics provides custom metrics for shell actor
+func (a *shellActorImpl) getShellMetrics() interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	// Count running vs completed jobs
+	runningJobs := 0
+	completedJobs := 0
+	for _, job := range a.jobs {
+		if job.Completed {
+			completedJobs++
+		} else {
+			runningJobs++
+		}
+	}
+
+	metrics := map[string]interface{}{
+		"total_jobs":     len(a.jobs),
+		"running_jobs":   runningJobs,
+		"completed_jobs": completedJobs,
+		"job_management": "active",
+	}
+
+	return metrics
 }
 
 func generateJobID() string {

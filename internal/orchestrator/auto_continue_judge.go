@@ -43,6 +43,11 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 		return false, reason
 	}
 
+	// Manual check: if last message ends with ':' followed by newlines, auto-continue
+	if shouldContinue, reason := checkMessageEndsWithColonNewline(messages); shouldContinue {
+		return true, reason
+	}
+
 	userPrompts := collectRecentUserPrompts(messages, 10)
 	if len(userPrompts) == 0 {
 		logger.Debug("Auto-continue skipped: no user prompts found")
@@ -118,6 +123,34 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 	}
 
 	return false, decision
+}
+
+// checkMessageEndsWithColonNewline checks if the last message ends with a colon followed by one or more newlines.
+// This is a manual check that happens before calling the summarization model for auto-continue decisions.
+// Returns (true, reason) if the last message ends with ':[newline]*', indicating continuation is required.
+func checkMessageEndsWithColonNewline(messages []*session.Message) (bool, string) {
+	if len(messages) == 0 {
+		return false, ""
+	}
+
+	lastMessage := messages[len(messages)-1]
+	if lastMessage == nil || lastMessage.Content == "" {
+		return false, ""
+	}
+
+	content := lastMessage.Content
+
+	// Check if content ends with colon followed by one or more newlines
+	// We trim trailing newlines and check if what remains ends with ':'
+	trimmed := strings.TrimRight(content, "\r\n")
+
+	// If trimming removed characters and the trimmed version ends with ':', we have a match
+	if strings.HasSuffix(trimmed, ":") && len(trimmed) < len(content) {
+		logger.Debug("Auto-continue triggered: last message (role=%s) ends with ':[newline]*'", lastMessage.Role)
+		return true, "CONTINUE - message ends with colon and newlines"
+	}
+
+	return false, ""
 }
 
 func collectRecentUserPrompts(messages []*session.Message, limit int) []string {

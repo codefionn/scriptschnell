@@ -46,6 +46,10 @@ func TestHeuristicContextWindow(t *testing.T) {
 	if window := heuristicContextWindow("gpt-3.5-turbo"); window != 4096 {
 		t.Fatalf("expected GPT-3.5 heuristic 4096, got %d", window)
 	}
+
+	if window := heuristicContextWindow("devstral-small"); window != 128000 {
+		t.Fatalf("expected Devstral heuristic 128000, got %d", window)
+	}
 }
 
 func TestFormatRoleLabel(t *testing.T) {

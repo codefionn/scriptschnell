@@ -282,7 +282,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		dangerous    bool
+		dangerous     bool
 		allowNetwork bool
 		allowDirs    stringSlice
 		allowFiles   stringSlice
@@ -292,6 +292,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		provider     string
 		acpMode      bool
 		jsonOutput   bool
+		jsonExtended bool
 	)
 
 	fs.BoolVar(&dangerous, "dangerous-allow-all", false, "Bypass all authorization checks (dangerous)")
@@ -303,6 +304,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs.StringVar(&provider, "provider", "", "Provider name (e.g., openai, anthropic, google)")
 	fs.BoolVar(&acpMode, "acp", false, "Run in Agent Client Protocol (ACP) mode for integration with code editors")
 	fs.BoolVar(&jsonOutput, "json", false, "Output final assistant message and usage as JSON")
+	fs.BoolVar(&jsonExtended, "json-extended", false, "Output all messages as JSON one-liners plus usage statistics")
 	fs.BoolVar(&showHelp, "help", false, "Show CLI usage information")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0])
@@ -358,6 +360,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		Model:               model,
 		Provider:            provider,
 		JSONOutput:          jsonOutput,
+		JSONExtended:        jsonExtended,
 	}
 	if dangerous {
 		opts.AllowAllNetwork = true
@@ -873,16 +876,14 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 			model.AddSystemMessage(menuResult.Message)
 		}
 
-		// Update model name if changed
-		if activeOrch := getActiveOrchestrator(); activeOrch != nil {
-			model.UpdateModel(activeOrch.GetCurrentModel())
-		}
-
-		// Refresh orchestrator models for all tabs if needed
+		// Refresh orchestrator models for all tabs if needed (must happen before UpdateModel)
 		if err := updateAllTabModels(); err != nil {
 			return fmt.Errorf("failed to refresh orchestrator models: %w", err)
 		}
+
+		// Update model name and context file after orchestrators are refreshed
 		if activeOrch := getActiveOrchestrator(); activeOrch != nil {
+			model.UpdateModel(activeOrch.GetCurrentModel())
 			model.SetContextFile(activeOrch.GetExtendedContextFile())
 		}
 

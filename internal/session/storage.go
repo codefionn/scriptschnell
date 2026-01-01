@@ -410,9 +410,9 @@ func (s *SessionStorage) DeleteSession(workingDir, sessionID string) error {
 
 // ToStoredSession converts a runtime Session to a storable format
 func (s *SessionStorage) ToStoredSession(session *Session, name string) *StoredSession {
-	// Convert messages
-	storedMessages := make([]*StoredMessage, len(session.GetMessages()))
+	// Convert messages - call GetMessages() once to avoid race condition
 	messages := session.GetMessages()
+	storedMessages := make([]*StoredMessage, len(messages))
 	for i, msg := range messages {
 		storedMessages[i] = &StoredMessage{
 			Role:              msg.Role,

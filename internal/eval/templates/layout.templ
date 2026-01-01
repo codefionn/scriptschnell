@@ -1,0 +1,44 @@
+package templates
+
+type LayoutProps struct {
+	Title      string
+	ActivePage string
+	Body       templ.Component
+}
+
+templ Layout(props LayoutProps) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ props.Title }</title>
+			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
+			<script src="https://cdn.tailwindcss.com"></script>
+			<style>
+				.htmx-indicator {
+					display: none;
+				}
+				.htmx-request .htmx-indicator {
+					display: inline-block;
+				}
+				.htmx-request.htmx-indicator {
+					display: inline-block;
+				}
+				/* Hide button when form is making request */
+				form.htmx-request button[type="submit"],
+				form.htmx-request button:not([type]) {
+					display: none;
+				}
+			</style>
+		</head>
+		<body class="bg-gray-50 min-h-screen">
+			@Menu(props.ActivePage)
+			<main class="max-w-7xl mx-auto py-6 px-4">
+				if props.Body != nil {
+					@props.Body
+				}
+			</main>
+		</body>
+	</html>
+}

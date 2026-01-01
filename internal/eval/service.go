@@ -22,6 +22,7 @@ type Service struct {
 	manager         *provider.Manager
 	mu              sync.RWMutex
 	openRouterToken string // Store token for lazy initialization
+	logAssistant    bool   // Whether to log assistant messages to console
 }
 
 // NewService creates a new eval service
@@ -56,6 +57,13 @@ func NewService(dbPath, evalDir string) (*Service, error) {
 // Close closes the service and cleans up resources
 func (s *Service) Close() error {
 	return s.db.Close()
+}
+
+// SetLogAssistant sets whether to log assistant messages to console
+func (s *Service) SetLogAssistant(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logAssistant = enabled
 }
 
 // Config operations
@@ -347,6 +355,9 @@ func (s *Service) executeEval(runID int64, evalDef *EvalDefinition, model *EvalM
 
 	// Save agent output and exit code regardless of error
 	if result != nil {
+		// Log assistant messages if enabled
+		s.logAssistantMessages(result.Output)
+
 		if updateErr := s.db.UpdateEvalRunAgentResult(runID, result.Output, result.ExitCode); updateErr != nil {
 			logError(fmt.Sprintf("failed to save agent result for run %d: %v", runID, updateErr))
 		}
@@ -683,4 +694,46 @@ func (s *Service) GetEvalStats(evalID string) ([]EvalStats, error) {
 // Helper function for logging errors
 func logError(msg string) {
 	log.Printf("ERROR: %s", msg)
+}
+
+// logAssistantMessages parses and logs assistant messages from JSON-extended output
+func (s *Service) logAssistantMessages(output string) {
+	s.mu.RLock()
+	enabled := s.logAssistant
+	s.mu.RUnlock()
+
+	if !enabled {
+		return
+	}
+
+	// Parse JSON-extended output (one JSON object per line)
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		// Try to parse as a message object
+		var msg map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+
+		// Check if this is an assistant message
+		role, hasRole := msg["role"].(string)
+		if !hasRole || role != "assistant" {
+			continue
+		}
+
+		// Log the full assistant message as JSON
+		jsonBytes, err := json.Marshal(msg)
+		if err != nil {
+			log.Printf("ERROR: failed to marshal assistant message: %v", err)
+			continue
+		}
+
+		// Output to stdout so it can be captured
+		fmt.Printf("ASSISTANT_MESSAGE: %s\n", string(jsonBytes))
+	}
 }

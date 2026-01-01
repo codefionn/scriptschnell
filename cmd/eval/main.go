@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	port    = flag.Int("port", 8080, "Port to run the web server on")
-	dbPath  = flag.String("db", "", "Path to SQLite database (defaults to ~/.config/scriptschnell/eval.db)")
-	evalDir = flag.String("eval-dir", "internal/eval/definitions", "Directory containing eval definitions")
+	port           = flag.Int("port", 8080, "Port to run the web server on")
+	dbPath         = flag.String("db", "", "Path to SQLite database (defaults to ~/.config/scriptschnell/eval.db)")
+	evalDir        = flag.String("eval-dir", "internal/eval/definitions", "Directory containing eval definitions")
+	logAssistant   = flag.Bool("log-assistant", false, "Log assistant messages to console as JSON")
 )
 
 func main() {
@@ -39,6 +40,9 @@ func main() {
 		log.Fatalf("Failed to initialize eval service: %v", err)
 	}
 	defer evalService.Close()
+
+	// Set assistant logging option
+	evalService.SetLogAssistant(*logAssistant)
 
 	// Create server
 	server := eval.NewServer(evalService, *port)

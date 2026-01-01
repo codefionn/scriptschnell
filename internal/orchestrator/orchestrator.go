@@ -1950,7 +1950,6 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		// The auto-continue decision will be made in the next iteration after tool results are added
 		if isTruncated || contentEndsIncomplete {
 			logger.Debug("Response truncated with tool calls present (iteration %d). Will execute tools first, then auto-continue decision in next iteration.", iteration)
-			sendStream("\n⏭ Response truncated, executing tools first...\n", false)
 		}
 
 		// Execute each tool call

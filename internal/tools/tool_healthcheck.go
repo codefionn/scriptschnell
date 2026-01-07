@@ -12,15 +12,15 @@ import (
 
 // ToolExecutionHealth represents the health status of a tool execution
 type ToolExecutionHealth struct {
-	ToolID        string        `json:"tool_id"`
-	ToolName      string        `json:"tool_name"`
+	ToolID        string         `json:"tool_id"`
+	ToolName      string         `json:"tool_name"`
 	State         ExecutionState `json:"state"`
-	StartTime     time.Time     `json:"start_time"`
-	LastHeartbeat time.Time     `json:"last_heartbeat"`
-	ElapsedTime   time.Duration `json:"elapsed_time"`
-	IsStuck       bool          `json:"is_stuck"`
-	IsCancelled   bool          `json:"is_cancelled"`
-	CustomData    interface{}   `json:"custom_data,omitempty"`
+	StartTime     time.Time      `json:"start_time"`
+	LastHeartbeat time.Time      `json:"last_heartbeat"`
+	ElapsedTime   time.Duration  `json:"elapsed_time"`
+	IsStuck       bool           `json:"is_stuck"`
+	IsCancelled   bool           `json:"is_cancelled"`
+	CustomData    interface{}    `json:"custom_data,omitempty"`
 }
 
 // ExecutionState represents the current state of tool execution
@@ -29,7 +29,7 @@ type ExecutionState string
 const (
 	StateStarting  ExecutionState = "starting"
 	StateRunning   ExecutionState = "running"
-	StateWaiting   ExecutionState = "waiting"    // Waiting for user input
+	StateWaiting   ExecutionState = "waiting" // Waiting for user input
 	StateCompleted ExecutionState = "completed"
 	StateFailed    ExecutionState = "failed"
 	StateCancelled ExecutionState = "cancelled"
@@ -42,16 +42,16 @@ type ToolHealthMonitor struct {
 	executions map[string]*ToolExecutionHealth
 
 	// Thresholds for detecting stuck executions
-	stuckThreshold    time.Duration // Time without heartbeat to consider stuck
-	maxExecutionTime  time.Duration // Maximum allowed execution time
+	stuckThreshold   time.Duration // Time without heartbeat to consider stuck
+	maxExecutionTime time.Duration // Maximum allowed execution time
 }
 
 // NewToolHealthMonitor creates a new tool health monitor
 func NewToolHealthMonitor() *ToolHealthMonitor {
 	return &ToolHealthMonitor{
 		executions:       make(map[string]*ToolExecutionHealth),
-		stuckThreshold:   30 * time.Second,  // No heartbeat for 30s = stuck
-		maxExecutionTime: 10 * time.Minute,  // Max 10 minutes per tool
+		stuckThreshold:   30 * time.Second, // No heartbeat for 30s = stuck
+		maxExecutionTime: 10 * time.Minute, // Max 10 minutes per tool
 	}
 }
 
@@ -333,7 +333,7 @@ type SandboxProcessInfo struct {
 
 // UserDialogInfo contains information about a user dialog
 type UserDialogInfo struct {
-	DialogType    string    `json:"dialog_type"`    // "ask_user", "ask_user_multiple", "authorization"
+	DialogType    string    `json:"dialog_type"` // "ask_user", "ask_user_multiple", "authorization"
 	IsDisplayed   bool      `json:"is_displayed"`
 	QuestionCount int       `json:"question_count,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -341,12 +341,12 @@ type UserDialogInfo struct {
 
 // HealthCheckReport provides a detailed health report for tool executions
 type HealthCheckReport struct {
-	TotalExecutions int                     `json:"total_executions"`
-	ActiveCount     int                     `json:"active_count"`
-	StuckCount      int                     `json:"stuck_count"`
-	Executions      []*ToolExecutionHealth  `json:"executions"`
-	StuckExecutions []*ToolExecutionHealth  `json:"stuck_executions"`
-	Timestamp       time.Time               `json:"timestamp"`
+	TotalExecutions int                    `json:"total_executions"`
+	ActiveCount     int                    `json:"active_count"`
+	StuckCount      int                    `json:"stuck_count"`
+	Executions      []*ToolExecutionHealth `json:"executions"`
+	StuckExecutions []*ToolExecutionHealth `json:"stuck_executions"`
+	Timestamp       time.Time              `json:"timestamp"`
 }
 
 // GenerateHealthReport creates a comprehensive health report

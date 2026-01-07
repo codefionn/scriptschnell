@@ -543,7 +543,7 @@ func (s *Service) parseUsageFromOutput(output string) (map[string]interface{}, e
 	// {"role": "user", "timestamp": "...", "content": "..."}
 	// {"role": "assistant", "timestamp": "...", "tool_calls": [...], "content": "..."}
 	// {"role": "usage", "timestamp": "...", "usage": {...}}
-	
+
 	// First, try to find the usage line in extended JSON format
 	lines := strings.Split(output, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {

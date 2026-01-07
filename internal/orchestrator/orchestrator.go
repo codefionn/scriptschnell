@@ -1834,6 +1834,8 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		if response.Usage != nil {
 			logger.Debug("LLM response contains usage data, processing OpenRouter usage")
 			o.processOpenRouterUsage(response.Usage, openRouterUsageCallback)
+			// Accumulate usage in session
+			o.session.AccumulateUsage(response.Usage)
 		} else {
 			logger.Debug("LLM response contains no usage data")
 		}

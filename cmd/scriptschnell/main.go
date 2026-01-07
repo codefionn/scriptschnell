@@ -282,7 +282,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		dangerous     bool
+		dangerous    bool
 		allowNetwork bool
 		allowDirs    stringSlice
 		allowFiles   stringSlice

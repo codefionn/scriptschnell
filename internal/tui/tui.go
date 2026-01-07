@@ -160,7 +160,7 @@ type Model struct {
 	todoClient           *tools.TodoActorClient
 	todoViewport         viewport.Model
 	todoContent          string // Cached todo content for viewport
-	todoContentHeight    int     // Height of todo content
+	todoContentHeight    int    // Height of todo content
 	viewportDirty        bool
 	viewportRefreshToken int
 	config               *config.Config
@@ -711,14 +711,14 @@ func (m *Model) applyWindowSize(width, height int) (bool, bool, tea.Cmd) {
 		if todoVpHeight < 5 {
 			todoVpHeight = 5
 		}
-		
+
 		if !m.ready || m.todoViewport.Height == 0 {
 			m.todoViewport = viewport.New(todoPanelWidth-4, todoVpHeight) // -4 for panel borders
 		} else {
 			m.todoViewport.Width = todoPanelWidth - 4
 			m.todoViewport.Height = todoVpHeight
 		}
-		
+
 		// Refresh todo content when size changes
 		m.refreshTodoContent()
 	}
@@ -2512,8 +2512,21 @@ func cachedTokensFromUsage(usage map[string]interface{}) float64 {
 func (m *Model) contextDisplay() string {
 	var parts []string
 
+	// Get current session's accumulated usage
+	var totalCost float64
+	var totalTokens int
+	var cachedTokens int
+
+	if m.activeSessionIdx >= 0 && m.activeSessionIdx < len(m.sessions) {
+		sess := m.sessions[m.activeSessionIdx].Session
+		if sess != nil {
+			totalCost = sess.GetTotalCost()
+			totalTokens = sess.GetTotalTokens()
+			cachedTokens = sess.TotalCachedTokens + sess.TotalCacheReadTokens
+		}
+	}
+
 	// Determine caching state
-	cachedTokens := cachedTokensFromUsage(m.openRouterUsage)
 	cacheActive := cachedTokens > 0
 
 	// Add context file info
@@ -2527,20 +2540,14 @@ func (m *Model) contextDisplay() string {
 		parts = append(parts, contextLabel)
 	}
 
-	// Add OpenRouter usage if available
-	if m.openRouterUsage != nil {
-		// Show cost (OpenRouter returns "cost" in dollars)
-		if cost, ok := m.openRouterUsage["cost"].(float64); ok && cost > 0 {
-			parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost))
-		}
+	// Add accumulated usage from session
+	if totalCost > 0 {
+		parts = append(parts, fmt.Sprintf("Cost: $%.6f", totalCost))
+	}
 
-		// Show caching if available
-		if cachedTokens > 0 {
-			if totalTokens, ok := m.openRouterUsage["total_tokens"].(float64); ok && totalTokens > 0 {
-				cachePercent := (cachedTokens / totalTokens) * 100
-				parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
-			}
-		}
+	if cachedTokens > 0 && totalTokens > 0 {
+		cachePercent := float64(cachedTokens) / float64(totalTokens) * 100
+		parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
 	}
 
 	return strings.Join(parts, " | ")
@@ -2548,44 +2555,53 @@ func (m *Model) contextDisplay() string {
 
 // formatOpenRouterUsage formats OpenRouter usage data for display
 func (m *Model) formatOpenRouterUsage() string {
-	if m.openRouterUsage == nil {
-		logger.Debug("formatOpenRouterUsage called but no usage data available")
-		return ""
+	// Get current session's accumulated usage
+	var totalCost float64
+	var totalTokens int
+	var promptTokens int
+	var completionTokens int
+	var cachedTokens int
+
+	if m.activeSessionIdx >= 0 && m.activeSessionIdx < len(m.sessions) {
+		sess := m.sessions[m.activeSessionIdx].Session
+		if sess != nil {
+			totalCost = sess.GetTotalCost()
+			totalTokens = sess.GetTotalTokens()
+			promptTokens = sess.TotalPromptTokens
+			completionTokens = sess.TotalCompletionTokens
+			cachedTokens = sess.TotalCachedTokens + sess.TotalCacheReadTokens
+		}
 	}
 
-	logger.Debug("formatOpenRouterUsage processing usage data: %v", m.openRouterUsage)
+	if totalTokens == 0 && totalCost == 0 {
+		return ""
+	}
 
 	var parts []string
 
 	// Add token usage
-	if promptTokens, ok := m.openRouterUsage["prompt_tokens"].(float64); ok {
-		if completionTokens, ok := m.openRouterUsage["completion_tokens"].(float64); ok {
-			totalTokens := promptTokens + completionTokens
-			parts = append(parts, fmt.Sprintf("Tokens: %.0f", totalTokens))
+	if promptTokens > 0 || completionTokens > 0 {
+		if totalTokens > 0 {
+			parts = append(parts, fmt.Sprintf("Tokens: %d", totalTokens))
 		}
 	}
 
 	// Add caching information if available
-	if cachedTokens, ok := m.openRouterUsage["cached_tokens"].(float64); ok && cachedTokens > 0 {
-		if totalTokens, ok2 := m.openRouterUsage["total_tokens"].(float64); ok2 && totalTokens > 0 {
-			cachePercent := (cachedTokens / totalTokens) * 100
-			parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
-		}
+	if cachedTokens > 0 && totalTokens > 0 {
+		cachePercent := float64(cachedTokens) / float64(totalTokens) * 100
+		parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
 	}
 
-	// Add cost (OpenRouter returns "cost" not "total_cost", already in dollars)
-	if cost, ok := m.openRouterUsage["cost"].(float64); ok && cost > 0 {
-		parts = append(parts, fmt.Sprintf("Cost: $%.6f", cost))
+	// Add cost
+	if totalCost > 0 {
+		parts = append(parts, fmt.Sprintf("Cost: $%.6f", totalCost))
 	}
 
 	if len(parts) == 0 {
-		logger.Debug("formatOpenRouterUsage: no displayable usage data found")
 		return ""
 	}
 
-	result := strings.Join(parts, " | ")
-	logger.Debug("formatOpenRouterUsage returning formatted result: %s", result)
-	return result
+	return strings.Join(parts, " | ")
 }
 
 func (m *Model) renderContextUsage() string {
@@ -2739,23 +2755,21 @@ func (m *Model) refreshTodoContent() {
 		}
 	}
 
-	// Add OpenRouter usage data if available
-	if m.openRouterUsage != nil {
-		content.WriteString("\n")
-		content.WriteString(todoTitleStyle.Render("OpenRouter Usage"))
-		content.WriteString("\n")
+	// Add usage data from session
+	if m.activeSessionIdx >= 0 && m.activeSessionIdx < len(m.sessions) {
+		sess := m.sessions[m.activeSessionIdx].Session
+		if sess != nil && (sess.GetTotalCost() > 0 || sess.GetTotalTokens() > 0) {
+			content.WriteString("\n")
+			content.WriteString(todoTitleStyle.Render("Usage Statistics"))
+			content.WriteString("\n")
 
-		usageInfo := m.formatOpenRouterUsage()
-		if usageInfo != "" {
-			content.WriteString(todoItemStyle.Render(usageInfo))
-			logger.Debug("OpenRouter usage displayed in todo panel: %s", usageInfo)
-		} else {
-			content.WriteString(todoEmptyStyle.Render("No usage data available."))
-			logger.Debug("OpenRouter usage panel shown but no usage data available")
+			usageInfo := m.formatOpenRouterUsage()
+			if usageInfo != "" {
+				content.WriteString(todoItemStyle.Render(usageInfo))
+			} else {
+				content.WriteString(todoEmptyStyle.Render("No usage data available."))
+			}
 		}
-		content.WriteString("\n")
-	} else {
-		logger.Debug("OpenRouter usage panel not shown - no usage data available")
 	}
 
 	// Update the viewport content
@@ -2775,7 +2789,7 @@ func (m *Model) renderTodoPanel() string {
 
 	// Use viewport for scrollable content
 	viewportContent := m.todoViewport.View()
-	
+
 	// Add scroll indicators
 	var scrollIndicator string
 	if m.todoViewport.AtTop() && m.todoViewport.AtBottom() {
@@ -2855,7 +2869,7 @@ func (m *Model) updateTodoClientForTab(tabIdx int) {
 	} else if tabIdx == m.activeSessionIdx {
 		m.todoClient = nil
 	}
-	
+
 	// Refresh todo content when tab changes
 	if tabIdx == m.activeSessionIdx && m.showTodoPanel {
 		m.refreshTodoContent()

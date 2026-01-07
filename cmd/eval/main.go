@@ -12,10 +12,10 @@ import (
 )
 
 var (
-	port           = flag.Int("port", 8080, "Port to run the web server on")
-	dbPath         = flag.String("db", "", "Path to SQLite database (defaults to ~/.config/scriptschnell/eval.db)")
-	evalDir        = flag.String("eval-dir", "internal/eval/definitions", "Directory containing eval definitions")
-	logAssistant   = flag.Bool("log-assistant", false, "Log assistant messages to console as JSON")
+	port         = flag.Int("port", 8080, "Port to run the web server on")
+	dbPath       = flag.String("db", "", "Path to SQLite database (defaults to ~/.config/scriptschnell/eval.db)")
+	evalDir      = flag.String("eval-dir", "internal/eval/definitions", "Directory containing eval definitions")
+	logAssistant = flag.Bool("log-assistant", false, "Log assistant messages to console as JSON")
 )
 
 func main() {

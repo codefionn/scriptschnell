@@ -32,11 +32,10 @@ type Options struct {
 
 // CLI handles command-line interface using the orchestrator
 type CLI struct {
-	config           *config.Config
-	providerMgr      *provider.Manager
-	orchestrator     *tui.Orchestrator
-	options          *Options
-	accumulatedUsage map[string]interface{}
+	config       *config.Config
+	providerMgr  *provider.Manager
+	orchestrator *tui.Orchestrator
+	options      *Options
 }
 
 func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI, error) {
@@ -185,38 +184,9 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		return false, fmt.Errorf("authorization required but not granted via CLI flags")
 	}
 
-	// Usage callback: accumulate usage statistics
+	// Usage callback: session now accumulates usage internally, no-op here
 	usageCallback := func(usage map[string]interface{}) error {
-		if c.accumulatedUsage == nil {
-			c.accumulatedUsage = make(map[string]interface{})
-		}
-
-		// Helper to add numeric values
-		addNumeric := func(key string, value interface{}) {
-			num, ok := toFloat64(value)
-			if !ok {
-				return
-			}
-			if existing, ok := c.accumulatedUsage[key].(float64); ok {
-				c.accumulatedUsage[key] = existing + num
-			} else {
-				c.accumulatedUsage[key] = num
-			}
-		}
-
-		// Accumulate various token types
-		addNumeric("prompt_tokens", usage["prompt_tokens"])
-		addNumeric("completion_tokens", usage["completion_tokens"])
-		addNumeric("total_tokens", usage["total_tokens"])
-		addNumeric("cached_tokens", usage["cached_tokens"])
-		addNumeric("input_tokens", usage["input_tokens"])
-		addNumeric("output_tokens", usage["output_tokens"])
-		addNumeric("cache_creation_input_tokens", usage["cache_creation_input_tokens"])
-		addNumeric("cache_read_input_tokens", usage["cache_read_input_tokens"])
-		// OpenRouter returns "cost" not "total_cost"
-		addNumeric("cost", usage["cost"])
-		addNumeric("total_cost", usage["total_cost"])
-
+		// Usage is now accumulated directly in the session
 		return nil
 	}
 
@@ -230,32 +200,34 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		fmt.Println() // Final newline
 	}
 
-	// Print accumulated usage statistics
-	if len(c.accumulatedUsage) > 0 && (c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended)) {
-		fmt.Fprintf(os.Stderr, "\n--- Usage Statistics ---\n")
+	// Print accumulated usage statistics from session
+	session := c.orchestrator.GetSession()
+	if session != nil {
+		usageStats := session.GetUsageStats()
+		if len(usageStats) > 0 && (c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended)) {
+			fmt.Fprintf(os.Stderr, "\n--- Usage Statistics ---\n")
 
-		// Calculate total tokens (try multiple field combinations)
-		totalTokens := c.calculateTotalTokens()
-		if totalTokens > 0 {
-			fmt.Fprintf(os.Stderr, "Total tokens: %.0f\n", totalTokens)
-		}
+			// Get totals from session
+			totalTokens := session.GetTotalTokens()
+			if totalTokens > 0 {
+				fmt.Fprintf(os.Stderr, "Total tokens: %d\n", totalTokens)
+			}
 
-		// Show cached tokens if available
-		if cached := c.getUsageValue("cached_tokens"); cached > 0 {
-			percentage := (cached / totalTokens) * 100
-			fmt.Fprintf(os.Stderr, "Cached tokens: %.0f (%.1f%%)\n", cached, percentage)
-		}
+			// Show cached tokens if available
+			cachedTokens := session.TotalCachedTokens + session.TotalCacheReadTokens
+			if cachedTokens > 0 {
+				percentage := float64(cachedTokens) / float64(totalTokens) * 100
+				fmt.Fprintf(os.Stderr, "Cached tokens: %d (%.1f%%)\n", cachedTokens, percentage)
+			}
 
-		// Show cost if available (OpenRouter returns "cost" in dollars)
-		cost := c.getUsageValue("cost")
-		if cost == 0 {
-			cost = c.getUsageValue("total_cost")
-		}
-		if cost > 0 {
-			fmt.Fprintf(os.Stderr, "Total cost: $%.6f\n", cost)
-		}
+			// Show cost if available
+			totalCost := session.GetTotalCost()
+			if totalCost > 0 {
+				fmt.Fprintf(os.Stderr, "Total cost: $%.6f\n", totalCost)
+			}
 
-		fmt.Fprintf(os.Stderr, "------------------------\n")
+			fmt.Fprintf(os.Stderr, "------------------------\n")
+		}
 	}
 
 	if c.options != nil && c.options.JSONOutput {
@@ -303,35 +275,35 @@ func (c *CLI) outputJSONExtended() error {
 	}
 
 	messages := session.GetMessages()
-	
+
 	// Output each message as a JSON one-liner
 	for _, msg := range messages {
 		if msg == nil {
 			continue
 		}
-		
+
 		// Build message object for output
 		msgObj := map[string]interface{}{
-			"role": msg.Role,
+			"role":      msg.Role,
 			"timestamp": msg.Timestamp.Format(time.RFC3339),
 		}
-		
+
 		if msg.Content != "" {
 			msgObj["content"] = msg.Content
 		}
-		
+
 		if msg.ToolID != "" {
 			msgObj["tool_id"] = msg.ToolID
 		}
-		
+
 		if msg.ToolName != "" {
 			msgObj["tool_name"] = msg.ToolName
 		}
-		
+
 		if len(msg.ToolCalls) > 0 {
 			msgObj["tool_calls"] = msg.ToolCalls
 		}
-		
+
 		// Marshal to single-line JSON
 		data, err := json.Marshal(msgObj)
 		if err != nil {
@@ -339,23 +311,23 @@ func (c *CLI) outputJSONExtended() error {
 		}
 		fmt.Println(string(data))
 	}
-	
+
 	// Output final usage statistics
 	usageObj := map[string]interface{}{
-		"role": "usage",
+		"role":      "usage",
 		"timestamp": time.Now().Format(time.RFC3339),
 	}
-	
+
 	if usage := c.buildUsageSummary(); len(usage) > 0 {
 		usageObj["usage"] = usage
 	}
-	
+
 	data, err := json.Marshal(usageObj)
 	if err != nil {
 		return fmt.Errorf("failed to marshal usage: %w", err)
 	}
 	fmt.Println(string(data))
-	
+
 	return nil
 }
 
@@ -389,139 +361,48 @@ func (c *CLI) lastAssistantMessage() string {
 func (c *CLI) buildUsageSummary() map[string]interface{} {
 	summary := make(map[string]interface{})
 
-	totalTokens := c.calculateTotalTokens()
+	session := c.orchestrator.GetSession()
+	if session == nil {
+		return summary
+	}
+
+	totalTokens := session.GetTotalTokens()
 	if totalTokens > 0 {
-		summary["total_tokens"] = int(totalTokens)
+		summary["total_tokens"] = totalTokens
 	}
 
 	// Add separate input and output tokens for eval tracking
-	if input := c.calculateInputTokens(); input > 0 {
-		summary["input_tokens"] = int(input)
+	if session.TotalPromptTokens > 0 {
+		summary["input_tokens"] = session.TotalPromptTokens
 	}
-	if output := c.calculateOutputTokens(); output > 0 {
-		summary["output_tokens"] = int(output)
+	if session.TotalCompletionTokens > 0 {
+		summary["output_tokens"] = session.TotalCompletionTokens
 	}
 
-	cachedTokens := c.getUsageValue("cached_tokens")
+	cachedTokens := session.TotalCachedTokens + session.TotalCacheReadTokens
 	if cachedTokens > 0 {
-		summary["cached_tokens"] = int(cachedTokens)
+		summary["cached_tokens"] = cachedTokens
 	}
 
-	cacheCreation := c.getUsageValue("cache_creation_input_tokens")
-	if cacheCreation > 0 {
-		summary["cache_creation_input_tokens"] = int(cacheCreation)
+	if session.TotalCacheCreationTokens > 0 {
+		summary["cache_creation_input_tokens"] = session.TotalCacheCreationTokens
 	}
 
-	cacheRead := c.getUsageValue("cache_read_input_tokens")
-	if cacheRead > 0 {
-		summary["cache_read_input_tokens"] = int(cacheRead)
+	if session.TotalCacheReadTokens > 0 {
+		summary["cache_read_input_tokens"] = session.TotalCacheReadTokens
 	}
 
-	cachePercent := c.cacheHitPercent(totalTokens, cachedTokens, cacheRead)
-	if cachePercent > 0 {
-		summary["cache_hit_percent"] = cachePercent
+	if cachedTokens > 0 && totalTokens > 0 {
+		cachePercent := float64(cachedTokens) / float64(totalTokens) * 100
+		summary["cache_hit_percent"] = math.Round(cachePercent*10) / 10
 	}
 
-	cost := c.getUsageValue("cost")
-	if cost == 0 {
-		cost = c.getUsageValue("total_cost")
-	}
-	if cost > 0 {
-		summary["cost"] = cost
+	totalCost := session.GetTotalCost()
+	if totalCost > 0 {
+		summary["cost"] = totalCost
 	}
 
 	return summary
-}
-
-// cacheHitPercent calculates prompt cache hit percentage when available.
-func (c *CLI) cacheHitPercent(totalTokens, cachedTokens, cacheReadTokens float64) float64 {
-	if totalTokens <= 0 {
-		return 0
-	}
-
-	var cachedBasis float64
-	switch {
-	case cachedTokens > 0:
-		cachedBasis = cachedTokens
-	case cacheReadTokens > 0:
-		cachedBasis = cacheReadTokens
-	default:
-		return 0
-	}
-
-	return math.Round(((cachedBasis/totalTokens)*100)*10) / 10
-}
-
-// getUsageValue retrieves an accumulated usage field as float64.
-func (c *CLI) getUsageValue(key string) float64 {
-	if c.accumulatedUsage == nil {
-		return 0
-	}
-	if value, ok := c.accumulatedUsage[key]; ok {
-		if num, ok := value.(float64); ok {
-			return num
-		}
-	}
-	return 0
-}
-
-// calculateTotalTokens computes total tokens from available usage fields.
-func (c *CLI) calculateTotalTokens() float64 {
-	if c.accumulatedUsage == nil {
-		return 0
-	}
-
-	if total := c.getUsageValue("total_tokens"); total > 0 {
-		return total
-	}
-
-	var totalTokens float64
-
-	// For providers that use input_tokens + output_tokens
-	if input := c.getUsageValue("input_tokens"); input > 0 {
-		totalTokens += input
-	}
-	if output := c.getUsageValue("output_tokens"); output > 0 {
-		totalTokens += output
-	}
-
-	// For providers that use prompt_tokens + completion_tokens
-	if prompt := c.getUsageValue("prompt_tokens"); prompt > 0 {
-		totalTokens += prompt
-	}
-	if completion := c.getUsageValue("completion_tokens"); completion > 0 {
-		totalTokens += completion
-	}
-
-	return totalTokens
-}
-
-// calculateInputTokens computes input tokens from available usage fields.
-func (c *CLI) calculateInputTokens() float64 {
-	if c.accumulatedUsage == nil {
-		return 0
-	}
-
-	if input := c.getUsageValue("input_tokens"); input > 0 {
-		return input
-	}
-
-	// Fallback to prompt_tokens for providers that use that naming
-	return c.getUsageValue("prompt_tokens")
-}
-
-// calculateOutputTokens computes output tokens from available usage fields.
-func (c *CLI) calculateOutputTokens() float64 {
-	if c.accumulatedUsage == nil {
-		return 0
-	}
-
-	if output := c.getUsageValue("output_tokens"); output > 0 {
-		return output
-	}
-
-	// Fallback to completion_tokens for providers that use that naming
-	return c.getUsageValue("completion_tokens")
 }
 
 // toFloat64 converts various numeric types to float64 for accumulation.

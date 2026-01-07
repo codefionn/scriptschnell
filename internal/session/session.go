@@ -48,11 +48,21 @@ type Session struct {
 	LastSandboxStderr   string          // stderr from last sandbox execution
 	CurrentProvider     string          // Current LLM provider for native message format
 	CurrentModelFamily  string          // Current model family for native message format
-	mu                  sync.RWMutex
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	LastSavedAt         time.Time
-	Dirty               bool // true when there are unsaved changes
+
+	// Cost and usage tracking (accumulated across all LLM calls in the session)
+	TotalCost                float64 // Total cost in dollars (sum of all calls)
+	TotalTokens              int     // Total tokens used
+	TotalPromptTokens        int     // Total input/prompt tokens
+	TotalCompletionTokens    int     // Total output/completion tokens
+	TotalCachedTokens        int     // Total cached/read-from-cache tokens
+	TotalCacheCreationTokens int     // Total cache creation tokens
+	TotalCacheReadTokens     int     // Total cache read tokens
+
+	mu          sync.RWMutex
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	LastSavedAt time.Time
+	Dirty       bool // true when there are unsaved changes
 }
 
 // BackgroundJob represents a running background process
@@ -489,4 +499,119 @@ func (s *Session) GetTitle() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Title
+}
+
+// AccumulateUsage adds usage data from an LLM call to the session totals
+func (s *Session) AccumulateUsage(usage map[string]interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Helper to extract int value from interface
+	toInt := func(v interface{}) int {
+		switch val := v.(type) {
+		case int:
+			return val
+		case int64:
+			return int(val)
+		case float64:
+			return int(val)
+		case float32:
+			return int(val)
+		default:
+			return 0
+		}
+	}
+
+	// Helper to extract float64 value from interface
+	toFloat64 := func(v interface{}) float64 {
+		switch val := v.(type) {
+		case float64:
+			return val
+		case float32:
+			return float64(val)
+		case int:
+			return float64(val)
+		case int64:
+			return float64(val)
+		default:
+			return 0
+		}
+	}
+
+	// Accumulate cost (may be "cost" or "total_cost" depending on provider)
+	if cost, ok := usage["cost"]; ok {
+		s.TotalCost += toFloat64(cost)
+	}
+	if cost, ok := usage["total_cost"]; ok {
+		s.TotalCost += toFloat64(cost)
+	}
+
+	// Accumulate tokens
+	if promptTokens, ok := usage["prompt_tokens"]; ok {
+		s.TotalPromptTokens += toInt(promptTokens)
+	}
+	if completionTokens, ok := usage["completion_tokens"]; ok {
+		s.TotalCompletionTokens += toInt(completionTokens)
+	}
+	if totalTokens, ok := usage["total_tokens"]; ok {
+		s.TotalTokens += toInt(totalTokens)
+	}
+
+	// Alternative field names used by some providers
+	if inputTokens, ok := usage["input_tokens"]; ok {
+		s.TotalPromptTokens += toInt(inputTokens)
+	}
+	if outputTokens, ok := usage["output_tokens"]; ok {
+		s.TotalCompletionTokens += toInt(outputTokens)
+	}
+
+	// Cache-related tokens
+	if cachedTokens, ok := usage["cached_tokens"]; ok {
+		s.TotalCachedTokens += toInt(cachedTokens)
+	}
+	if cacheCreationTokens, ok := usage["cache_creation_input_tokens"]; ok {
+		s.TotalCacheCreationTokens += toInt(cacheCreationTokens)
+	}
+	if cacheReadTokens, ok := usage["cache_read_input_tokens"]; ok {
+		s.TotalCacheReadTokens += toInt(cacheReadTokens)
+	}
+
+	// Recalculate total tokens if not directly provided
+	if s.TotalTokens == 0 && (s.TotalPromptTokens > 0 || s.TotalCompletionTokens > 0) {
+		s.TotalTokens = s.TotalPromptTokens + s.TotalCompletionTokens
+	}
+
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// GetTotalCost returns the total cost for the session
+func (s *Session) GetTotalCost() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.TotalCost
+}
+
+// GetTotalTokens returns the total tokens used in the session
+func (s *Session) GetTotalTokens() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.TotalTokens
+}
+
+// GetUsageStats returns all usage statistics for the session
+func (s *Session) GetUsageStats() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	stats := make(map[string]interface{})
+	stats["total_cost"] = s.TotalCost
+	stats["total_tokens"] = s.TotalTokens
+	stats["total_prompt_tokens"] = s.TotalPromptTokens
+	stats["total_completion_tokens"] = s.TotalCompletionTokens
+	stats["total_cached_tokens"] = s.TotalCachedTokens
+	stats["total_cache_creation_tokens"] = s.TotalCacheCreationTokens
+	stats["total_cache_read_tokens"] = s.TotalCacheReadTokens
+
+	return stats
 }

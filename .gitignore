@@ -69,5 +69,6 @@ build/
 /test-server
 /test-eval-*
 /eval-*
+/scriptschnell-final
 
 *_templ.go

@@ -2018,11 +2018,49 @@ func (o *Orchestrator) processToolCalls(
 		toolType, _ := toolCall["type"].(string)
 
 		if toolType != "function" {
+			errorMsg := fmt.Sprintf("Invalid tool type: %s", toolType)
+			results[i] = &toolCallResult{
+				idx: i,
+				message: &session.Message{
+					Role:    "tool",
+					Content: errorMsg,
+					ToolID:  toolID,
+				},
+				toolName: "unknown",
+				toolID:   toolID,
+				uiResult: errorMsg,
+				errorMsg: errorMsg,
+			}
+			// Notify UI about tool result
+			if toolResultCb != nil {
+				if err := toolResultCb("unknown", toolID, errorMsg, errorMsg); err != nil {
+					logger.Warn("Failed to send tool result message: %v", err)
+				}
+			}
 			continue
 		}
 
 		function, ok := toolCall["function"].(map[string]interface{})
 		if !ok {
+			errorMsg := "Invalid function format in tool call"
+			results[i] = &toolCallResult{
+				idx: i,
+				message: &session.Message{
+					Role:    "tool",
+					Content: errorMsg,
+					ToolID:  toolID,
+				},
+				toolName: "unknown",
+				toolID:   toolID,
+				uiResult: errorMsg,
+				errorMsg: errorMsg,
+			}
+			// Notify UI about tool result
+			if toolResultCb != nil {
+				if err := toolResultCb("unknown", toolID, errorMsg, errorMsg); err != nil {
+					logger.Warn("Failed to send tool result message: %v", err)
+				}
+			}
 			continue
 		}
 

@@ -44,6 +44,7 @@ type ToolExecutorActor struct {
 	id               string
 	registry         *Registry
 	defaultHeartbeat time.Duration
+	healthMonitor    *ToolHealthMonitor
 }
 
 // NewToolExecutorActor creates a new actor that executes tool calls.
@@ -52,7 +53,13 @@ func NewToolExecutorActor(id string, registry *Registry) *ToolExecutorActor {
 		id:               id,
 		registry:         registry,
 		defaultHeartbeat: 500 * time.Millisecond,
+		healthMonitor:    NewToolHealthMonitor(),
 	}
+}
+
+// GetHealthMonitor returns the health monitor for this executor
+func (a *ToolExecutorActor) GetHealthMonitor() *ToolHealthMonitor {
+	return a.healthMonitor
 }
 
 // ID returns the actor ID.
@@ -110,6 +117,23 @@ func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecut
 		}()
 	}
 
+	// Start health monitoring for this tool execution
+	toolID := msg.Call.ID
+	if a.healthMonitor != nil {
+		a.healthMonitor.StartExecution(toolID, msg.ToolName)
+		defer func() {
+			// Execution ended - check result and mark as complete
+			select {
+			case result := <-msg.ResponseChannel:
+				success := result.Error == ""
+				a.healthMonitor.CompleteExecution(toolID, success)
+				msg.ResponseChannel <- result // Put it back
+			default:
+				// Channel already closed or emptied
+			}
+		}()
+	}
+
 	resultChan := make(chan *ToolResult, 1)
 
 	sendProgress := func(update progress.Update) {
@@ -122,6 +146,11 @@ func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecut
 	}
 
 	go func() {
+		// Mark as running in health monitor
+		if a.healthMonitor != nil {
+			a.healthMonitor.UpdateState(toolID, StateRunning)
+		}
+
 		resultChan <- a.registry.ExecuteWithCallbacks(execCtx, msg.Call, msg.ToolName, msg.ProgressCallback, msg.ToolCallCallback, msg.ToolResultCallback, msg.Approved)
 	}()
 
@@ -140,9 +169,19 @@ func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecut
 	for {
 		select {
 		case result := <-resultChan:
+			// Mark completion in health monitor
+			if a.healthMonitor != nil {
+				success := result.Error == ""
+				a.healthMonitor.CompleteExecution(toolID, success)
+			}
 			msg.ResponseChannel <- result
 			return
 		case <-tickerTick(ticker):
+			// Send heartbeat to health monitor
+			if a.healthMonitor != nil {
+				a.healthMonitor.Heartbeat(toolID)
+			}
+
 			if msg.ProgressCallback != nil {
 				status := fmt.Sprintf("Calling tool: %s%s", msg.ToolName, strings.Repeat(".", heartbeatCount%4))
 				sendProgress(progress.Update{
@@ -153,6 +192,10 @@ func (a *ToolExecutorActor) executeTool(actorCtx context.Context, msg ToolExecut
 				heartbeatCount++
 			}
 		case <-execCtx.Done():
+			// Mark as cancelled in health monitor
+			if a.healthMonitor != nil {
+				a.healthMonitor.CancelExecution(toolID)
+			}
 			msg.ResponseChannel <- &ToolResult{
 				ID:    msg.Call.ID,
 				Error: "Tool execution cancelled",

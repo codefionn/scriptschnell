@@ -158,6 +158,9 @@ type Model struct {
 	sanitizeState        ansiSanitizeState
 	showTodoPanel        bool
 	todoClient           *tools.TodoActorClient
+	todoViewport         viewport.Model
+	todoContent          string // Cached todo content for viewport
+	todoContentHeight    int     // Height of todo content
 	viewportDirty        bool
 	viewportRefreshToken int
 	config               *config.Config
@@ -512,6 +515,10 @@ func (m *Model) isGitIgnored(path string) bool {
 // SetTodoClient configures the TodoActorClient for accessing todo state
 func (m *Model) SetTodoClient(client *tools.TodoActorClient) {
 	m.todoClient = client
+	// Refresh todo content when client changes
+	if m.showTodoPanel {
+		m.refreshTodoContent()
+	}
 }
 
 // SetConfig stores the application configuration for UI elements that need it.
@@ -695,6 +702,25 @@ func (m *Model) applyWindowSize(width, height int) (bool, bool, tea.Cmd) {
 			// Renderer init already in flight, don't start another
 			m.rendererInitMutex.Unlock()
 		}
+	}
+
+	// Initialize todo viewport if panel is shown
+	if m.showTodoPanel {
+		// Calculate todo viewport height (main content area minus input area)
+		todoVpHeight := height - 10 // Reserve space for input and status
+		if todoVpHeight < 5 {
+			todoVpHeight = 5
+		}
+		
+		if !m.ready || m.todoViewport.Height == 0 {
+			m.todoViewport = viewport.New(todoPanelWidth-4, todoVpHeight) // -4 for panel borders
+		} else {
+			m.todoViewport.Width = todoPanelWidth - 4
+			m.todoViewport.Height = todoVpHeight
+		}
+		
+		// Refresh todo content when size changes
+		m.refreshTodoContent()
 	}
 
 	if !m.ready {
@@ -1418,6 +1444,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.viewport, vpCmd = m.viewport.Update(msg)
 
+	// Update todo viewport if panel is shown
+	var todoVpCmd tea.Cmd
+	if m.showTodoPanel {
+		m.todoViewport, todoVpCmd = m.todoViewport.Update(msg)
+	}
+
 	var spCmd tea.Cmd
 	if !m.animationsDisabled {
 		switch msg.(type) {
@@ -1430,7 +1462,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	baseCmd := tea.Batch(tiCmd, vpCmd, spCmd)
+	baseCmd := tea.Batch(tiCmd, vpCmd, todoVpCmd, spCmd)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1548,6 +1580,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tabCycleIndex = m.selectedSuggIndex
 				return m, baseCmd
 			}
+			// Handle todo scrolling when no suggestions
+			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
+				m.todoViewport.LineUp(1)
+				return m, baseCmd
+			}
 
 		case "down":
 			if len(m.suggestions) > 0 {
@@ -1556,6 +1593,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedSuggIndex = 0
 				}
 				m.tabCycleIndex = m.selectedSuggIndex
+				return m, baseCmd
+			}
+			// Handle todo scrolling when no suggestions
+			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
+				m.todoViewport.LineDown(1)
+				return m, baseCmd
+			}
+
+		case "pgup":
+			// Handle todo page up when todo panel is shown
+			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
+				m.todoViewport.HalfViewUp()
+				return m, baseCmd
+			}
+
+		case "pgdn":
+			// Handle todo page down when todo panel is shown
+			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
+				m.todoViewport.HalfViewDown()
+				return m, baseCmd
+			}
+
+		case "home":
+			// Handle todo scroll to top when todo panel is shown
+			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
+				m.todoViewport.GotoTop()
+				return m, baseCmd
+			}
+
+		case "end":
+			// Handle todo scroll to bottom when todo panel is shown
+			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
+				m.todoViewport.GotoBottom()
 				return m, baseCmd
 			}
 
@@ -2186,6 +2256,10 @@ func (m *Model) processOpenRouterUsage(tabIdx int, usage map[string]interface{})
 		if thinkingTokens > 0 {
 			logger.Debug("Extracted thinking tokens for active tab: %d", thinkingTokens)
 		}
+		// Refresh todo content to show updated usage data
+		if m.showTodoPanel {
+			m.refreshTodoContent()
+		}
 	}
 }
 
@@ -2597,7 +2671,8 @@ func (m *Model) renderSuggestions() string {
 	return sb.String()
 }
 
-func (m *Model) renderTodoPanel() string {
+// refreshTodoContent updates the todo content for the viewport
+func (m *Model) refreshTodoContent() {
 	var todoList *tools.TodoList
 	var err error
 	if m.todoClient != nil {
@@ -2656,13 +2731,12 @@ func (m *Model) renderTodoPanel() string {
 	if len(names) == 0 {
 		content.WriteString(todoEmptyStyle.Render("No MCP servers selected."))
 		content.WriteString("\n")
-		return todoPanelStyle.Render(strings.TrimRight(content.String(), "\n"))
-	}
-
-	sort.Strings(names)
-	for _, name := range names {
-		content.WriteString(todoItemStyle.Render(fmt.Sprintf("• %s", name)))
-		content.WriteString("\n")
+	} else {
+		sort.Strings(names)
+		for _, name := range names {
+			content.WriteString(todoItemStyle.Render(fmt.Sprintf("• %s", name)))
+			content.WriteString("\n")
+		}
 	}
 
 	// Add OpenRouter usage data if available
@@ -2684,7 +2758,42 @@ func (m *Model) renderTodoPanel() string {
 		logger.Debug("OpenRouter usage panel not shown - no usage data available")
 	}
 
-	return todoPanelStyle.Render(strings.TrimRight(content.String(), "\n"))
+	// Update the viewport content
+	m.todoContent = content.String()
+	m.todoContentHeight = strings.Count(m.todoContent, "\n") + 1
+	m.todoViewport.SetContent(m.todoContent)
+}
+
+func (m *Model) renderTodoPanel() string {
+	// Always refresh todo content to ensure it's up to date
+	m.refreshTodoContent()
+
+	// If viewport is not initialized or content fits, show content directly
+	if m.todoViewport.Height == 0 || m.todoContentHeight <= m.todoViewport.Height {
+		return todoPanelStyle.Render(strings.TrimRight(m.todoContent, "\n"))
+	}
+
+	// Use viewport for scrollable content
+	viewportContent := m.todoViewport.View()
+	
+	// Add scroll indicators
+	var scrollIndicator string
+	if m.todoViewport.AtTop() && m.todoViewport.AtBottom() {
+		scrollIndicator = ""
+	} else if m.todoViewport.AtTop() {
+		scrollIndicator = "\n⬇"
+	} else if m.todoViewport.AtBottom() {
+		scrollIndicator = "⬆\n"
+	} else {
+		scrollIndicator = "⬆\n⬇"
+	}
+
+	content := viewportContent
+	if scrollIndicator != "" {
+		content += scrollIndicator
+	}
+
+	return todoPanelStyle.Render(strings.TrimRight(content, "\n"))
 }
 
 // renderTodoTree renders todos hierarchically
@@ -2745,6 +2854,11 @@ func (m *Model) updateTodoClientForTab(tabIdx int) {
 		m.todoClient = runtime.Orchestrator.GetTodoClient()
 	} else if tabIdx == m.activeSessionIdx {
 		m.todoClient = nil
+	}
+	
+	// Refresh todo content when tab changes
+	if tabIdx == m.activeSessionIdx && m.showTodoPanel {
+		m.refreshTodoContent()
 	}
 }
 

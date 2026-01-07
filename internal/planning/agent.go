@@ -493,11 +493,35 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 			toolType, _ := call["type"].(string)
 
 			if toolType != "function" {
+				errorMsg := fmt.Sprintf("Invalid tool type: %s", toolType)
+				res.message = &llm.Message{
+					Role:     "tool",
+					Content:  errorMsg,
+					ToolID:   toolID,
+					ToolName: "unknown",
+				}
+				if toolResultCb != nil {
+					if err := toolResultCb("unknown", toolID, errorMsg, errorMsg); err != nil {
+						logger.Warn("Failed to send planning tool result message: %v", err)
+					}
+				}
 				return
 			}
 
 			function, ok := call["function"].(map[string]interface{})
 			if !ok {
+				errorMsg := "Invalid function format in tool call"
+				res.message = &llm.Message{
+					Role:     "tool",
+					Content:  errorMsg,
+					ToolID:   toolID,
+					ToolName: "unknown",
+				}
+				if toolResultCb != nil {
+					if err := toolResultCb("unknown", toolID, errorMsg, errorMsg); err != nil {
+						logger.Warn("Failed to send planning tool result message: %v", err)
+					}
+				}
 				return
 			}
 

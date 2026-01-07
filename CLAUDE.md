@@ -174,6 +174,23 @@ Tools are registered in a central registry ([internal/tools/tools.go](internal/t
 - Tools receive parameters as `map[string]interface{}` from LLM
 - Helper functions: `GetStringParam()`, `GetIntParam()`, `GetBoolParam()`
 
+#### Tool Execution Healthcheck
+
+The tool execution healthcheck system ([internal/tools/tool_healthcheck.go](internal/tools/tool_healthcheck.go)) monitors ongoing tool executions:
+
+- **Health monitoring**: Tracks execution state, heartbeats, and custom metadata
+- **Stuck detection**: Identifies executions without heartbeats (default: 30s threshold)
+- **Timeout detection**: Detects executions exceeding maximum time (default: 10 minutes)
+- **Custom metadata**: Track process info (sandbox PID, running state), dialog state (ask_user_multiple display)
+- **Integration**: Automatically integrated with `ToolExecutorActor` for all tool executions
+- **Thread-safe**: All operations use mutexes for concurrent access
+
+See [TOOL_HEALTHCHECK.md](TOOL_HEALTHCHECK.md) for detailed documentation on:
+- Monitoring sandbox program execution (is WASM still running?)
+- Tracking user input dialogs (is TUI still displaying ask_user_multiple?)
+- Detecting and reporting stuck or timed-out executions
+- Generating health reports for debugging
+
 Available tools:
 - **read_file**: Read files with line range support (max 2000 lines)
 - **read_file_summarized**: AI-powered summarization of large files

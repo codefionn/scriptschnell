@@ -89,6 +89,7 @@ type DomainBlockerActor struct {
 	health            *HealthCheckable
 	stopCh            chan struct{}
 	refreshTicker     *time.Ticker
+	initialized       bool // Tracks whether initial load is complete
 }
 
 // DomainBlockerConfig holds configuration for the domain blocker actor
@@ -276,47 +277,24 @@ func (a *DomainBlockerActor) ID() string {
 	return a.id
 }
 
-// Start initializes the actor and loads the initial blocklist
+// Start initializes the actor and starts background loading of the blocklist
 func (a *DomainBlockerActor) Start(ctx context.Context) error {
 	logger.Debug("domain blocker actor %s: starting with blocklist URL: %s", a.id, a.blocklistURL)
 
-	// Try to load from cache first, then check TTL
-	var loadedFromCache bool
-	if domains, err := a.loadCachedBlocklist(); err == nil {
-		// Successfully loaded from cache
-		a.mu.Lock()
-		a.matcher = ahocorasick.NewStringMatcher(domains)
-		a.domainCount = len(domains)
-		a.lastUpdated = time.Now() // Update lastUpdated to indicate we just loaded it
-		a.mu.Unlock()
-		loadedFromCache = true
-		logger.Info("domain blocker actor %s: loaded %d domains from cache", a.id, len(domains))
-	} else {
-		logger.Debug("domain blocker actor %s: cache load failed: %v", a.id, err)
-	}
-
-	// Check if we need to refresh (either no cache or expired cache)
-	if a.isBlocklistExpired() {
-		// Blocklist is expired or doesn't exist, refresh in background
-		logger.Info("domain blocker actor %s: blocklist is expired or missing, starting background refresh", a.id)
-		go a.backgroundRefresh()
-	}
-
-	// Start periodic refresh
+	// Start periodic refresh ticker (immediately, no waiting for cache)
 	a.refreshTicker = time.NewTicker(a.refreshInterval)
 	go a.refreshLoop(ctx)
 
-	cacheStatus := "disabled"
-	if a.cacheDir != "" {
-		if loadedFromCache {
-			cacheStatus = "loaded"
-		} else {
-			cacheStatus = "enabled"
-		}
-	}
-	
-	logger.Info("domain blocker actor %s: started with %d domains, refresh interval: %v, TTL: %v, cache: %s", 
-		a.id, a.getDomainCount(), a.refreshInterval, a.ttl, cacheStatus)
+	// Load cache and build matcher in the background to avoid blocking startup
+	go a.initializeBlocklist()
+
+	logger.Info("domain blocker actor %s: started (initializing blocklist in background), refresh interval: %v, TTL: %v, cache: %s",
+		a.id, a.refreshInterval, a.ttl, func() string {
+			if a.cacheDir != "" {
+				return "enabled"
+			}
+			return "disabled"
+		}())
 	return nil
 }
 
@@ -372,6 +350,22 @@ func (a *DomainBlockerActor) Receive(ctx context.Context, msg Message) error {
 		return fmt.Errorf("unknown message type: %T", msg)
 	}
 	return nil
+}
+
+// waitForInitialization waits for the initial blocklist load to complete
+// This is useful for tests that need to ensure the blocklist is loaded before proceeding
+func (a *DomainBlockerActor) waitForInitialization(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		a.mu.RLock()
+		ready := a.initialized && a.matcher != nil
+		a.mu.RUnlock()
+		if ready {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for blocklist initialization")
 }
 
 // IsDomainBlocked checks if a domain is in the blocklist
@@ -484,6 +478,34 @@ func (a *DomainBlockerActor) refreshLoop(ctx context.Context) {
 	}
 }
 
+// initializeBlocklist loads the blocklist from cache in the background
+func (a *DomainBlockerActor) initializeBlocklist() {
+	logger.Debug("domain blocker actor %s: starting background initialization", a.id)
+
+	// Try to load from cache first
+	if domains, err := a.loadCachedBlocklist(); err == nil {
+		// Successfully loaded from cache
+		a.mu.Lock()
+		a.matcher = ahocorasick.NewStringMatcher(domains)
+		a.domainCount = len(domains)
+		a.lastUpdated = time.Now() // Update lastUpdated to indicate we just loaded it
+		a.initialized = true
+		a.mu.Unlock()
+		logger.Info("domain blocker actor %s: loaded %d domains from cache (background initialization complete)", a.id, len(domains))
+	} else {
+		logger.Debug("domain blocker actor %s: cache load failed: %v", a.id, err)
+		// No cache available, trigger immediate refresh
+		a.backgroundRefresh()
+		return
+	}
+
+	// Check if we need to refresh (expired cache)
+	if a.isBlocklistExpired() {
+		logger.Info("domain blocker actor %s: cached blocklist is expired, starting background refresh", a.id)
+		go a.backgroundRefresh()
+	}
+}
+
 // refreshBlocklist downloads and parses the latest RPZ blocklist
 func (a *DomainBlockerActor) refreshBlocklist() error {
 	logger.Debug("domain blocker actor %s: refreshing blocklist from %s", a.id, a.blocklistURL)
@@ -508,6 +530,7 @@ func (a *DomainBlockerActor) refreshBlocklist() error {
 	a.matcher = ahocorasick.NewStringMatcher(domains)
 	a.domainCount = len(domains)
 	a.lastUpdated = time.Now()
+	a.initialized = true
 	a.mu.Unlock()
 
 	// Save to cache (non-blocking, don't fail if caching fails)

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -22,6 +23,9 @@ type SharedResources struct {
 	sessionStorageRef    *actor.ActorRef
 	sessionStorageCancel context.CancelFunc
 	sessionStorageSystem *actor.System // System that owns the session storage actor
+	domainBlockerRef     *actor.ActorRef
+	domainBlockerCancel  context.CancelFunc
+	domainBlockerSystem  *actor.System // System that owns the domain blocker actor
 	filesystem           fs.FileSystem // Shared CachedFS
 }
 
@@ -75,12 +79,35 @@ func NewRuntimeFactory(cfg *config.Config, providerMgr *provider.Manager, workin
 
 	logger.Debug("Session storage actor spawned successfully")
 
+	// Create singleton domain blocker actor
+	domainBlockerCtx, domainBlockerCancel := context.WithCancel(context.Background())
+	domainBlockerSystem := actor.NewSystem()
+	domainBlockerConfig := actor.DomainBlockerConfig{
+		BlocklistURL:    actor.DefaultRPZURL,
+		RefreshInterval: 6 * time.Hour,
+		TTL:             24 * time.Hour,
+		HTTPClient:      &http.Client{Timeout: 30 * time.Second},
+	}
+	domainBlockerActor := actor.NewDomainBlockerActor("domain-blocker", domainBlockerConfig)
+	domainBlockerRef, err := domainBlockerSystem.Spawn(domainBlockerCtx, "domain-blocker", domainBlockerActor, 16)
+	if err != nil {
+		domainBlockerCancel()
+		cancel()
+		filesystem.Close()
+		return nil, fmt.Errorf("failed to spawn domain blocker actor: %w", err)
+	}
+
+	logger.Debug("Domain blocker actor spawned successfully")
+
 	shared := &SharedResources{
 		config:               cfg,
 		providerMgr:          providerMgr,
 		sessionStorageRef:    storageRef,
 		sessionStorageCancel: cancel,
 		sessionStorageSystem: actorSystem,
+		domainBlockerRef:     domainBlockerRef,
+		domainBlockerCancel:  domainBlockerCancel,
+		domainBlockerSystem:  domainBlockerSystem,
 		filesystem:           filesystem,
 	}
 
@@ -108,7 +135,7 @@ func (rf *RuntimeFactory) CreateTabRuntime(tabID int, sess *session.Session) (*T
 	// Create per-tab context
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create per-tab orchestrator with shared session storage
+	// Create per-tab orchestrator with shared resources
 	orch, err := orchestrator.NewOrchestratorWithSharedResources(
 		rf.shared.config,
 		rf.shared.providerMgr,
@@ -116,6 +143,7 @@ func (rf *RuntimeFactory) CreateTabRuntime(tabID int, sess *session.Session) (*T
 		rf.shared.filesystem,        // Shared FS
 		sess,                        // Tab's session
 		rf.shared.sessionStorageRef, // Shared session storage
+		rf.shared.domainBlockerRef,   // Shared domain blocker
 	)
 	if err != nil {
 		cancel()
@@ -186,6 +214,17 @@ func (rf *RuntimeFactory) Close() error {
 	}
 
 	// Close shared resources
+	logger.Debug("Closing shared domain blocker actor")
+	if rf.shared.domainBlockerRef != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := rf.shared.domainBlockerSystem.StopAll(shutdownCtx); err != nil {
+			logger.Error("Error stopping domain blocker system: %v", err)
+		}
+		cancel()
+	}
+
+	rf.shared.domainBlockerCancel()
+
 	logger.Debug("Closing shared session storage actor")
 	if rf.shared.sessionStorageRef != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

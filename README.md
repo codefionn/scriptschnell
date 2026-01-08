@@ -99,6 +99,14 @@ flowchart TD
     planning -->|Record plan| session
 
     orchestrator -->|Dispatch tool call| registry[Tool Registry]
+    registry -->|Check for secrets| secretDetector[Secret Detector]
+    secretDetector -->|Secrets found?| secretAuth{Has secrets?}
+    secretAuth -->|Yes| secretAwareAuth[Secret Aware Authorizer]
+    secretAwareAuth -->|Judge with secrets| authActor[Authorization Actor]
+    authActor -->|Authorization decision| summarizer
+    summarizer -->|Allow / Deny| secretAwareAuth
+    secretAwareAuth -->|Authorization decision| registry
+    secretAuth -->|No| registry
     registry --> tools["Tool Actors<br/>(read_file, write_file_diff, shell, sandbox, MCP, ...)"]
     tools -->|Tool outputs| orchestrator
     orchestrator -->|Record message| session

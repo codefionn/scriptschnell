@@ -391,7 +391,7 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 }
 
 // NewOrchestratorWithSharedResources creates an orchestrator with shared resources
-// Used by RuntimeFactory for per-tab orchestrators with shared session storage and filesystem
+// Used by RuntimeFactory for per-tab orchestrators with shared session storage, domain blocker, and filesystem
 func NewOrchestratorWithSharedResources(
 	cfg *config.Config,
 	providerMgr *provider.Manager,
@@ -399,6 +399,7 @@ func NewOrchestratorWithSharedResources(
 	sharedFS fs.FileSystem,
 	sess *session.Session,
 	sharedSessionStorage *actor.ActorRef,
+	sharedDomainBlocker *actor.ActorRef,
 ) (*Orchestrator, error) {
 	logger.Debug("Creating orchestrator with shared resources for session %s", sess.ID)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -503,29 +504,11 @@ func NewOrchestratorWithSharedResources(
 	orch.shellActorClient = actor.NewShellActorClient(shellRef)
 	orch.shellActorCancel = shellCancel
 
-	// Set up domain blocker actor
-	domainBlockerCtx, domainBlockerCancel := context.WithCancel(context.Background())
-	domainBlockerConfig := actor.DomainBlockerConfig{
-		BlocklistURL:    actor.DefaultRPZURL,
-		RefreshInterval: 6 * time.Hour, // Refresh every 6 hours
-		TTL:             24 * time.Hour, // Blocklist expires after 24 hours
-		HTTPClient:      &http.Client{Timeout: 30 * time.Second},
-	}
-	domainBlockerActor := actor.NewDomainBlockerActor("domain_blocker", domainBlockerConfig)
-	domainBlockerRef, err := orch.actorSystem.Spawn(domainBlockerCtx, "domain_blocker", domainBlockerActor, 16)
-	if err != nil {
-		domainBlockerCancel()
-		shellCancel()
-		todoCancel()
-		authorizationCancel()
-		cancel()
-		logger.Error("Failed to start domain blocker actor: %v", err)
-		return nil, fmt.Errorf("failed to start domain blocker actor: %w", err)
-	}
-	logger.Debug("Domain blocker actor spawned")
-	orch.domainBlockerRef = domainBlockerRef
-	orch.domainBlockerCancel = domainBlockerCancel
-	orch.domainBlockerClient = actor.NewDomainBlockerClient(domainBlockerRef)
+	// Use shared domain blocker actor - DO NOT create new one
+	orch.domainBlockerRef = sharedDomainBlocker
+	orch.domainBlockerCancel = nil // Don't own the cancel function - shared lifecycle
+	orch.domainBlockerClient = actor.NewDomainBlockerClient(sharedDomainBlocker)
+	logger.Debug("Using shared domain blocker actor")
 
 	// Use shared session storage actor - DO NOT create new one
 	orch.sessionStorageRef = sharedSessionStorage
@@ -3048,6 +3031,9 @@ func (o *Orchestrator) Close() error {
 	if o.shellActorCancel != nil {
 		o.shellActorCancel()
 	}
+
+	// Note: domainBlockerCancel is now managed by RuntimeFactory as a shared resource
+	// and should NOT be cancelled here - it's lifecycle is managed externally
 
 	var firstErr error
 

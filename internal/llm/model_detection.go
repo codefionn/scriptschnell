@@ -554,7 +554,7 @@ func DetectMaxOutputTokens(modelID string, family ModelFamily, contextWindow int
 	case FamilyCommand:
 		return 4096
 	case FamilyZaiGLM:
-		return 8192
+		return 40000
 	case FamilyKimi:
 		return 8192
 	case FamilyMiniMax:

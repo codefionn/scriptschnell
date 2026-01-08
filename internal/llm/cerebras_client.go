@@ -198,6 +198,14 @@ func (c *CerebrasClient) buildChatRequest(req *CompletionRequest, stream bool) (
 		payload.MaxCompletionTokens = req.MaxTokens
 	}
 
+	if req.TopP > 0 {
+		payload.TopP = req.TopP
+	}
+
+	if req.ClearThinking != nil {
+		payload.ClearThinking = req.ClearThinking
+	}
+
 	if len(req.Tools) > 0 {
 		payload.Tools = req.Tools
 		payload.ToolChoice = "auto"
@@ -361,6 +369,7 @@ type cerebrasChatRequest struct {
 	User                string                   `json:"user,omitempty"`
 	LogProbs            *bool                    `json:"logprobs,omitempty"`
 	TopLogProbs         *int                     `json:"top_logprobs,omitempty"`
+	ClearThinking       *bool                    `json:"clear_thinking,omitempty"` // Preserve reasoning traces (false recommended for agentic workflows)
 }
 
 type cerebrasChatMessage struct {

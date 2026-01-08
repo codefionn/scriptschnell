@@ -2,7 +2,6 @@ package actor
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 )
@@ -214,8 +213,4 @@ func TestSessionHealthManager_PeriodicHealthChecks(t *testing.T) {
 	if !manager.IsEnabled() {
 		t.Error("Health manager should still be enabled")
 	}
-}
-
-func makeError(msg string) error {
-	return fmt.Errorf("%s", msg)
 }

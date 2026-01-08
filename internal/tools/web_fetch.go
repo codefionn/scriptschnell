@@ -130,7 +130,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 	headers := make(map[string]string) // Currently no custom headers are supported, but preparing for future use
 	var secretMatches []secretdetect.SecretMatch
 	var secretWarning string
-	
+
 	if t.featureFlags != nil && t.featureFlags.IsToolEnabled("web_fetch_secret_detect") {
 		secretMatches = t.scanWebFetchRequest(reqURL.String(), headers, "")
 		if len(secretMatches) > 0 {
@@ -188,7 +188,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 	if len(secretMatches) > 0 {
 		result["secret_detection"] = map[string]interface{}{
 			"secrets_found": len(secretMatches),
-			"warning":      "Potential secrets detected in request - see UI output for details",
+			"warning":       "Potential secrets detected in request - see UI output for details",
 		}
 	}
 
@@ -296,7 +296,7 @@ func truncateStringToBytes(s string, limit int) (string, bool) {
 // scanWebFetchRequest scans the web fetch request components for secrets
 func (t *WebFetchTool) scanWebFetchRequest(url string, headers map[string]string, body string) []secretdetect.SecretMatch {
 	var allMatches []secretdetect.SecretMatch
-	
+
 	if t.detector == nil {
 		return allMatches
 	}
@@ -332,10 +332,10 @@ func formatSecretMatches(matches []secretdetect.SecretMatch) string {
 		if match.FilePath != "" {
 			location = match.FilePath
 		}
-		warnings = append(warnings, fmt.Sprintf("• %s detected in %s at line %d, col %d: %s", 
+		warnings = append(warnings, fmt.Sprintf("• %s detected in %s at line %d, col %d: %s",
 			match.PatternName, location, match.LineNumber, match.Column, match.MatchedText))
 	}
 
-	return fmt.Sprintf("\n\n⚠️ **SECRET DETECTION WARNING**\nThe following potential secrets were detected in the web fetch request:\n%s\n\nConsider whether these should be redacted before proceeding.", 
+	return fmt.Sprintf("\n\n⚠️ **SECRET DETECTION WARNING**\nThe following potential secrets were detected in the web fetch request:\n%s\n\nConsider whether these should be redacted before proceeding.",
 		strings.Join(warnings, "\n"))
 }

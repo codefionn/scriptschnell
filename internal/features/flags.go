@@ -17,58 +17,58 @@ type FeatureFlags struct {
 	PlanningEnabled bool
 
 	// Tool flags - all default to true (enabled)
-	ReadFile             bool
-	ReadFileSummarized   bool
-	CreateFile           bool
-	WriteFileDiff        bool
-	WriteFileReplace     bool
-	WriteFileJSON        bool
-	Shell                bool
-	StatusProgram        bool
-	WaitProgram          bool
-	StopProgram          bool
-	Parallel             bool
-	GoSandbox            bool
-	WebSearch            bool
-	WebFetchSecretDetect       bool // Secret detection in web fetch
+	ReadFile                 bool
+	ReadFileSummarized       bool
+	CreateFile               bool
+	WriteFileDiff            bool
+	WriteFileReplace         bool
+	WriteFileJSON            bool
+	Shell                    bool
+	StatusProgram            bool
+	WaitProgram              bool
+	StopProgram              bool
+	Parallel                 bool
+	GoSandbox                bool
+	WebSearch                bool
+	WebFetchSecretDetect     bool // Secret detection in web fetch
 	ToolCallSecretAuthScreen bool // Tool call secret authorization screening
-	ToolSummarize             bool
-	Todo                 bool
-	SearchFiles          bool
-	SearchFileContent    bool
-	CodebaseInvestigator bool
-	SearchContextFiles   bool
-	GrepContextFiles     bool
-	ReadContextFile      bool
+	ToolSummarize            bool
+	Todo                     bool
+	SearchFiles              bool
+	SearchFileContent        bool
+	CodebaseInvestigator     bool
+	SearchContextFiles       bool
+	GrepContextFiles         bool
+	ReadContextFile          bool
 }
 
 // NewFeatureFlags creates a new FeatureFlags instance with default values (all enabled)
 func NewFeatureFlags() *FeatureFlags {
 	return &FeatureFlags{
-		PlanningEnabled:      true,
-		ReadFile:             true,
-		ReadFileSummarized:   false, // The codebase_investigator completely replaces this
-		CreateFile:           true,
-		WriteFileDiff:        true,
-		WriteFileReplace:     true,
-		WriteFileJSON:        true,
-		Shell:                true,
-		StatusProgram:        true,
-		WaitProgram:          true,
-		StopProgram:          true,
-		Parallel:             true,
-		GoSandbox:            true,
-		WebSearch:            true,
-		WebFetchSecretDetect:       true, // Secret detection in web fetch - enabled by default
+		PlanningEnabled:          true,
+		ReadFile:                 true,
+		ReadFileSummarized:       false, // The codebase_investigator completely replaces this
+		CreateFile:               true,
+		WriteFileDiff:            true,
+		WriteFileReplace:         true,
+		WriteFileJSON:            true,
+		Shell:                    true,
+		StatusProgram:            true,
+		WaitProgram:              true,
+		StopProgram:              true,
+		Parallel:                 true,
+		GoSandbox:                true,
+		WebSearch:                true,
+		WebFetchSecretDetect:     true, // Secret detection in web fetch - enabled by default
 		ToolCallSecretAuthScreen: true, // Tool call secret authorization screening - enabled by default
-		ToolSummarize:             true,
-		Todo:                 true,
-		SearchFiles:          true,
-		SearchFileContent:    true,
-		CodebaseInvestigator: true,
-		SearchContextFiles:   true,
-		GrepContextFiles:     true,
-		ReadContextFile:      true,
+		ToolSummarize:            true,
+		Todo:                     true,
+		SearchFiles:              true,
+		SearchFileContent:        true,
+		CodebaseInvestigator:     true,
+		SearchContextFiles:       true,
+		GrepContextFiles:         true,
+		ReadContextFile:          true,
 	}
 }
 

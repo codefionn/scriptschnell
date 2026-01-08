@@ -61,19 +61,18 @@ func (wm *WorkspaceManager) WaitForSignal(workspaceDir string, timeout time.Dura
 	defer ticker.Stop()
 
 	deadline := time.Now().Add(timeout)
-
-	for {
-		select {
-		case <-ticker.C:
-			if _, err := os.Stat(donePath); err == nil {
-				return nil // Success
-			}
-			if _, err := os.Stat(failedPath); err == nil {
-				return fmt.Errorf("build failed (signal file detected)")
-			}
-			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout waiting for build signal")
-			}
+	for range ticker.C {
+		if _, err := os.Stat(donePath); err == nil {
+			return nil // Success
+		}
+		if _, err := os.Stat(failedPath); err == nil {
+			return fmt.Errorf("build failed (signal file detected)")
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for build signal")
 		}
 	}
+	// Unreachable but needed for linter
+	return fmt.Errorf("unexpected end of wait loop")
 }
+

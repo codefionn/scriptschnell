@@ -143,7 +143,7 @@ func (rf *RuntimeFactory) CreateTabRuntime(tabID int, sess *session.Session) (*T
 		rf.shared.filesystem,        // Shared FS
 		sess,                        // Tab's session
 		rf.shared.sessionStorageRef, // Shared session storage
-		rf.shared.domainBlockerRef,   // Shared domain blocker
+		rf.shared.domainBlockerRef,  // Shared domain blocker
 	)
 	if err != nil {
 		cancel()

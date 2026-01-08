@@ -37,7 +37,7 @@ func TestHTTPBlocklistDownloader_NewDownloader(t *testing.T) {
 func TestHTTPBlocklistDownloader_DownloadSuccess(t *testing.T) {
 	mockClient := NewMockHTTPClient()
 	testContent := "example.com CNAME .\ntest.com CNAME .\n"
-	
+
 	mockClient.SetResponse("https://example.com/blocklist.txt", &MockHTTPResponse{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(testContent)),
@@ -88,7 +88,7 @@ func TestHTTPBlocklistDownloader_DownloadError(t *testing.T) {
 // TestHTTPBlocklistDownloader_DownloadHTTPError tests HTTP error status handling
 func TestHTTPBlocklistDownloader_DownloadHTTPError(t *testing.T) {
 	mockClient := NewMockHTTPClient()
-	
+
 	mockClient.SetResponse("https://example.com/404.txt", &MockHTTPResponse{
 		StatusCode: http.StatusNotFound,
 		Body:       io.NopCloser(strings.NewReader("Not Found")),
@@ -114,10 +114,10 @@ func TestHTTPBlocklistDownloader_DownloadHTTPError(t *testing.T) {
 // TestHTTPBlocklistDownloader_GetLastModified tests getting last modified time
 func TestHTTPBlocklistDownloader_GetLastModified(t *testing.T) {
 	mockClient := NewMockHTTPClient()
-	
+
 	header := make(http.Header)
 	header.Set("Last-Modified", "Wed, 01 Jan 2020 12:00:00 GMT")
-	
+
 	mockClient.SetResponse("https://example.com/blocklist.txt", &MockHTTPResponse{
 		StatusCode: http.StatusOK,
 		Header:     header,
@@ -134,7 +134,7 @@ func TestHTTPBlocklistDownloader_GetLastModified(t *testing.T) {
 	ctx := context.Background()
 	lastModified, err := downloader.GetLastModified(ctx, "https://example.com/blocklist.txt")
 	require.NoError(t, err)
-	
+
 	expectedTime, _ := time.Parse(time.RFC1123, "Wed, 01 Jan 2020 12:00:00 GMT")
 	assert.Equal(t, expectedTime, lastModified)
 	assert.True(t, downloader.IsHealthy())
@@ -176,12 +176,12 @@ func TestHTTPBlocklistDownloader_ContentTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockClient := NewMockHTTPClient()
-			
+
 			header := make(http.Header)
 			if tt.contentType != "" {
 				header.Set("Content-Type", tt.contentType)
 			}
-			
+
 			mockClient.SetResponse("https://example.com/blocklist.txt", &MockHTTPResponse{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader("test.com CNAME .\n")),
@@ -210,7 +210,7 @@ func TestHTTPBlocklistDownloader_ContentTypes(t *testing.T) {
 // TestHTTPBlocklistDownloader_ContextCancellation tests context cancellation
 func TestHTTPBlocklistDownloader_ContextCancellation(t *testing.T) {
 	mockClient := NewMockHTTPClient()
-	
+
 	mockClient.SetResponse("https://example.com/slow.txt", &MockHTTPResponse{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader("test.com CNAME .\n")),
@@ -240,7 +240,7 @@ func TestHTTPBlocklistDownloader_RequestHeaders(t *testing.T) {
 	// This test would require a more sophisticated mock to capture request headers
 	// For now, we'll just verify that the downloader doesn't fail
 	mockClient := NewMockHTTPClient()
-	
+
 	mockClient.SetResponse("https://example.com/blocklist.txt", &MockHTTPResponse{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader("test.com CNAME .\n")),
@@ -268,7 +268,7 @@ func TestHTTPBlocklistDownloader_RequestHeaders(t *testing.T) {
 // TestHTTPBlocklistDownloader_HealthTracking tests health status tracking
 func TestHTTPBlocklistDownloader_HealthTracking(t *testing.T) {
 	mockClient := NewMockHTTPClient()
-	
+
 	// Initially set up for success
 	mockClient.SetResponse("https://example.com/blocklist.txt", &MockHTTPResponse{
 		StatusCode: http.StatusOK,

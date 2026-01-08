@@ -297,10 +297,10 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 		if len(bodyBytes) > 0 {
 			bodyMatches = t.detector.Scan(string(bodyBytes))
 		}
-		
+
 		// Combine all matches
 		allMatches := append(urlMatches, bodyMatches...)
-		
+
 		if len(allMatches) > 0 {
 			// Log secret detection warning
 			logger.Debug("sandbox fetch: detected %d potential secrets in request", len(allMatches))

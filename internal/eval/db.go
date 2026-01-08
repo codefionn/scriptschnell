@@ -211,9 +211,6 @@ func (d *Database) getSQLiteType(t reflect.Type) string {
 }
 
 // initSchema is kept for backward compatibility if needed, but now calls migrate
-func (d *Database) initSchema() error {
-	return d.migrate()
-}
 
 // addSampleModels adds some sample models to demonstrate the functionality
 func (d *Database) addSampleModels() error {

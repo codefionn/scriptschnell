@@ -74,9 +74,9 @@ type Orchestrator struct {
 	toolExecutorCancel    context.CancelFunc
 	shellActorClient      *actor.ShellActorClient
 	shellActorCancel      context.CancelFunc
-	domainBlockerRef     *actor.ActorRef
-	domainBlockerCancel  context.CancelFunc
-	domainBlockerClient  *actor.DomainBlockerClient
+	domainBlockerRef      *actor.ActorRef
+	domainBlockerCancel   context.CancelFunc
+	domainBlockerClient   *actor.DomainBlockerClient
 	sessionStorageRef     *actor.ActorRef
 	sessionStorageCancel  context.CancelFunc
 	activeShellMu         sync.Mutex
@@ -284,7 +284,7 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	domainBlockerCtx, domainBlockerCancel := context.WithCancel(context.Background())
 	domainBlockerConfig := actor.DomainBlockerConfig{
 		BlocklistURL:    actor.DefaultRPZURL,
-		RefreshInterval: 6 * time.Hour, // Refresh every 6 hours
+		RefreshInterval: 6 * time.Hour,  // Refresh every 6 hours
 		TTL:             24 * time.Hour, // Blocklist expires after 24 hours
 		HTTPClient:      &http.Client{Timeout: 30 * time.Second},
 	}

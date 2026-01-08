@@ -1582,7 +1582,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Handle todo scrolling when no suggestions
 			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
-				m.todoViewport.LineUp(1)
+				m.todoViewport.ScrollUp(1)
 				return m, baseCmd
 			}
 
@@ -1597,21 +1597,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Handle todo scrolling when no suggestions
 			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
-				m.todoViewport.LineDown(1)
+				m.todoViewport.ScrollDown(1)
 				return m, baseCmd
 			}
 
 		case "pgup":
 			// Handle todo page up when todo panel is shown
 			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
-				m.todoViewport.HalfViewUp()
+				m.todoViewport.HalfPageUp()
 				return m, baseCmd
 			}
 
 		case "pgdn":
 			// Handle todo page down when todo panel is shown
 			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
-				m.todoViewport.HalfViewDown()
+				m.todoViewport.HalfPageDown()
 				return m, baseCmd
 			}
 
@@ -2462,51 +2462,6 @@ func (m *Model) renderFooter(left, right string) string {
 	}
 
 	return left + strings.Repeat(" ", space) + right
-}
-
-func cachedTokensFromUsage(usage map[string]interface{}) float64 {
-	if usage == nil {
-		return 0
-	}
-
-	toFloat := func(v interface{}) float64 {
-		switch n := v.(type) {
-		case float64:
-			return n
-		case float32:
-			return float64(n)
-		case int:
-			return float64(n)
-		case int32:
-			return float64(n)
-		case int64:
-			return float64(n)
-		case uint:
-			return float64(n)
-		case uint32:
-			return float64(n)
-		case uint64:
-			return float64(n)
-		default:
-			return 0
-		}
-	}
-
-	var total float64
-	if v, ok := usage["cached_tokens"]; ok {
-		total += toFloat(v)
-	}
-	if details, ok := usage["input_tokens_details"].(map[string]interface{}); ok {
-		if v, ok2 := details["cached_tokens"]; ok2 {
-			total += toFloat(v)
-		}
-	}
-	if details, ok := usage["output_tokens_details"].(map[string]interface{}); ok {
-		if v, ok2 := details["cached_tokens"]; ok2 {
-			total += toFloat(v)
-		}
-	}
-	return total
 }
 
 func (m *Model) contextDisplay() string {

@@ -16,10 +16,10 @@ type HTTPClient interface {
 type BlocklistDownloader interface {
 	// DownloadBlocklist downloads the blocklist from the configured URL
 	DownloadBlocklist(ctx context.Context, url string) (io.ReadCloser, error)
-	
+
 	// GetLastModified returns the last modified time of the blocklist (if available)
 	GetLastModified(ctx context.Context, url string) (time.Time, error)
-	
+
 	// IsHealthy returns true if the downloader is functioning properly
 	IsHealthy() bool
 }

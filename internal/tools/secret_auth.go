@@ -81,13 +81,13 @@ func shouldScanTool(toolName string) bool {
 	// Define tools that are less likely to contain legitimate secrets
 	// and can be skipped to reduce false positives
 	skipTools := map[string]bool{
-		"read_file":           true, // File content is scanned separately if needed
-		"list_files":          true, // Just lists filenames
-		"todo":                true, // Task management, unlikely to have secrets
-		"status":              true, // Job status, unlikely to have secrets
-		"help":                true, // Help content, no secrets
-		"parallel_tools":      true, // Just coordinates other tools
-		"tool_summarize":      true, // Just summarizes output
+		"read_file":            true, // File content is scanned separately if needed
+		"list_files":           true, // Just lists filenames
+		"todo":                 true, // Task management, unlikely to have secrets
+		"status":               true, // Job status, unlikely to have secrets
+		"help":                 true, // Help content, no secrets
+		"parallel_tools":       true, // Just coordinates other tools
+		"tool_summarize":       true, // Just summarizes output
 		"read_file_summarized": true, // Just summarizes files
 	}
 

@@ -8,14 +8,14 @@ import (
 
 // SecretAwareAuthorizer wraps an Authorizer to add secret-based authorization capabilities.
 type SecretAwareAuthorizer struct {
-	authorizer       Authorizer
+	authorizer         Authorizer
 	authorizationActor *AuthorizationActor
 }
 
 // NewSecretAwareAuthorizer creates a new SecretAwareAuthorizer that wraps an existing authorizer.
 func NewSecretAwareAuthorizer(authorizer Authorizer, actor *AuthorizationActor) *SecretAwareAuthorizer {
 	return &SecretAwareAuthorizer{
-		authorizer:        authorizer,
+		authorizer:         authorizer,
 		authorizationActor: actor,
 	}
 }
@@ -33,7 +33,7 @@ func (s *SecretAwareAuthorizer) AuthorizeWithSecrets(ctx context.Context, toolNa
 	if s.authorizationActor != nil {
 		return s.authorizationActor.judgeToolCallWithSecrets(ctx, toolName, params, secrets)
 	}
-	
+
 	// Fallback: require user input if we have no way to judge secrets
 	return &AuthorizationDecision{
 		Allowed:           false,

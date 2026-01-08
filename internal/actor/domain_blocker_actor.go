@@ -26,12 +26,12 @@ type DomainBlockerMessage interface {
 
 // DomainBlockRequest asks whether a domain is blocked
 type DomainBlockRequest struct {
-	Domain      string
-	ResponseCh  chan DomainBlockResponse
+	Domain     string
+	ResponseCh chan DomainBlockResponse
 }
 
 func (DomainBlockRequest) isDomainBlockerMessage() {}
-func (DomainBlockRequest) Type() string { return "DomainBlockRequest" }
+func (DomainBlockRequest) Type() string            { return "DomainBlockRequest" }
 
 // DomainBlockResponse contains the result of a domain block check
 type DomainBlockResponse struct {
@@ -45,13 +45,13 @@ type RefreshBlocklistRequest struct {
 }
 
 func (RefreshBlocklistRequest) isDomainBlockerMessage() {}
-func (RefreshBlocklistRequest) Type() string { return "RefreshBlocklistRequest" }
+func (RefreshBlocklistRequest) Type() string            { return "RefreshBlocklistRequest" }
 
 // RefreshBlocklistResponse contains the result of a blocklist refresh
 type RefreshBlocklistResponse struct {
-	Success   bool
+	Success     bool
 	DomainCount int
-	Error     string
+	Error       string
 }
 
 // GetBlocklistStatsRequest requests current blocklist statistics
@@ -60,46 +60,46 @@ type GetBlocklistStatsRequest struct {
 }
 
 func (GetBlocklistStatsRequest) isDomainBlockerMessage() {}
-func (GetBlocklistStatsRequest) Type() string { return "GetBlocklistStatsRequest" }
+func (GetBlocklistStatsRequest) Type() string            { return "GetBlocklistStatsRequest" }
 
 // BlocklistStatsResponse contains statistics about the current blocklist
 type BlocklistStatsResponse struct {
-	DomainCount      int
-	LastUpdated      time.Time
-	BlocklistURL     string
-	RefreshInterval  time.Duration
-	TTL              time.Duration
-	Expired          bool
-	CacheEnabled     bool
-	CacheDir         string // Empty if cache is disabled
+	DomainCount     int
+	LastUpdated     time.Time
+	BlocklistURL    string
+	RefreshInterval time.Duration
+	TTL             time.Duration
+	Expired         bool
+	CacheEnabled    bool
+	CacheDir        string // Empty if cache is disabled
 }
 
 // DomainBlockerActor handles domain blocking based on RPZ lists
 type DomainBlockerActor struct {
-	id                string
-	mu                sync.RWMutex
-	matcher           *ahocorasick.Matcher
-	domainCount       int
-	lastUpdated       time.Time
-	blocklistURL      string
-	refreshInterval   time.Duration
-	ttl               time.Duration
-	cacheDir          string
-	downloader        BlocklistDownloader
-	health            *HealthCheckable
-	stopCh            chan struct{}
-	refreshTicker     *time.Ticker
-	initialized       bool // Tracks whether initial load is complete
+	id              string
+	mu              sync.RWMutex
+	matcher         *ahocorasick.Matcher
+	domainCount     int
+	lastUpdated     time.Time
+	blocklistURL    string
+	refreshInterval time.Duration
+	ttl             time.Duration
+	cacheDir        string
+	downloader      BlocklistDownloader
+	health          *HealthCheckable
+	stopCh          chan struct{}
+	refreshTicker   *time.Ticker
+	initialized     bool // Tracks whether initial load is complete
 }
 
 // DomainBlockerConfig holds configuration for the domain blocker actor
 type DomainBlockerConfig struct {
-	BlocklistURL     string
-	RefreshInterval  time.Duration
-	TTL              time.Duration // TTL for the blocklist, after which it's considered stale
-	CacheDir         string        // Directory to cache blocklist files
-	Downloader       BlocklistDownloader
-	HTTPClient       *http.Client  // Deprecated: use Downloader instead
+	BlocklistURL    string
+	RefreshInterval time.Duration
+	TTL             time.Duration // TTL for the blocklist, after which it's considered stale
+	CacheDir        string        // Directory to cache blocklist files
+	Downloader      BlocklistDownloader
+	HTTPClient      *http.Client // Deprecated: use Downloader instead
 }
 
 // DefaultRPZURL is the default RPZ blocklist URL
@@ -238,7 +238,7 @@ func NewDomainBlockerActor(id string, config DomainBlockerConfig) *DomainBlocker
 			config.CacheDir = cacheDir
 		}
 	}
-	
+
 	// Initialize downloader if not provided
 	if config.Downloader == nil {
 		if config.HTTPClient != nil {
@@ -352,22 +352,6 @@ func (a *DomainBlockerActor) Receive(ctx context.Context, msg Message) error {
 	return nil
 }
 
-// waitForInitialization waits for the initial blocklist load to complete
-// This is useful for tests that need to ensure the blocklist is loaded before proceeding
-func (a *DomainBlockerActor) waitForInitialization(timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		a.mu.RLock()
-		ready := a.initialized && a.matcher != nil
-		a.mu.RUnlock()
-		if ready {
-			return nil
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return fmt.Errorf("timeout waiting for blocklist initialization")
-}
-
 // IsDomainBlocked checks if a domain is in the blocklist
 func (a *DomainBlockerActor) IsDomainBlocked(domain string) (bool, string) {
 	a.mu.RLock()
@@ -416,7 +400,7 @@ func (a *DomainBlockerActor) handleRefreshBlocklistRequest(ctx context.Context, 
 	}
 
 	return RefreshBlocklistResponse{
-		Success:    true,
+		Success:     true,
 		DomainCount: a.getDomainCount(),
 	}
 }
@@ -442,12 +426,12 @@ func (a *DomainBlockerActor) handleGetBlocklistStatsRequest(ctx context.Context,
 func (a *DomainBlockerActor) isBlocklistExpired() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	
+
 	// If we haven't loaded any blocklist yet, it's considered expired
 	if a.lastUpdated.IsZero() {
 		return true
 	}
-	
+
 	// Check if the blocklist age exceeds the TTL
 	return time.Since(a.lastUpdated) > a.ttl
 }
@@ -551,57 +535,52 @@ func (a *DomainBlockerActor) ParseRPZResponse(body io.Reader) ([]string, error) 
 	var domains []string
 	domainSet := make(map[string]struct{})
 	scanner := bufio.NewScanner(body)
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip comments and empty lines
 		if line == "" || strings.HasPrefix(line, ";") {
 			continue
 		}
-		
+
 		// Skip DNS SOA records, TTL settings, and other non-CNAME records
-		if strings.HasPrefix(line, "$") || 
-		   strings.HasPrefix(line, "@") || 
-		   (!strings.Contains(line, "CNAME") && 
-		    (strings.Contains(line, "SOA") || 
-		     strings.Contains(line, "NS") || 
-		     strings.Contains(line, "A") || 
-		     strings.Contains(line, "AAAA"))) {
+		if strings.HasPrefix(line, "$") ||
+			strings.HasPrefix(line, "@") ||
+			(!strings.Contains(line, "CNAME") &&
+				(strings.Contains(line, "SOA") ||
+					strings.Contains(line, "NS") ||
+					strings.Contains(line, "A") ||
+					strings.Contains(line, "AAAA"))) {
 			continue
 		}
-		
+
 		// Parse RPZ format lines
 		// RPZ format typically looks like: blocked.domain.com CNAME .
 		// or: *.blocked.domain.com CNAME .
 		fields := strings.Fields(line)
 		if len(fields) >= 3 && fields[1] == "CNAME" {
-			domain := fields[0]
-			
-			// Remove wildcard prefix if present
-			if strings.HasPrefix(domain, "*.") {
-				domain = domain[2:] // Remove "*."
-			}
-			
+			domain := strings.TrimPrefix(fields[0], "*.")
+
 			// Skip if it's an IP address, localhost, or invalid format
-			if strings.Contains(domain, "/") || 
-			   strings.HasPrefix(domain, "!") || 
-			   strings.Contains(domain, " ") ||
-			   domain == "localhost" ||
-			   strings.HasSuffix(domain, ".localhost") ||
-			   strings.HasPrefix(domain, "127.") ||
-			   strings.HasPrefix(domain, "10.") ||
-			   strings.HasPrefix(domain, "192.168.") ||
-			   strings.HasPrefix(domain, "172.") {
+			if strings.Contains(domain, "/") ||
+				strings.HasPrefix(domain, "!") ||
+				strings.Contains(domain, " ") ||
+				domain == "localhost" ||
+				strings.HasSuffix(domain, ".localhost") ||
+				strings.HasPrefix(domain, "127.") ||
+				strings.HasPrefix(domain, "10.") ||
+				strings.HasPrefix(domain, "192.168.") ||
+				strings.HasPrefix(domain, "172.") {
 				continue
 			}
-			
+
 			// Validate domain format
-			if strings.Contains(domain, ".") && 
-			   domain != "." && 
-			   len(domain) > 3 && // minimum domain length like a.bc
-			   !strings.HasPrefix(domain, ".") && // doesn't start with dot
-			   !strings.HasSuffix(domain, ".") { // doesn't end with dot
+			if strings.Contains(domain, ".") &&
+				domain != "." &&
+				len(domain) > 3 && // minimum domain length like a.bc
+				!strings.HasPrefix(domain, ".") && // doesn't start with dot
+				!strings.HasSuffix(domain, ".") { // doesn't end with dot
 				// Add to set for deduplication
 				lowerDomain := strings.ToLower(domain)
 				if _, exists := domainSet[lowerDomain]; !exists {
@@ -610,17 +589,17 @@ func (a *DomainBlockerActor) ParseRPZResponse(body io.Reader) ([]string, error) 
 			}
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read RPZ data: %w", err)
 	}
-	
+
 	// Convert set to slice
 	domains = make([]string, 0, len(domainSet))
 	for domain := range domainSet {
 		domains = append(domains, domain)
 	}
-	
+
 	return domains, nil
 }
 
@@ -628,7 +607,7 @@ func (a *DomainBlockerActor) ParseRPZResponse(body io.Reader) ([]string, error) 
 func (a *DomainBlockerActor) getDomainCount() int {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	
+
 	return a.domainCount
 }
 
@@ -636,40 +615,40 @@ func (a *DomainBlockerActor) getDomainCount() int {
 func (a *DomainBlockerActor) getDomainBlockerMetrics() map[string]interface{} {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	
+
 	metrics := map[string]interface{}{
-		"domains_loaded":    a.getDomainCount(),
-		"last_updated":      a.lastUpdated.Format(time.RFC3339),
-		"blocklist_url":     a.blocklistURL,
-		"refresh_interval":  a.refreshInterval.String(),
-		"ttl":               a.ttl.String(),
-		"cache_enabled":     a.cacheDir != "",
+		"domains_loaded":     a.getDomainCount(),
+		"last_updated":       a.lastUpdated.Format(time.RFC3339),
+		"blocklist_url":      a.blocklistURL,
+		"refresh_interval":   a.refreshInterval.String(),
+		"ttl":                a.ttl.String(),
+		"cache_enabled":      a.cacheDir != "",
 		"downloader_healthy": a.downloader.IsHealthy(),
-		"status":            "healthy",
+		"status":             "healthy",
 	}
-	
+
 	// Add cache directory if enabled
 	if a.cacheDir != "" {
 		metrics["cache_dir"] = a.cacheDir
 	}
-	
+
 	// Check if blocklist is stale (more than 2x refresh interval old)
 	if !a.lastUpdated.IsZero() && time.Since(a.lastUpdated) > 2*a.refreshInterval {
 		metrics["status"] = "stale"
 	}
-	
+
 	// Check if blocklist is expired (older than TTL)
 	if !a.lastUpdated.IsZero() && time.Since(a.lastUpdated) > a.ttl {
 		metrics["expired"] = true
 	} else {
 		metrics["expired"] = false
 	}
-	
+
 	// Update status based on downloader health
 	if !a.downloader.IsHealthy() {
 		metrics["status"] = "downloader_unhealthy"
 	}
-	
+
 	return metrics
 }
 

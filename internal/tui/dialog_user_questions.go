@@ -10,8 +10,6 @@ import (
 )
 
 var (
-	docStyle = lipgloss.NewStyle().Margin(1, 2)
-
 	// Dialog box styling - responsive width will be set dynamically
 	dialogBoxBaseStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).

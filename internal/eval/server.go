@@ -509,7 +509,9 @@ func (s *Server) handleResultDetail(w http.ResponseWriter, r *http.Request, ps h
 			Body:       templates.DetailedResults(errorProps),
 		}
 		w.Header().Set("Content-Type", "text/html")
-		templates.Layout(layoutProps).Render(r.Context(), w)
+		if err := templates.Layout(layoutProps).Render(r.Context(), w); err != nil {
+			log.Printf("failed to render error page: %v", err)
+		}
 		return
 	}
 
@@ -525,7 +527,9 @@ func (s *Server) handleResultDetail(w http.ResponseWriter, r *http.Request, ps h
 			Body:       templates.DetailedResults(errorProps),
 		}
 		w.Header().Set("Content-Type", "text/html")
-		templates.Layout(layoutProps).Render(r.Context(), w)
+		if err := templates.Layout(layoutProps).Render(r.Context(), w); err != nil {
+			log.Printf("failed to render error page: %v", err)
+		}
 		return
 	}
 
@@ -540,7 +544,9 @@ func (s *Server) handleResultDetail(w http.ResponseWriter, r *http.Request, ps h
 			Body:       templates.DetailedResults(errorProps),
 		}
 		w.Header().Set("Content-Type", "text/html")
-		templates.Layout(layoutProps).Render(r.Context(), w)
+		if err := templates.Layout(layoutProps).Render(r.Context(), w); err != nil {
+			log.Printf("failed to render error page: %v", err)
+		}
 		return
 	}
 
@@ -669,81 +675,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request, _ httproute
 // handleHealth returns health status
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status": "ok",
 		"time":   time.Now().Format(time.RFC3339),
-	})
-}
-
-// API handlers
-func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	config, err := s.service.GetConfig()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	}); err != nil {
+		log.Printf("failed to encode health response: %v", err)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(config)
-}
-
-func (s *Server) handleAPIUpdateConfig(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var config EvalConfig
-	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := s.service.SetConfig(&config); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(config)
-}
-
-func (s *Server) handleAPIModels(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	models, err := s.service.GetModels()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models)
-}
-
-func (s *Server) handleAPIEvals(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	eevals, err := s.service.GetEvals()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(eevals)
-}
-
-func (s *Server) handleAPIResults(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	stats, err := s.service.GetEvalStats("")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
-}
-
-func (s *Server) handleAPIResultDetail(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	runIDStr := ps.ByName("run_id")
-	runID, err := strconv.ParseInt(runIDStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid run ID", http.StatusBadRequest)
-		return
-	}
-	results, err := s.service.GetEvalResults(runID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
 }
 
 // handleSetup shows the setup form
@@ -955,14 +892,6 @@ func convertCLITestCases(testCases []CLITestCase) []templates.CLITest {
 		}
 	}
 	return result
-}
-
-// maskToken masks the API token for display
-func maskToken(token string) string {
-	if len(token) <= 8 {
-		return strings.Repeat("*", len(token))
-	}
-	return token[:4] + strings.Repeat("*", len(token)-8) + token[len(token)-4:]
 }
 
 // sanitizeID replaces characters that are invalid in CSS selectors

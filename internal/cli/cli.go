@@ -405,36 +405,6 @@ func (c *CLI) buildUsageSummary() map[string]interface{} {
 	return summary
 }
 
-// toFloat64 converts various numeric types to float64 for accumulation.
-func toFloat64(value interface{}) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case uint:
-		return float64(v), true
-	case uint64:
-		return float64(v), true
-	case uint32:
-		return float64(v), true
-	case json.Number:
-		num, err := v.Float64()
-		if err != nil {
-			return 0, false
-		}
-		return num, true
-	default:
-		return 0, false
-	}
-}
-
 // configureProviderFromOptions configures a provider based on CLI options
 func configureProviderFromOptions(providerMgr *provider.Manager, opts *Options) error {
 	if opts.Provider == "" || opts.Model == "" {

@@ -30,10 +30,10 @@ func TestParamsToString(t *testing.T) {
 		{
 			name: "mixed types",
 			params: map[string]interface{}{
-				"string":  "test",
-				"int":     42,
-				"bool":    true,
-				"float":   3.14,
+				"string": "test",
+				"int":    42,
+				"bool":   true,
+				"float":  3.14,
 			},
 			expected: "string=test int=42 bool=true float=3.14",
 		},
@@ -230,7 +230,7 @@ func TestShouldScanTool(t *testing.T) {
 func TestSecretAwareAuthorizer(t *testing.T) {
 	// Mock authorizer that always allows
 	mockAuthorizer := &MockAuthorizer{allowed: true}
-	
+
 	// For testing, we'll use nil as the authorization actor since we're testing
 	// the wrapper behavior with a mock interface
 	saa := NewSecretAwareAuthorizer(mockAuthorizer, nil)

@@ -842,14 +842,14 @@ func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
 		if tab != nil {
 			// Get or create runtime for this tab (same logic as startPromptForTab)
 			if ch.factory != nil && tab.Runtime == nil {
-				runtime, ok := ch.factory.GetTabRuntime(tab.ID)
+				var ok bool
+				tab.Runtime, ok = ch.factory.GetTabRuntime(tab.ID)
 				if !ok {
 					var err error
-					runtime, err = ch.factory.CreateTabRuntime(tab.ID, tab.Session)
+					tab.Runtime, err = ch.factory.CreateTabRuntime(tab.ID, tab.Session)
 					if err != nil {
 						return MenuResult{}, fmt.Errorf("failed to create runtime for tab %d: %w", tab.ID, err)
 					}
-					tab.Runtime = runtime
 					logger.Info("Created runtime for tab %d in handleInit", tab.ID)
 				}
 			}

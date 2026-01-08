@@ -294,12 +294,16 @@ func normalizeProvider(provider string) string {
 // executeEval executes an evaluation run with containerized execution
 func (s *Service) executeEval(runID int64, evalDef *EvalDefinition, model *EvalModel) {
 	// Update status to running
-	s.db.UpdateEvalRunStatus(runID, "running")
+	if err := s.db.UpdateEvalRunStatus(runID, "running"); err != nil {
+		logError(fmt.Sprintf("failed to update run status to running: %v", err))
+	}
 
 	// Create workspace manager
 	workspaceMgr, err := NewWorkspaceManager("/tmp/eval-workspaces")
 	if err != nil {
-		s.db.UpdateEvalRunStatus(runID, "failed")
+		if err := s.db.UpdateEvalRunStatus(runID, "failed"); err != nil {
+			logError(fmt.Sprintf("failed to update run status to failed: %v", err))
+		}
 		logError(fmt.Sprintf("failed to create workspace manager: %v", err))
 		return
 	}
@@ -307,16 +311,24 @@ func (s *Service) executeEval(runID int64, evalDef *EvalDefinition, model *EvalM
 	// Create workspace for this specific run (eval + model combination)
 	workspaceDir, err := workspaceMgr.CreateWorkspace(runID)
 	if err != nil {
-		s.db.UpdateEvalRunStatus(runID, "failed")
+		if err := s.db.UpdateEvalRunStatus(runID, "failed"); err != nil {
+			logError(fmt.Sprintf("failed to update run status to failed: %v", err))
+		}
 		logError(fmt.Sprintf("failed to create workspace: %v", err))
 		return
 	}
-	defer workspaceMgr.CleanupWorkspace(workspaceDir)
+	defer func() {
+		if err := workspaceMgr.CleanupWorkspace(workspaceDir); err != nil {
+			logError(fmt.Sprintf("failed to cleanup workspace: %v", err))
+		}
+	}()
 
 	// Create container executor
 	executor, err := NewContainerExecutor()
 	if err != nil {
-		s.db.UpdateEvalRunStatus(runID, "failed")
+		if err := s.db.UpdateEvalRunStatus(runID, "failed"); err != nil {
+			logError(fmt.Sprintf("failed to update run status to failed: %v", err))
+		}
 		logError(fmt.Sprintf("failed to create container executor: %v", err))
 		return
 	}
@@ -364,7 +376,9 @@ func (s *Service) executeEval(runID int64, evalDef *EvalDefinition, model *EvalM
 	}
 
 	if err != nil {
-		s.db.UpdateEvalRunStatus(runID, "failed")
+		if err := s.db.UpdateEvalRunStatus(runID, "failed"); err != nil {
+			logError(fmt.Sprintf("failed to update run status to failed: %v", err))
+		}
 		logError(fmt.Sprintf("container execution failed for run %d: %v\nOutput: %s", runID, err, result.Output))
 		return
 	}
@@ -394,7 +408,9 @@ func (s *Service) executeEval(runID int64, evalDef *EvalDefinition, model *EvalM
 	if !allPassed {
 		finalStatus = "failed"
 	}
-	s.db.UpdateEvalRunStatus(runID, finalStatus)
+	if err := s.db.UpdateEvalRunStatus(runID, finalStatus); err != nil {
+		logError(fmt.Sprintf("failed to update run status to %s: %v", finalStatus, err))
+	}
 }
 
 // runCLITestInContainer runs a single CLI test in container
@@ -634,44 +650,6 @@ func (s *Service) parseUsageFromOutput(output string) (map[string]interface{}, e
 	}
 
 	return nil, fmt.Errorf("no JSON object with usage data found")
-}
-
-// createLLMClient creates an LLM client for a model
-func (s *Service) createLLMClient(modelID string) (llm.Client, error) {
-	s.mu.Lock()
-	manager := s.manager
-
-	// Initialize manager lazily if needed
-	if manager == nil && s.openRouterToken != "" {
-		// Create a config path for the provider manager
-		configDir := s.db.getConfigDir()
-		configPath := filepath.Join(configDir, "eval-providers.json")
-
-		// Initialize provider manager
-		var err error
-		manager, err = provider.NewManager(configPath, "password")
-		if err != nil {
-			s.mu.Unlock()
-			return nil, fmt.Errorf("failed to create provider manager: %w", err)
-		}
-
-		// Add OpenRouter provider
-		err = manager.AddProviderWithAPIListing(context.Background(), "openrouter", s.openRouterToken)
-		if err != nil {
-			s.mu.Unlock()
-			return nil, fmt.Errorf("failed to add OpenRouter provider: %w", err)
-		}
-
-		s.manager = manager
-	}
-
-	s.mu.Unlock()
-
-	if manager == nil {
-		return nil, fmt.Errorf("provider manager not initialized - please configure OpenRouter token first")
-	}
-
-	return manager.CreateClient(modelID)
 }
 
 // Results operations

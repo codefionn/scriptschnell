@@ -46,7 +46,7 @@ func TestDomainBlockerActor_NewActor(t *testing.T) {
 // TestDomainBlockerActor_StartStop tests starting and stopping the actor
 func TestDomainBlockerActor_StartStop(t *testing.T) {
 	mockDownloader := NewMockBlocklistDownloader()
-	
+
 	config := DomainBlockerConfig{
 		Downloader: mockDownloader,
 		TTL:        1 * time.Hour, // Long TTL to avoid background refresh
@@ -125,7 +125,7 @@ func TestDomainBlockerActor_BlockDomain(t *testing.T) {
 // TestDomainBlockerActor_BackgroundRefresh tests background refresh functionality
 func TestDomainBlockerActor_BackgroundRefresh(t *testing.T) {
 	mockDownloader := NewMockBlocklistDownloader()
-	
+
 	// Initial domains
 	initialDomains := []string{"old1.com", "old2.com"}
 	mockDownloader.SetDomains(initialDomains)
@@ -133,7 +133,7 @@ func TestDomainBlockerActor_BackgroundRefresh(t *testing.T) {
 	config := DomainBlockerConfig{
 		Downloader:      mockDownloader,
 		TTL:             1 * time.Millisecond, // Very short TTL to force refresh
-		RefreshInterval: 1 * time.Hour, // Long refresh interval
+		RefreshInterval: 1 * time.Hour,        // Long refresh interval
 	}
 
 	actor := NewDomainBlockerActor("test", config)
@@ -293,10 +293,10 @@ func TestDomainBlockerActor_ConcurrentAccess(t *testing.T) {
 
 // MockBlocklistDownloader is a mock implementation of BlocklistDownloader for testing
 type MockBlocklistDownloader struct {
-	domains  []string
-	healthy  bool
+	domains   []string
+	healthy   bool
 	callCount int
-	mu       sync.Mutex
+	mu        sync.Mutex
 }
 
 // NewMockBlocklistDownloader creates a new mock blocklist downloader
@@ -332,20 +332,20 @@ func (m *MockBlocklistDownloader) GetCallCount() int {
 func (m *MockBlocklistDownloader) DownloadBlocklist(ctx context.Context, url string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.callCount++
-	
+
 	if !m.healthy {
 		return nil, assert.AnError
 	}
-	
+
 	// Create RPZ format content
 	var content strings.Builder
 	for _, domain := range m.domains {
 		content.WriteString(domain)
 		content.WriteString(" CNAME .\n")
 	}
-	
+
 	return io.NopCloser(strings.NewReader(content.String())), nil
 }
 
@@ -353,11 +353,11 @@ func (m *MockBlocklistDownloader) DownloadBlocklist(ctx context.Context, url str
 func (m *MockBlocklistDownloader) GetLastModified(ctx context.Context, url string) (time.Time, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if !m.healthy {
 		return time.Time{}, assert.AnError
 	}
-	
+
 	return time.Now().Add(-1 * time.Hour), nil
 }
 
@@ -366,14 +366,4 @@ func (m *MockBlocklistDownloader) IsHealthy() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.healthy
-}
-
-// Helper function to create a mock RPZ response
-func createMockRPZResponse(domains []string) string {
-	var content strings.Builder
-	for _, domain := range domains {
-		content.WriteString(domain)
-		content.WriteString(" CNAME .\n")
-	}
-	return content.String()
 }

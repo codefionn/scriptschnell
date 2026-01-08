@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/planning"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 )
@@ -72,6 +74,9 @@ type Orchestrator struct {
 	toolExecutorCancel    context.CancelFunc
 	shellActorClient      *actor.ShellActorClient
 	shellActorCancel      context.CancelFunc
+	domainBlockerRef     *actor.ActorRef
+	domainBlockerCancel  context.CancelFunc
+	domainBlockerClient  *actor.DomainBlockerClient
 	sessionStorageRef     *actor.ActorRef
 	sessionStorageCancel  context.CancelFunc
 	activeShellMu         sync.Mutex
@@ -221,7 +226,14 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 		return nil, fmt.Errorf("failed to start authorization actor: %w", err)
 	}
 	logger.Debug("Authorization actor spawned")
-	orch.authorizer = tools.NewAuthorizationActorClient(authRef)
+	baseAuthorizer := tools.NewAuthorizationActorClient(authRef)
+
+	// Create secret detector and wrap authorizer for secret-based authorization
+	if features.Enabled["secret_based_auth"] {
+		orch.authorizer = tools.NewSecretAwareAuthorizer(baseAuthorizer, authActor)
+	} else {
+		orch.authorizer = baseAuthorizer
+	}
 	orch.actorCancel = authorizationCancel
 
 	// Set up todo actor
@@ -267,6 +279,30 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	logger.Debug("Shell actor spawned")
 	orch.shellActorClient = actor.NewShellActorClient(shellRef)
 	orch.shellActorCancel = shellCancel
+
+	// Set up domain blocker actor
+	domainBlockerCtx, domainBlockerCancel := context.WithCancel(context.Background())
+	domainBlockerConfig := actor.DomainBlockerConfig{
+		BlocklistURL:    actor.DefaultRPZURL,
+		RefreshInterval: 6 * time.Hour, // Refresh every 6 hours
+		TTL:             24 * time.Hour, // Blocklist expires after 24 hours
+		HTTPClient:      &http.Client{Timeout: 30 * time.Second},
+	}
+	domainBlockerActor := actor.NewDomainBlockerActor("domain_blocker", domainBlockerConfig)
+	domainBlockerRef, err := orch.actorSystem.Spawn(domainBlockerCtx, "domain_blocker", domainBlockerActor, 16)
+	if err != nil {
+		domainBlockerCancel()
+		shellCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start domain blocker actor: %v", err)
+		return nil, fmt.Errorf("failed to start domain blocker actor: %w", err)
+	}
+	logger.Debug("Domain blocker actor spawned")
+	orch.domainBlockerRef = domainBlockerRef
+	orch.domainBlockerCancel = domainBlockerCancel
+	orch.domainBlockerClient = actor.NewDomainBlockerClient(domainBlockerRef)
 
 	// Set up session storage actor
 	configFunc := func() *config.AutoSaveConfig {
@@ -424,7 +460,14 @@ func NewOrchestratorWithSharedResources(
 		return nil, fmt.Errorf("failed to start authorization actor: %w", err)
 	}
 	logger.Debug("Authorization actor spawned")
-	orch.authorizer = tools.NewAuthorizationActorClient(authRef)
+	baseAuthorizer := tools.NewAuthorizationActorClient(authRef)
+
+	// Create secret detector and wrap authorizer for secret-based authorization
+	if features.Enabled["secret_based_auth"] {
+		orch.authorizer = tools.NewSecretAwareAuthorizer(baseAuthorizer, authActor)
+	} else {
+		orch.authorizer = baseAuthorizer
+	}
 	orch.actorCancel = authorizationCancel
 
 	// Set up todo actor
@@ -459,6 +502,30 @@ func NewOrchestratorWithSharedResources(
 	logger.Debug("Shell actor spawned")
 	orch.shellActorClient = actor.NewShellActorClient(shellRef)
 	orch.shellActorCancel = shellCancel
+
+	// Set up domain blocker actor
+	domainBlockerCtx, domainBlockerCancel := context.WithCancel(context.Background())
+	domainBlockerConfig := actor.DomainBlockerConfig{
+		BlocklistURL:    actor.DefaultRPZURL,
+		RefreshInterval: 6 * time.Hour, // Refresh every 6 hours
+		TTL:             24 * time.Hour, // Blocklist expires after 24 hours
+		HTTPClient:      &http.Client{Timeout: 30 * time.Second},
+	}
+	domainBlockerActor := actor.NewDomainBlockerActor("domain_blocker", domainBlockerConfig)
+	domainBlockerRef, err := orch.actorSystem.Spawn(domainBlockerCtx, "domain_blocker", domainBlockerActor, 16)
+	if err != nil {
+		domainBlockerCancel()
+		shellCancel()
+		todoCancel()
+		authorizationCancel()
+		cancel()
+		logger.Error("Failed to start domain blocker actor: %v", err)
+		return nil, fmt.Errorf("failed to start domain blocker actor: %w", err)
+	}
+	logger.Debug("Domain blocker actor spawned")
+	orch.domainBlockerRef = domainBlockerRef
+	orch.domainBlockerCancel = domainBlockerCancel
+	orch.domainBlockerClient = actor.NewDomainBlockerClient(domainBlockerRef)
 
 	// Use shared session storage actor - DO NOT create new one
 	orch.sessionStorageRef = sharedSessionStorage
@@ -666,7 +733,7 @@ func (o *Orchestrator) initializePlanningAgent() {
 	o.planningAgent.SetExternalTools([]planning.PlanningTool{
 		planning.NewRealToolAdapter(
 			&tools.WebFetchToolSpec{},
-			tools.NewWebFetchTool(nil, o.summarizeClient, o.authorizer),
+			tools.NewWebFetchTool(nil, o.summarizeClient, o.authorizer, secretdetect.NewDetector(), o.featureFlags),
 		),
 	})
 	o.planningAgentCancel = planningCancel
@@ -789,6 +856,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(&tools.SearchFileContentToolSpec{}, false, tools.NewSearchFileContentToolFactory(o.fs), false, "")
 	addSpec(&tools.CodebaseInvestigatorToolSpec{}, false, tools.NewCodebaseInvestigatorToolFactory(NewCodebaseInvestigatorAgent(o)), false, "")
 	addSpec(&tools.WebSearchToolSpec{}, false, tools.NewWebSearchToolFactory(o.config), false, "")
+	addSpec(&tools.WebFetchToolSpec{}, false, tools.NewWebFetchToolFactory(nil, o.summarizeClient, o.authorizer, secretdetect.NewDetector(), o.featureFlags), false, "")
 
 	// Context directory tools
 	addSpec(&tools.SearchContextFilesToolSpec{}, false, tools.NewSearchContextFilesToolFactory(o.fs, o.config, o.session), false, "")
@@ -818,11 +886,14 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(sandboxSpec, true, sandboxFactory, false, "")
 
 	// Parallel execution - needs registry access
-	parallelSpec, _ := tools.WrapLegacyTool(tools.NewParallelTool(nil))
-	parallelFactory := func(reg *tools.Registry) tools.ToolExecutor {
-		return tools.NewParallelTool(reg)
+	// Disabled for certain models (e.g., zai-glm) that don't handle parallel tools well
+	if o.shouldUseParallelTool(modelFamily) {
+		parallelSpec, _ := tools.WrapLegacyTool(tools.NewParallelTool(nil))
+		parallelFactory := func(reg *tools.Registry) tools.ToolExecutor {
+			return tools.NewParallelTool(reg)
+		}
+		addSpec(parallelSpec, false, parallelFactory, false, "")
 	}
-	addSpec(parallelSpec, false, parallelFactory, false, "")
 
 	// Summarization-related tools
 	if o.summarizeClient != nil {
@@ -895,7 +966,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		o.setActiveMCPServers(nil)
 	}
 
-	registry := tools.NewRegistry(o.authorizer)
+	registry := tools.NewRegistryWithSecrets(o.authorizer, secretdetect.NewDetector())
 	o.toolRegistry = registry
 
 	var activeMCPSanitized []string
@@ -985,6 +1056,41 @@ func (o *Orchestrator) shouldUseSimpleSingleDiffTool(modelFamily llm.ModelFamily
 		modelFamily == llm.FamilyCodestral
 }
 
+func (o *Orchestrator) shouldUseParallelTool(modelFamily llm.ModelFamily) bool {
+	// Disable parallel tool for zai-glm models
+	return modelFamily != llm.FamilyZaiGLM
+}
+
+func (o *Orchestrator) applyModelSpecificDefaults(req *llm.CompletionRequest, modelID string) {
+	if req == nil {
+		return
+	}
+
+	// Detect model family from model ID
+	modelFamily := llm.DetectModelFamily(modelID)
+	normalizedID := strings.ToLower(strings.TrimSpace(modelID))
+
+	// Apply model-specific parameter defaults
+	switch modelFamily {
+	case llm.FamilyGPT5:
+		req.Temperature = 1.0
+
+	case llm.FamilyZaiGLM:
+		// ZAI GLM (Cerebras) defaults
+		// Always use temperature=1.0 and top_p=0.95 for optimal performance
+		// These are the recommended defaults from Cerebras documentation
+		req.Temperature = 1.0
+		req.TopP = 0.95
+
+		// Set clear_thinking to false ONLY for zai-glm-4.7 to preserve reasoning traces
+		// (recommended for agentic/coding workflows)
+		if strings.Contains(normalizedID, "zai-glm-4.7") && req.ClearThinking == nil {
+			clearThinking := false
+			req.ClearThinking = &clearThinking
+		}
+	}
+}
+
 func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
 	if sandboxTool == nil {
 		return
@@ -993,6 +1099,9 @@ func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
 		sandboxTool.SetAuthorizer(o.authorizer)
 	}
 	sandboxTool.SetSummarizeClient(o.summarizeClient)
+	// Set secret detector and feature flags for fetch requests
+	sandboxTool.SetSecretDetector(secretdetect.NewDetector())
+	sandboxTool.SetFeatureFlags(o.featureFlags)
 	sandboxTool.SetProgressCallback(o.GetCurrentProgressCallback())
 	if sandboxTool.GetTinyGoManager() != nil {
 		sandboxTool.GetTinyGoManager().SetStatusCallback(func(status string) {
@@ -1783,6 +1892,9 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 			EnableCaching: o.config.EnablePromptCache,
 			CacheTTL:      o.config.PromptCacheTTL,
 		}
+
+		// Apply model-specific defaults
+		o.applyModelSpecificDefaults(req, modelID)
 
 		// Notify UI that we're waiting for LLM response
 		if progressCallback != nil && len(llmMessages) > 1 {

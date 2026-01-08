@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
@@ -494,4 +496,96 @@ func (a *AuthorizationActor) authorizeShell(ctx context.Context, params map[stri
 	}
 
 	return a.judgeShellCommandWithLLM(ctx, command)
+}
+
+// judgeToolCallWithSecrets delegates tool call authorization decisions with detected secrets to the summarize client.
+func (a *AuthorizationActor) judgeToolCallWithSecrets(ctx context.Context, toolName string, params map[string]interface{}, secrets []secretdetect.SecretMatch) (*AuthorizationDecision, error) {
+	if a.summarizeClient == nil {
+		decision := &AuthorizationDecision{
+			Allowed:           false,
+			Reason:            fmt.Sprintf("Tool %s contains detected secrets and requires user approval", toolName),
+			RequiresUserInput: true,
+		}
+		return decision, nil
+	}
+
+	// Format the secrets for the prompt
+	var secretDetails []string
+	for _, secret := range secrets {
+		secretDetails = append(secretDetails, fmt.Sprintf("- %s: %s (line %d)", secret.PatternName, secret.MatchedText, secret.LineNumber))
+	}
+
+	prompt := fmt.Sprintf(`You are a security analyzer for AI tool execution. Analyze a tool call that contains detected secrets and determine if it should be allowed or requires user approval.
+
+Tool Name: %s
+Parameters: %s
+
+Detected Secrets:
+%s
+
+Consider the following when evaluating:
+- Is this tool call attempting to use secrets in a legitimate way (e.g., API keys for authentication)?
+- Are the secrets being used in read-only operations or potentially dangerous ones?
+- Is the tool call part of normal development workflows (e.g., using API keys for external services)?
+- Could this be an attempt to exfiltrate or misuse sensitive data?
+- Are the secrets being exposed inappropriately (e.g., in logs, output to files)?
+
+Common legitimate uses of secrets in tools:
+- API keys for external services in web_fetch or API calls
+- Authentication tokens for accessing private repositories or services
+- Database credentials for data operations
+- Deployment keys for infrastructure management
+
+Potentially dangerous uses:
+- Writing secrets to files that might be committed to version control
+- Including secrets in logs or output
+- Using secrets with destructive commands
+- Exfiltrating secrets to external services
+
+Respond with ONLY a JSON object in this exact format (no markdown, no code blocks):
+{"allowed": true/false, "reason": "brief explanation"}
+
+If "allowed" is true, the tool will execute with the secrets.
+If "allowed" is false, the user will be prompted for approval.`, toolName, paramsToString(params), strings.Join(secretDetails, "\n"))
+
+	response, err := a.summarizeClient.Complete(ctx, prompt)
+	if err != nil {
+		decision := &AuthorizationDecision{
+			Allowed:           false,
+			Reason:            fmt.Sprintf("Tool %s contains secrets and requires user approval (LLM analysis failed)", toolName),
+			RequiresUserInput: true,
+		}
+		return decision, nil
+	}
+
+	var result struct {
+		Allowed bool   `json:"allowed"`
+		Reason  string `json:"reason"`
+	}
+
+	if err := json.Unmarshal([]byte(cleanLLMJSONResponse(response)), &result); err != nil {
+		decision := &AuthorizationDecision{
+			Allowed:           false,
+			Reason:            fmt.Sprintf("Tool %s contains secrets and requires user approval (failed to parse LLM response)", toolName),
+			RequiresUserInput: true,
+		}
+		return decision, nil
+	}
+
+	if result.Allowed {
+		decision := &AuthorizationDecision{Allowed: true}
+		return decision, nil
+	}
+
+	reason := result.Reason
+	if reason == "" {
+		reason = fmt.Sprintf("Tool %s contains detected secrets and requires user approval", toolName)
+	}
+
+	decision := &AuthorizationDecision{
+		Allowed:           false,
+		Reason:            reason,
+		RequiresUserInput: true,
+	}
+	return decision, nil
 }

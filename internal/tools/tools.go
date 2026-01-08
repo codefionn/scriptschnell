@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 )
 
 // ToolSpec represents the static specification of a tool (name, description, parameters).
@@ -222,6 +223,7 @@ type Registry struct {
 	authorizer        Authorizer
 	manualSuggestions map[string]*ManualSuggestion
 	writeMu           sync.Mutex
+	secretDetector    secretdetect.Detector
 }
 
 // NewRegistry creates a new tool registry with an optional authorizer
@@ -233,6 +235,23 @@ func NewRegistry(authorizer Authorizer) *Registry {
 	}
 	r.initializeDefaultSuggestions()
 	return r
+}
+
+// NewRegistryWithSecrets creates a new tool registry with authorizer and secret detector
+func NewRegistryWithSecrets(authorizer Authorizer, detector secretdetect.Detector) *Registry {
+	r := &Registry{
+		entries:           make(map[string]*registryEntry),
+		authorizer:        authorizer,
+		manualSuggestions: make(map[string]*ManualSuggestion),
+		secretDetector:    detector,
+	}
+	r.initializeDefaultSuggestions()
+	return r
+}
+
+// SetSecretDetector sets the secret detector for the registry
+func (r *Registry) SetSecretDetector(detector secretdetect.Detector) {
+	r.secretDetector = detector
 }
 
 type exclusiveToolSpec interface {
@@ -593,6 +612,39 @@ func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {
 		return &ToolResult{
 			ID:    call.ID,
 			Error: "tool executor not available: " + call.Name,
+		}
+	}
+
+	// Secret-based authorization: Scan parameters for secrets before normal authorization
+	if r.secretDetector != nil && shouldScanTool(call.Name) {
+		paramStr := paramsToString(call.Parameters)
+		if secrets := extractSecrets(r.secretDetector, paramStr); len(secrets) > 0 {
+			// If we have secrets detected and an authorizer that supports secret judgment
+			if secretAwareAuthorizer, ok := r.authorizer.(*SecretAwareAuthorizer); ok {
+				decision, err := secretAwareAuthorizer.AuthorizeWithSecrets(ctx, call.Name, call.Parameters, secrets)
+				if err != nil {
+					return &ToolResult{
+						ID:    call.ID,
+						Error: "secret-based authorization error: " + err.Error(),
+					}
+				}
+
+				if decision != nil && !decision.Allowed {
+					if decision.RequiresUserInput {
+						return &ToolResult{
+							ID:                     call.ID,
+							RequiresUserInput:      true,
+							AuthReason:             decision.Reason,
+							SuggestedCommandPrefix: decision.SuggestedCommandPrefix,
+						}
+					}
+					return &ToolResult{
+						ID:                     call.ID,
+						Error:                  decision.Reason,
+						SuggestedCommandPrefix: decision.SuggestedCommandPrefix,
+					}
+				}
+			}
 		}
 	}
 

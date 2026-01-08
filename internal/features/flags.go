@@ -2,6 +2,11 @@ package features
 
 import "sync"
 
+// Global feature flags map for quick access
+var Enabled = map[string]bool{
+	"secret_based_auth": true, // Enable secret-based authorization by default
+}
+
 // FeatureFlags manages runtime feature flags for tools and capabilities.
 // This structure is NOT persisted to disk - it's in-memory only.
 // Each tool has its own boolean flag with a default value of true (enabled).
@@ -25,7 +30,9 @@ type FeatureFlags struct {
 	Parallel             bool
 	GoSandbox            bool
 	WebSearch            bool
-	ToolSummarize        bool
+	WebFetchSecretDetect       bool // Secret detection in web fetch
+	ToolCallSecretAuthScreen bool // Tool call secret authorization screening
+	ToolSummarize             bool
 	Todo                 bool
 	SearchFiles          bool
 	SearchFileContent    bool
@@ -52,7 +59,9 @@ func NewFeatureFlags() *FeatureFlags {
 		Parallel:             true,
 		GoSandbox:            true,
 		WebSearch:            true,
-		ToolSummarize:        true,
+		WebFetchSecretDetect:       true, // Secret detection in web fetch - enabled by default
+		ToolCallSecretAuthScreen: true, // Tool call secret authorization screening - enabled by default
+		ToolSummarize:             true,
 		Todo:                 true,
 		SearchFiles:          true,
 		SearchFileContent:    true,
@@ -95,6 +104,12 @@ func (f *FeatureFlags) IsToolEnabled(toolName string) bool {
 		return f.GoSandbox
 	case "web_search":
 		return f.WebSearch
+	case "web_fetch":
+		return true // web_fetch itself is always enabled, but secret detection is controlled separately
+	case "web_fetch_secret_detect":
+		return f.WebFetchSecretDetect
+	case "tool_call_secret_auth_screen":
+		return f.ToolCallSecretAuthScreen
 	case "tool_summarize":
 		return f.ToolSummarize
 	case "todo":
@@ -163,6 +178,8 @@ func (f *FeatureFlags) EnableAllTools() {
 	f.Parallel = true
 	f.GoSandbox = true
 	f.WebSearch = true
+	f.WebFetchSecretDetect = true
+	f.ToolCallSecretAuthScreen = true
 	f.ToolSummarize = true
 	f.Todo = true
 	f.SearchFiles = true
@@ -202,6 +219,10 @@ func (f *FeatureFlags) setToolFlag(toolName string, enabled bool) {
 		f.GoSandbox = enabled
 	case "web_search":
 		f.WebSearch = enabled
+	case "web_fetch_secret_detect":
+		f.WebFetchSecretDetect = enabled
+	case "tool_call_secret_auth_screen":
+		f.ToolCallSecretAuthScreen = enabled
 	case "tool_summarize":
 		f.ToolSummarize = enabled
 	case "todo":

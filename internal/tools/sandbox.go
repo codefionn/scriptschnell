@@ -12,6 +12,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
@@ -36,6 +37,8 @@ type SandboxTool struct {
 	summarizeClient llm.Client
 	shellExecutor   ShellExecutor
 	progressCb      progress.Callback
+	detector        secretdetect.Detector
+	featureFlags    FeatureFlagsProvider // Interface to check feature flags
 }
 
 func NewSandboxTool(workingDir, tempDir string) *SandboxTool {
@@ -80,6 +83,16 @@ func (t *SandboxTool) SetAuthorizer(auth Authorizer) {
 // SetSummarizeClient sets the summarization LLM client
 func (t *SandboxTool) SetSummarizeClient(client llm.Client) {
 	t.summarizeClient = client
+}
+
+// SetSecretDetector sets the secret detector for scanning web requests
+func (t *SandboxTool) SetSecretDetector(detector secretdetect.Detector) {
+	t.detector = detector
+}
+
+// SetFeatureFlags sets the feature flags provider
+func (t *SandboxTool) SetFeatureFlags(featureFlags FeatureFlagsProvider) {
+	t.featureFlags = featureFlags
 }
 
 // SetProgressCallback sets a callback for streaming status/output messages.
@@ -552,7 +565,7 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 			},
 			"working_dir": map[string]interface{}{
 				"type":        "string",
-				"description": "Working directory for sandbox execution (optional, defaults to the tool working directory).",
+				"description": "Working directory for sandbox execution (optional, defaults to the working directory). Only use in multi-repository projects and if really important for execution, otherwise ddo not use/leave empty.",
 			},
 			"libraries": map[string]interface{}{
 				"type":        "array",

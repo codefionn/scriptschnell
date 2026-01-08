@@ -70,5 +70,8 @@ build/
 /test-eval-*
 /eval-*
 /scriptschnell-final
+/test_*.go
 
 *_templ.go
+
+/test-build

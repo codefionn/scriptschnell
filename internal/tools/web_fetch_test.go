@@ -9,7 +9,16 @@ import (
 	"testing"
 
 	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 )
+
+// Mock feature flags provider for testing
+type mockFeatureFlags struct{}
+
+func (m *mockFeatureFlags) IsToolEnabled(toolName string) bool {
+	// Enable all features for testing
+	return true
+}
 
 func TestWebFetchToolSpec(t *testing.T) {
 	spec := &WebFetchToolSpec{}
@@ -35,7 +44,7 @@ func TestWebFetchToolFetchesHTML(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(server.Client(), nil, &mockAuthorizer{})
+	tool := NewWebFetchTool(server.Client(), nil, &mockAuthorizer{}, secretdetect.NewDetector(), &mockFeatureFlags{})
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"url": server.URL,
 	})
@@ -67,7 +76,7 @@ func TestWebFetchToolSummarizesWhenPromptProvided(t *testing.T) {
 	defer server.Close()
 
 	mockLLM := &mockLLMClient{response: "short summary"}
-	tool := NewWebFetchTool(server.Client(), mockLLM, &mockAuthorizer{})
+	tool := NewWebFetchTool(server.Client(), mockLLM, &mockAuthorizer{}, secretdetect.NewDetector(), &mockFeatureFlags{})
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"url":              server.URL,

@@ -13,6 +13,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/project"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 )
@@ -176,7 +177,7 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	})
 
 	// Create limited registry (with authorizer to enforce network/domain rules)
-	registry := tools.NewRegistry(a.orch.authorizer)
+	registry := tools.NewRegistryWithSecrets(a.orch.authorizer, secretdetect.NewDetector())
 
 	// Register tools
 	modelFamily := llm.DetectModelFamily(a.orch.getSummarizeModelID())
@@ -191,7 +192,7 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	// Web fetch (domain-authorized)
 	registry.RegisterSpec(
 		&tools.WebFetchToolSpec{},
-		tools.NewWebFetchToolFactory(nil, a.orch.summarizeClient, a.orch.authorizer),
+		tools.NewWebFetchToolFactory(nil, a.orch.summarizeClient, a.orch.authorizer, secretdetect.NewDetector(), a.orch.featureFlags),
 	)
 
 	// Parallel execution tool (allows the investigator to speed up by running multiple tools concurrently)

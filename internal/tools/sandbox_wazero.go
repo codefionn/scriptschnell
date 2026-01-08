@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -284,6 +285,30 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 		bodyBytes, ok = memory.Read(bodyPtr, bodyLen)
 		if !ok {
 			return 400 // Bad request - invalid memory access
+		}
+	}
+
+	// Scan request for secrets (if feature flag is enabled)
+	if t.featureFlags != nil && t.featureFlags.IsToolEnabled("web_fetch_secret_detect") && t.detector != nil {
+		// Scan URL for secrets
+		urlMatches := t.detector.Scan(urlStr)
+		// Scan body for secrets
+		var bodyMatches []secretdetect.SecretMatch
+		if len(bodyBytes) > 0 {
+			bodyMatches = t.detector.Scan(string(bodyBytes))
+		}
+		
+		// Combine all matches
+		allMatches := append(urlMatches, bodyMatches...)
+		
+		if len(allMatches) > 0 {
+			// Log secret detection warning
+			logger.Debug("sandbox fetch: detected %d potential secrets in request", len(allMatches))
+			// In the sandbox, we log the warning but still allow the request to proceed
+			// The warning will be visible in debug logs
+			for _, match := range allMatches {
+				logger.Debug("sandbox fetch: secret detected - %s: %s", match.PatternName, match.MatchedText)
+			}
 		}
 	}
 

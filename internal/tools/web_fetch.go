@@ -12,6 +12,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
 )
 
 const (
@@ -19,6 +20,11 @@ const (
 	webFetchMaxBodyBytes    = 1_000_000 // 1MB cap to avoid overwhelming the UI/LLM
 	webFetchMaxSummaryBytes = 200_000   // limit summary input size
 )
+
+// FeatureFlagsProvider provides access to feature flags
+type FeatureFlagsProvider interface {
+	IsToolEnabled(toolName string) bool
+}
 
 // WebFetchToolSpec defines the schema for the web_fetch tool.
 type WebFetchToolSpec struct{}
@@ -53,10 +59,12 @@ type WebFetchTool struct {
 	client          *http.Client
 	summarizeClient llm.Client
 	authorizer      Authorizer
+	detector        secretdetect.Detector
+	featureFlags    FeatureFlagsProvider // Interface to check feature flags
 }
 
 // NewWebFetchTool constructs a WebFetchTool.
-func NewWebFetchTool(client *http.Client, summarizeClient llm.Client, authorizer Authorizer) *WebFetchTool {
+func NewWebFetchTool(client *http.Client, summarizeClient llm.Client, authorizer Authorizer, detector secretdetect.Detector, featureFlags FeatureFlagsProvider) *WebFetchTool {
 	if client == nil {
 		client = &http.Client{Timeout: webFetchDefaultTimeout}
 	}
@@ -64,13 +72,15 @@ func NewWebFetchTool(client *http.Client, summarizeClient llm.Client, authorizer
 		client:          client,
 		summarizeClient: summarizeClient,
 		authorizer:      authorizer,
+		detector:        detector,
+		featureFlags:    featureFlags,
 	}
 }
 
 // NewWebFetchToolFactory creates a factory for WebFetchTool.
-func NewWebFetchToolFactory(client *http.Client, summarizeClient llm.Client, authorizer Authorizer) ToolFactory {
+func NewWebFetchToolFactory(client *http.Client, summarizeClient llm.Client, authorizer Authorizer, detector secretdetect.Detector, featureFlags FeatureFlagsProvider) ToolFactory {
 	return func(reg *Registry) ToolExecutor {
-		return NewWebFetchTool(client, summarizeClient, authorizer)
+		return NewWebFetchTool(client, summarizeClient, authorizer, detector, featureFlags)
 	}
 }
 
@@ -116,6 +126,19 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 		return &ToolResult{Error: "summarization model not configured; clear summarize_prompt or configure a summarize model"}
 	}
 
+	// Scan request components for secrets before making the request (if feature flag is enabled)
+	headers := make(map[string]string) // Currently no custom headers are supported, but preparing for future use
+	var secretMatches []secretdetect.SecretMatch
+	var secretWarning string
+	
+	if t.featureFlags != nil && t.featureFlags.IsToolEnabled("web_fetch_secret_detect") {
+		secretMatches = t.scanWebFetchRequest(reqURL.String(), headers, "")
+		if len(secretMatches) > 0 {
+			secretWarning = formatSecretMatches(secretMatches)
+			logger.Debug("web_fetch: detected %d potential secrets in request", len(secretMatches))
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
 	if err != nil {
 		return &ToolResult{Error: fmt.Sprintf("failed to build request: %v", err)}
@@ -147,7 +170,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 
 	var summary string
 	if summaryPrompt != "" {
-		summary, err = t.summarizeContent(ctx, summaryPrompt, body, finalURL)
+		summary, err = t.summarizeContent(ctx, summaryPrompt, body, finalURL, secretWarning)
 		if err != nil {
 			return &ToolResult{Error: err.Error()}
 		}
@@ -161,6 +184,14 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 		"truncated":    truncated,
 	}
 
+	// Add secret detection metadata if any secrets were found
+	if len(secretMatches) > 0 {
+		result["secret_detection"] = map[string]interface{}{
+			"secrets_found": len(secretMatches),
+			"warning":      "Potential secrets detected in request - see UI output for details",
+		}
+	}
+
 	if summaryPrompt != "" {
 		result["summary_prompt"] = summaryPrompt
 		result["summary"] = summary
@@ -171,6 +202,9 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 		uiResult += ", truncated"
 	}
 	uiResult += ")"
+	if secretWarning != "" {
+		uiResult += secretWarning
+	}
 	if summary != "" {
 		uiResult += "\n\nSummary:\n" + summary
 	}
@@ -181,7 +215,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 	}
 }
 
-func (t *WebFetchTool) summarizeContent(ctx context.Context, prompt, body, urlStr string) (string, error) {
+func (t *WebFetchTool) summarizeContent(ctx context.Context, prompt, body, urlStr, secretWarning string) (string, error) {
 	content := body
 	if converted, ok := htmlconv.ConvertIfHTML(body); ok {
 		content = converted
@@ -198,7 +232,7 @@ URL: %s
 User request: %s
 
 Content:
-%s`, urlStr, prompt, content)
+%s%s`, urlStr, prompt, content, secretWarning)
 
 	logger.Debug("web_fetch: summarizing content for %s (len=%d)", urlStr, len(content))
 
@@ -257,4 +291,51 @@ func truncateStringToBytes(s string, limit int) (string, bool) {
 	}
 
 	return builder.String(), true
+}
+
+// scanWebFetchRequest scans the web fetch request components for secrets
+func (t *WebFetchTool) scanWebFetchRequest(url string, headers map[string]string, body string) []secretdetect.SecretMatch {
+	var allMatches []secretdetect.SecretMatch
+	
+	if t.detector == nil {
+		return allMatches
+	}
+
+	// Scan URL
+	urlMatches := t.detector.Scan(url)
+	allMatches = append(allMatches, urlMatches...)
+
+	// Scan headers
+	for name, value := range headers {
+		headerMatches := t.detector.Scan(fmt.Sprintf("%s: %s", name, value))
+		allMatches = append(allMatches, headerMatches...)
+	}
+
+	// Scan body if provided
+	if body != "" {
+		bodyMatches := t.detector.Scan(body)
+		allMatches = append(allMatches, bodyMatches...)
+	}
+
+	return allMatches
+}
+
+// formatSecretMatches formats secret matches into a readable warning message
+func formatSecretMatches(matches []secretdetect.SecretMatch) string {
+	if len(matches) == 0 {
+		return ""
+	}
+
+	var warnings []string
+	for _, match := range matches {
+		location := "url"
+		if match.FilePath != "" {
+			location = match.FilePath
+		}
+		warnings = append(warnings, fmt.Sprintf("• %s detected in %s at line %d, col %d: %s", 
+			match.PatternName, location, match.LineNumber, match.Column, match.MatchedText))
+	}
+
+	return fmt.Sprintf("\n\n⚠️ **SECRET DETECTION WARNING**\nThe following potential secrets were detected in the web fetch request:\n%s\n\nConsider whether these should be redacted before proceeding.", 
+		strings.Join(warnings, "\n"))
 }

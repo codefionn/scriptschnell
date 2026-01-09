@@ -34,7 +34,7 @@ func (s *WebFetchToolSpec) Name() string {
 }
 
 func (s *WebFetchToolSpec) Description() string {
-	return "Fetch HTML content from a URL using an HTTP GET request. Optionally provide summarize_prompt to summarize the fetched content with the summarize model. Leave summarize_prompt empty to skip summarization."
+	return "Fetch HTML content from a URL using an HTTP GET request. Provide a summarize_prompt to extract key information from the fetched content using the fast summarize model. This is highly recommended for large pages or when you need specific information. Leave summarize_prompt empty to get the raw content. Examples: 'Extract the main points', 'What are the key technical specifications?', 'List all API endpoints', or 'What errors are mentioned?'"
 }
 
 func (s *WebFetchToolSpec) Parameters() map[string]interface{} {
@@ -47,7 +47,7 @@ func (s *WebFetchToolSpec) Parameters() map[string]interface{} {
 			},
 			"summarize_prompt": map[string]interface{}{
 				"type":        "string",
-				"description": "Optional prompt to summarize the fetched content using the summarize model. Leave empty to skip summarization.",
+				"description": "Optional prompt to summarize the fetched content using the summarize model. Leave empty to skip summarization. Recommended prompts: 'Extract the main points and key information', 'What are the key findings or conclusions?', 'List the most important details', 'Summarize this to key points', or provide specific questions like 'What authentication methods are used?' or 'How many errors occurred and what were they?'",
 			},
 		},
 		"required": []string{"url"},

@@ -53,12 +53,20 @@ func preprocessHTML(input string) (string, error) {
 		return input, err
 	}
 
-	// Remove unwanted nodes
-	removeUnwantedNodes(doc)
+	// Try to extract main content
+	mainContent := findMainContent(doc)
+	if mainContent != nil {
+		// Remove unwanted nodes from main content only
+		removeUnwantedNodes(mainContent)
+	} else {
+		// Fallback: remove unwanted nodes from entire document
+		removeUnwantedNodes(doc)
+		mainContent = doc
+	}
 
 	// Render back to HTML string
 	var buf bytes.Buffer
-	if err := html.Render(&buf, doc); err != nil {
+	if err := html.Render(&buf, mainContent); err != nil {
 		return input, err
 	}
 
@@ -144,14 +152,130 @@ func removeUnwantedNodes(n *html.Node) {
 	}
 }
 
+// findMainContent attempts to find the main content node in the HTML document
+func findMainContent(doc *html.Node) *html.Node {
+	if doc.Type != html.DocumentNode {
+		return doc
+	}
+
+	// Priority order for finding main content:
+	// 1. <main> tag
+	// 2. <article> tag
+	// 3. elements with semantic classes/ids (content, article, main, post, etc.)
+	// 4. <body> as fallback
+
+	var candidates []*html.Node
+
+	// Search for main content indicators
+	var search func(n *html.Node)
+	search = func(n *html.Node) {
+		if n.Type == html.ElementNode {
+			tagName := strings.ToLower(n.Data)
+			
+			// Check for semantic tags
+			switch tagName {
+			case "main":
+				candidates = append(candidates, n)
+			case "article":
+				candidates = append(candidates, n)
+			case "body":
+				candidates = append(candidates, n)
+			default:
+				// Check for common content identifiers in class/id
+				if hasContentIdentifier(n) {
+					candidates = append(candidates, n)
+				}
+			}
+		}
+		
+		// Recursively search children
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			search(c)
+		}
+	}
+
+	search(doc)
+
+	// Return the highest priority candidate
+	for _, candidate := range candidates {
+		if candidate.Type == html.ElementNode {
+			tagName := strings.ToLower(candidate.Data)
+			if tagName == "main" {
+				return candidate
+			}
+		}
+	}
+
+	for _, candidate := range candidates {
+		if candidate.Type == html.ElementNode {
+			tagName := strings.ToLower(candidate.Data)
+			if tagName == "article" {
+				return candidate
+			}
+		}
+	}
+
+	// Check for content identifiers
+	for _, candidate := range candidates {
+		if hasContentIdentifier(candidate) {
+			return candidate
+		}
+	}
+
+	// Fallback to body
+	for _, candidate := range candidates {
+		if candidate.Type == html.ElementNode && strings.ToLower(candidate.Data) == "body" {
+			return candidate
+		}
+	}
+
+	return doc
+}
+
+// hasContentIdentifier checks if a node has class or id attributes that suggest it contains main content
+func hasContentIdentifier(n *html.Node) bool {
+	if n.Type != html.ElementNode {
+		return false
+	}
+
+	contentIdentifiers := []string{
+		"content", "main", "article", "post", "entry", "story",
+		"text", "body-content", "page-content", "main-content",
+	}
+
+	// Check id attribute
+	for _, attr := range n.Attr {
+		if strings.ToLower(attr.Key) == "id" {
+			for _, id := range contentIdentifiers {
+				if strings.Contains(strings.ToLower(attr.Val), id) {
+					return true
+				}
+			}
+		}
+		
+		// Check class attribute
+		if strings.ToLower(attr.Key) == "class" {
+			classes := strings.Fields(attr.Val)
+			for _, class := range classes {
+				for _, id := range contentIdentifiers {
+					if strings.Contains(strings.ToLower(class), id) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // shouldRemoveNode determines if a node should be removed
 func shouldRemoveNode(n *html.Node) bool {
 	if n.Type != html.ElementNode {
 		return false
 	}
 
-	// Only remove true non-content elements (scripts, styles, metadata)
-	// Keep everything else including hidden content
+	// Remove non-content elements and navigation elements
 	unwantedTags := map[string]bool{
 		"script":   true,
 		"style":    true,
@@ -159,6 +283,12 @@ func shouldRemoveNode(n *html.Node) bool {
 		"meta":     true,
 		"link":     true,
 		"head":     true, // Head contains metadata we don't need
+		"header":   true, // Skip headers/navigation
+		"footer":   true, // Skip footers
+		"nav":      true, // Skip navigation
+		"aside":    true, // Skip sidebars
+		"iframe":   true, // Skip embedded content
+		"svg":      true, // Skip SVG graphics
 	}
 
 	return unwantedTags[n.Data]

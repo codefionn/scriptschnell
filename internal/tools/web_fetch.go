@@ -17,8 +17,8 @@ import (
 
 const (
 	webFetchDefaultTimeout  = 30 * time.Second
-	webFetchMaxBodyBytes    = 1_000_000 // 1MB cap to avoid overwhelming the UI/LLM
-	webFetchMaxSummaryBytes = 200_000   // limit summary input size
+	webFetchMaxBodyBytes    = 16_384     // ~16KB cap to avoid overwhelming the UI/LLM
+	webFetchMaxSummaryBytes = 16_384     // limit summary input size
 )
 
 // FeatureFlagsProvider provides access to feature flags

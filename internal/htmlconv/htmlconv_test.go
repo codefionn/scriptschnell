@@ -205,7 +205,7 @@ func TestConvertHTMLWithHiddenElements(t *testing.T) {
 			shouldContain:    []string{"Page Title", "Page content"},
 		},
 		{
-			name: "Preserve navigation and headers",
+			name: "Extract main content only",
 			input: `
 				<header class="site-header">Site Header</header>
 				<nav class="navigation">Navigation Menu</nav>
@@ -215,8 +215,8 @@ func TestConvertHTMLWithHiddenElements(t *testing.T) {
 				</div>
 				<footer>Site Footer</footer>
 			`,
-			shouldNotContain: []string{},
-			shouldContain:    []string{"Site Header", "Navigation Menu", "Main Content", "Article text", "Site Footer"},
+			shouldNotContain: []string{"Site Header", "Navigation Menu", "Site Footer"},
+			shouldContain:    []string{"Main Content", "Article text"},
 		},
 		{
 			name: "Preserve aria-hidden elements",

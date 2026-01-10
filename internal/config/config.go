@@ -382,7 +382,7 @@ func (c *Config) GetContextDirectories(workspace string) []string {
 	return result
 }
 
-// Save saves configuration to file
+// Save saves configuration to file using atomic writes
 func (c *Config) Save(path string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
@@ -395,7 +395,12 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	// Atomic write: write to temporary file then rename
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // GetConfigPath returns the default config path

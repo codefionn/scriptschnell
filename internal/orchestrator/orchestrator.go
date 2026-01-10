@@ -25,6 +25,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/summarizer"
 	"github.com/codefionn/scriptschnell/internal/tools"
 )
 
@@ -2602,18 +2603,31 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 	_, perMessageTokens, _ := estimateContextTokens(modelID, "", messages)
 	latestUserPrompt := findLatestUserPrompt(o.session.GetMessages())
 
-	summaryPrompt := buildSummaryPrompt(messages)
 	summary := ""
 
+	// Use the abstracted chunked summarizer
 	if o.summarizeClient != nil {
-		summaryCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
+		// Build conversation content for summarization
+		conversationContent := buildConversationContent(messages)
 
-		result, err := o.summarizeClient.Complete(summaryCtx, summaryPrompt)
+		// Create chunked summarizer
+		chunkedSummarizer := summarizer.NewChunkedSummarizer(o.summarizeClient)
+
+		// Summarize with automatic chunking
+		result, err := chunkedSummarizer.Summarize(context.Background(), conversationContent, summarizer.SummarizeOptions{
+			BasePrompt: "Summarize the earlier part of this conversation so the assistant can continue later without losing context. Capture tasks in progress, key decisions, file operations, and remaining follow-ups. Use concise bullet points; preserve critical commands, file paths, and TODOs.",
+			MaxBytes:   16_384,
+			ProgressCallback: func(status string) {
+				logger.Debug("compaction: %s", status)
+			},
+		})
+
 		if err != nil {
 			fmt.Printf("Context compaction summary failed: %v\n", err)
+			summary = fallbackConversationSummary(messages)
 		} else {
-			summary = strings.TrimSpace(result)
+			summary = strings.TrimSpace(result.Summary)
+			logger.Debug("compaction: summarized %d messages using %d chunks, %d total tokens", len(messages), result.ChunksUsed, result.TotalTokens)
 		}
 	}
 
@@ -2870,6 +2884,19 @@ func findLatestUserPrompt(messages []*session.Message) string {
 		}
 	}
 	return ""
+}
+
+// buildConversationContent builds the conversation content for summarization
+func buildConversationContent(messages []*session.Message) string {
+	var sb strings.Builder
+	for _, msg := range messages {
+		role := formatRoleLabel(msg)
+		sb.WriteString(role)
+		sb.WriteString(": ")
+		sb.WriteString(strings.TrimSpace(msg.Content))
+		sb.WriteString("\n---\n")
+	}
+	return sb.String()
 }
 
 func buildSummaryPrompt(messages []*session.Message) string {

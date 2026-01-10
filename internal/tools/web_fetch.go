@@ -13,12 +13,13 @@ import (
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
+	"github.com/codefionn/scriptschnell/internal/summarizer"
 )
 
 const (
 	webFetchDefaultTimeout  = 30 * time.Second
-	webFetchMaxBodyBytes    = 16_384     // ~16KB cap to avoid overwhelming the UI/LLM
-	webFetchMaxSummaryBytes = 16_384     // limit summary input size
+	webFetchMaxBodyBytes    = 16_384 // ~16KB cap to avoid overwhelming the UI/LLM
+	webFetchMaxSummaryBytes = 16_384 // limit summary input size
 )
 
 // FeatureFlagsProvider provides access to feature flags
@@ -56,11 +57,12 @@ func (s *WebFetchToolSpec) Parameters() map[string]interface{} {
 
 // WebFetchTool performs GET requests with optional summarization.
 type WebFetchTool struct {
-	client          *http.Client
-	summarizeClient llm.Client
-	authorizer      Authorizer
-	detector        secretdetect.Detector
-	featureFlags    FeatureFlagsProvider // Interface to check feature flags
+	client            *http.Client
+	summarizeClient   llm.Client
+	authorizer        Authorizer
+	detector          secretdetect.Detector
+	featureFlags      FeatureFlagsProvider // Interface to check feature flags
+	chunkedSummarizer *summarizer.ChunkedSummarizer
 }
 
 // NewWebFetchTool constructs a WebFetchTool.
@@ -68,12 +70,17 @@ func NewWebFetchTool(client *http.Client, summarizeClient llm.Client, authorizer
 	if client == nil {
 		client = &http.Client{Timeout: webFetchDefaultTimeout}
 	}
+	var chunkedSummarizer *summarizer.ChunkedSummarizer
+	if summarizeClient != nil {
+		chunkedSummarizer = summarizer.NewChunkedSummarizer(summarizeClient)
+	}
 	return &WebFetchTool{
-		client:          client,
-		summarizeClient: summarizeClient,
-		authorizer:      authorizer,
-		detector:        detector,
-		featureFlags:    featureFlags,
+		client:            client,
+		summarizeClient:   summarizeClient,
+		authorizer:        authorizer,
+		detector:          detector,
+		featureFlags:      featureFlags,
+		chunkedSummarizer: chunkedSummarizer,
 	}
 }
 
@@ -216,32 +223,35 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 }
 
 func (t *WebFetchTool) summarizeContent(ctx context.Context, prompt, body, urlStr, secretWarning string) (string, error) {
+	if t.chunkedSummarizer == nil {
+		return "", fmt.Errorf("summarization model not configured")
+	}
+
 	content := body
 	if converted, ok := htmlconv.ConvertIfHTML(body); ok {
 		content = converted
 	}
 
-	content, wasTruncated := truncateStringToBytes(content, webFetchMaxSummaryBytes)
-	if wasTruncated {
-		content += fmt.Sprintf("\n\n[Content truncated to %d bytes for summarization]", webFetchMaxSummaryBytes)
+	// Append secret warning if any
+	fullContent := content
+	if secretWarning != "" {
+		fullContent = content + "\n\n" + secretWarning
 	}
 
-	fullPrompt := fmt.Sprintf(`Summarize the fetched page content for the user's goal.
+	// Use the abstracted chunked summarizer
+	result, err := t.chunkedSummarizer.Summarize(ctx, fullContent, summarizer.SummarizeOptions{
+		Context:    urlStr,
+		BasePrompt: prompt,
+		MaxBytes:   webFetchMaxSummaryBytes,
+	})
 
-URL: %s
-User request: %s
-
-Content:
-%s%s`, urlStr, prompt, content, secretWarning)
-
-	logger.Debug("web_fetch: summarizing content for %s (len=%d)", urlStr, len(content))
-
-	summary, err := t.summarizeClient.Complete(ctx, fullPrompt)
 	if err != nil {
-		return "", fmt.Errorf("summarization failed: %v", err)
+		return "", fmt.Errorf("summarization failed: %w", err)
 	}
 
-	return summary, nil
+	logger.Debug("web_fetch: summarized content for %s (chunks used: %d, total tokens: %d)", urlStr, result.ChunksUsed, result.TotalTokens)
+
+	return result.Summary, nil
 }
 
 // normalizeFetchURL ensures the URL has a scheme and host and only allows HTTP/S.

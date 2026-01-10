@@ -75,4 +75,3 @@ func (wm *WorkspaceManager) WaitForSignal(workspaceDir string, timeout time.Dura
 	// Unreachable but needed for linter
 	return fmt.Errorf("unexpected end of wait loop")
 }
-

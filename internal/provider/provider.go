@@ -211,7 +211,12 @@ func (m *Manager) save() error {
 		return err
 	}
 
-	return os.WriteFile(m.configPath, encrypted, 0600) // Secure permissions for API keys
+	// Atomic write: write to temporary file then rename
+	tmpPath := m.configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, encrypted, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, m.configPath)
 }
 
 func (m *Manager) maybeDecrypt(data []byte) ([]byte, error) {

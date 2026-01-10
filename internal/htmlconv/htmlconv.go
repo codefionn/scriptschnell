@@ -171,7 +171,7 @@ func findMainContent(doc *html.Node) *html.Node {
 	search = func(n *html.Node) {
 		if n.Type == html.ElementNode {
 			tagName := strings.ToLower(n.Data)
-			
+
 			// Check for semantic tags
 			switch tagName {
 			case "main":
@@ -187,7 +187,7 @@ func findMainContent(doc *html.Node) *html.Node {
 				}
 			}
 		}
-		
+
 		// Recursively search children
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			search(c)
@@ -252,7 +252,7 @@ func hasContentIdentifier(n *html.Node) bool {
 				}
 			}
 		}
-		
+
 		// Check class attribute
 		if strings.ToLower(attr.Key) == "class" {
 			classes := strings.Fields(attr.Val)

@@ -177,6 +177,11 @@ func (m *MockHTTPClient) SetError(url string, err error) {
 	m.errors[url] = err
 }
 
+// ClearError clears a mock error for a URL
+func (m *MockHTTPClient) ClearError(url string) {
+	delete(m.errors, url)
+}
+
 // GetCallCount returns the number of times a URL was called
 func (m *MockHTTPClient) GetCallCount(url string) int {
 	return m.callCount[url]

@@ -27,6 +27,8 @@ import (
 
 const maxLogSnippetLen = 256
 
+// truncateForLog truncates a string to a maximum length for logging purposes.
+// If the string exceeds maxLogSnippetLen, it returns a truncated version with a suffix.
 func truncateForLog(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= maxLogSnippetLen {
@@ -35,6 +37,8 @@ func truncateForLog(s string) string {
 	return s[:maxLogSnippetLen] + "...(truncated)"
 }
 
+// truncateMapForLog converts a map to a string and truncates it for logging purposes.
+// Returns an empty map representation string if the map is empty.
 func truncateMapForLog(m map[string]interface{}) string {
 	if len(m) == 0 {
 		return "{}"

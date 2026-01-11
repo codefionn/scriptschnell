@@ -62,14 +62,36 @@ func TestParamsToString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := paramsToString(tt.params)
 			// Since map iteration order is not guaranteed, we need to check that all parts are present
-			// in any order for the mixed types test
-			if tt.name == "mixed types" {
+			// in any order for tests with multiple keys
+			if tt.name == "simple string params" {
+				// Check that all expected parts are in the result
+				expectedParts := []string{"key1=value1", "key2=value2"}
+				for _, part := range expectedParts {
+					if !strings.Contains(result, part) {
+						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
+					}
+				}
+			} else if tt.name == "mixed types" {
 				// Check that all expected parts are in the result
 				expectedParts := []string{"string=test", "int=42", "bool=true", "float=3.14"}
 				for _, part := range expectedParts {
 					if !strings.Contains(result, part) {
 						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
 					}
+				}
+			} else if tt.name == "nested_map" {
+				// Check that config contains the expected parts in any order
+				expectedParts := []string{"host:localhost", "port:8080"}
+				if !strings.Contains(result, "config={") || !strings.Contains(result, "}") {
+					t.Errorf("paramsToString() = %q, expected config to be a map-like string", result)
+				}
+				for _, part := range expectedParts {
+					if !strings.Contains(result, part) {
+						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
+					}
+				}
+				if !strings.Contains(result, "debug=true") {
+					t.Errorf("paramsToString() = %q, expected to contain debug=true", result)
 				}
 			} else {
 				if result != tt.expected {

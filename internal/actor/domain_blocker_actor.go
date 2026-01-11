@@ -354,8 +354,8 @@ func (a *DomainBlockerActor) Receive(ctx context.Context, msg Message) error {
 
 // IsDomainBlocked checks if a domain is in the blocklist
 func (a *DomainBlockerActor) IsDomainBlocked(domain string) (bool, string) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.matcher == nil {
 		return false, "blocklist not loaded"
@@ -601,6 +601,13 @@ func (a *DomainBlockerActor) ParseRPZResponse(body io.Reader) ([]string, error) 
 	}
 
 	return domains, nil
+}
+
+// IsInitialized returns true if the blocklist has been initialized
+func (a *DomainBlockerActor) IsInitialized() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.initialized
 }
 
 // getDomainCount returns the current number of domains in the blocklist

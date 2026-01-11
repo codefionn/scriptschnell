@@ -1260,6 +1260,7 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			// Deny and close
+			logger.Debug("User denied authorization via ESC/Ctrl+C for authID %s", m.activeAuthorizationID)
 			m.program.Send(AuthorizationResponseMsg{
 				AuthID:   m.activeAuthorizationID,
 				Approved: false,
@@ -1270,6 +1271,7 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Check which option is selected
 			if item, ok := m.authorizationDialog.list.SelectedItem().(authChoiceItem); ok {
 				approved := item.value == "approve"
+				logger.Debug("User %s authorization via Enter for authID %s", map[bool]string{true: "approved", false: "denied"}[approved], m.activeAuthorizationID)
 				m.program.Send(AuthorizationResponseMsg{
 					AuthID:   m.activeAuthorizationID,
 					Approved: approved,
@@ -1279,6 +1281,7 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "y", "Y":
 			// Quick approve with 'y'
+			logger.Debug("User approved authorization via 'y' key for authID %s", m.activeAuthorizationID)
 			m.program.Send(AuthorizationResponseMsg{
 				AuthID:   m.activeAuthorizationID,
 				Approved: true,
@@ -1287,6 +1290,7 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "n", "N":
 			// Quick deny with 'n'
+			logger.Debug("User denied authorization via 'n' key for authID %s", m.activeAuthorizationID)
 			m.program.Send(AuthorizationResponseMsg{
 				AuthID:   m.activeAuthorizationID,
 				Approved: false,
@@ -1317,12 +1321,15 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Check for EndUserQuestionsMsg
 	if _, ok := msg.(EndUserQuestionsMsg); ok {
+		logger.Debug("EndUserQuestionsMsg received, collecting answers from dialog")
+
 		// Collect answers based on dialog type
 		var response string
 
 		if dialog, ok := m.userQuestionDialog.(UserQuestionDialog); ok {
 			// Multiple choice dialog
 			answers := dialog.GetAnswers()
+			logger.Debug("Collected %d answers from multiple choice dialog", len(answers))
 			var formattedAnswers strings.Builder
 			for i, answer := range answers {
 				if answer != "" {
@@ -1333,22 +1340,28 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if dialog, ok := m.userQuestionDialog.(UserInputDialog); ok {
 			// Single text input dialog
 			response = dialog.GetAnswer()
+			logger.Debug("Collected answer from single input dialog")
 		}
 
 		// Send response with timeout to prevent blocking indefinitely
 		if response != "" {
+			logger.Debug("Attempting to send user question response: %d bytes", len(response))
 			select {
 			case m.userQuestionResponse <- response:
-				// Successfully sent response
-			case <-time.After(5 * time.Second):
+				logger.Debug("Successfully sent user question response")
+			case <-time.After(30 * time.Second):
 				// Timeout sending response - send error instead
-				logger.Error("Timeout sending user question response after 5 seconds")
+				logger.Error("Timeout sending user question response after 30 seconds - receiver may not be ready")
+				// Try to send error, but don't block indefinitely
 				select {
-				case m.userQuestionError <- fmt.Errorf("timeout sending response to planning agent"):
-				default:
-					logger.Warn("Could not send error to planning agent")
+				case m.userQuestionError <- fmt.Errorf("timeout sending response to planning agent after 30 seconds"):
+					logger.Debug("Sent timeout error to planning agent")
+				case <-time.After(5 * time.Second):
+					logger.Warn("Could not send error to planning agent - error channel also blocked")
 				}
 			}
+		} else {
+			logger.Warn("User question dialog completed but response is empty")
 		}
 
 		// Close dialog
@@ -1883,6 +1896,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, baseCmd
 
 	case ShowAuthorizationDialogMsg:
+		logger.Debug("Received ShowAuthorizationDialogMsg for authID %s, tool %s", msg.Request.AuthID, msg.Request.ToolName)
+
 		// Get tab name for display
 		tabIdx := m.findTabIndexByID(msg.Request.TabID)
 		tabName := fmt.Sprintf("Tab %d", tabIdx+1)
@@ -1900,21 +1915,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.authorizationDialogOpen = true
 		m.authorizationMu.Unlock()
 
-		logger.Info("Showing authorization dialog for tab %d (authID: %s)", msg.Request.TabID, msg.Request.AuthID)
+		logger.Info("Showing authorization dialog for tab %d (authID: %s, tool: %s)", msg.Request.TabID, msg.Request.AuthID, msg.Request.ToolName)
 
 		return m, baseCmd
 
 	case AuthorizationResponseMsg:
 		// User responded to authorization
+		logger.Debug("Received AuthorizationResponseMsg for authID %s: approved=%v", msg.AuthID, msg.Approved)
 		m.authorizationMu.Lock()
 		request, ok := m.pendingAuthorizations[msg.AuthID]
 		if ok {
-			// Send response to waiting callback
+			logger.Debug("Found pending authorization request, attempting to send response")
+			// Send response to waiting callback with timeout
 			select {
 			case request.ResponseChan <- msg.Approved:
 				logger.Info("Authorization response sent for authID %s: %v", msg.AuthID, msg.Approved)
-			default:
-				logger.Warn("Failed to send authorization response for authID %s (channel not ready)", msg.AuthID)
+			case <-time.After(30 * time.Second):
+				logger.Error("Timeout sending authorization response for authID %s after 30 seconds - receiver may not be ready", msg.AuthID)
 			}
 
 			// Mark tab as no longer waiting for auth
@@ -1922,6 +1939,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if tabIdx >= 0 && tabIdx < len(m.sessions) {
 				m.sessions[tabIdx].WaitingForAuth = false
 			}
+		} else {
+			logger.Warn("No pending authorization found for authID %s", msg.AuthID)
 		}
 
 		// Close authorization dialog
@@ -2159,14 +2178,18 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 		responseChan := make(chan string, 1)
 		errChan := make(chan error, 1)
 
+		logger.Debug("User input callback invoked, question length: %d bytes", len(question))
+
 		// Choose dialog based on the question format
 		if isLikelyMultipleChoicePrompt(question) {
+			logger.Debug("Detected multiple choice prompt, sending UserMultipleQuestionsRequestMsg")
 			m.program.Send(UserMultipleQuestionsRequestMsg{
 				Questions: question,
 				Response:  responseChan,
 				Error:     errChan,
 			})
 		} else {
+			logger.Debug("Detected single question prompt, sending UserInputRequestMsg")
 			m.program.Send(UserInputRequestMsg{
 				Question: question,
 				Response: responseChan,
@@ -2174,7 +2197,14 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 			})
 		}
 
-		return m.awaitUserResponse(runtime.ctx, responseChan, errChan)
+		logger.Debug("Waiting for user response via awaitUserResponse")
+		result, err := m.awaitUserResponse(runtime.ctx, responseChan, errChan)
+		if err != nil {
+			logger.Debug("User input callback returning error: %v", err)
+		} else {
+			logger.Debug("User input callback returning response: %d bytes", len(result))
+		}
+		return result, err
 	})
 
 	// Submit to tab's orchestrator in goroutine
@@ -3848,6 +3878,8 @@ func (m *Model) handleUserInputRequest(msg UserInputRequestMsg) tea.Cmd {
 
 // handleUserMultipleQuestionsRequest handles multiple choice question requests
 func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequestMsg) tea.Cmd {
+	logger.Debug("handleUserMultipleQuestionsRequest called, parsing questions")
+
 	// Parse the questions from the formatted string
 	// The format is expected to be:
 	// 1. Question text?
@@ -3926,11 +3958,17 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 	}
 
 	if len(questions) == 0 {
-		msg.Error <- fmt.Errorf("no questions found")
+		logger.Warn("Failed to parse any questions from multiple choice prompt")
+		select {
+		case msg.Error <- fmt.Errorf("no questions found in formatted prompt"):
+		case <-time.After(5 * time.Second):
+			logger.Error("Timeout sending 'no questions found' error - error channel blocked")
+		}
 		return nil
 	}
 
 	// Create user questions dialog
+	logger.Debug("Successfully parsed %d questions, creating dialog", len(questions))
 	dialog := NewUserQuestionDialog(questions)
 
 	// Initialize with current window size
@@ -3942,6 +3980,8 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 	m.userQuestionDialogOpen = true
 	m.userQuestionResponse = msg.Response
 	m.userQuestionError = msg.Error
+
+	logger.Debug("User question dialog opened, waiting for user input")
 
 	// Set overlay active to blur textarea and prevent input
 	m.SetOverlayActive(true)
@@ -4020,15 +4060,20 @@ func isLikelyMultipleChoicePrompt(question string) bool {
 
 // awaitUserResponse waits for a response/err with a safeguard timeout to prevent planner hangs.
 func (m *Model) awaitUserResponse(ctx context.Context, resp <-chan string, errc <-chan error) (string, error) {
+	logger.Debug("awaitUserResponse started, waiting for user input with 2 minute timeout")
 	timeout := time.After(2 * time.Minute)
 	select {
 	case r := <-resp:
+		logger.Debug("awaitUserResponse received response from response channel")
 		return r, nil
 	case err := <-errc:
+		logger.Debug("awaitUserResponse received error from error channel: %v", err)
 		return "", err
 	case <-timeout:
+		logger.Error("awaitUserResponse timed out after 2 minutes waiting for user input")
 		return "", fmt.Errorf("timed out waiting for user input")
 	case <-ctx.Done():
+		logger.Debug("awaitUserResponse context cancelled: %v", ctx.Err())
 		return "", ctx.Err()
 	}
 }

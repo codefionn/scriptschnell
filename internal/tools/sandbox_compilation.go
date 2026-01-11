@@ -33,10 +33,13 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 
 	// Wrap code with authorization layer
 	wrappedCode, detectedDomains := wasi.GenerateWASMStub(code)
-
-	// Store detected domains for potential pre-authorization
-	_ = detectedDomains // TODO: Could pre-authorize or warn about these
 	commandSummary := summarizeSandboxCommand(code)
+
+	// Log detected domains for potential authorization decisions
+	// TODO: Could pre-authorize or warn about these domains
+	if len(detectedDomains) > 0 {
+		fmt.Fprintf(os.Stderr, "Detected domains in code: %v\n", detectedDomains)
+	}
 
 	// Write wrapped code to file
 	mainFile := filepath.Join(sandboxDir, "main.go")

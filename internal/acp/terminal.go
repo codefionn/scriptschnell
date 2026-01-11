@@ -129,7 +129,7 @@ func (tm *TerminalManager) Output(ctx context.Context, req acp.TerminalOutputReq
 	if completed || !running {
 		response.ExitStatus = &acp.TerminalExitStatus{
 			ExitCode: &exitCode,
-			Signal:   nil, // TODO: Detect signal termination
+			Signal:   nil, // Signal detection not currently supported via ShellActor
 		}
 	}
 
@@ -151,7 +151,7 @@ func (tm *TerminalManager) WaitForExit(ctx context.Context, req acp.WaitForTermi
 
 	return &acp.WaitForTerminalExitResponse{
 		ExitCode: &exitCode,
-		Signal:   nil, // TODO: Detect signal termination
+		Signal:   nil, // Signal detection not currently supported via ShellActor
 	}, nil
 }
 

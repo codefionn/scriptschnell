@@ -926,15 +926,15 @@ func extractAnswerFromTags(content string) string {
 func (p *PlanningAgent) tryParseJSONPlan(jsonStr string) *PlanningResponse {
 	var resp PlanningResponse
 	if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
-		fmt.Printf("JSON parse error: %v for %s\n", err, jsonStr)
+		logger.Debug("JSON parse error: %v for %s", err, jsonStr)
 		return nil
 	}
-	fmt.Printf("Parsed JSON: %+v from %s\n", resp, jsonStr)
+	logger.Debug("Parsed JSON: %+v from %s", resp, jsonStr)
 	// Validate that we have at least a plan or questions, or it's an explicit empty plan or needs input
 	if len(resp.Plan) > 0 || len(resp.Questions) > 0 || resp.NeedsInput || (resp.Complete && strings.Contains(jsonStr, "\"plan\"")) {
 		return &resp
 	}
-	fmt.Printf("JSON parsed but validation failed: plan=%d, questions=%d\n", len(resp.Plan), len(resp.Questions))
+	logger.Debug("JSON parsed but validation failed: plan=%d, questions=%d", len(resp.Plan), len(resp.Questions))
 	return nil
 }
 
@@ -1057,7 +1057,7 @@ func (t *AskUserTool) Parameters() map[string]interface{} {
 				"description": "The question to ask the user",
 			},
 			"options": map[string]interface{}{
-				"type":        "array",
+				"type": "array",
 				"items": map[string]interface{}{
 					"type": "string",
 				},

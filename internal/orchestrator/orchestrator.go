@@ -194,7 +194,7 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	// Initialize clients first so we have summarize client for authorization actor
 	if err := orch.initializeClients(); err != nil {
 		// Non-fatal, user can configure later
-		fmt.Printf("Warning: %v\n", err)
+		logger.Warn("Failed to initialize clients: %v", err)
 	}
 
 	// Set up authorization actor with summarize client
@@ -429,7 +429,7 @@ func NewOrchestratorWithSharedResources(
 	// Initialize clients first so we have summarize client for authorization actor
 	if err := orch.initializeClients(); err != nil {
 		// Non-fatal, user can configure later
-		fmt.Printf("Warning: %v\n", err)
+		logger.Warn("Failed to initialize clients: %v", err)
 	}
 
 	// Set up authorization actor with summarize client
@@ -2623,7 +2623,7 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 		})
 
 		if err != nil {
-			fmt.Printf("Context compaction summary failed: %v\n", err)
+			logger.Warn("Context compaction summary failed: %v", err)
 			summary = fallbackConversationSummary(messages)
 		} else {
 			summary = strings.TrimSpace(result.Summary)
@@ -3123,8 +3123,9 @@ func (o *Orchestrator) enhancedToolResultCallback(callback ToolResultCallback, t
 		return err
 	}
 
-	// TODO: Store metadata for TUI access when we extend the callback interface
+	// Note: Could store metadata for TUI access when we extend the callback interface
 	// This could be done via a side channel, context, or enhanced callback signature
+	// Current implementation uses progress callbacks for most metadata needs
 
 	return nil
 }

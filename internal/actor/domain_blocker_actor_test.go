@@ -50,6 +50,7 @@ func TestDomainBlockerActor_StartStop(t *testing.T) {
 	config := DomainBlockerConfig{
 		Downloader: mockDownloader,
 		TTL:        1 * time.Hour, // Long TTL to avoid background refresh
+		CacheDir:   t.TempDir(),
 	}
 
 	actor := NewDomainBlockerActor("test", config)
@@ -79,6 +80,7 @@ func TestDomainBlockerActor_BlockDomain(t *testing.T) {
 	config := DomainBlockerConfig{
 		Downloader: mockDownloader,
 		TTL:        1 * time.Hour,
+		CacheDir:   t.TempDir(), // Use temp dir to ensure clean state
 	}
 
 	actor := NewDomainBlockerActor("test", config)
@@ -90,8 +92,20 @@ func TestDomainBlockerActor_BlockDomain(t *testing.T) {
 	err := actor.Start(ctx)
 	require.NoError(t, err)
 
-	// Wait for initial load
-	time.Sleep(200 * time.Millisecond)
+	// Manually trigger refresh to load the test domains (using the public method)
+	refreshCh := make(chan RefreshBlocklistResponse, 1)
+	refreshReq := RefreshBlocklistRequest{
+		ResponseCh: refreshCh,
+	}
+	err = actor.Receive(ctx, refreshReq)
+	require.NoError(t, err)
+
+	refreshResp := <-refreshCh
+	require.True(t, refreshResp.Success, "refresh failed: %s", refreshResp.Error)
+	require.Equal(t, len(testDomains), refreshResp.DomainCount)
+
+	// Verify domains were loaded
+	require.Equal(t, len(testDomains), actor.getDomainCount())
 
 	tests := []struct {
 		domain  string
@@ -101,7 +115,8 @@ func TestDomainBlockerActor_BlockDomain(t *testing.T) {
 		{"phishing.net", true},
 		{"bad.site", true},
 		{"good.com", false},
-		{"sub.malware.com", false}, // Should not block subdomains by default
+		{"sub.malware.com", true},  // Subdomains of blocked domains should also be blocked
+		{"sub.phishing.net", true}, // Subdomains of blocked domains should also be blocked
 		{"", false},
 	}
 
@@ -134,6 +149,7 @@ func TestDomainBlockerActor_BackgroundRefresh(t *testing.T) {
 		Downloader:      mockDownloader,
 		TTL:             1 * time.Millisecond, // Very short TTL to force refresh
 		RefreshInterval: 1 * time.Hour,        // Long refresh interval
+		CacheDir:        t.TempDir(),
 	}
 
 	actor := NewDomainBlockerActor("test", config)
@@ -177,6 +193,7 @@ func TestDomainBlockerActor_Messages(t *testing.T) {
 	config := DomainBlockerConfig{
 		Downloader: mockDownloader,
 		TTL:        1 * time.Hour,
+		CacheDir:   t.TempDir(), // Use temp dir to ensure clean state
 	}
 
 	actor := NewDomainBlockerActor("test", config)
@@ -187,7 +204,20 @@ func TestDomainBlockerActor_Messages(t *testing.T) {
 	// Start the actor
 	err := actor.Start(ctx)
 	require.NoError(t, err)
-	time.Sleep(100 * time.Millisecond)
+
+	// Manually trigger refresh to load the test domains
+	refreshCh := make(chan RefreshBlocklistResponse, 1)
+	refreshReq := RefreshBlocklistRequest{
+		ResponseCh: refreshCh,
+	}
+	err = actor.Receive(ctx, refreshReq)
+	require.NoError(t, err)
+
+	refreshResp := <-refreshCh
+	require.True(t, refreshResp.Success, "refresh failed: %s", refreshResp.Error)
+
+	// Ensure domains are loaded
+	require.Equal(t, len(testDomains), actor.getDomainCount())
 
 	// Test DomainBlockRequest
 	responseCh := make(chan DomainBlockResponse, 1)
@@ -209,12 +239,12 @@ func TestDomainBlockerActor_Messages(t *testing.T) {
 
 	// Test RefreshBlocklistRequest
 	refreshResponseCh := make(chan RefreshBlocklistResponse, 1)
-	refreshReq := RefreshBlocklistRequest{
+	refreshReq = RefreshBlocklistRequest{
 		ResponseCh: refreshResponseCh,
 	}
 
-	err = actor.Receive(ctx, refreshReq)
-	require.NoError(t, err)
+	refreshErr := actor.Receive(ctx, refreshReq)
+	require.NoError(t, refreshErr)
 
 	select {
 	case response := <-refreshResponseCh:
@@ -256,6 +286,7 @@ func TestDomainBlockerActor_ConcurrentAccess(t *testing.T) {
 	config := DomainBlockerConfig{
 		Downloader: mockDownloader,
 		TTL:        1 * time.Hour,
+		CacheDir:   t.TempDir(), // Use temp dir to ensure clean state
 	}
 
 	actor := NewDomainBlockerActor("test", config)
@@ -266,7 +297,20 @@ func TestDomainBlockerActor_ConcurrentAccess(t *testing.T) {
 	// Start the actor
 	err := actor.Start(ctx)
 	require.NoError(t, err)
-	time.Sleep(100 * time.Millisecond)
+
+	// Manually trigger refresh to load the test domains
+	refreshCh := make(chan RefreshBlocklistResponse, 1)
+	refreshReq := RefreshBlocklistRequest{
+		ResponseCh: refreshCh,
+	}
+	err = actor.Receive(ctx, refreshReq)
+	require.NoError(t, err)
+
+	refreshResp := <-refreshCh
+	require.True(t, refreshResp.Success, "refresh failed: %s", refreshResp.Error)
+
+	// Ensure domains are loaded
+	require.Equal(t, len(testDomains), actor.getDomainCount())
 
 	// Test concurrent domain checks
 	var wg sync.WaitGroup

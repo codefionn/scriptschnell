@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // Message represents a message sent between actors
@@ -51,6 +53,8 @@ func WithSequentialProcessing() ActorRefOption {
 	}
 }
 
+// NewActorRef creates a new actor reference with the given ID, actor implementation,
+// mailbox size, and optional configuration options.
 func NewActorRef(id string, actor Actor, mailboxSize int, opts ...ActorRefOption) *ActorRef {
 	ref := &ActorRef{
 		id:      id,
@@ -96,7 +100,7 @@ func (ref *ActorRef) Send(msg Message) error {
 		ref.sequenceMu.Lock()
 		defer ref.sequenceMu.Unlock()
 		if err := ref.actor.Receive(ctx, msg); err != nil {
-			fmt.Printf("Actor %s error processing message: %v\n", ref.id, err)
+			logger.Error("Actor %s error processing message: %v", ref.id, err)
 			if ref.health != nil {
 				ref.health.RecordError(err)
 			}
@@ -193,7 +197,7 @@ func (ref *ActorRef) run(ctx context.Context) {
 
 			if err := ref.actor.Receive(ctx, msg); err != nil {
 				// Log error but continue processing
-				fmt.Printf("Actor %s error processing message: %v\n", ref.id, err)
+				logger.Error("Actor %s error processing message: %v", ref.id, err)
 				if ref.health != nil {
 					ref.health.RecordError(err)
 				}

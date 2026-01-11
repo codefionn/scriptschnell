@@ -315,6 +315,30 @@ func TestIsLikelyMultipleChoicePrompt(t *testing.T) {
    a. Option A`,
 			expected: false,
 		},
+		{
+			name: "single question with options - ask_user tool format",
+			question: `1. What is your favorite color?
+   a. Red
+   b. Green
+   c. Blue`,
+			expected: true,
+		},
+		{
+			name: "single question with options - different separators",
+			question: `1. Which framework do you prefer?
+   a) React
+   b) Vue
+   c) Angular`,
+			expected: true,
+		},
+		{
+			name: "plain text without numbering",
+			question: `What is your favorite color?
+a. Red
+b. Green
+c. Blue`,
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {

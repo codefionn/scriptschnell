@@ -572,7 +572,28 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 						if question == "" {
 							toolResult = "No question provided"
 						} else {
-							userResponse, err := userInputCb(question)
+							// Check if options are provided
+							var questionText string
+							if opts, hasOptions := args["options"]; hasOptions {
+								// Format with options like ask_user_multiple
+								if optsArray, ok := opts.([]interface{}); ok && len(optsArray) == 3 {
+									var questionsText strings.Builder
+									questionsText.WriteString(fmt.Sprintf("1. %s\n", question))
+									for j, opt := range optsArray {
+										if optStr, ok := opt.(string); ok {
+											questionsText.WriteString(fmt.Sprintf("   %c. %s\n", 'a'+j, optStr))
+										}
+									}
+									questionText = questionsText.String()
+								} else {
+									// Fallback to just the question if options are invalid
+									questionText = question
+								}
+							} else {
+								questionText = question
+							}
+
+							userResponse, err := userInputCb(questionText)
 							if err != nil {
 								toolResult = fmt.Sprintf("Failed to get user input: %v", err)
 								res.needsInput = true
@@ -1035,6 +1056,13 @@ func (t *AskUserTool) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "The question to ask the user",
 			},
+			"options": map[string]interface{}{
+				"type":        "array",
+				"items": map[string]interface{}{
+					"type": "string",
+				},
+				"description": "Optional: Three predefined response options for the user (e.g., [\"Option A\", \"Option B\", \"Option C\"])",
+			},
 		},
 		"required": []string{"question"},
 	}
@@ -1048,13 +1076,44 @@ func (t *AskUserTool) Execute(ctx context.Context, params map[string]interface{}
 		}
 	}
 
+	// Validate options if provided
+	var options []string
+	if opts, hasOptions := params["options"]; hasOptions {
+		optsArray, ok := opts.([]interface{})
+		if !ok {
+			return &PlanningToolResult{
+				Error: "options parameter must be an array of strings",
+			}
+		}
+		if len(optsArray) != 3 {
+			return &PlanningToolResult{
+				Error: "options parameter must contain exactly 3 options",
+			}
+		}
+		options = make([]string, 3)
+		for i, opt := range optsArray {
+			optStr, ok := opt.(string)
+			if !ok {
+				return &PlanningToolResult{
+					Error: fmt.Sprintf("option %d must be a string", i),
+				}
+			}
+			options[i] = optStr
+		}
+	}
+
 	// This tool is handled specially by the planning agent
 	// The actual user interaction happens through the callback
+	result := map[string]interface{}{
+		"question": question,
+		"status":   "pending_user_input",
+	}
+	if len(options) > 0 {
+		result["options"] = options
+	}
+
 	return &PlanningToolResult{
-		Result: map[string]interface{}{
-			"question": question,
-			"status":   "pending_user_input",
-		},
+		Result: result,
 	}
 }
 

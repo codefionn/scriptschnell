@@ -1335,11 +1335,19 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 			response = dialog.GetAnswer()
 		}
 
-		// Send response
+		// Send response with timeout to prevent blocking indefinitely
 		if response != "" {
 			select {
 			case m.userQuestionResponse <- response:
-			default:
+				// Successfully sent response
+			case <-time.After(5 * time.Second):
+				// Timeout sending response - send error instead
+				logger.Error("Timeout sending user question response after 5 seconds")
+				select {
+				case m.userQuestionError <- fmt.Errorf("timeout sending response to planning agent"):
+				default:
+					logger.Warn("Could not send error to planning agent")
+				}
 			}
 		}
 
@@ -3941,15 +3949,16 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 	return cmd
 }
 
-// isLikelyMultipleChoicePrompt detects the formatted prompt produced by the planning agent's ask_user_multiple tool.
+// isLikelyMultipleChoicePrompt detects the formatted prompt produced by the planning agent's ask_user_multiple tool
+// and ask_user tool with options.
 func isLikelyMultipleChoicePrompt(question string) bool {
 	q := strings.TrimSpace(question)
 	if !strings.Contains(q, "\n") {
 		return false // Must be multi-line
 	}
 
-	// Check for numbered questions (1., 1), 1:, 10., etc.)
-	// Look for a digit followed by a separator at the start of a line
+	// Check for numbered questions (1., 1), 1:, 10., etc.) - from ask_user_multiple
+	// OR check for single question followed by lettered options - from ask_user with options
 	hasNumberedQuestions := false
 	lines := strings.Split(q, "\n")
 	for _, line := range lines {
@@ -3970,6 +3979,26 @@ func isLikelyMultipleChoicePrompt(question string) bool {
 			}
 		}
 	}
+
+	// If we don't have numbered questions, check if it looks like a single question with options
+	// Format: "1. Question text" followed by indented options like "   a. Option A"
+	if !hasNumberedQuestions {
+		// Check if the first non-empty line starts with "1."
+		foundFirstQuestion := false
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "1.") {
+				foundFirstQuestion = true
+				break
+			}
+			break // First non-empty line doesn't start with "1."
+		}
+		hasNumberedQuestions = foundFirstQuestion
+	}
+
 	if !hasNumberedQuestions {
 		return false
 	}

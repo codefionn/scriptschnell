@@ -23,10 +23,15 @@ RUN go mod download
 
 # Linting stage (minimal)
 FROM base AS lint
-RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && \
+    go install github.com/a-h/templ/cmd/templ@latest
 
 # Copy source code
 COPY . .
+
+# Generate templ templates before linting
+RUN echo "Generating templ templates..." && \
+    templ generate
 
 # Run linters with CGO enabled for tree-sitter
 RUN echo "Running golangci-lint..." && \

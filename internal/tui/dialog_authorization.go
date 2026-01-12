@@ -163,23 +163,21 @@ func (m AuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			// ESC or Ctrl+C means deny
+			// Note: The TUI's handleAuthorizationDialog intercepts this in practice,
+			// but we keep this for standalone testing
 			m.choice = true
 			m.approved = false
 			m.quitting = true
-			return m, tea.Batch(
-				tea.Quit,
-				func() tea.Msg { return AuthorizationApprovedMsg{Approved: false} },
-			)
+			return m, func() tea.Msg { return AuthorizationApprovedMsg{Approved: false} }
 
 		case "enter":
+			// Note: The TUI's handleAuthorizationDialog intercepts this in practice,
+			// but we keep this for standalone testing
 			if item, ok := m.list.SelectedItem().(authChoiceItem); ok {
 				m.choice = true
 				m.approved = item.value == "approve"
 				m.quitting = true
-				return m, tea.Batch(
-					tea.Quit,
-					func() tea.Msg { return AuthorizationApprovedMsg{Approved: m.approved} },
-				)
+				return m, func() tea.Msg { return AuthorizationApprovedMsg{Approved: m.approved} }
 			}
 		}
 	}

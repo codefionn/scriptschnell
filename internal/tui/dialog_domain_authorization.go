@@ -169,19 +169,18 @@ func (m DomainAuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			// ESC or Ctrl+C means deny
+			// Note: This message will be handled by the parent TUI
 			m.choice = "deny"
 			m.quitting = true
-			return m, tea.Batch(
-				tea.Quit,
-				func() tea.Msg {
-					return DomainAuthorizationChoiceMsg{
-						Domain:    m.request.Domain,
-						Choice:    "deny",
-						Approved:  false,
-						Permanent: false,
-					}
-				},
-			)
+			// Send the message for the parent to handle, but don't quit the program
+			return m, func() tea.Msg {
+				return DomainAuthorizationChoiceMsg{
+					Domain:    m.request.Domain,
+					Choice:    "deny",
+					Approved:  false,
+					Permanent: false,
+				}
+			}
 
 		case "enter":
 			if item, ok := m.list.SelectedItem().(domainChoiceItem); ok {
@@ -191,17 +190,15 @@ func (m DomainAuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				approved := item.value == "approve" || item.value == "permanent"
 				permanent := item.value == "permanent"
 
-				return m, tea.Batch(
-					tea.Quit,
-					func() tea.Msg {
-						return DomainAuthorizationChoiceMsg{
-							Domain:    m.request.Domain,
-							Choice:    item.value,
-							Approved:  approved,
-							Permanent: permanent,
-						}
-					},
-				)
+				// Send the message for the parent to handle, but don't quit the program
+				return m, func() tea.Msg {
+					return DomainAuthorizationChoiceMsg{
+						Domain:    m.request.Domain,
+						Choice:    item.value,
+						Approved:  approved,
+						Permanent: permanent,
+					}
+				}
 			}
 		}
 	}

@@ -173,7 +173,9 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 			return &ToolResult{Error: fmt.Sprintf("old_string not found in file (edit %d). Try to read the file again and redo the edit.", i+1)}
 		}
 		if count != expected {
-			return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string in edit %d, but expected %d. Try to read more surrounding text and redo the edit.", count, i+1, expected)}
+			// Find all match locations with context to help the user
+			matchLocations := findMatchLocations(finalContent, edit.OldString)
+			return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string in edit %d, but expected %d. Try to read more surrounding text and redo the edit.\n\nFound matches at:\n%s", count, i+1, expected, matchLocations)}
 		}
 
 		finalContent = strings.Replace(finalContent, edit.OldString, edit.NewString, -1)
@@ -235,6 +237,46 @@ func parseReplacementEdits(params map[string]interface{}) ([]replacementEdit, er
 	}
 
 	return edits, nil
+}
+
+// findMatchLocations finds all occurrences of a pattern in content and returns their locations with context
+func findMatchLocations(content, pattern string) string {
+	lines := strings.Split(content, "\n")
+	var matches []string
+	
+	// Find all line numbers where the pattern occurs
+	for i, line := range lines {
+		if strings.Contains(line, pattern) {
+			// Calculate surrounding line range (4 lines before and after)
+			start := i - 4
+			if start < 0 {
+				start = 0
+			}
+			end := i + 4
+			if end >= len(lines) {
+				end = len(lines) - 1
+			}
+			
+			// Build context display
+			var contextLines []string
+			for j := start; j <= end; j++ {
+				lineNum := j + 1 // Convert to 1-indexed line numbers
+				prefix := "  "
+				if j == i {
+					prefix = "> " // Mark the matching line
+				}
+				contextLines = append(contextLines, fmt.Sprintf("%s%d: %s", prefix, lineNum, lines[j]))
+			}
+			
+			matches = append(matches, strings.Join(contextLines, "\n"))
+		}
+	}
+	
+	if len(matches) == 0 {
+		return "No matches found (this should not happen)"
+	}
+	
+	return strings.Join(matches, "\n---\n")
 }
 
 // NewWriteFileReplaceToolFactory creates a factory for WriteFileReplaceTool

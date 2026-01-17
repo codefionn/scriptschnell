@@ -99,7 +99,7 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 		return &ToolResult{Error: err.Error()}
 	}
 
-	logger.Debug("write_file_diff(replace): path=%s replacements_requested=%d", path, len(edits))
+	logger.Debug("edit_file(replace): path=%s replacements_requested=%d", path, len(edits))
 
 	if t.fs == nil {
 		return &ToolResult{Error: "file system is not configured"}
@@ -107,7 +107,7 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
-		logger.Error("write_file_diff(replace): error checking if file exists: %v", err)
+		logger.Error("edit_file(replace): error checking if file exists: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 
@@ -132,7 +132,7 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 		}
 
 		if err := t.fs.WriteFile(ctx, path, []byte(edits[0].NewString)); err != nil {
-			logger.Error("write_file_diff(replace): error writing file: %v", err)
+			logger.Error("edit_file(replace): error writing file: %v", err)
 			return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 		}
 
@@ -140,7 +140,7 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 			t.session.TrackFileModified(path)
 		}
 
-		logger.Info("write_file_diff(replace): updated empty file %s", path)
+		logger.Info("edit_file(replace): updated empty file %s", path)
 
 		return &ToolResult{
 			Result: map[string]interface{}{
@@ -162,28 +162,50 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 	finalContent := content
 	totalReplacements := 0
 
+	// Detect the file's newline style for normalizing new_string values
+	fileNewlineStyle := detectNewlineStyle(content)
+
 	for i, edit := range edits {
 		expected := edit.ExpectedReplacements
 		if expected == 0 {
 			expected = 1
 		}
 
-		count := strings.Count(finalContent, edit.OldString)
+		oldStr := edit.OldString
+		newStr := normalizeNewlines(edit.NewString, fileNewlineStyle)
+
+		count := strings.Count(finalContent, oldStr)
 		if count == 0 {
+			// Try normalizing old_string to the file's newline style
+			normalizedOld := normalizeNewlines(oldStr, fileNewlineStyle)
+			if normalizedOld != oldStr {
+				count = strings.Count(finalContent, normalizedOld)
+				if count > 0 {
+					oldStr = normalizedOld
+					logger.Debug("edit_file(replace): normalized newlines in old_string for edit %d", i+1)
+				}
+			}
+		}
+
+		if count == 0 {
+			// Check for tab/space mismatch (common with Mistral models)
+			if hint := checkWhitespaceMismatch(finalContent, oldStr); hint != "" {
+				return &ToolResult{Error: fmt.Sprintf("old_string not found in file (edit %d). %s", i+1, hint)}
+			}
 			return &ToolResult{Error: fmt.Sprintf("old_string not found in file (edit %d). Try to read the file again and redo the edit.", i+1)}
 		}
 		if count != expected {
 			// Find all match locations with context to help the user
-			matchLocations := findMatchLocations(finalContent, edit.OldString)
+			matchLocations := findMatchLocations(finalContent, oldStr)
 			return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string in edit %d, but expected %d. Try to read more surrounding text and redo the edit.\n\nFound matches at:\n%s", count, i+1, expected, matchLocations)}
 		}
 
-		finalContent = strings.Replace(finalContent, edit.OldString, edit.NewString, -1)
+		finalContent = strings.Replace(finalContent, oldStr, newStr, -1)
 		totalReplacements += count
 	}
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
-		logger.Error("write_file_diff(replace): error writing file: %v", err)
+		logger.Error("edit_file(replace): error writing file: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 	}
 
@@ -191,7 +213,7 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 		t.session.TrackFileModified(path)
 	}
 
-	logger.Info("write_file_diff(replace): updated %s (%d replacements)", path, totalReplacements)
+	logger.Info("edit_file(replace): updated %s (%d replacements)", path, totalReplacements)
 
 	return &ToolResult{
 		Result: map[string]interface{}{
@@ -243,7 +265,7 @@ func parseReplacementEdits(params map[string]interface{}) ([]replacementEdit, er
 func findMatchLocations(content, pattern string) string {
 	lines := strings.Split(content, "\n")
 	var matches []string
-	
+
 	// Find all line numbers where the pattern occurs
 	for i, line := range lines {
 		if strings.Contains(line, pattern) {
@@ -256,7 +278,7 @@ func findMatchLocations(content, pattern string) string {
 			if end >= len(lines) {
 				end = len(lines) - 1
 			}
-			
+
 			// Build context display
 			var contextLines []string
 			for j := start; j <= end; j++ {
@@ -267,16 +289,90 @@ func findMatchLocations(content, pattern string) string {
 				}
 				contextLines = append(contextLines, fmt.Sprintf("%s%d: %s", prefix, lineNum, lines[j]))
 			}
-			
+
 			matches = append(matches, strings.Join(contextLines, "\n"))
 		}
 	}
-	
+
 	if len(matches) == 0 {
 		return "No matches found (this should not happen)"
 	}
-	
+
 	return strings.Join(matches, "\n---\n")
+}
+
+// detectNewlineStyle returns the newline style used in content: "\r\n" for CRLF, "\n" for LF.
+// If the content has no newlines or mixed styles, defaults to LF.
+func detectNewlineStyle(content string) string {
+	crlfCount := strings.Count(content, "\r\n")
+	lfCount := strings.Count(content, "\n") - crlfCount // LF not preceded by CR
+
+	if crlfCount > lfCount {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+// normalizeNewlines converts all newlines in s to the target style.
+func normalizeNewlines(s, targetStyle string) string {
+	// First normalize to LF, then convert to target
+	normalized := strings.ReplaceAll(s, "\r\n", "\n")
+	if targetStyle == "\r\n" {
+		normalized = strings.ReplaceAll(normalized, "\n", "\r\n")
+	}
+	return normalized
+}
+
+// checkWhitespaceMismatch checks if an old_string would match if tabs/spaces were normalized.
+// Returns a hint string if a whitespace mismatch is detected, empty string otherwise.
+func checkWhitespaceMismatch(content, oldString string) string {
+	// Check if old_string contains tabs or leading spaces that might be mismatched
+	hasTabs := strings.Contains(oldString, "\t")
+	hasLeadingSpaces := false
+	for _, line := range strings.Split(oldString, "\n") {
+		if len(line) > 0 && line[0] == ' ' {
+			hasLeadingSpaces = true
+			break
+		}
+	}
+
+	if !hasTabs && !hasLeadingSpaces {
+		return ""
+	}
+
+	// Try replacing tabs with spaces (2, 4, and 8 spaces are common)
+	if hasTabs {
+		for _, spaceCount := range []int{2, 4, 8} {
+			normalized := strings.ReplaceAll(oldString, "\t", strings.Repeat(" ", spaceCount))
+			if strings.Contains(content, normalized) {
+				return fmt.Sprintf("The file uses %d spaces for indentation, but old_string uses tabs. Replace tabs with %d spaces and retry.", spaceCount, spaceCount)
+			}
+		}
+	}
+
+	// Try replacing leading spaces with tabs
+	if hasLeadingSpaces {
+		// Try common space counts that might be tabs
+		for _, spaceCount := range []int{2, 4, 8} {
+			spaces := strings.Repeat(" ", spaceCount)
+			// Replace leading spaces on each line
+			lines := strings.Split(oldString, "\n")
+			var normalized []string
+			for _, line := range lines {
+				newLine := line
+				for strings.HasPrefix(newLine, spaces) {
+					newLine = "\t" + newLine[spaceCount:]
+				}
+				normalized = append(normalized, newLine)
+			}
+			normalizedStr := strings.Join(normalized, "\n")
+			if normalizedStr != oldString && strings.Contains(content, normalizedStr) {
+				return fmt.Sprintf("The file uses tabs for indentation, but old_string uses spaces. Replace %d-space indentation with tabs and retry.", spaceCount)
+			}
+		}
+	}
+
+	return ""
 }
 
 // NewWriteFileReplaceToolFactory creates a factory for WriteFileReplaceTool

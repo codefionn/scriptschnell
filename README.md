@@ -13,7 +13,7 @@ On first run, it will download tinygo (if not in PATH).
 - Golang WASM sandbox (compiled with TinyGo, which is downloaded on startup)
 - Auto-continue for long-running sessions
 - Auto-compaction during generation for longer sessions
-- Separate LLM models:
+- Separate LLM models (all must support tool calls via API):
     - Orchestrator: writes the actual code
     - Summarization: summarizes and makes *small* choices
     - Planning: Plans the next steps

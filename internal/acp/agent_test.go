@@ -173,8 +173,8 @@ func TestHandleToolCallResult_UpdatedContent(t *testing.T) {
 			},
 		},
 		{
-			name:     "write_file_diff with updated content",
-			toolName: "write_file_diff",
+			name:     "edit_file with updated content",
+			toolName: "edit_file",
 			toolID:   "write-456",
 			result:   fmt.Sprintf("Successfully updated %s", testFile),
 			errorMsg: "",
@@ -265,8 +265,8 @@ func TestFormatToolResultContent_UpdatedContent(t *testing.T) {
 			wantType:    "",
 		},
 		{
-			name:     "write_file_diff with valid diff",
-			toolName: "write_file_diff",
+			name:     "edit_file with valid diff",
+			toolName: "edit_file",
 			result:   fmt.Sprintf("--- a/%s\n+++ b/%s\n@@ -1,2 +1,2 @@\n-original line 1\n+modified line 1\n original line 2\n", filepath.Base(testFile), filepath.Base(testFile)),
 			params: map[string]interface{}{
 				"path": testFile,
@@ -354,7 +354,7 @@ func TestToolCallContentUpdates(t *testing.T) {
 	}
 
 	toolID := "lifecycle-tool-123"
-	toolName := "write_file_diff"
+	toolName := "edit_file"
 	params := map[string]interface{}{
 		"path": testFile,
 	}

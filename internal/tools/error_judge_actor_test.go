@@ -128,11 +128,6 @@ func TestHeuristicJudge_FatalErrors(t *testing.T) {
 			wantRetry: false,
 		},
 		{
-			name:      "token limit error",
-			error:     errors.New("context length exceeded maximum tokens"),
-			wantRetry: false,
-		},
-		{
 			name:      "bad request",
 			error:     errors.New("400 bad request - invalid parameter"),
 			wantRetry: false,
@@ -156,6 +151,69 @@ func TestHeuristicJudge_FatalErrors(t *testing.T) {
 
 			if decision.Reason == "" {
 				t.Error("Expected reason to be set for non-retryable error")
+			}
+		})
+	}
+}
+
+func TestHeuristicJudge_ContextSizeExceeded(t *testing.T) {
+	actor := NewErrorJudgeActor("test", nil)
+
+	tests := []struct {
+		name  string
+		error error
+	}{
+		{
+			name:  "context length exceeded",
+			error: errors.New("context length exceeded maximum tokens"),
+		},
+		{
+			name:  "context_length_exceeded error code",
+			error: errors.New("error: context_length_exceeded"),
+		},
+		{
+			name:  "max tokens exceeded",
+			error: errors.New("max_tokens limit exceeded"),
+		},
+		{
+			name:  "input too long",
+			error: errors.New("input too long for model"),
+		},
+		{
+			name:  "prompt is too long",
+			error: errors.New("prompt is too long"),
+		},
+		{
+			name:  "request too large",
+			error: errors.New("request too large"),
+		},
+		{
+			name:  "exceeds the model limit",
+			error: errors.New("exceeds the model context window"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &ErrorJudgeMessage{
+				Error:         tt.error,
+				AttemptNumber: 1,
+				MaxAttempts:   5,
+				ModelID:       "gpt-4",
+			}
+
+			decision := actor.heuristicJudge(msg)
+
+			if !decision.ShouldRetry {
+				t.Errorf("ShouldRetry = %v, want true for context size error", decision.ShouldRetry)
+			}
+
+			if !decision.TriggerCompaction {
+				t.Errorf("TriggerCompaction = %v, want true for context size error", decision.TriggerCompaction)
+			}
+
+			if decision.Reason == "" {
+				t.Error("Expected reason to be set for context size error")
 			}
 		})
 	}

@@ -13,9 +13,10 @@ import (
 
 // ErrorJudgeDecision represents the error judge's decision
 type ErrorJudgeDecision struct {
-	ShouldRetry  bool
-	SleepSeconds int
-	Reason       string
+	ShouldRetry       bool
+	SleepSeconds      int
+	Reason            string
+	TriggerCompaction bool // If true, the error is likely due to context size exceeded and compaction should be triggered
 }
 
 // ErrorJudgeMessage contains information for the error judge
@@ -125,13 +126,14 @@ func (a *ErrorJudgeActor) buildErrorJudgePrompt(msg *ErrorJudgeMessage) string {
 	sb.WriteString("Your response must be in this exact format:\n")
 	sb.WriteString("DECISION: RETRY or HALT\n")
 	sb.WriteString("SLEEP_SECONDS: <number>\n")
+	sb.WriteString("TRIGGER_COMPACTION: YES or NO\n")
 	sb.WriteString("REASON: <brief explanation>\n\n")
 
 	sb.WriteString("Guidelines:\n")
 	sb.WriteString("- Rate limit errors: RETRY with exponential backoff (5s, 15s, 30s, 60s)\n")
 	sb.WriteString("- Temporary service errors (500, 503, timeout): RETRY with moderate delays (2s, 5s, 10s)\n")
 	sb.WriteString("- Network errors: RETRY with short delays (1s, 3s, 5s)\n")
-	sb.WriteString("- Token/context limit errors: HALT (cannot fix automatically)\n")
+	sb.WriteString("- Token/context limit errors (context_length_exceeded, max tokens, prompt too long, input too long): RETRY with TRIGGER_COMPACTION=YES\n")
 	sb.WriteString("- Authentication errors: HALT (invalid credentials)\n")
 	sb.WriteString("- Invalid request/parameter errors: HALT (bad input)\n")
 	sb.WriteString("- Unknown errors after 3+ attempts: HALT (prevent infinite loops)\n\n")
@@ -160,6 +162,9 @@ func (a *ErrorJudgeActor) parseDecision(response string, msg *ErrorJudgeMessage)
 			if _, err := fmt.Sscanf(value, "%d", &decision.SleepSeconds); err != nil {
 				decision.SleepSeconds = 0
 			}
+		} else if strings.HasPrefix(line, "TRIGGER_COMPACTION:") {
+			value := strings.TrimSpace(strings.TrimPrefix(line, "TRIGGER_COMPACTION:"))
+			decision.TriggerCompaction = strings.EqualFold(value, "YES")
 		} else if strings.HasPrefix(line, "REASON:") {
 			decision.Reason = strings.TrimSpace(strings.TrimPrefix(line, "REASON:"))
 		}
@@ -235,14 +240,21 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 		}
 	}
 
-	// Token/context limit errors - cannot fix automatically
+	// Token/context limit errors - trigger compaction and retry
 	if strings.Contains(errMsg, "token") ||
 		strings.Contains(errMsg, "context length") ||
-		strings.Contains(errMsg, "max_tokens") {
+		strings.Contains(errMsg, "context_length") ||
+		strings.Contains(errMsg, "max_tokens") ||
+		strings.Contains(errMsg, "maximum context") ||
+		strings.Contains(errMsg, "input too long") ||
+		strings.Contains(errMsg, "prompt is too long") ||
+		strings.Contains(errMsg, "request too large") ||
+		strings.Contains(errMsg, "exceeds the model") {
 		return ErrorJudgeDecision{
-			ShouldRetry:  false,
-			SleepSeconds: 0,
-			Reason:       "Token limit error, cannot retry automatically",
+			ShouldRetry:       true,
+			SleepSeconds:      0,
+			Reason:            "Context size exceeded, triggering compaction",
+			TriggerCompaction: true,
 		}
 	}
 

@@ -20,7 +20,7 @@ const AgentsLocalFileName = "AGENTS.local.md"
 var defaultToolDescriptions = []string{
 	"read_file: Read files with optional line range support.",
 	"create_file: Create new files with provided content.",
-	"write_file_diff: Update existing files by applying unified diffs.",
+	"edit_file: Update existing files by applying unified diffs.",
 	"shell: Execute shell commands with optional background execution.",
 	"go_sandbox: Run Go code safely in a sandboxed environment.",
 	"todo: Manage todo items for planning and progress tracking.",

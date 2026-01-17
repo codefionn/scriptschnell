@@ -88,7 +88,7 @@ func TestFindSimilarTools(t *testing.T) {
 	// Register some common tools
 	tools := []string{
 		"read_file",
-		"write_file_diff",
+		"edit_file",
 		"create_file",
 		"shell",
 		"go_sandbox",
@@ -121,8 +121,8 @@ func TestFindSimilarTools(t *testing.T) {
 			name:            "Missing character",
 			typo:            "writ_file_diff",
 			maxSuggestions:  3,
-			maxDistance:     5,
-			expectedContain: []string{"write_file_diff"},
+			maxDistance:     7,
+			expectedContain: []string{"edit_file"},
 			minResults:      1,
 		},
 		{
@@ -183,7 +183,7 @@ func TestFormatToolNotFoundError(t *testing.T) {
 
 	// Register some tools
 	registry.Register(&mockTool{name: "read_file"})
-	registry.Register(&mockTool{name: "write_file_diff"})
+	registry.Register(&mockTool{name: "edit_file"})
 	registry.Register(&mockTool{name: "create_file"})
 	registry.Register(&mockTool{name: "shell"})
 
@@ -229,7 +229,7 @@ func TestExecuteWithInvalidTool(t *testing.T) {
 
 	// Register some tools
 	registry.Register(&mockTool{name: "read_file"})
-	registry.Register(&mockTool{name: "write_file_diff"})
+	registry.Register(&mockTool{name: "edit_file"})
 	registry.Register(&mockTool{name: "shell"})
 
 	// Try to execute a typo'd tool
@@ -264,7 +264,7 @@ func TestManualSuggestions(t *testing.T) {
 	// Register actual tools that suggestions will point to
 	registry.Register(&mockTool{name: "shell"})
 	registry.Register(&mockTool{name: "go_sandbox"})
-	registry.Register(&mockTool{name: "write_file_diff"})
+	registry.Register(&mockTool{name: "edit_file"})
 	registry.Register(&mockTool{name: "create_file"})
 	registry.Register(&mockTool{name: "read_file_summarized"})
 	registry.Register(&mockTool{name: "todo"})
@@ -297,7 +297,7 @@ func TestManualSuggestions(t *testing.T) {
 			toolName: "edit_file",
 			shouldContain: []string{
 				"tool not found: edit_file",
-				"write_file_diff",
+				"edit_file",
 				"modify files",
 			},
 		},
@@ -307,7 +307,7 @@ func TestManualSuggestions(t *testing.T) {
 			shouldContain: []string{
 				"tool not found: write_file",
 				"create_file",
-				"write_file_diff",
+				"edit_file",
 			},
 		},
 		{
@@ -439,7 +439,6 @@ func TestExecuteWithManualSuggestion(t *testing.T) {
 	// Register tools
 	registry.Register(&mockTool{name: "shell"})
 	registry.Register(&mockTool{name: "go_sandbox"})
-	registry.Register(&mockTool{name: "write_file_diff"})
 
 	tests := []struct {
 		name               string
@@ -452,9 +451,9 @@ func TestExecuteWithManualSuggestion(t *testing.T) {
 			expectedSuggestion: "shell",
 		},
 		{
-			name:               "edit_file suggests write_file_diff",
+			name:               "edit_file suggests edit_file",
 			invalidToolName:    "edit_file",
-			expectedSuggestion: "write_file_diff",
+			expectedSuggestion: "edit_file",
 		},
 		{
 			name:               "python suggests go_sandbox",

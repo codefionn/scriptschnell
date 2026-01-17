@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/progress"
@@ -28,6 +29,7 @@ type Options struct {
 	Provider            string
 	JSONOutput          bool
 	JSONExtended        bool
+	JSONFull            bool // Include full tool call outputs in JSON
 }
 
 // CLI handles command-line interface using the orchestrator
@@ -82,6 +84,21 @@ func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI
 		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
 	}
 
+	// Set up the non-interactive handler for authorization
+	handlerOpts := &actor.NonInteractiveOptions{}
+	if opts != nil {
+		handlerOpts.DangerouslyAllowAll = opts.DangerouslyAllowAll
+		handlerOpts.AllowAllNetwork = opts.AllowAllNetwork
+		handlerOpts.AllowedDirs = opts.AllowedDirs
+		handlerOpts.AllowedFiles = opts.AllowedFiles
+		handlerOpts.AllowedDomains = opts.AllowedDomains
+	}
+	handler := actor.NewNonInteractiveHandler(handlerOpts)
+	if err := orch.SetUserInteractionHandler(handler); err != nil {
+		orch.Close()
+		return nil, fmt.Errorf("failed to set user interaction handler: %w", err)
+	}
+
 	cli := &CLI{
 		config:       cfg,
 		providerMgr:  providerMgr,
@@ -110,7 +127,7 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 
 	// Progress callback: print streaming to stdout and status to stderr
 	progressCallback := func(update progress.Update) error {
-		if c.options != nil && (c.options.JSONOutput || c.options.JSONExtended) {
+		if c.options != nil && (c.options.JSONOutput || c.options.JSONExtended || c.options.JSONFull) {
 			return nil
 		}
 		normalized := progress.Normalize(update)
@@ -148,7 +165,7 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		// Check if specific authorizations are set
 		if c.options != nil {
 			// Check allowed directories for write operations
-			if toolName == "create_file" || toolName == "write_file_diff" {
+			if toolName == "create_file" || toolName == "edit_file" {
 				var filePath string
 				if v, ok := params["path"].(string); ok {
 					filePath = v
@@ -196,7 +213,7 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		return fmt.Errorf("failed to process prompt: %w", err)
 	}
 
-	if c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended) {
+	if c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended && !c.options.JSONFull) {
 		fmt.Println() // Final newline
 	}
 
@@ -204,7 +221,7 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 	session := c.orchestrator.GetSession()
 	if session != nil {
 		usageStats := session.GetUsageStats()
-		if len(usageStats) > 0 && (c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended)) {
+		if len(usageStats) > 0 && (c.options == nil || (!c.options.JSONOutput && !c.options.JSONExtended && !c.options.JSONFull)) {
 			fmt.Fprintf(os.Stderr, "\n--- Usage Statistics ---\n")
 
 			// Get totals from session
@@ -228,6 +245,10 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 
 			fmt.Fprintf(os.Stderr, "------------------------\n")
 		}
+	}
+
+	if c.options != nil && c.options.JSONFull {
+		return c.outputJSONFull()
 	}
 
 	if c.options != nil && c.options.JSONOutput {
@@ -328,6 +349,76 @@ func (c *CLI) outputJSONExtended() error {
 	}
 	fmt.Println(string(data))
 
+	return nil
+}
+
+// outputJSONFull outputs all messages including full tool call outputs as a single JSON object.
+// This is useful for eval tracking where you need to see exactly what the LLM generated
+// and what outputs tools produced.
+func (c *CLI) outputJSONFull() error {
+	if c.orchestrator == nil {
+		return fmt.Errorf("orchestrator not initialized")
+	}
+
+	session := c.orchestrator.GetSession()
+	if session == nil {
+		return fmt.Errorf("no session available")
+	}
+
+	messages := session.GetMessages()
+
+	// Build the full output structure
+	result := map[string]interface{}{}
+
+	// Build messages array with full details
+	var messagesOutput []map[string]interface{}
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+
+		msgObj := map[string]interface{}{
+			"role":      msg.Role,
+			"timestamp": msg.Timestamp.Format(time.RFC3339),
+		}
+
+		// Always include content (even if empty, for tool results this is important)
+		if msg.Content != "" {
+			msgObj["content"] = msg.Content
+		}
+
+		if msg.ToolID != "" {
+			msgObj["tool_id"] = msg.ToolID
+		}
+
+		if msg.ToolName != "" {
+			msgObj["tool_name"] = msg.ToolName
+		}
+
+		if len(msg.ToolCalls) > 0 {
+			msgObj["tool_calls"] = msg.ToolCalls
+		}
+
+		messagesOutput = append(messagesOutput, msgObj)
+	}
+
+	result["messages"] = messagesOutput
+
+	// Add the final assistant message for convenience
+	result["final_message"] = c.lastAssistantMessage()
+
+	// Add usage statistics
+	if usage := c.buildUsageSummary(); len(usage) > 0 {
+		result["usage"] = usage
+	}
+
+	// Marshal with indentation for readability
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON output: %w", err)
+	}
+
+	fmt.Println(string(data))
 	return nil
 }
 

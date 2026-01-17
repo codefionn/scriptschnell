@@ -349,8 +349,8 @@ func (s *Service) executeEval(runID int64, evalDef *EvalDefinition, model *EvalM
 	env["SCRIPTSCHNELL_LOG_LEVEL"] = "debug"
 	env["SCRIPTSCHNELL_LOG_PATH"] = "/workspace/.logs/scriptschnell.log"
 
-	// Enable extended JSON output for eval tracking
-	env["SCRIPTSCHNELL_JSON_EXTENDED"] = "1"
+	// Enable full JSON output for eval tracking (includes all messages and tool outputs)
+	env["SCRIPTSCHNELL_JSON_FULL"] = "1"
 
 	// Prepare container config
 	config := &ContainerConfig{
@@ -542,7 +542,10 @@ func (s *Service) collectAPIKeys() map[string]string {
 }
 
 // parseUsageFromOutput extracts token usage from container output (JSON format)
-// Handles both regular JSON output (--json flag) and extended JSON output (--json-extended flag)
+// Handles multiple JSON output formats:
+// - --json: Simple format with message and usage
+// - --json-extended: One-liner per message with final usage line
+// - --json-full: Single JSON object with messages array and usage
 func (s *Service) parseUsageFromOutput(output string) (map[string]interface{}, error) {
 	// The JSON output format from --json flag is:
 	// {
@@ -559,8 +562,25 @@ func (s *Service) parseUsageFromOutput(output string) (map[string]interface{}, e
 	// {"role": "user", "timestamp": "...", "content": "..."}
 	// {"role": "assistant", "timestamp": "...", "tool_calls": [...], "content": "..."}
 	// {"role": "usage", "timestamp": "...", "usage": {...}}
+	//
+	// The JSON-full output format (--json-full flag) outputs a single JSON object:
+	// {
+	//   "messages": [...],
+	//   "final_message": "...",
+	//   "usage": {...}
+	// }
 
-	// First, try to find the usage line in extended JSON format
+	// First, try to parse as --json-full format (single JSON object with messages array)
+	var fullOutput struct {
+		Messages     []map[string]interface{} `json:"messages"`
+		FinalMessage string                   `json:"final_message"`
+		Usage        map[string]interface{}   `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(output), &fullOutput); err == nil && fullOutput.Usage != nil {
+		return fullOutput.Usage, nil
+	}
+
+	// Second, try to find the usage line in extended JSON format
 	lines := strings.Split(output, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])

@@ -113,7 +113,7 @@ func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string
 		return &ToolResult{Error: "diff is required"}
 	}
 
-	logger.Debug("write_file_diff(simple): path=%s", path)
+	logger.Debug("edit_file(simple): path=%s", path)
 
 	if t.fs == nil {
 		return &ToolResult{Error: "file system is not configured"}
@@ -121,7 +121,7 @@ func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string
 
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
-		logger.Error("write_file_diff(simple): error checking if file exists: %v", err)
+		logger.Error("edit_file(simple): error checking if file exists: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 
@@ -144,7 +144,7 @@ func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string
 	}
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
-		logger.Error("write_file_diff(simple): error writing file: %v", err)
+		logger.Error("edit_file(simple): error writing file: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 	}
 
@@ -152,7 +152,7 @@ func (t *WriteFileSimpleDiffTool) Execute(ctx context.Context, params map[string
 		t.session.TrackFileModified(path)
 	}
 
-	logger.Info("write_file_diff(simple): updated %s (%d bytes)", path, len(finalContent))
+	logger.Info("edit_file(simple): updated %s (%d bytes)", path, len(finalContent))
 
 	return &ToolResult{
 		Result: map[string]interface{}{

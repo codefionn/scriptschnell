@@ -18,8 +18,12 @@ type MockInvestigator struct{}
 
 var _ realtools.Investigator = &MockInvestigator{}
 
-func (m *MockInvestigator) Investigate(ctx context.Context, objective string) (string, error) {
-	return "mock investigation result", nil
+func (m *MockInvestigator) Investigate(ctx context.Context, objectives []string) ([]string, error) {
+	results := make([]string, len(objectives))
+	for i := range objectives {
+		results[i] = "mock investigation result"
+	}
+	return results, nil
 }
 
 // TestPlanningAgent_Initialization tests various initialization scenarios

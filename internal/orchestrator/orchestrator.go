@@ -47,58 +47,63 @@ type UserInputCallback = planning.UserInputCallback
 
 // Orchestrator manages the LLM interaction
 type Orchestrator struct {
-	fs                    fs.FileSystem
-	session               *session.Session
-	providerMgr           *provider.Manager
-	toolRegistry          *tools.Registry
-	orchestrationClient   llm.Client
-	summarizeClient       llm.Client
-	planningClient        llm.Client
-	config                *config.Config
-	workingDir            string
-	ctx                   context.Context
-	cancel                context.CancelFunc
-	actorSystem           *actor.System
-	authorizer            tools.Authorizer
-	actorCancel           context.CancelFunc
-	compactionMu          sync.Mutex
-	compactionInProgress  bool
-	cliMode               bool
-	todoClient            *tools.TodoActorClient
-	todoActor             tools.TodoActorInterface
-	todoActorCancel       context.CancelFunc
-	currentProgressCb     progress.Callback
-	progressCbMu          sync.Mutex
-	errorJudge            *tools.ErrorJudgeActorClient
-	errorJudgeCancel      context.CancelFunc
-	toolExecutor          *tools.ToolExecutorActorClient
-	toolExecutorCancel    context.CancelFunc
-	shellActorClient      *actor.ShellActorClient
-	shellActorCancel      context.CancelFunc
-	domainBlockerRef      *actor.ActorRef
-	domainBlockerCancel   context.CancelFunc
-	domainBlockerClient   *actor.DomainBlockerClient
-	sessionStorageRef     *actor.ActorRef
-	sessionStorageCancel  context.CancelFunc
-	activeShellMu         sync.Mutex
-	activeShellChan       chan struct{}
-	loopDetector          *loopdetector.LoopDetector
-	mcpManager            *mcp.Manager
-	toolSelectionDirty    bool
-	activeMCPServers      []string
-	activeMCPMu           sync.RWMutex
-	preconnectMu          sync.Mutex
-	preconnectInFlight    bool
-	lastPreconnectAttempt time.Time
-	preconnectCompleted   bool
-	clientInitMu          sync.Mutex
-	cachedSystemPrompt    string
-	systemPromptMu        sync.RWMutex
-	healthManager         *actor.SessionHealthManager
-	planningAgent         *planning.PlanningAgent
-	planningAgentCancel   context.CancelFunc
-	featureFlags          *features.FeatureFlags
-	userInputCb           UserInputCallback
+	fs                     fs.FileSystem
+	session                *session.Session
+	providerMgr            *provider.Manager
+	toolRegistry           *tools.Registry
+	orchestrationClient    llm.Client
+	summarizeClient        llm.Client
+	planningClient         llm.Client
+	config                 *config.Config
+	workingDir             string
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	actorSystem            *actor.System
+	authorizer             tools.Authorizer
+	actorCancel            context.CancelFunc
+	compactionMu           sync.Mutex
+	compactionInProgress   bool
+	cliMode                bool
+	todoClient             *tools.TodoActorClient
+	todoActor              tools.TodoActorInterface
+	todoActorCancel        context.CancelFunc
+	currentProgressCb      progress.Callback
+	progressCbMu           sync.Mutex
+	errorJudge             *tools.ErrorJudgeActorClient
+	errorJudgeCancel       context.CancelFunc
+	toolExecutor           *tools.ToolExecutorActorClient
+	toolExecutorCancel     context.CancelFunc
+	shellActorClient       *actor.ShellActorClient
+	shellActorCancel       context.CancelFunc
+	domainBlockerRef       *actor.ActorRef
+	domainBlockerCancel    context.CancelFunc
+	domainBlockerClient    *actor.DomainBlockerClient
+	sessionStorageRef      *actor.ActorRef
+	sessionStorageCancel   context.CancelFunc
+	activeShellMu          sync.Mutex
+	activeShellChan        chan struct{}
+	loopDetector           *loopdetector.LoopDetector
+	mcpManager             *mcp.Manager
+	toolSelectionDirty     bool
+	activeMCPServers       []string
+	activeMCPMu            sync.RWMutex
+	preconnectMu           sync.Mutex
+	preconnectInFlight     bool
+	lastPreconnectAttempt  time.Time
+	preconnectCompleted    bool
+	clientInitMu           sync.Mutex
+	cachedSystemPrompt     string
+	systemPromptMu         sync.RWMutex
+	healthManager          *actor.SessionHealthManager
+	planningAgent          *planning.PlanningAgent
+	planningAgentCancel    context.CancelFunc
+	featureFlags           *features.FeatureFlags
+	userInputCb            UserInputCallback
+	userInteractionRef     *actor.ActorRef
+	userInteractionCancel  context.CancelFunc
+	userInteractionClient  *actor.UserInteractionClient
+	userInteractionTabID   int
+	userInteractionTabIDMu sync.Mutex
 }
 
 const (
@@ -130,6 +135,29 @@ func (e *toolCallValidationError) Error() string {
 }
 
 func (e *toolCallValidationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.inner
+}
+
+// contextSizeExceededError indicates that the context size was exceeded and compaction should be triggered
+type contextSizeExceededError struct {
+	inner  error
+	reason string
+}
+
+func (e *contextSizeExceededError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.inner != nil {
+		return fmt.Sprintf("context size exceeded: %s: %v", e.reason, e.inner)
+	}
+	return fmt.Sprintf("context size exceeded: %s", e.reason)
+}
+
+func (e *contextSizeExceededError) Unwrap() error {
 	if e == nil {
 		return nil
 	}
@@ -1887,6 +1915,7 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 
 		// Get completion with error retry logic
 		var validationErr *toolCallValidationError
+		var ctxSizeErr *contextSizeExceededError
 		response, err := o.completeWithRetry(ctx, req, progressCallback)
 		if err != nil {
 			if errors.As(err, &validationErr) {
@@ -1900,6 +1929,14 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 				o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 				sendStream(fmt.Sprintf("\n⚠️ %s\n", msg), false)
 				sendStatus("Waiting for tool call validation fix...")
+				continue
+			}
+			if errors.As(err, &ctxSizeErr) {
+				// Context size exceeded - trigger forced compaction and retry
+				logger.Info("Context size exceeded, triggering forced compaction: %s", ctxSizeErr.reason)
+				sendStatus("Compacting context...")
+				o.forceCompactContext(modelID, systemPrompt, sessionMessages, progressCallback, contextCallback)
+				// Continue to retry with compacted context
 				continue
 			}
 			return fmt.Errorf("completion failed: %w", err)
@@ -2222,11 +2259,50 @@ func (o *Orchestrator) processToolCalls(
 
 			// Check if authorization is required
 			if result.RequiresUserInput {
-				// Ask user for approval
+				// Ask user for approval - prefer userInteractionClient, fall back to authCb
 				approved := false
-				if authCb != nil {
+				suggestedPrefix := result.SuggestedCommandPrefix
+				tabID := o.GetUserInteractionTabID()
+
+				if o.userInteractionClient != nil {
+					// Use new actor-based authorization
+					authMu.Lock()
+					resp, err := o.userInteractionClient.RequestAuthorization(
+						ctx,
+						toolName,
+						args,
+						result.AuthReason,
+						suggestedPrefix,
+						tabID,
+					)
+					authMu.Unlock()
+
+					if err != nil {
+						result = &tools.ToolResult{
+							ID:    toolID,
+							Error: fmt.Sprintf("Authorization error: %v", err),
+						}
+					} else if resp.TimedOut {
+						result = &tools.ToolResult{
+							ID:    toolID,
+							Error: "Authorization timed out - denied by default",
+						}
+					} else if resp.Cancelled {
+						result = &tools.ToolResult{
+							ID:    toolID,
+							Error: "Authorization cancelled by user",
+						}
+					} else if resp.Approved {
+						approved = true
+					} else {
+						result = &tools.ToolResult{
+							ID:    toolID,
+							Error: "Operation denied by user",
+						}
+					}
+				} else if authCb != nil {
+					// Fall back to legacy callback
 					var err error
-					suggestedPrefix := result.SuggestedCommandPrefix
 					authMu.Lock()
 					approved, err = authCb(toolName, args, result.AuthReason)
 					authMu.Unlock()
@@ -2235,39 +2311,41 @@ func (o *Orchestrator) processToolCalls(
 							ID:    toolID,
 							Error: fmt.Sprintf("Authorization error: %v", err),
 						}
-					} else if approved {
-						if suggestedPrefix != "" {
-							sess.AuthorizeCommand(suggestedPrefix)
-							logger.Info("Authorized command prefix for session: %q", suggestedPrefix)
-							if o.config != nil && !o.config.IsCommandAuthorized(suggestedPrefix) {
-								o.config.AuthorizeCommand(suggestedPrefix)
-								if err := o.config.Save(config.GetConfigPath()); err != nil {
-									logger.Warn("Failed to persist authorized command prefix %q: %v", suggestedPrefix, err)
-								} else {
-									logger.Info("Persisted authorized command prefix %q to config", suggestedPrefix)
-								}
-							}
-						}
-
-						result, execErr = execFunc(ctx, callObj, toolName, progressCb, toolCallCb, toolResultCb, true)
-						if execErr != nil {
-							result = &tools.ToolResult{
-								ID:    toolID,
-								Error: execErr.Error(),
-							}
-						}
-					} else {
-						// User denied
+					} else if !approved {
 						result = &tools.ToolResult{
 							ID:    toolID,
 							Error: "Operation denied by user",
 						}
 					}
 				} else {
-					// No callback provided, deny by default
+					// No authorization mechanism available, deny by default
 					result = &tools.ToolResult{
 						ID:    toolID,
 						Error: "Authorization required but no approval mechanism available",
+					}
+				}
+
+				// If approved, persist command prefix and re-execute
+				if approved {
+					if suggestedPrefix != "" {
+						sess.AuthorizeCommand(suggestedPrefix)
+						logger.Info("Authorized command prefix for session: %q", suggestedPrefix)
+						if o.config != nil && !o.config.IsCommandAuthorized(suggestedPrefix) {
+							o.config.AuthorizeCommand(suggestedPrefix)
+							if err := o.config.Save(config.GetConfigPath()); err != nil {
+								logger.Warn("Failed to persist authorized command prefix %q: %v", suggestedPrefix, err)
+							} else {
+								logger.Info("Persisted authorized command prefix %q to config", suggestedPrefix)
+							}
+						}
+					}
+
+					result, execErr = execFunc(ctx, callObj, toolName, progressCb, toolCallCb, toolResultCb, true)
+					if execErr != nil {
+						result = &tools.ToolResult{
+							ID:    toolID,
+							Error: execErr.Error(),
+						}
 					}
 				}
 			}
@@ -2438,6 +2516,13 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 			logger.Info("Error judge decided to halt: %s", decision.Reason)
 			sendStream(fmt.Sprintf("\n⚠️  %s\n", decision.Reason))
 			return nil, err
+		}
+
+		// Check if compaction should be triggered
+		if decision.TriggerCompaction {
+			logger.Info("Error judge decided to trigger compaction: %s", decision.Reason)
+			sendStream(fmt.Sprintf("\n🧹 %s - triggering context compaction...\n", decision.Reason))
+			return nil, &contextSizeExceededError{inner: err, reason: decision.Reason}
 		}
 
 		// Notify user about retry
@@ -2655,6 +2740,118 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 	dispatchProgress(progressCallback, progress.Update{
 		Message: "\n🧹 Auto-compacted earlier context.\n",
 	})
+}
+
+// forceCompactContext runs compaction synchronously when context size is exceeded
+// This is more aggressive than maybeCompactContext - it compacts 60% of messages
+func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, sessionMessages []*session.Message, progressCallback progress.Callback, contextCallback ContextUsageCallback) {
+	if len(sessionMessages) < 4 {
+		logger.Debug("forceCompactContext: not enough messages to compact (%d)", len(sessionMessages))
+		return
+	}
+
+	// Wait for any in-progress compaction to finish
+	o.compactionMu.Lock()
+	if o.compactionInProgress {
+		o.compactionMu.Unlock()
+		logger.Debug("forceCompactContext: compaction already in progress, waiting...")
+		// Wait a bit and check again
+		time.Sleep(100 * time.Millisecond)
+		o.compactionMu.Lock()
+		for o.compactionInProgress {
+			o.compactionMu.Unlock()
+			time.Sleep(100 * time.Millisecond)
+			o.compactionMu.Lock()
+		}
+	}
+	o.compactionInProgress = true
+	o.compactionMu.Unlock()
+
+	defer func() {
+		o.compactionMu.Lock()
+		o.compactionInProgress = false
+		o.compactionMu.Unlock()
+	}()
+
+	// Compact more aggressively - target 60% of messages
+	prefixCount := len(sessionMessages) * 60 / 100
+	if prefixCount < 2 {
+		prefixCount = 2
+	}
+
+	// Ensure we keep at least two recent messages un-compacted
+	if len(sessionMessages)-prefixCount < 2 {
+		prefixCount = len(sessionMessages) - 2
+		if prefixCount <= 0 {
+			logger.Debug("forceCompactContext: cannot compact, too few messages")
+			return
+		}
+	}
+
+	_, perMessageTokens, _ := estimateContextTokens(modelID, "", sessionMessages)
+	prefixCount = adjustCompactionBoundaryForTools(sessionMessages, prefixCount)
+	if prefixCount <= 0 {
+		logger.Debug("forceCompactContext: no messages to compact after boundary adjustment")
+		return
+	}
+
+	messagesCopy := append([]*session.Message(nil), sessionMessages[:prefixCount]...)
+	logger.Info("forceCompactContext: compacting %d messages", len(messagesCopy))
+
+	// Run compaction synchronously
+	contextWindow := o.getContextWindow(modelID)
+	latestUserPrompt := findLatestUserPrompt(o.session.GetMessages())
+
+	summary := ""
+
+	if o.summarizeClient != nil {
+		conversationContent := buildConversationContent(messagesCopy)
+		chunkedSummarizer := summarizer.NewChunkedSummarizer(o.summarizeClient)
+
+		result, err := chunkedSummarizer.Summarize(context.Background(), conversationContent, summarizer.SummarizeOptions{
+			BasePrompt: "Summarize the earlier part of this conversation so the assistant can continue later without losing context. Capture tasks in progress, key decisions, file operations, and remaining follow-ups. Use concise bullet points; preserve critical commands, file paths, and TODOs.",
+			MaxBytes:   16_384,
+			ProgressCallback: func(status string) {
+				logger.Debug("forceCompactContext: %s", status)
+			},
+		})
+
+		if err != nil {
+			logger.Warn("forceCompactContext: summary failed: %v", err)
+			summary = fallbackConversationSummary(messagesCopy)
+		} else {
+			summary = strings.TrimSpace(result.Summary)
+			logger.Debug("forceCompactContext: summarized %d messages using %d chunks", len(messagesCopy), result.ChunksUsed)
+		}
+	}
+
+	if summary == "" {
+		summary = fallbackConversationSummary(messagesCopy)
+	}
+
+	if summary == "" {
+		logger.Debug("forceCompactContext: no summary generated")
+		return
+	}
+
+	summaryContent := fmt.Sprintf("Summary of earlier context (force-compacted due to context size limit):\n%s", summary)
+	userSection := buildUserCompactionSection(messagesCopy, perMessageTokens, contextWindow, latestUserPrompt)
+	if userSection != "" {
+		summaryContent = fmt.Sprintf("%s\n\n%s", summaryContent, userSection)
+	}
+
+	if !o.session.CompactWithSummary(messagesCopy, summaryContent) {
+		logger.Debug("forceCompactContext: session head changed, compaction not applied")
+		return
+	}
+
+	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
+
+	dispatchProgress(progressCallback, progress.Update{
+		Message: "\n🧹 Force-compacted context due to size limit.\n",
+	})
+
+	logger.Info("forceCompactContext: completed successfully")
 }
 
 func (o *Orchestrator) dispatchContextUsage(modelID string, totalTokens int, callback ContextUsageCallback) {
@@ -3438,8 +3635,64 @@ func (o *Orchestrator) SaveCurrentSession(ctx context.Context) error {
 }
 
 // SetUserInputCallback sets the callback for user input during planning
+// Deprecated: Use SetUserInteractionHandler instead
 func (o *Orchestrator) SetUserInputCallback(callback UserInputCallback) {
 	o.userInputCb = callback
+}
+
+// SetUserInteractionHandler sets the handler for user interactions.
+// This replaces the callback-based authorization and user input mechanisms
+// with a proper actor-based system.
+func (o *Orchestrator) SetUserInteractionHandler(handler actor.UserInteractionHandler) error {
+	// Stop existing actor if any
+	if o.userInteractionCancel != nil {
+		o.userInteractionCancel()
+		o.userInteractionCancel = nil
+	}
+	if o.userInteractionRef != nil {
+		_ = o.userInteractionRef.Stop(context.Background())
+		o.userInteractionRef = nil
+	}
+	o.userInteractionClient = nil
+
+	if handler == nil {
+		logger.Debug("UserInteractionHandler cleared")
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	userInteractionActor := actor.NewUserInteractionActor("user_interaction", handler)
+	ref, err := o.actorSystem.Spawn(ctx, "user_interaction", userInteractionActor, 16)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("failed to spawn user interaction actor: %w", err)
+	}
+
+	o.userInteractionRef = ref
+	o.userInteractionCancel = cancel
+	o.userInteractionClient = actor.NewUserInteractionClient(ref)
+
+	logger.Info("UserInteractionHandler set with mode: %s", handler.Mode())
+	return nil
+}
+
+// GetUserInteractionClient returns the user interaction client if available
+func (o *Orchestrator) GetUserInteractionClient() *actor.UserInteractionClient {
+	return o.userInteractionClient
+}
+
+// SetUserInteractionTabID sets the tab ID used for user interaction requests
+func (o *Orchestrator) SetUserInteractionTabID(tabID int) {
+	o.userInteractionTabIDMu.Lock()
+	defer o.userInteractionTabIDMu.Unlock()
+	o.userInteractionTabID = tabID
+}
+
+// GetUserInteractionTabID returns the current tab ID for user interaction requests
+func (o *Orchestrator) GetUserInteractionTabID() int {
+	o.userInteractionTabIDMu.Lock()
+	defer o.userInteractionTabIDMu.Unlock()
+	return o.userInteractionTabID
 }
 
 // GenerateSessionTitle generates an auto-title for the current session based on

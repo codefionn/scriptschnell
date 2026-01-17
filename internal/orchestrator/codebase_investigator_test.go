@@ -125,13 +125,13 @@ func TestCodebaseInvestigator_Investigate_Success(t *testing.T) {
 
 	agent := NewCodebaseInvestigatorAgent(orch)
 
-	result, err := agent.Investigate(context.Background(), "Find test.txt")
+	results, err := agent.Investigate(context.Background(), []string{"Find test.txt"})
 	if err != nil {
 		t.Fatalf("Investigate failed: %v", err)
 	}
 
-	if result != "Found it." {
-		t.Errorf("Expected 'Found it.', got %q", result)
+	if len(results) != 1 || results[0] != "Found it." {
+		t.Errorf("Expected ['Found it.'], got %q", results)
 	}
 }
 
@@ -180,13 +180,13 @@ func TestCodebaseInvestigator_Investigate_ToolUse(t *testing.T) {
 
 	agent := NewCodebaseInvestigatorAgent(orch)
 
-	result, err := agent.Investigate(context.Background(), "Find target.go")
+	results, err := agent.Investigate(context.Background(), []string{"Find target.go"})
 	if err != nil {
 		t.Fatalf("Investigate failed: %v", err)
 	}
 
-	if result != "Found target.go" {
-		t.Errorf("Expected 'Found target.go', got %q", result)
+	if len(results) != 1 || results[0] != "Found target.go" {
+		t.Errorf("Expected ['Found target.go'], got %q", results)
 	}
 }
 
@@ -219,15 +219,15 @@ func TestCodebaseInvestigator_Investigate_ContextLimit(t *testing.T) {
 	agent := NewCodebaseInvestigatorAgent(orch)
 
 	// This should hit the loop detection early and terminate with loop handling
-	result, err := agent.Investigate(context.Background(), "Infinite loop check")
+	results, err := agent.Investigate(context.Background(), []string{"Infinite loop check"})
 
 	// Investigate currently returns a string message and nil error
 	if err != nil {
 		t.Fatalf("Investigate failed: %v", err)
 	}
 
-	if len(strings.TrimSpace(result)) == 0 {
-		t.Errorf("Expected non-empty result, got: %q", result)
+	if len(results) != 1 || len(strings.TrimSpace(results[0])) == 0 {
+		t.Errorf("Expected non-empty result, got: %q", results)
 	}
 }
 
@@ -245,7 +245,7 @@ func TestCodebaseInvestigator_Investigate_LLMError(t *testing.T) {
 
 	agent := NewCodebaseInvestigatorAgent(orch)
 
-	_, err := agent.Investigate(context.Background(), "Expect error")
+	_, err := agent.Investigate(context.Background(), []string{"Expect error"})
 	if err == nil {
 		t.Fatal("Expected error from LLM failure")
 	}

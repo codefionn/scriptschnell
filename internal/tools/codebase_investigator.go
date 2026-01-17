@@ -6,7 +6,7 @@ import (
 
 // Investigator defines the interface for the codebase investigation agent.
 type Investigator interface {
-	Investigate(ctx context.Context, objective string) (string, error)
+	Investigate(ctx context.Context, objectives []string) ([]string, error)
 }
 
 // CodebaseInvestigatorToolSpec is the static specification for the codebase_investigator tool
@@ -34,12 +34,15 @@ func (s *CodebaseInvestigatorToolSpec) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
-			"objective": map[string]interface{}{
-				"type":        "string",
-				"description": "The goal or question to investigate in the codebase. Please also add basic tooling information (programming language, major frameworks used, etc.) to this.",
+			"objectives": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "string",
+				},
+				"description": "List of goals or questions to investigate in the codebase. Each objective is investigated concurrently. Please also add basic tooling information (programming language, major frameworks used, etc.) to each objective.",
 			},
 		},
-		"required": []string{"objective"},
+		"required": []string{"objectives"},
 	}
 }
 
@@ -64,16 +67,49 @@ func (t *CodebaseInvestigatorTool) Parameters() map[string]interface{} {
 }
 
 func (t *CodebaseInvestigatorTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
-	objective := GetStringParam(params, "objective", "")
-	if objective == "" {
-		return &ToolResult{Error: "objective is required"}
+	objectivesRaw, ok := params["objectives"]
+	if !ok {
+		return &ToolResult{Error: "objectives is required"}
 	}
 
-	result, err := t.investigator.Investigate(ctx, objective)
+	objectivesArr, ok := objectivesRaw.([]interface{})
+	if !ok {
+		return &ToolResult{Error: "objectives must be an array"}
+	}
+
+	if len(objectivesArr) == 0 {
+		return &ToolResult{Error: "at least one objective is required"}
+	}
+
+	objectives := make([]string, 0, len(objectivesArr))
+	for _, obj := range objectivesArr {
+		if s, ok := obj.(string); ok && s != "" {
+			objectives = append(objectives, s)
+		}
+	}
+
+	if len(objectives) == 0 {
+		return &ToolResult{Error: "at least one non-empty objective is required"}
+	}
+
+	results, err := t.investigator.Investigate(ctx, objectives)
 	if err != nil {
 		return &ToolResult{Error: err.Error()}
 	}
-	return &ToolResult{Result: result}
+
+	// Format results with objective headers
+	var combined string
+	for i, result := range results {
+		if len(objectives) > 1 {
+			combined += "## Objective: " + objectives[i] + "\n\n"
+		}
+		combined += result
+		if i < len(results)-1 {
+			combined += "\n\n---\n\n"
+		}
+	}
+
+	return &ToolResult{Result: combined}
 }
 
 // NewCodebaseInvestigatorToolFactory creates a factory for CodebaseInvestigatorTool

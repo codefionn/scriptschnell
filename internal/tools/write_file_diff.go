@@ -125,7 +125,7 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 		return &ToolResult{Error: "diff is required"}
 	}
 
-	logger.Debug("write_file_diff: path=%s", path)
+	logger.Debug("edit_file: path=%s", path)
 
 	if t.fs == nil {
 		return &ToolResult{Error: "file system is not configured"}
@@ -133,7 +133,7 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 
 	exists, err := t.fs.Exists(ctx, path)
 	if err != nil {
-		logger.Error("write_file_diff: error checking if file exists: %v", err)
+		logger.Error("edit_file: error checking if file exists: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error checking file: %v", err)}
 	}
 
@@ -163,12 +163,12 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 		validationResult, err := validator.Validate(finalContent, language)
 		if err == nil && !validationResult.Valid {
 			validationWarning = formatValidationWarning(path, validationResult)
-			logger.Warn("write_file_diff: syntax validation found %d error(s) in %s", len(validationResult.Errors), path)
+			logger.Warn("edit_file: syntax validation found %d error(s) in %s", len(validationResult.Errors), path)
 		}
 	}
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
-		logger.Error("write_file_diff: error writing file: %v", err)
+		logger.Error("edit_file: error writing file: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
 	}
 
@@ -176,7 +176,7 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 		t.session.TrackFileModified(path)
 	}
 
-	logger.Info("write_file_diff: updated %s (%d bytes)", path, len(finalContent))
+	logger.Info("edit_file: updated %s (%d bytes)", path, len(finalContent))
 
 	// Build result with optional validation warning
 	resultMap := map[string]interface{}{
@@ -221,7 +221,7 @@ func applyUnifiedDiff(original, diffText string) (string, error) {
 	result := make([]string, 0, len(originalLines))
 	currentOrigLine := 0
 
-	for _, hunk := range fileDiff.Hunks {
+	for hunkIdx, hunk := range fileDiff.Hunks {
 		// Copy unchanged lines before this hunk
 		hunkStartLine := int(hunk.OrigStartLine) - 1 // Convert to 0-indexed
 		for currentOrigLine < hunkStartLine && currentOrigLine < len(originalLines) {
@@ -229,25 +229,83 @@ func applyUnifiedDiff(original, diffText string) (string, error) {
 			currentOrigLine++
 		}
 
-		// Apply the hunk
+		// Validate and apply the hunk with detailed error reporting
 		hunkLines := strings.Split(string(hunk.Body), "\n")
+
+		// Track position within the hunk for detailed error reporting
+		hunkLineNum := 0
+		expectedLine := currentOrigLine + 1 // Convert to 1-indexed for user reports
+
 		for _, line := range hunkLines {
 			if len(line) == 0 {
 				continue
 			}
 
 			switch line[0] {
-			case ' ': // Context line - copy from original
-				if currentOrigLine < len(originalLines) {
-					result = append(result, originalLines[currentOrigLine])
-					currentOrigLine++
+			case ' ': // Context line - must match original
+				if currentOrigLine >= len(originalLines) {
+					return "", fmt.Errorf("hunk %d, context mismatch at line %d: file ends unexpectedly, expected context line: %q",
+						hunkIdx+1, expectedLine, strings.TrimSpace(line))
 				}
-			case '-': // Deleted line - skip in original
-				if currentOrigLine < len(originalLines) {
-					currentOrigLine++
+
+				expected := strings.TrimPrefix(line, " ")
+				actual := originalLines[currentOrigLine]
+				if actual != expected {
+					// Calculate context for error message
+					startLine := maxInt(0, currentOrigLine-2)
+					endLine := minInt(len(originalLines), currentOrigLine+3)
+
+					var linesWithNumbers strings.Builder
+					for i := startLine; i < endLine; i++ {
+						prefix := "  "
+						if i == currentOrigLine {
+							prefix = "->"
+						}
+						linesWithNumbers.WriteString(fmt.Sprintf("%s %3d: %s\n", prefix, i+1, originalLines[i]))
+					}
+
+					return "", fmt.Errorf("hunk %d, context mismatch at line %d:\n\nExpected:\n%q\n\nActual:\n%q\n\nSurrounding content:\n%s",
+						hunkIdx+1, expectedLine, expected, actual, linesWithNumbers.String())
 				}
+
+				result = append(result, originalLines[currentOrigLine])
+				currentOrigLine++
+				hunkLineNum++
+				expectedLine++
+
+			case '-': // Deleted line - must match original
+				if currentOrigLine >= len(originalLines) {
+					return "", fmt.Errorf("hunk %d, deletion failure at line %d: file ends unexpectedly, expected to delete line: %q",
+						hunkIdx+1, expectedLine, strings.TrimPrefix(line, "-"))
+				}
+
+				expectedDeletion := strings.TrimPrefix(line, "-")
+				actualLine := originalLines[currentOrigLine]
+				if actualLine != expectedDeletion {
+					startLine := maxInt(0, currentOrigLine-2)
+					endLine := minInt(len(originalLines), currentOrigLine+3)
+
+					var linesWithNumbers strings.Builder
+					for i := startLine; i < endLine; i++ {
+						prefix := "  "
+						if i == currentOrigLine {
+							prefix = "->"
+						}
+						linesWithNumbers.WriteString(fmt.Sprintf("%s %3d: %s\n", prefix, i+1, originalLines[i]))
+					}
+
+					return "", fmt.Errorf("hunk %d, deletion failure at line %d:\n\nExpected to delete:\n%q\n\nActual content:\n%q\n\nSurrounding content:\n%s",
+						hunkIdx+1, expectedLine, expectedDeletion, actualLine, linesWithNumbers.String())
+				}
+
+				currentOrigLine++
+				hunkLineNum++
+				expectedLine++
+
 			case '+': // Added line - add to result
 				result = append(result, line[1:])
+				hunkLineNum++
+				// Note: we don't increment expectedLine here since added lines don't consume original lines
 			}
 		}
 	}
@@ -259,6 +317,21 @@ func applyUnifiedDiff(original, diffText string) (string, error) {
 	}
 
 	return strings.Join(result, "\n"), nil
+}
+
+// Helper functions
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // generateGitDiff creates a unified diff in git format for UI display

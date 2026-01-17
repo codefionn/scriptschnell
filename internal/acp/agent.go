@@ -1369,13 +1369,20 @@ func (a *ScriptschnellAIAgent) processPromptWithStreaming(session *statcodeSessi
 		return nil
 	}
 
+	// Set up the ACP interaction handler for authorization
+	handler := NewACPInteractionHandler(a.conn, session.sessionID)
+	if err := session.orchestrator.SetUserInteractionHandler(handler); err != nil {
+		logger.Warn("processPromptWithStreaming[%s]: failed to set user interaction handler: %v", session.sessionID, err)
+		// Continue with legacy callback as fallback
+	}
+
 	// Process the prompt with the orchestrator
 	err := session.orchestrator.ProcessPrompt(
 		session.promptCtx,
 		promptText,
 		enhancedProgressCallback,
 		contextCallback,
-		authCallback,
+		authCallback, // Kept as fallback
 		toolCallCallback,
 		toolResultCallback,
 		nil, // OpenRouter usage callback - not used in ACP
@@ -1461,7 +1468,7 @@ func (a *ScriptschnellAIAgent) getToolKind(toolName string, parameters map[strin
 	switch toolName {
 	case "read_file", "read_file_summarized":
 		return acp.ToolKindRead
-	case "create_file", "write_file_diff", "write_file_replace":
+	case "create_file", "edit_file", "write_file_replace":
 		return acp.ToolKindEdit // Use Edit instead of Write
 	case "shell", "go_sandbox":
 		return acp.ToolKindExecute
@@ -1485,7 +1492,7 @@ func (a *ScriptschnellAIAgent) extractLocations(toolName string, parameters map[
 	var locations []acp.ToolCallLocation
 
 	switch toolName {
-	case "read_file", "create_file", "write_file_diff", "write_file_replace":
+	case "read_file", "create_file", "edit_file", "write_file_replace":
 		if path, ok := parameters["path"].(string); ok {
 			// Convert relative paths to absolute for better client display
 			if !strings.HasPrefix(path, "/") {
@@ -1674,7 +1681,7 @@ func (a *ScriptschnellAIAgent) formatToolResultContent(toolName string, result s
 	}
 
 	switch toolName {
-	case "write_file_diff", "write_file_simple_diff", "write_file_replace", "create_file":
+	case "edit_file", "write_file_simple_diff", "write_file_replace", "create_file":
 		if diffContent := a.parseDiffContent(result, params); len(diffContent) > 0 {
 			return diffContent
 		}

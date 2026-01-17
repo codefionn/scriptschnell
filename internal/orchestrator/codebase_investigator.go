@@ -124,8 +124,52 @@ func (ld *LoopDetector) argsEqual(a, b map[string]interface{}) bool {
 	return true
 }
 
-func (a *CodebaseInvestigatorAgent) Investigate(ctx context.Context, objective string) (string, error) {
-	return a.investigateInternal(ctx, objective, nil)
+func (a *CodebaseInvestigatorAgent) Investigate(ctx context.Context, objectives []string) ([]string, error) {
+	if len(objectives) == 0 {
+		return nil, fmt.Errorf("at least one objective is required")
+	}
+
+	// For a single objective, run directly
+	if len(objectives) == 1 {
+		result, err := a.investigateInternal(ctx, objectives[0], nil)
+		if err != nil {
+			return nil, err
+		}
+		return []string{result}, nil
+	}
+
+	// For multiple objectives, run concurrently
+	type investigationResult struct {
+		index  int
+		result string
+		err    error
+	}
+
+	resultChan := make(chan investigationResult, len(objectives))
+
+	for i, objective := range objectives {
+		go func(idx int, obj string) {
+			result, err := a.investigateInternal(ctx, obj, nil)
+			resultChan <- investigationResult{index: idx, result: result, err: err}
+		}(i, objective)
+	}
+
+	// Collect results
+	results := make([]string, len(objectives))
+	var firstErr error
+	for range objectives {
+		res := <-resultChan
+		if res.err != nil && firstErr == nil {
+			firstErr = res.err
+		}
+		results[res.index] = res.result
+	}
+
+	if firstErr != nil {
+		return results, firstErr
+	}
+
+	return results, nil
 }
 
 func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, objective string, progressCb progress.Callback) (string, error) {

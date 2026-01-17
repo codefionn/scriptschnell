@@ -84,7 +84,7 @@ func (f *FeatureFlags) IsToolEnabled(toolName string) bool {
 		return f.ReadFileSummarized
 	case "create_file":
 		return f.CreateFile
-	case "write_file_diff":
+	case "edit_file":
 		return f.WriteFileDiff
 	case "write_file_replace":
 		return f.WriteFileReplace
@@ -199,7 +199,7 @@ func (f *FeatureFlags) setToolFlag(toolName string, enabled bool) {
 		f.ReadFileSummarized = enabled
 	case "create_file":
 		f.CreateFile = enabled
-	case "write_file_diff":
+	case "edit_file":
 		f.WriteFileDiff = enabled
 	case "write_file_replace":
 		f.WriteFileReplace = enabled

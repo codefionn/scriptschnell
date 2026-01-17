@@ -224,11 +224,15 @@ func (ce *ContainerExecutor) generateEntrypointScript() string {
 set -e
 
 # Build scriptschnell command args
-ARGS=(scriptschnell --dangerous-allow-all --json)
+ARGS=(scriptschnell --dangerous-allow-all)
 
-# Support extended JSON output for eval tracking
-if [ -n "$SCRIPTSCHNELL_JSON_EXTENDED" ]; then
+# Support full JSON output for eval tracking (includes all messages and tool outputs)
+if [ -n "$SCRIPTSCHNELL_JSON_FULL" ]; then
+    ARGS+=(--json-full)
+elif [ -n "$SCRIPTSCHNELL_JSON_EXTENDED" ]; then
     ARGS+=(--json-extended)
+else
+    ARGS+=(--json)
 fi
 
 if [ -n "$SCRIPTSCHNELL_PROVIDER" ]; then

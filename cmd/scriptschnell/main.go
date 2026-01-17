@@ -293,6 +293,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		acpMode      bool
 		jsonOutput   bool
 		jsonExtended bool
+		jsonFull     bool
 	)
 
 	fs.BoolVar(&dangerous, "dangerous-allow-all", false, "Bypass all authorization checks (dangerous)")
@@ -305,6 +306,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs.BoolVar(&acpMode, "acp", false, "Run in Agent Client Protocol (ACP) mode for integration with code editors")
 	fs.BoolVar(&jsonOutput, "json", false, "Output final assistant message and usage as JSON")
 	fs.BoolVar(&jsonExtended, "json-extended", false, "Output all messages as JSON one-liners plus usage statistics")
+	fs.BoolVar(&jsonFull, "json-full", false, "Output all messages with full tool call outputs as single JSON object")
 	fs.BoolVar(&showHelp, "help", false, "Show CLI usage information")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0])
@@ -361,6 +363,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		Provider:            provider,
 		JSONOutput:          jsonOutput,
 		JSONExtended:        jsonExtended,
+		JSONFull:            jsonFull,
 	}
 	if dangerous {
 		opts.AllowAllNetwork = true

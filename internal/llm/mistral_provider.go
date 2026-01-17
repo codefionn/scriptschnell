@@ -127,7 +127,7 @@ func (p *MistralProvider) getFallbackModels() []*ModelInfo {
 			Name:                "Mistral Large",
 			Provider:            "mistral",
 			Description:         "Top-tier reasoning for complex tasks",
-			ContextWindow:       131072,
+			ContextWindow:       262144,
 			MaxOutputTokens:     8192,
 			SupportsToolCalling: true,
 			SupportsStreaming:   true,

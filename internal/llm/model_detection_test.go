@@ -170,8 +170,8 @@ func TestDetectContextWindow_Mistral(t *testing.T) {
 		family   ModelFamily
 		expected int
 	}{
-		{"mistral-large-latest", FamilyMistralLarge, 128000},
-		{"devstral-small-latest", FamilyDevstral, 128000},
+		{"mistral-large-latest", FamilyMistralLarge, 256000},
+		{"devstral-small-latest", FamilyDevstral, 262144},
 		{"codestral-latest", FamilyCodestral, 128000},
 	}
 

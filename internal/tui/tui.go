@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
@@ -191,6 +192,9 @@ type Model struct {
 	userQuestionDialog     tea.Model   // The user question dialog component
 	userQuestionResponse   chan string // Channel to send the answer back
 	userQuestionError      chan error  // Channel to send any error
+
+	// User interaction handler for actor-based authorization
+	userInteractionHandler *TUIInteractionHandler
 }
 
 // EndUserQuestionsMsg is sent when the user finishes answering questions
@@ -539,6 +543,26 @@ func (m *Model) SetOnSaveSession(callback func(*session.Session) error) {
 // SetProgram stores a reference to the tea.Program for self-messaging
 func (m *Model) SetProgram(program *tea.Program) {
 	m.program = program
+	// Initialize the user interaction handler with the program
+	if m.userInteractionHandler == nil {
+		m.userInteractionHandler = NewTUIInteractionHandler(program)
+	} else {
+		m.userInteractionHandler.SetProgram(program)
+	}
+}
+
+// GetUserInteractionHandler returns the TUI interaction handler
+func (m *Model) GetUserInteractionHandler() *TUIInteractionHandler {
+	return m.userInteractionHandler
+}
+
+// safeSend safely sends a message via m.program, logging if program is nil
+func (m *Model) safeSend(msg tea.Msg) {
+	if m.program == nil {
+		logger.Error("Cannot send message: m.program is nil, msg type: %T", msg)
+		return
+	}
+	m.program.Send(msg)
 }
 
 // GetActiveTab returns the currently active tab session
@@ -1261,7 +1285,7 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			// Deny and close
 			logger.Debug("User denied authorization via ESC/Ctrl+C for authID %s", m.activeAuthorizationID)
-			m.program.Send(AuthorizationResponseMsg{
+			m.safeSend(AuthorizationResponseMsg{
 				AuthID:   m.activeAuthorizationID,
 				Approved: false,
 			})
@@ -1269,12 +1293,30 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			// Check which option is selected
-			if item, ok := m.authorizationDialog.list.SelectedItem().(authChoiceItem); ok {
-				approved := item.value == "approve"
+			item := m.authorizationDialog.list.SelectedItem()
+			if item == nil {
+				// No item selected - deny by default and log error
+				logger.Error("Authorization dialog has no selected item for authID %s", m.activeAuthorizationID)
+				m.safeSend(AuthorizationResponseMsg{
+					AuthID:   m.activeAuthorizationID,
+					Approved: false,
+				})
+				return m, nil
+			}
+
+			if typedItem, ok := item.(authChoiceItem); ok {
+				approved := typedItem.value == "approve"
 				logger.Debug("User %s authorization via Enter for authID %s", map[bool]string{true: "approved", false: "denied"}[approved], m.activeAuthorizationID)
-				m.program.Send(AuthorizationResponseMsg{
+				m.safeSend(AuthorizationResponseMsg{
 					AuthID:   m.activeAuthorizationID,
 					Approved: approved,
+				})
+			} else {
+				// Type assertion failed - deny by default and log error
+				logger.Error("Type assertion failed for authChoiceItem in authID %s, item type: %T", m.activeAuthorizationID, item)
+				m.safeSend(AuthorizationResponseMsg{
+					AuthID:   m.activeAuthorizationID,
+					Approved: false,
 				})
 			}
 			return m, nil
@@ -1282,7 +1324,7 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "y", "Y":
 			// Quick approve with 'y'
 			logger.Debug("User approved authorization via 'y' key for authID %s", m.activeAuthorizationID)
-			m.program.Send(AuthorizationResponseMsg{
+			m.safeSend(AuthorizationResponseMsg{
 				AuthID:   m.activeAuthorizationID,
 				Approved: true,
 			})
@@ -1291,7 +1333,7 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n", "N":
 			// Quick deny with 'n'
 			logger.Debug("User denied authorization via 'n' key for authID %s", m.activeAuthorizationID)
-			m.program.Send(AuthorizationResponseMsg{
+			m.safeSend(AuthorizationResponseMsg{
 				AuthID:   m.activeAuthorizationID,
 				Approved: false,
 			})
@@ -1389,8 +1431,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		vpCmd tea.Cmd
 	)
 
-	// Handle authorization dialog if open
-	if m.authorizationDialogOpen {
+	// Handle AuthorizationResponseMsg first, even if dialog is open
+	// This ensures the response is processed and the dialog is closed
+	if _, ok := msg.(AuthorizationResponseMsg); ok {
+		// Process the response in the main handler below
+		// Don't route to handleAuthorizationDialog
+	} else if m.authorizationDialogOpen {
+		// Handle other messages through authorization dialog
 		return m.handleAuthorizationDialog(msg)
 	}
 
@@ -1919,34 +1966,92 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, baseCmd
 
+	case TUIAuthorizationRequestMsg:
+		// Handler-based authorization request
+		logger.Debug("Received TUIAuthorizationRequestMsg for requestID %s, tool %s", msg.RequestID, msg.ToolName)
+
+		// Get tab name for display
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		tabName := fmt.Sprintf("Tab %d", tabIdx+1)
+		if tabIdx >= 0 && tabIdx < len(m.sessions) && m.sessions[tabIdx].Name != "" {
+			tabName = m.sessions[tabIdx].Name
+		}
+
+		// Create a temporary AuthorizationRequest for the dialog (without ResponseChan)
+		tempRequest := &AuthorizationRequest{
+			AuthID:     msg.RequestID,
+			TabID:      msg.TabID,
+			ToolName:   msg.ToolName,
+			Parameters: msg.Parameters,
+			Reason:     msg.Reason,
+		}
+
+		// Create authorization dialog
+		authDialog := NewAuthorizationDialog(tempRequest, tabName)
+
+		// Update state
+		m.authorizationMu.Lock()
+		m.activeAuthorizationID = msg.RequestID
+		m.authorizationDialog = authDialog
+		m.authorizationDialogOpen = true
+		m.authorizationMu.Unlock()
+
+		// Notify handler that dialog is displayed
+		if m.userInteractionHandler != nil {
+			m.userInteractionHandler.HandleDialogDisplayed(msg.RequestID)
+		}
+
+		logger.Info("Showing handler authorization dialog for tab %d (requestID: %s, tool: %s)", msg.TabID, msg.RequestID, msg.ToolName)
+
+		return m, baseCmd
+
 	case AuthorizationResponseMsg:
 		// User responded to authorization
 		logger.Debug("Received AuthorizationResponseMsg for authID %s: approved=%v", msg.AuthID, msg.Approved)
-		m.authorizationMu.Lock()
-		request, ok := m.pendingAuthorizations[msg.AuthID]
-		if ok {
-			logger.Debug("Found pending authorization request, attempting to send response")
-			// Send response to waiting callback with timeout
-			select {
-			case request.ResponseChan <- msg.Approved:
-				logger.Info("Authorization response sent for authID %s: %v", msg.AuthID, msg.Approved)
-			case <-time.After(30 * time.Second):
-				logger.Error("Timeout sending authorization response for authID %s after 30 seconds - receiver may not be ready", msg.AuthID)
-			}
 
-			// Mark tab as no longer waiting for auth
-			tabIdx := m.findTabIndexByID(request.TabID)
-			if tabIdx >= 0 && tabIdx < len(m.sessions) {
-				m.sessions[tabIdx].WaitingForAuth = false
-			}
-		} else {
-			logger.Warn("No pending authorization found for authID %s", msg.AuthID)
+		// First try the new handler-based approach
+		if m.userInteractionHandler != nil {
+			m.userInteractionHandler.HandleAuthorizationResponse(msg.AuthID, msg.Approved)
 		}
 
-		// Close authorization dialog
+		// Then try the legacy channel-based approach
+		// IMPORTANT: We must release the mutex BEFORE attempting the channel send
+		// to avoid blocking the TUI event loop while waiting for the receiver.
+		m.authorizationMu.Lock()
+		request, ok := m.pendingAuthorizations[msg.AuthID]
+		var tabIdxToUpdate int = -1
+		if ok {
+			// Get tab index and remove from pending while holding lock
+			tabIdxToUpdate = m.findTabIndexByID(request.TabID)
+			delete(m.pendingAuthorizations, msg.AuthID)
+			logger.Debug("Found pending authorization request for authID %s, will send response", msg.AuthID)
+		} else {
+			logger.Debug("No legacy pending authorization found for authID %s (may be handler-based)", msg.AuthID)
+		}
+
+		// Close authorization dialog state while still holding lock
 		m.authorizationDialogOpen = false
 		m.activeAuthorizationID = ""
 		m.authorizationMu.Unlock()
+
+		// Now send response WITHOUT holding the mutex to avoid blocking TUI
+		if ok {
+			select {
+			case request.ResponseChan <- msg.Approved:
+				logger.Info("Authorization response sent for authID %s: %v", msg.AuthID, msg.Approved)
+			case <-time.After(5 * time.Second):
+				logger.Error("Timeout sending authorization response for authID %s after 5 seconds - receiver may have timed out", msg.AuthID)
+			}
+
+			// Update tab state (briefly re-acquire lock)
+			if tabIdxToUpdate >= 0 {
+				m.authorizationMu.Lock()
+				if tabIdxToUpdate < len(m.sessions) {
+					m.sessions[tabIdxToUpdate].WaitingForAuth = false
+				}
+				m.authorizationMu.Unlock()
+			}
+		}
 
 		return m, baseCmd
 
@@ -2115,10 +2220,17 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 			Request: request,
 		})
 
-		// Block until user responds
+		// Block until user responds (with timeout to prevent indefinite blocking)
 		logger.Debug("Tab %d: waiting for authorization response (authID: %s)", tab.ID, authID)
-		approved := <-responseChan
-		logger.Debug("Tab %d: authorization response received: %v (authID: %s)", tab.ID, approved, authID)
+		var approved bool
+		select {
+		case approved = <-responseChan:
+			logger.Debug("Tab %d: authorization response received: %v (authID: %s)", tab.ID, approved, authID)
+		case <-time.After(5 * time.Minute):
+			// Timeout - something went wrong with message delivery
+			logger.Error("Tab %d: authorization timeout after 5 minutes (authID: %s) - denying by default", tab.ID, authID)
+			approved = false
+		}
 
 		// Cleanup
 		m.authorizationMu.Lock()
@@ -2207,6 +2319,15 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 		return result, err
 	})
 
+	// Set up the user interaction handler on the orchestrator
+	if m.userInteractionHandler != nil {
+		if err := runtime.Orchestrator.SetUserInteractionHandler(m.userInteractionHandler); err != nil {
+			logger.Warn("Tab %d: failed to set user interaction handler: %v", tab.ID, err)
+		}
+		// Set the tab ID for user interaction requests
+		runtime.Orchestrator.SetUserInteractionTabID(tab.ID)
+	}
+
 	// Submit to tab's orchestrator in goroutine
 	return func() tea.Msg {
 		go func() {
@@ -2216,7 +2337,7 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 				input,
 				progressCallback,
 				contextCallback,       // context usage callback (tab-aware)
-				authorizationCallback, // authorization callback
+				authorizationCallback, // authorization callback (fallback)
 				toolCallCallback,      // tool call callback
 				toolResultCallback,    // tool result callback
 				usageCallback,         // usage callback
@@ -3634,7 +3755,13 @@ func (m *Model) updateViewport() {
 			rendered.WriteString(renderedContent)
 		} else {
 			// Plain text for user and system messages
-			rendered.WriteString(msg.content)
+			if msg.role == "You" {
+				// Wrap user prompts to improve readability
+				wrappedContent := wordwrap.String(msg.content, m.renderWrapWidth)
+				rendered.WriteString(wrappedContent)
+			} else {
+				rendered.WriteString(msg.content)
+			}
 		}
 	}
 

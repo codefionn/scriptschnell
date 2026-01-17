@@ -64,7 +64,7 @@ func TestDetectContextWindow(t *testing.T) {
 		{"llama-3.2-1b", 131072},
 		{"llama-3.1-8b-128k", 131072},
 		{"llama-3-8b", 8192},
-		{"mistral-large-latest", 128000},
+		{"mistral-large-latest", 256000},
 		{"mistral-small-latest", 32000},
 		{"mixtral-8x22b-instruct", 32000},
 		{"mixtral-8x7b-instruct", 32000},

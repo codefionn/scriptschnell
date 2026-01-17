@@ -20,7 +20,7 @@ import (
 type SearchContextFilesToolSpec struct{}
 
 func (s *SearchContextFilesToolSpec) Name() string {
-	return "search_context_files"
+	return ToolNameSearchContextFiles
 }
 
 func (s *SearchContextFilesToolSpec) Description() string {
@@ -63,7 +63,7 @@ func NewSearchContextFilesTool(filesystem fs.FileSystem, cfg *config.Config, ses
 	}
 }
 
-func (t *SearchContextFilesTool) Name() string { return "search_context_files" }
+func (t *SearchContextFilesTool) Name() string { return ToolNameSearchContextFiles }
 func (t *SearchContextFilesTool) Description() string {
 	return (&SearchContextFilesToolSpec{}).Description()
 }
@@ -369,7 +369,7 @@ func NewSearchContextFilesToolFactory(filesystem fs.FileSystem, cfg *config.Conf
 type GrepContextFilesToolSpec struct{}
 
 func (s *GrepContextFilesToolSpec) Name() string {
-	return "grep_context_files"
+	return ToolNameGrepContextFiles
 }
 
 func (s *GrepContextFilesToolSpec) Description() string {
@@ -416,7 +416,7 @@ func NewGrepContextFilesTool(filesystem fs.FileSystem, cfg *config.Config, sess 
 	}
 }
 
-func (t *GrepContextFilesTool) Name() string { return "grep_context_files" }
+func (t *GrepContextFilesTool) Name() string { return ToolNameGrepContextFiles }
 func (t *GrepContextFilesTool) Description() string {
 	return (&GrepContextFilesToolSpec{}).Description()
 }
@@ -721,7 +721,7 @@ func NewGrepContextFilesToolFactory(filesystem fs.FileSystem, cfg *config.Config
 type ReadContextFileToolSpec struct{}
 
 func (s *ReadContextFileToolSpec) Name() string {
-	return "read_context_file"
+	return ToolNameReadContextFile
 }
 
 func (s *ReadContextFileToolSpec) Description() string {
@@ -764,7 +764,7 @@ func NewReadContextFileTool(filesystem fs.FileSystem, cfg *config.Config, sess *
 	}
 }
 
-func (t *ReadContextFileTool) Name() string        { return "read_context_file" }
+func (t *ReadContextFileTool) Name() string        { return ToolNameReadContextFile }
 func (t *ReadContextFileTool) Description() string { return (&ReadContextFileToolSpec{}).Description() }
 func (t *ReadContextFileTool) Parameters() map[string]interface{} {
 	return (&ReadContextFileToolSpec{}).Parameters()

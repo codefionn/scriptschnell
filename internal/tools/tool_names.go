@@ -21,5 +21,8 @@ const (
 	ToolNameSearchFileContent    = "search_file_content"
 	ToolNameCodebaseInvestigator = "codebase_investigator"
 	ToolNameValidateSyntax       = "validate_syntax"
-	ToolNameLs                   = "ls"
+	ToolNameLs                   = "list_dir"
+	ToolNameSearchContextFiles   = "search_context_files"
+	ToolNameGrepContextFiles     = "grep_context_files"
+	ToolNameReadContextFile      = "read_context_file"
 )

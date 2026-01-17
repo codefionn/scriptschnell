@@ -8,7 +8,7 @@ import (
 
 func TestAuthorizationDialogDefaultsToDeny(t *testing.T) {
 	dialog := NewAuthorizationDialog(&AuthorizationRequest{
-		ToolName:   "write_file_diff",
+		ToolName:   "edit_file",
 		Parameters: map[string]interface{}{"path": "main.go"},
 		Reason:     "File exists but was not read",
 	}, "test-tab")
@@ -32,7 +32,7 @@ func TestAuthorizationDialogDefaultsToDeny(t *testing.T) {
 }
 
 func TestAuthorizationDialogApproveSelection(t *testing.T) {
-	dialog := NewAuthorizationDialog(&AuthorizationRequest{ToolName: "write_file_diff"}, "test-tab")
+	dialog := NewAuthorizationDialog(&AuthorizationRequest{ToolName: "edit_file"}, "test-tab")
 	dialog.list.Select(0)
 
 	model, _ := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -50,7 +50,7 @@ func TestAuthorizationDialogApproveSelection(t *testing.T) {
 }
 
 func TestAuthorizationDialogEscapeDenies(t *testing.T) {
-	dialog := NewAuthorizationDialog(&AuthorizationRequest{ToolName: "write_file_diff"}, "test-tab")
+	dialog := NewAuthorizationDialog(&AuthorizationRequest{ToolName: "edit_file"}, "test-tab")
 
 	model, _ := dialog.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated, ok := model.(AuthorizationDialog)
@@ -111,7 +111,7 @@ func TestShowAuthorizationDialogMsgInitializesDialogBeforeFlag(t *testing.T) {
 	req := &AuthorizationRequest{
 		AuthID:       "test-auth-1",
 		TabID:        1,
-		ToolName:     "write_file_diff",
+		ToolName:     "edit_file",
 		Parameters:   map[string]interface{}{"path": "test.go"},
 		Reason:       "File exists but was not read",
 		ResponseChan: make(chan bool, 1),
@@ -138,7 +138,7 @@ func TestShowAuthorizationDialogMsgInitializesDialogBeforeFlag(t *testing.T) {
 	}
 
 	// Verify dialog has correct request
-	if m.authorizationDialog.request.ToolName != "write_file_diff" {
+	if m.authorizationDialog.request.ToolName != "edit_file" {
 		t.Fatalf("expected dialog to have write_file_diff tool, got %q", m.authorizationDialog.request.ToolName)
 	}
 }
@@ -299,7 +299,7 @@ func TestMultipleAuthorizationRequestsQueued(t *testing.T) {
 	req1 := &AuthorizationRequest{
 		AuthID:       "test-auth-6",
 		TabID:        1,
-		ToolName:     "write_file_diff",
+		ToolName:     "edit_file",
 		Parameters:   map[string]interface{}{"path": "file1.go"},
 		Reason:       "First file",
 		ResponseChan: make(chan bool, 1),
@@ -321,7 +321,7 @@ func TestMultipleAuthorizationRequestsQueued(t *testing.T) {
 	req2 := &AuthorizationRequest{
 		AuthID:       "test-auth-7",
 		TabID:        2,
-		ToolName:     "write_file_diff",
+		ToolName:     "edit_file",
 		Parameters:   map[string]interface{}{"path": "file2.go"},
 		Reason:       "Second file",
 		ResponseChan: make(chan bool, 1),
@@ -395,7 +395,7 @@ func TestAuthorizationDialogNoRaceOnWindowResize(t *testing.T) {
 	req := &AuthorizationRequest{
 		AuthID:       "test-race-2",
 		TabID:        1,
-		ToolName:     "write_file_diff",
+		ToolName:     "edit_file",
 		Parameters:   map[string]interface{}{"path": "test.go"},
 		Reason:       "Test resize race",
 		ResponseChan: make(chan bool, 1),
@@ -623,5 +623,145 @@ func TestAuthorizationDialogTabIDHandling(t *testing.T) {
 	// Request TabID should be preserved
 	if m.authorizationDialog.request.TabID != 2 {
 		t.Fatalf("expected TabID 2, got %d", m.authorizationDialog.request.TabID)
+	}
+}
+
+func TestAuthorizationResponseProcessedWhenDialogOpen(t *testing.T) {
+	// This test verifies the bug fix: AuthorizationResponseMsg should be
+	// processed even when authorizationDialogOpen is still true.
+	// Previously, the message would be routed to handleAuthorizationDialog
+	// which doesn't handle it, causing a freeze.
+	m := New("test-model", "", false)
+	m.ready = true
+
+	// Set up authorization state
+	responseChan := make(chan bool, 1)
+	req := &AuthorizationRequest{
+		AuthID:       "test-freeze-fix",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test freeze fix",
+		ResponseChan: responseChan,
+	}
+
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true // Dialog is STILL OPEN
+	m.activeAuthorizationID = "test-freeze-fix"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-freeze-fix": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Send AuthorizationResponseMsg while dialog is STILL OPEN
+	// This simulates what happens when user presses Enter:
+	// handleAuthorizationDialog sends the message but hasn't closed the dialog yet
+	msg := AuthorizationResponseMsg{
+		AuthID:   "test-freeze-fix",
+		Approved: true,
+	}
+	updatedModel, _ := m.Update(msg)
+	m = updatedModel.(*Model)
+
+	// Verify the message was processed (not dropped)
+	// 1. Dialog should be closed
+	if m.authorizationDialogOpen {
+		t.Fatal("expected authorizationDialogOpen to be false after processing response")
+	}
+
+	// 2. Active auth ID should be cleared
+	if m.activeAuthorizationID != "" {
+		t.Fatalf("expected activeAuthorizationID to be empty, got %q", m.activeAuthorizationID)
+	}
+
+	// 3. Response should have been sent to channel
+	select {
+	case approved := <-responseChan:
+		if !approved {
+			t.Fatal("expected approval to be true")
+		}
+	default:
+		t.Fatal("expected response to be sent to channel - this indicates the message was dropped")
+	}
+
+	// Note: In production, the authCallback goroutine would delete the pending
+	// authorization after receiving from the channel. In this test, we're only
+	// verifying that the UI handler processes the message correctly and sends
+	// the response.
+}
+
+func TestSafeSendWithNilProgram(t *testing.T) {
+	// Test that safeSend doesn't panic when m.program is nil
+	m := New("test-model", "", false)
+	m.ready = true
+	m.program = nil // Explicitly set to nil
+
+	// This should not panic - it should log an error and return
+	m.safeSend(AuthorizationResponseMsg{
+		AuthID:   "test-nil-program",
+		Approved: true,
+	})
+
+	// If we reach here without panic, the test passes
+}
+
+func TestHandleAuthorizationDialogAlwaysSendsResponse(t *testing.T) {
+	// This test verifies that handleAuthorizationDialog ALWAYS sends a response
+	// even if the list item is nil or type assertion fails.
+	// This prevents the authorization callback from blocking indefinitely.
+	m := New("test-model", "", false)
+	m.ready = true
+
+	// Set up authorization state with a response channel
+	responseChan := make(chan bool, 1)
+	req := &AuthorizationRequest{
+		AuthID:       "test-always-responds",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test always responds",
+		ResponseChan: responseChan,
+	}
+
+	// Create dialog with proper list initialization
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-always-responds"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-always-responds": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Press Enter - even if something goes wrong internally, a response should be sent
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+
+	// First, route through handleAuthorizationDialog (which uses safeSend)
+	// Since m.program is nil, safeSend will log error but not panic
+	_, _ = m.handleAuthorizationDialog(msg)
+
+	// Now test the direct AuthorizationResponseMsg handling
+	// This simulates what happens when safeSend successfully delivers the message
+	responseMsg := AuthorizationResponseMsg{
+		AuthID:   "test-always-responds",
+		Approved: true,
+	}
+	updatedModel, _ := m.Update(responseMsg)
+	m = updatedModel.(*Model)
+
+	// Verify the dialog was closed
+	if m.authorizationDialogOpen {
+		t.Fatal("expected authorizationDialogOpen to be false after processing response")
+	}
+
+	// Verify response was sent to channel
+	select {
+	case approved := <-responseChan:
+		if !approved {
+			t.Fatal("expected approval to be true")
+		}
+	default:
+		t.Fatal("expected response to be sent to channel")
 	}
 }

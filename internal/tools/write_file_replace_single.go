@@ -145,15 +145,35 @@ func (t *WriteFileReplaceSingleTool) Execute(ctx context.Context, params map[str
 		expectedReplacements = 1
 	}
 
+	// Detect the file's newline style for normalizing strings
+	fileNewlineStyle := detectNewlineStyle(content)
+	normalizedNewString := normalizeNewlines(newString, fileNewlineStyle)
+
 	count := strings.Count(content, oldString)
 	if count == 0 {
+		// Try normalizing old_string to the file's newline style
+		normalizedOld := normalizeNewlines(oldString, fileNewlineStyle)
+		if normalizedOld != oldString {
+			count = strings.Count(content, normalizedOld)
+			if count > 0 {
+				oldString = normalizedOld
+				logger.Debug("write_file_replace_single: normalized newlines in old_string")
+			}
+		}
+	}
+
+	if count == 0 {
+		// Check for tab/space mismatch (common with Mistral models)
+		if hint := checkWhitespaceMismatch(content, oldString); hint != "" {
+			return &ToolResult{Error: fmt.Sprintf("old_string not found in file. %s", hint)}
+		}
 		return &ToolResult{Error: "old_string not found in file. Try to read the file again and redo the edit."}
 	}
 	if count != expectedReplacements {
 		return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string, but expected %d. Try to read more surrounding text and redo the edit.", count, expectedReplacements)}
 	}
 
-	finalContent := strings.Replace(content, oldString, newString, -1)
+	finalContent := strings.Replace(content, oldString, normalizedNewString, -1)
 	totalReplacements := count
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {

@@ -441,7 +441,9 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 		return 4096
 
 	// Mistral families
-	case FamilyMistralLarge, FamilyCodestral:
+	case FamilyMistralLarge:
+		return 256000
+	case FamilyCodestral:
 		return 128000
 	case FamilyMistralMedium:
 		return 32000
@@ -452,7 +454,7 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 	case FamilyMixtral:
 		return 32000
 	case FamilyDevstral:
-		return 128000
+		return 262144
 
 	// Other families
 	case FamilyQwen:
@@ -540,7 +542,7 @@ func DetectMaxOutputTokens(modelID string, family ModelFamily, contextWindow int
 	case FamilyMixtral:
 		return 8192
 	case FamilyDevstral:
-		return 32000
+		return 64000
 
 	// Other families
 	case FamilyQwen:

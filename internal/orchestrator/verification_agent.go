@@ -48,9 +48,9 @@ func (a *VerificationAgent) decideVerificationNeeded(ctx context.Context, userPr
 		return false, "No files were modified - likely a question or information request", nil
 	}
 
-	client := a.orch.summarizeClient
+	client := a.orch.orchestrationClient
 	if client == nil {
-		// If no summarize client, default to running verification when files were modified
+		// If no orchestration client, default to running verification when files were modified
 		return true, "Files were modified, defaulting to verification", nil
 	}
 
@@ -100,7 +100,7 @@ func (a *VerificationAgent) buildToolRegistry(verificationSession *session.Sessi
 	registry := tools.NewRegistryWithSecrets(a.orch.authorizer, secretdetect.NewDetector())
 
 	// Register tools
-	modelFamily := llm.DetectModelFamily(a.orch.getSummarizeModelID())
+	modelFamily := llm.DetectModelFamily(a.orch.providerMgr.GetOrchestrationModel())
 
 	// Read File - essential for checking modified files
 	registry.Register(a.orch.getReadFileTool(modelFamily, verificationSession))
@@ -310,9 +310,9 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 		Content: "Please verify that the implementation was completed successfully. Check the modified files, build the project, run linting, and run tests.",
 	})
 
-	client := a.orch.summarizeClient
+	client := a.orch.orchestrationClient
 	if client == nil {
-		return nil, fmt.Errorf("summarization client not available")
+		return nil, fmt.Errorf("orchestration client not available")
 	}
 
 	// Initialize loop detector

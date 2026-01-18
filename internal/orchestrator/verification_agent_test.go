@@ -119,8 +119,8 @@ func TestDecideVerificationNeeded_FilesModifiedNoLLM(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.Close()
 
-	// Remove summarize client
-	orch.summarizeClient = nil
+	// Remove orchestration client
+	orch.orchestrationClient = nil
 
 	agent := NewVerificationAgent(orch)
 	ctx := context.Background()
@@ -151,7 +151,7 @@ func TestDecideVerificationNeeded_ClassifiedAsQuestion(t *testing.T) {
 	mockClient := &MockSummarizeClient{
 		responses: []string{"QUESTION"},
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 
@@ -185,7 +185,7 @@ func TestDecideVerificationNeeded_ClassifiedAsImplementation(t *testing.T) {
 	mockClient := &MockSummarizeClient{
 		responses: []string{"IMPLEMENTATION"},
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 
@@ -214,7 +214,7 @@ func TestDecideVerificationNeeded_LLMError(t *testing.T) {
 	mockClient := &MockSummarizeClient{
 		responses: []string{"IMPLEMENTATION"},
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 
@@ -463,7 +463,7 @@ func TestVerify_NotNeeded(t *testing.T) {
 	mockClient := &MockSummarizeClient{
 		responses: []string{"QUESTION"},
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
@@ -503,7 +503,7 @@ func TestVerify_Success(t *testing.T) {
 </verification_result>`, // Final verification result
 		},
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
@@ -550,7 +550,7 @@ func TestVerify_WithToolCalls(t *testing.T) {
 </verification_result>`, // Final verification result
 		},
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
@@ -592,7 +592,7 @@ func TestVerify_LoopDetection(t *testing.T) {
 			"I'll read the file once more", // Will call read_file again (loop detected)
 		},
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
@@ -639,7 +639,7 @@ func TestVerify_Timeout(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		mockClient.responses = append(mockClient.responses, "I need to check more things")
 	}
-	orch.summarizeClient = mockClient
+	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
@@ -660,8 +660,8 @@ func TestVerify_Timeout(t *testing.T) {
 	}
 }
 
-// Test Verify method without summarize client
-func TestVerify_NoSummarizeClient(t *testing.T) {
+// Test Verify method without orchestration client
+func TestVerify_NoOrchestrationClient(t *testing.T) {
 	providerMgr, err := provider.NewManager("", "")
 	require.NoError(t, err)
 
@@ -675,8 +675,8 @@ func TestVerify_NoSummarizeClient(t *testing.T) {
 
 	agent := NewVerificationAgent(orch)
 
-	// Remove summarize client
-	orch.summarizeClient = nil
+	// Remove orchestration client
+	orch.orchestrationClient = nil
 
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
@@ -684,7 +684,7 @@ func TestVerify_NoSummarizeClient(t *testing.T) {
 	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, []session.QuestionAnswer{}, progressCb)
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "summarization client not available")
+	assert.Contains(t, err.Error(), "orchestration client not available")
 }
 
 // Test reportResults

@@ -601,6 +601,10 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 								toolResult = userResponse
 								res.questionsAsked = 1
 								questionsAskedInBatch++
+								// Store the question and answer in session
+								if p.session != nil {
+									p.session.AddPlanningQuestionAnswer(question, userResponse)
+								}
 							}
 						}
 					}
@@ -648,6 +652,21 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 								toolResult = userResponse
 								res.questionsAsked = len(questions)
 								questionsAskedInBatch += len(questions)
+								// Store all questions and the combined answer in session
+								if p.session != nil {
+									// For multiple questions, we store each question with the full response
+									// The response contains answers to all questions in formatted form
+									for _, q := range questions {
+										if questionMap, ok := q.(map[string]interface{}); ok {
+											question, _ := questionMap["question"].(string)
+											if question != "" {
+												// Store each question with the full response text
+												// (in practice, the full response contains all answers)
+												p.session.AddPlanningQuestionAnswer(question, userResponse)
+											}
+										}
+									}
+								}
 							}
 						}
 					}

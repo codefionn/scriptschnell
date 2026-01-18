@@ -29,25 +29,33 @@ type Message struct {
 	NativeTimestamp   time.Time   `json:"native_timestamp,omitempty"`    // When native format was created
 }
 
+// QuestionAnswer represents a question asked during planning and its answer
+type QuestionAnswer struct {
+	Question  string    `json:"question"`
+	Answer    string    `json:"answer"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // Session manages a conversation session
 type Session struct {
-	ID                  string
-	Title               string // Auto-generated title for the session
-	WorkingDir          string
-	Messages            []*Message
-	FilesRead           map[string]string // path -> content
-	FilesModified       map[string]bool
-	BackgroundJobs      map[string]*BackgroundJob
-	AuthorizedDomains   map[string]bool // domain -> authorized (session-level)
-	AuthorizedCommands  []string        // command prefixes that are authorized (session-level)
-	PlanningActive      bool            // whether planning phase is currently running
-	PlanningObjective   string          // objective of current planning phase
-	PlanningStartTime   time.Time       // when current planning phase started
-	LastSandboxExitCode int             // exit code from last sandbox execution
-	LastSandboxStdout   string          // stdout from last sandbox execution
-	LastSandboxStderr   string          // stderr from last sandbox execution
-	CurrentProvider     string          // Current LLM provider for native message format
-	CurrentModelFamily  string          // Current model family for native message format
+	ID                        string
+	Title                     string // Auto-generated title for the session
+	WorkingDir                string
+	Messages                  []*Message
+	FilesRead                 map[string]string // path -> content
+	FilesModified             map[string]bool
+	BackgroundJobs            map[string]*BackgroundJob
+	AuthorizedDomains         map[string]bool  // domain -> authorized (session-level)
+	AuthorizedCommands        []string         // command prefixes that are authorized (session-level)
+	PlanningActive            bool             // whether planning phase is currently running
+	PlanningObjective         string           // objective of current planning phase
+	PlanningStartTime         time.Time        // when current planning phase started
+	PlanningQuestionsAnswered []QuestionAnswer // questions asked and answered during planning
+	LastSandboxExitCode       int              // exit code from last sandbox execution
+	LastSandboxStdout         string           // stdout from last sandbox execution
+	LastSandboxStderr         string           // stderr from last sandbox execution
+	CurrentProvider           string           // Current LLM provider for native message format
+	CurrentModelFamily        string           // Current model family for native message format
 
 	// Verification retry tracking
 	VerificationAttempt    int  // Current verification attempt number (1-3)
@@ -94,17 +102,18 @@ type BackgroundJob struct {
 // NewSession creates a new session
 func NewSession(id, workingDir string) *Session {
 	return &Session{
-		ID:                 id,
-		WorkingDir:         workingDir,
-		Messages:           make([]*Message, 0),
-		FilesRead:          make(map[string]string),
-		FilesModified:      make(map[string]bool),
-		BackgroundJobs:     make(map[string]*BackgroundJob),
-		AuthorizedDomains:  make(map[string]bool),
-		AuthorizedCommands: make([]string, 0),
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
-		Dirty:              true, // new session needs an initial save
+		ID:                        id,
+		WorkingDir:                workingDir,
+		Messages:                  make([]*Message, 0),
+		FilesRead:                 make(map[string]string),
+		FilesModified:             make(map[string]bool),
+		BackgroundJobs:            make(map[string]*BackgroundJob),
+		AuthorizedDomains:         make(map[string]bool),
+		AuthorizedCommands:        make([]string, 0),
+		PlanningQuestionsAnswered: make([]QuestionAnswer, 0),
+		CreatedAt:                 time.Now(),
+		UpdatedAt:                 time.Now(),
+		Dirty:                     true, // new session needs an initial save
 	}
 }
 
@@ -257,6 +266,7 @@ func (s *Session) Clear() {
 	s.PlanningActive = false
 	s.PlanningObjective = ""
 	s.PlanningStartTime = time.Time{}
+	s.PlanningQuestionsAnswered = make([]QuestionAnswer, 0)
 	s.UpdatedAt = time.Now()
 	s.Dirty = true
 }
@@ -675,4 +685,37 @@ func (s *Session) userMessageCountLocked() int {
 		}
 	}
 	return count
+}
+
+// AddPlanningQuestionAnswer adds a question and answer pair from the planning phase
+func (s *Session) AddPlanningQuestionAnswer(question, answer string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	qa := QuestionAnswer{
+		Question:  question,
+		Answer:    answer,
+		Timestamp: time.Now(),
+	}
+	s.PlanningQuestionsAnswered = append(s.PlanningQuestionsAnswered, qa)
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// GetPlanningQuestionsAnswered returns all questions and answers from the planning phase
+func (s *Session) GetPlanningQuestionsAnswered() []QuestionAnswer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Return a copy to prevent external modifications
+	qas := make([]QuestionAnswer, len(s.PlanningQuestionsAnswered))
+	copy(qas, s.PlanningQuestionsAnswered)
+	return qas
+}
+
+// ClearPlanningQuestionsAnswered clears all stored planning questions and answers
+func (s *Session) ClearPlanningQuestionsAnswered() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.PlanningQuestionsAnswered = make([]QuestionAnswer, 0)
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
 }

@@ -2225,11 +2225,14 @@ func (o *Orchestrator) runVerificationPhaseIfNeeded(ctx context.Context, prompt 
 		userPrompts = []string{prompt}
 	}
 
+	// Get planning questions and answers from session
+	questionsAnswered := o.session.GetPlanningQuestionsAnswered()
+
 	// Create verification agent
 	agent := NewVerificationAgent(o)
 
 	// Run verification
-	result, err := agent.Verify(ctx, userPrompts, filesModified, progressCallback)
+	result, err := agent.Verify(ctx, userPrompts, filesModified, questionsAnswered, progressCallback)
 	if err != nil {
 		return nil, err
 	}

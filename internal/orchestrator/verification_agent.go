@@ -122,7 +122,7 @@ func (a *VerificationAgent) buildToolRegistry(verificationSession *session.Sessi
 }
 
 // buildSystemPrompt creates the system prompt for the verification agent.
-func (a *VerificationAgent) buildSystemPrompt(projectTypes []project.ProjectType, filesModified []string) string {
+func (a *VerificationAgent) buildSystemPrompt(projectTypes []project.ProjectType, filesModified []string, questionsAnswered []session.QuestionAnswer) string {
 	var projectInfo string
 	if len(projectTypes) > 0 {
 		bestMatch := projectTypes[0]
@@ -139,6 +139,16 @@ func (a *VerificationAgent) buildSystemPrompt(projectTypes []project.ProjectType
 		filesModifiedStr = "  - " + filesModifiedStr
 	}
 
+	// Build answered questions section
+	var questionsStr string
+	if len(questionsAnswered) > 0 {
+		var sb strings.Builder
+		for i, qa := range questionsAnswered {
+			sb.WriteString(fmt.Sprintf("%d. Q: %s\n   A: %s\n", i+1, qa.Question, qa.Answer))
+		}
+		questionsStr = sb.String()
+	}
+
 	return fmt.Sprintf(`You are a Verification Agent responsible for ensuring implementation tasks were completed successfully.
 
 ## Your Goal
@@ -152,6 +162,9 @@ Verify that the code changes are correct by:
 %s
 
 ## Project Information
+%s
+
+## Planning Questions & Answers
 %s
 
 ## Available Shell Commands
@@ -189,7 +202,7 @@ When complete, provide a summary wrapped in <verification_result> tags:
 </verification_result>
 
 If ALL checks pass, you can provide a short success message. If any check fails, provide details about what failed and why.`,
-		filesModifiedStr, projectInfo)
+		filesModifiedStr, projectInfo, questionsStr)
 }
 
 // extractVerificationResult parses the verification result from the LLM response.
@@ -230,7 +243,7 @@ func extractVerificationResult(content string) *VerificationResult {
 }
 
 // Verify runs the verification process.
-func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, filesModified []string, progressCb progress.Callback) (*VerificationResult, error) {
+func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, filesModified []string, questionsAnswered []session.QuestionAnswer, progressCb progress.Callback) (*VerificationResult, error) {
 	// Pre-check: decide if verification is needed
 	shouldVerify, reason, err := a.decideVerificationNeeded(ctx, userPrompts, filesModified)
 	if err != nil {
@@ -280,7 +293,7 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 	projectTypes, _ := detector.Detect(ctx)
 
 	// Build system prompt
-	systemPrompt := a.buildSystemPrompt(projectTypes, filesModified)
+	systemPrompt := a.buildSystemPrompt(projectTypes, filesModified, questionsAnswered)
 
 	// Add initial message
 	verificationSession.AddMessage(&session.Message{

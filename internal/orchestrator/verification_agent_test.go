@@ -273,7 +273,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 	filesModified := []string{"main.go", "utils.go"}
 
-	prompt := agent.buildSystemPrompt(projectTypes, filesModified)
+	prompt := agent.buildSystemPrompt(projectTypes, filesModified, []session.QuestionAnswer{})
 
 	assert.Contains(t, prompt, "Verification Agent")
 	assert.Contains(t, prompt, "main.go")
@@ -301,7 +301,7 @@ func TestBuildSystemPrompt_UnknownProject(t *testing.T) {
 	projectTypes := []project.ProjectType{}
 	filesModified := []string{"main.go"}
 
-	prompt := agent.buildSystemPrompt(projectTypes, filesModified)
+	prompt := agent.buildSystemPrompt(projectTypes, filesModified, []session.QuestionAnswer{})
 
 	assert.Contains(t, prompt, "Language/Framework: Unknown")
 }
@@ -460,7 +460,7 @@ func TestVerify_NotNeeded(t *testing.T) {
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
 
-	result, err := agent.Verify(ctx, []string{"what is x?"}, []string{}, progressCb)
+	result, err := agent.Verify(ctx, []string{"what is x?"}, []string{}, []session.QuestionAnswer{}, progressCb)
 	require.NoError(t, err)
 	assert.Nil(t, result) // Should return nil when verification is skipped
 }
@@ -500,7 +500,7 @@ func TestVerify_Success(t *testing.T) {
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
 
-	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, progressCb)
+	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, []session.QuestionAnswer{}, progressCb)
 	require.NoError(t, err)
 
 	assert.NotNil(t, result)
@@ -553,7 +553,7 @@ func TestVerify_WithToolCalls(t *testing.T) {
 	require.NoError(t, writeErr)
 	require.NoError(t, err)
 
-	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, progressCb)
+	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, []session.QuestionAnswer{}, progressCb)
 	require.NoError(t, err)
 
 	assert.NotNil(t, result)
@@ -589,7 +589,7 @@ func TestVerify_LoopDetection(t *testing.T) {
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
 
-	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, progressCb)
+	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, []session.QuestionAnswer{}, progressCb)
 	require.NoError(t, err)
 
 	assert.NotNil(t, result)
@@ -636,7 +636,7 @@ func TestVerify_Timeout(t *testing.T) {
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
 
-	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, progressCb)
+	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, []session.QuestionAnswer{}, progressCb)
 	require.NoError(t, err)
 
 	assert.NotNil(t, result)
@@ -673,7 +673,7 @@ func TestVerify_NoSummarizeClient(t *testing.T) {
 	ctx := context.Background()
 	progressCb := func(update progress.Update) error { return nil }
 
-	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, progressCb)
+	result, err := agent.Verify(ctx, []string{"implement x"}, []string{"main.go"}, []session.QuestionAnswer{}, progressCb)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "summarization client not available")
@@ -842,6 +842,6 @@ func BenchmarkBuildSystemPrompt(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		agent.buildSystemPrompt(projectTypes, filesModified)
+		agent.buildSystemPrompt(projectTypes, filesModified, []session.QuestionAnswer{})
 	}
 }

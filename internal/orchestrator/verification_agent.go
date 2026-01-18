@@ -94,7 +94,7 @@ Respond with ONLY one word: "QUESTION" or "IMPLEMENTATION"`
 	return true, "Classified as an implementation request", nil
 }
 
-// buildToolRegistry creates a tool registry with read tools and shell access.
+// buildToolRegistry creates a tool registry with read tools and go_sandbox access.
 func (a *VerificationAgent) buildToolRegistry(verificationSession *session.Session) *tools.Registry {
 	// Use the orchestrator's authorizer (which respects session-level authorizations)
 	registry := tools.NewRegistryWithSecrets(a.orch.authorizer, secretdetect.NewDetector())
@@ -109,11 +109,14 @@ func (a *VerificationAgent) buildToolRegistry(verificationSession *session.Sessi
 	registry.Register(tools.NewSearchFilesTool(a.orch.fs))
 	registry.Register(tools.NewSearchFileContentTool(a.orch.fs))
 
-	// Shell tool - for running build/lint/test commands
-	registry.RegisterSpec(
-		&tools.ShellToolSpec{},
-		tools.NewShellToolFactory(verificationSession, a.orch.workingDir),
-	)
+	// Go Sandbox tool - for running build/lint/test commands and code execution
+	sandboxSpec, _ := tools.WrapLegacyTool(tools.NewSandboxToolWithFS(a.orch.workingDir, a.orch.config.TempDir, a.orch.fs, verificationSession, a.orch.shellActorClient))
+	sandboxFactory := func(_ *tools.Registry) tools.ToolExecutor {
+		instance := tools.NewSandboxToolWithFS(a.orch.workingDir, a.orch.config.TempDir, a.orch.fs, verificationSession, a.orch.shellActorClient)
+		a.orch.configureSandboxTool(instance)
+		return instance
+	}
+	registry.RegisterSpec(sandboxSpec, sandboxFactory)
 
 	// Parallel execution tool
 	registry.Register(tools.NewParallelTool(registry))
@@ -167,12 +170,17 @@ Verify that the code changes are correct by:
 ## Planning Questions & Answers
 %s
 
-## Available Shell Commands
-Build commands: go build, npm run build, cargo build, make, gradle build, mvn compile
-Lint commands: golangci-lint, eslint, cargo clippy, ruff, flake8, mypy
-Test commands: go test, npm test, pytest, cargo test, gradle test
+## Available Tools
+- **go_sandbox**: Execute Go code in a sandboxed environment and run shell commands
+- **read_file**: Read files to check modifications
+- **search_files/search_file_content**: Find relevant files
+- **parallel_tools**: Run multiple checks concurrently
 
-Note: Shell commands will go through normal authorization checks. The system will determine if user approval is needed.
+Build commands (via go_sandbox): go build, npm run build, cargo build, make, gradle build, mvn compile
+Lint commands (via go_sandbox): golangci-lint, eslint, cargo clippy, ruff, flake8, mypy
+Test commands (via go_sandbox): go test, npm test, pytest, cargo test, gradle test
+
+Note: Commands will go through normal authorization checks. The system will determine if user approval is needed.
 
 ## Instructions
 1. First, briefly review the modified files to understand what changed
@@ -186,7 +194,8 @@ Note: Shell commands will go through normal authorization checks. The system wil
 - Use the parallel_tools to run independent checks concurrently
 - For large test suites, run only relevant tests or use -short flags
 - If a command fails, report the error but continue with other checks
-- Keep shell command output concise (avoid verbose flags unless debugging)
+- Keep command output concise (avoid verbose flags unless debugging)
+- Use go_sandbox for all command execution (build, lint, test)
 
 When complete, provide a summary wrapped in <verification_result> tags:
 <verification_result>
@@ -285,7 +294,7 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 		verificationSession.TrackFileRead(f, "")
 	}
 
-	// Create tool registry with shell access
+	// Create tool registry with go_sandbox and other verification tools
 	registry := a.buildToolRegistry(verificationSession)
 
 	// Detect project type
@@ -416,15 +425,28 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 // formatVerificationToolCall formats a tool call for display.
 func (a *VerificationAgent) formatVerificationToolCall(toolName string, args map[string]interface{}) string {
 	switch toolName {
-	case "shell":
-		if cmd, ok := args["command"].(string); ok {
-			// Truncate long commands
-			if len(cmd) > 80 {
-				cmd = cmd[:77] + "..."
+	case "go_sandbox":
+		if code, ok := args["code"].(string); ok {
+			// Show first line of code or command
+			lines := strings.Split(code, "\n")
+			if len(lines) > 0 {
+				firstLine := strings.TrimSpace(lines[0])
+				if len(firstLine) > 80 {
+					firstLine = firstLine[:77] + "..."
+				}
+				if strings.HasPrefix(firstLine, "ExecuteCommand") {
+					// Extract shell command from ExecuteCommand
+					if idx := strings.Index(firstLine, "\""); idx != -1 {
+						if endIdx := strings.Index(firstLine[idx+1:], "\""); endIdx != -1 {
+							cmd := firstLine[idx+1 : idx+1+endIdx]
+							return fmt.Sprintf("→ Running: `%s`\n", cmd)
+						}
+					}
+				}
+				return fmt.Sprintf("→ Running: `%s`\n", firstLine)
 			}
-			return fmt.Sprintf("→ Running: `%s`\n", cmd)
 		}
-		return "→ Running shell command\n"
+		return "→ Running go_sandbox\n"
 
 	case "read_file":
 		if path, ok := args["path"].(string); ok {

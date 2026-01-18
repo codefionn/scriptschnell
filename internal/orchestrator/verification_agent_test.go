@@ -405,20 +405,28 @@ func TestFormatVerificationToolCall(t *testing.T) {
 
 	agent := NewVerificationAgent(orch)
 
-	// Test shell command
-	args := map[string]interface{}{"command": "go build -o app ./cmd/main.go"}
-	result := agent.formatVerificationToolCall("shell", args)
-	assert.Contains(t, result, "Running: `go build -o app ./cmd/main.go`")
+	// Test go_sandbox with shell command
+	goCode := `package main
 
-	// Test long shell command truncation
-	longCmd := strings.Repeat("a", 100)
-	args = map[string]interface{}{"command": longCmd}
-	result = agent.formatVerificationToolCall("shell", args)
-	// The truncation happens at exactly 77 + "...", so total length should be around 80 chars for command part
-	if len(longCmd) > 80 {
+import "fmt"
+
+func main() {
+	stdout, stderr, code := ExecuteCommand([]string{"go", "build", "-o", "app", "./cmd/main.go"}, "")
+	fmt.Printf("Build result: %d", code)
+}`
+	args := map[string]interface{}{"code": goCode}
+	result := agent.formatVerificationToolCall("go_sandbox", args)
+	assert.Contains(t, result, "Running: `package main`")
+
+	// Test go_sandbox with long code truncation
+	longCode := strings.Repeat("a", 100)
+	args = map[string]interface{}{"code": longCode}
+	result = agent.formatVerificationToolCall("go_sandbox", args)
+	// The truncation happens at exactly 77 + "...", so total length should be around 80 chars for code part
+	if len(longCode) > 80 {
 		assert.True(t, strings.Contains(result, "..."))
 		// The result should be: "→ Running: `aaaaaaaa...`\n" which is less than original
-		assert.True(t, len(result) < len("→ Running: `"+longCmd+"`\n"))
+		assert.True(t, len(result) < len("→ Running: `"+longCode+"`\n"))
 	}
 
 	// Test read_file

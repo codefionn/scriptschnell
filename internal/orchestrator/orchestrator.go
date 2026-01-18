@@ -2113,6 +2113,153 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 	return nil
 }
 
+const maxVerificationRetries = 3
+
+// ProcessPromptWithVerification wraps ProcessPrompt with automatic verification retry.
+// If verification fails, it feeds the failures back to the LLM and retries up to 3 times.
+// This is now the main entry point - ProcessPrompt handles orchestration, this handles verification retry.
+func (o *Orchestrator) ProcessPromptWithVerification(
+	ctx context.Context,
+	prompt string,
+	progressCallback progress.Callback,
+	contextCallback ContextUsageCallback,
+	authCallback AuthorizationCallback,
+	toolCallCallback ToolCallCallback,
+	toolResultCallback ToolResultCallback,
+	openRouterUsageCallback OpenRouterUsageCallback,
+) error {
+	// Track initial user message count to detect new prompts during verification
+	initialUserMsgCount := o.session.UserMessageCount()
+
+	for attempt := 1; attempt <= maxVerificationRetries; attempt++ {
+		// Mark verification attempt in session
+		o.session.StartVerificationAttempt()
+
+		// Run main orchestration loop
+		err := o.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback, openRouterUsageCallback)
+		if err != nil {
+			o.session.ResetVerification()
+			return err
+		}
+
+		// After orchestration completes, run verification
+		result, err := o.runVerificationPhaseIfNeeded(ctx, prompt, progressCallback)
+		if err != nil {
+			logger.Warn("Verification error on attempt %d: %v", attempt, err)
+			// Continue despite error - don't fail the whole operation
+		}
+
+		// If verification skipped (nil) or passed, we're done
+		if result == nil || result.Success {
+			o.session.ResetVerification()
+			return nil
+		}
+
+		// Verification failed - check if we should retry
+		if o.session.HasNewUserPrompt(initialUserMsgCount) {
+			logger.Info("New user prompt detected, stopping verification retry")
+			o.session.ResetVerification()
+			return nil
+		}
+
+		// Check if we've hit max attempts
+		if attempt >= maxVerificationRetries {
+			logger.Info("Max verification attempts (%d) reached", maxVerificationRetries)
+			dispatchProgress(progressCallback, progress.Update{
+				Message: fmt.Sprintf("\n⚠️  Maximum verification attempts (%d) reached. Please review failures and fix manually if needed.\n", maxVerificationRetries),
+				Mode:    progress.ReportNoStatus,
+			})
+			o.session.ResetVerification()
+			return nil
+		}
+
+		// Feed failure back to LLM for next attempt
+		agent := NewVerificationAgent(o)
+		feedbackMsg := agent.formatVerificationFailureFeedback(result, attempt)
+
+		o.session.AddMessage(&session.Message{
+			Role:    "user",
+			Content: feedbackMsg,
+		})
+
+		dispatchProgress(progressCallback, progress.Update{
+			Message: fmt.Sprintf("\n🔄 Verification attempt %d/%d failed. Requesting fixes from LLM...\n\n", attempt, maxVerificationRetries),
+			Mode:    progress.ReportNoStatus,
+		})
+
+		// Loop will call ProcessPrompt again with feedback already in session
+		// Clear the prompt for subsequent iterations since feedback is in session messages
+		prompt = ""
+	}
+
+	o.session.ResetVerification()
+	return nil
+}
+
+// runVerificationPhaseIfNeeded runs verification after the main orchestration loop completes.
+// It checks if files were modified and runs build/lint/test to verify the implementation.
+// Returns the verification result and any error encountered.
+func (o *Orchestrator) runVerificationPhaseIfNeeded(ctx context.Context, prompt string, progressCallback progress.Callback) (*VerificationResult, error) {
+	// Check if verification is enabled
+	if !o.featureFlags.IsToolEnabled("verification_agent") {
+		logger.Debug("Verification phase disabled via feature flags")
+		return nil, nil
+	}
+
+	// Check if summarize client is available
+	if o.summarizeClient == nil {
+		logger.Debug("Verification phase skipped: no summarize client")
+		return nil, nil
+	}
+
+	// Get list of modified files from session
+	filesModified := o.session.GetModifiedFiles()
+	if len(filesModified) == 0 {
+		logger.Debug("Verification phase skipped: no files modified")
+		return nil, nil
+	}
+
+	// Collect user prompts from session (excluding "continue" messages)
+	userPrompts := o.collectUserPrompts(10) // Last 10 user prompts
+	if len(userPrompts) == 0 {
+		userPrompts = []string{prompt}
+	}
+
+	// Create verification agent
+	agent := NewVerificationAgent(o)
+
+	// Run verification
+	result, err := agent.Verify(ctx, userPrompts, filesModified, progressCallback)
+	if err != nil {
+		return nil, err
+	}
+
+	// Report results
+	agent.reportResults(result, progressCallback)
+
+	return result, nil
+}
+
+// collectUserPrompts collects recent user prompts from the session.
+func (o *Orchestrator) collectUserPrompts(limit int) []string {
+	messages := o.session.GetMessages()
+	prompts := make([]string, 0, limit)
+
+	for i := len(messages) - 1; i >= 0 && len(prompts) < limit; i-- {
+		msg := messages[i]
+		if msg.Role == "user" && msg.Content != "continue" && !strings.HasPrefix(msg.Content, "continue") {
+			prompts = append(prompts, msg.Content)
+		}
+	}
+
+	// Reverse to chronological order
+	for i, j := 0, len(prompts)-1; i < j; i, j = i+1, j-1 {
+		prompts[i], prompts[j] = prompts[j], prompts[i]
+	}
+
+	return prompts
+}
+
 func (o *Orchestrator) executeToolWithMode(ctx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error) {
 	return o.ExecuteTool(ctx, call, toolName, progressCb, toolCallCb, toolResultCb, approved)
 }
@@ -3093,23 +3240,6 @@ func buildConversationContent(messages []*session.Message) string {
 		sb.WriteString(strings.TrimSpace(msg.Content))
 		sb.WriteString("\n---\n")
 	}
-	return sb.String()
-}
-
-func buildSummaryPrompt(messages []*session.Message) string {
-	var sb strings.Builder
-	sb.WriteString("Summarize the earlier part of this conversation so the assistant can continue later without losing context.\n")
-	sb.WriteString("Capture tasks in progress, key decisions, file operations, and remaining follow-ups.\n")
-	sb.WriteString("Use concise bullet points; preserve critical commands, file paths, and TODOs.\n\n")
-	sb.WriteString("Conversation history:\n")
-	for _, msg := range messages {
-		role := formatRoleLabel(msg)
-		sb.WriteString(role)
-		sb.WriteString(": ")
-		sb.WriteString(strings.TrimSpace(msg.Content))
-		sb.WriteString("\n---\n")
-	}
-
 	return sb.String()
 }
 

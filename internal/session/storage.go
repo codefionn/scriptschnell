@@ -84,9 +84,15 @@ type StoredSession struct {
 	LastSandboxStderr   string
 	CurrentProvider     string
 	CurrentModelFamily  string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	LastSavedAt         time.Time
+
+	// Verification retry tracking
+	VerificationAttempt    int  `json:"verification_attempt,omitempty"`
+	VerificationInProgress bool `json:"verification_in_progress,omitempty"`
+	LastUserMessageCount   int  `json:"last_user_message_count,omitempty"`
+
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	LastSavedAt time.Time
 }
 
 // SessionMetadata contains lightweight session information for listing
@@ -450,27 +456,30 @@ func (s *SessionStorage) ToStoredSession(session *Session, name string) *StoredS
 	defer session.mu.RUnlock()
 
 	return &StoredSession{
-		Version:             SessionStorageVersion,
-		ID:                  session.ID,
-		WorkingDir:          session.WorkingDir,
-		Name:                name,
-		Title:               session.Title,
-		Messages:            storedMessages,
-		FilesRead:           session.FilesRead,
-		FilesModified:       session.FilesModified,
-		BackgroundJobs:      storedJobs,
-		AuthorizedDomains:   session.AuthorizedDomains,
-		AuthorizedCommands:  session.AuthorizedCommands,
-		PlanningActive:      session.PlanningActive,
-		PlanningObjective:   session.PlanningObjective,
-		LastSandboxExitCode: session.LastSandboxExitCode,
-		LastSandboxStdout:   session.LastSandboxStdout,
-		LastSandboxStderr:   session.LastSandboxStderr,
-		CurrentProvider:     session.CurrentProvider,
-		CurrentModelFamily:  session.CurrentModelFamily,
-		CreatedAt:           session.CreatedAt,
-		UpdatedAt:           session.UpdatedAt,
-		LastSavedAt:         session.LastSavedAt,
+		Version:                SessionStorageVersion,
+		ID:                     session.ID,
+		WorkingDir:             session.WorkingDir,
+		Name:                   name,
+		Title:                  session.Title,
+		Messages:               storedMessages,
+		FilesRead:              session.FilesRead,
+		FilesModified:          session.FilesModified,
+		BackgroundJobs:         storedJobs,
+		AuthorizedDomains:      session.AuthorizedDomains,
+		AuthorizedCommands:     session.AuthorizedCommands,
+		PlanningActive:         session.PlanningActive,
+		PlanningObjective:      session.PlanningObjective,
+		LastSandboxExitCode:    session.LastSandboxExitCode,
+		LastSandboxStdout:      session.LastSandboxStdout,
+		LastSandboxStderr:      session.LastSandboxStderr,
+		CurrentProvider:        session.CurrentProvider,
+		CurrentModelFamily:     session.CurrentModelFamily,
+		VerificationAttempt:    session.VerificationAttempt,
+		VerificationInProgress: session.VerificationInProgress,
+		LastUserMessageCount:   session.LastUserMessageCount,
+		CreatedAt:              session.CreatedAt,
+		UpdatedAt:              session.UpdatedAt,
+		LastSavedAt:            session.LastSavedAt,
 	}
 }
 
@@ -508,6 +517,9 @@ func (s *SessionStorage) FromStoredSession(stored *StoredSession) *Session {
 	session.LastSandboxStderr = stored.LastSandboxStderr
 	session.CurrentProvider = stored.CurrentProvider
 	session.CurrentModelFamily = stored.CurrentModelFamily
+	session.VerificationAttempt = stored.VerificationAttempt
+	session.VerificationInProgress = stored.VerificationInProgress
+	session.LastUserMessageCount = stored.LastUserMessageCount
 	session.CreatedAt = stored.CreatedAt
 	session.UpdatedAt = stored.UpdatedAt
 	session.LastSavedAt = stored.LastSavedAt

@@ -900,7 +900,7 @@ func (ch *CommandHandler) handleInit(_ []string) (MenuResult, error) {
 
 	// Process through orchestrator with streaming (in background)
 	go func() {
-		if err := orch.ProcessPrompt(ch.ctx, initPrompt, progressCallback, ch.contextCallback, nil, nil, nil, ch.usageCallback); err != nil {
+		if err := orch.ProcessPromptWithVerification(ch.ctx, initPrompt, progressCallback, ch.contextCallback, nil, nil, nil, ch.usageCallback); err != nil {
 			// Error will be handled by orchestrator's error handling
 			// Clear status on error
 			dispatch(progress.Update{Message: "", Mode: progress.ReportJustStatus, Ephemeral: true})

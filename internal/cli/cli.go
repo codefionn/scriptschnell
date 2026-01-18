@@ -207,8 +207,8 @@ func (c *CLI) Run(ctx context.Context, prompt string) error {
 		return nil
 	}
 
-	// Use the orchestrator to process the prompt
-	err := c.orchestrator.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, nil, nil, usageCallback)
+	// Use the orchestrator to process the prompt with automatic verification retry
+	err := c.orchestrator.ProcessPromptWithVerification(ctx, prompt, progressCallback, contextCallback, authCallback, nil, nil, usageCallback)
 	if err != nil {
 		return fmt.Errorf("failed to process prompt: %w", err)
 	}

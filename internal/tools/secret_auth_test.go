@@ -79,7 +79,15 @@ func TestParamsToString(t *testing.T) {
 						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
 					}
 				}
-			} else if tt.name == "nested_map" {
+			} else if tt.name == "nested array" {
+				// Check that all expected parts are in the result in any order
+				expectedParts := []string{"items=[a,b,c]", "count=3"}
+				for _, part := range expectedParts {
+					if !strings.Contains(result, part) {
+						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
+					}
+				}
+			} else if tt.name == "nested map" {
 				// Check that config contains the expected parts in any order
 				expectedParts := []string{"host:localhost", "port:8080"}
 				if !strings.Contains(result, "config={") || !strings.Contains(result, "}") {

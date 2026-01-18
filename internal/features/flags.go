@@ -40,6 +40,7 @@ type FeatureFlags struct {
 	SearchContextFiles       bool
 	GrepContextFiles         bool
 	ReadContextFile          bool
+	VerificationAgent        bool // Enable post-execution verification
 }
 
 // NewFeatureFlags creates a new FeatureFlags instance with default values (all enabled)
@@ -69,6 +70,7 @@ func NewFeatureFlags() *FeatureFlags {
 		SearchContextFiles:       true,
 		GrepContextFiles:         true,
 		ReadContextFile:          true,
+		VerificationAgent:        true, // Default to enabled
 	}
 }
 
@@ -126,6 +128,8 @@ func (f *FeatureFlags) IsToolEnabled(toolName string) bool {
 		return f.GrepContextFiles
 	case "read_context_file":
 		return f.ReadContextFile
+	case "verification_agent":
+		return f.VerificationAgent
 	default:
 		// Unknown tools default to enabled
 		return true
@@ -188,6 +192,7 @@ func (f *FeatureFlags) EnableAllTools() {
 	f.SearchContextFiles = true
 	f.GrepContextFiles = true
 	f.ReadContextFile = true
+	f.VerificationAgent = true
 }
 
 // setToolFlag sets the tool's flag (must be called with lock held)
@@ -239,6 +244,8 @@ func (f *FeatureFlags) setToolFlag(toolName string, enabled bool) {
 		f.GrepContextFiles = enabled
 	case "read_context_file":
 		f.ReadContextFile = enabled
+	case "verification_agent":
+		f.VerificationAgent = enabled
 	}
 	// Unknown tools are ignored
 }

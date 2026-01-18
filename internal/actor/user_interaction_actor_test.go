@@ -90,8 +90,14 @@ func TestUserInteractionActorAuthorizationApproved(t *testing.T) {
 
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	responseChan := make(chan *UserInteractionResponse, 1)
 	req := &UserInteractionRequest{
@@ -134,8 +140,14 @@ func TestUserInteractionActorAuthorizationDenied(t *testing.T) {
 
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	responseChan := make(chan *UserInteractionResponse, 1)
 	req := &UserInteractionRequest{
@@ -179,8 +191,14 @@ func TestUserInteractionActorTimeout(t *testing.T) {
 	actor.defaultTimeout = 100 * time.Millisecond // Short timeout for test
 
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	responseChan := make(chan *UserInteractionResponse, 1)
 	req := &UserInteractionRequest{
@@ -227,8 +245,14 @@ func TestUserInteractionActorCancellation(t *testing.T) {
 
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	reqCtx, cancel := context.WithCancel(ctx)
 	responseChan := make(chan *UserInteractionResponse, 1)
@@ -271,8 +295,14 @@ func TestUserInteractionActorUnsupportedType(t *testing.T) {
 
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	responseChan := make(chan *UserInteractionResponse, 1)
 	req := &UserInteractionRequest{
@@ -322,8 +352,14 @@ func TestUserInteractionActorConcurrentRequests(t *testing.T) {
 
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	// Send multiple requests concurrently
 	numRequests := 5
@@ -346,7 +382,9 @@ func TestUserInteractionActorConcurrentRequests(t *testing.T) {
 				RequestCtx:   ctx,
 				ResponseChan: responseChans[idx],
 			}
-			actor.Receive(ctx, req)
+			if err := actor.Receive(ctx, req); err != nil {
+				t.Errorf("Failed to receive request: %v", err)
+			}
 		}(i)
 	}
 
@@ -375,8 +413,14 @@ func TestUserInteractionActorHealthCheck(t *testing.T) {
 	handler := newMockHandler("test-mode")
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	responseChan := make(chan HealthCheckResponse, 1)
 	req := &HealthCheckRequest{
@@ -410,7 +454,9 @@ func TestUserInteractionActorStopCancelsPending(t *testing.T) {
 
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
 
 	responseChan := make(chan *UserInteractionResponse, 1)
 	req := &UserInteractionRequest{
@@ -424,13 +470,17 @@ func TestUserInteractionActorStopCancelsPending(t *testing.T) {
 		ResponseChan: responseChan,
 	}
 
-	actor.Receive(ctx, req)
+	if err := actor.Receive(ctx, req); err != nil {
+		t.Errorf("Failed to receive request: %v", err)
+	}
 
 	// Small delay to ensure request is pending
 	time.Sleep(10 * time.Millisecond)
 
 	// Stop the actor
-	actor.Stop(ctx)
+	if err := actor.Stop(ctx); err != nil {
+		t.Errorf("Failed to stop actor: %v", err)
+	}
 
 	select {
 	case resp := <-responseChan:
@@ -446,8 +496,14 @@ func TestUserInteractionActorMetrics(t *testing.T) {
 	handler := newMockHandler("test")
 	actor := NewUserInteractionActor("test-actor", handler)
 	ctx := context.Background()
-	actor.Start(ctx)
-	defer actor.Stop(ctx)
+	if err := actor.Start(ctx); err != nil {
+		t.Fatalf("Failed to start actor: %v", err)
+	}
+	defer func() {
+		if err := actor.Stop(ctx); err != nil {
+			t.Errorf("Failed to stop actor: %v", err)
+		}
+	}()
 
 	// Send a request
 	responseChan := make(chan *UserInteractionResponse, 1)
@@ -462,7 +518,9 @@ func TestUserInteractionActorMetrics(t *testing.T) {
 		ResponseChan: responseChan,
 	}
 
-	actor.Receive(ctx, req)
+	if err := actor.Receive(ctx, req); err != nil {
+		t.Errorf("Failed to receive request: %v", err)
+	}
 	<-responseChan
 
 	metrics := actor.GetMetrics()

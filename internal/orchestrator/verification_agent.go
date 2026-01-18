@@ -1,0 +1,580 @@
+package orchestrator
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/progress"
+	"github.com/codefionn/scriptschnell/internal/project"
+	"github.com/codefionn/scriptschnell/internal/secretdetect"
+	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/tools"
+)
+
+// VerificationAgent handles post-execution verification of implementation tasks.
+// It runs after the main orchestrator loop stops (LLM EOS + auto-continue didn't trigger)
+// to verify that implementation tasks were completed successfully by building/linting/testing.
+type VerificationAgent struct {
+	orch *Orchestrator
+}
+
+// VerificationResult represents the outcome of verification checks.
+type VerificationResult struct {
+	Success     bool     `json:"success"`
+	BuildPassed bool     `json:"build_passed"`
+	LintPassed  bool     `json:"lint_passed"`
+	TestsPassed bool     `json:"tests_passed"`
+	Errors      []string `json:"errors,omitempty"`
+	Warnings    []string `json:"warnings,omitempty"`
+	Summary     string   `json:"summary"`
+}
+
+// NewVerificationAgent creates a new verification agent.
+func NewVerificationAgent(orch *Orchestrator) *VerificationAgent {
+	return &VerificationAgent{
+		orch: orch,
+	}
+}
+
+// decideVerificationNeeded determines if verification should run based on the original prompt.
+// Returns true if this was an implementation request, false if it was just a question.
+func (a *VerificationAgent) decideVerificationNeeded(ctx context.Context, userPrompts []string, filesModified []string) (bool, string, error) {
+	// Quick heuristic: if no files were modified, it was likely a question
+	if len(filesModified) == 0 {
+		return false, "No files were modified - likely a question or information request", nil
+	}
+
+	client := a.orch.summarizeClient
+	if client == nil {
+		// If no summarize client, default to running verification when files were modified
+		return true, "Files were modified, defaulting to verification", nil
+	}
+
+	// Prepare the user prompts summary
+	promptsSummary := strings.Join(userPrompts, "\n---\n")
+	if len(promptsSummary) > 2000 {
+		promptsSummary = promptsSummary[:2000] + "..."
+	}
+
+	systemPrompt := `You are a task classifier. Determine if the user's request was:
+1. A QUESTION - asking for information, explanation, documentation lookup, or general inquiry
+2. An IMPLEMENTATION - requesting code changes, file modifications, bug fixes, or feature additions
+
+Files were modified during this session, which strongly suggests implementation.
+However, some queries (like "show me the code for X" followed by accidental modifications) may still be questions.
+
+Respond with ONLY one word: "QUESTION" or "IMPLEMENTATION"`
+
+	messages := []*llm.Message{
+		{Role: "user", Content: fmt.Sprintf("User request(s):\n%s\n\nFiles modified: %d files", promptsSummary, len(filesModified))},
+	}
+
+	req := &llm.CompletionRequest{
+		Messages:     messages,
+		SystemPrompt: systemPrompt,
+		Temperature:  0,
+		MaxTokens:    10,
+	}
+
+	resp, err := client.CompleteWithRequest(ctx, req)
+	if err != nil {
+		logger.Warn("Verification decision LLM error: %v, defaulting to verification", err)
+		return true, "LLM error, defaulting to verification", nil
+	}
+
+	decision := strings.TrimSpace(strings.ToUpper(resp.Content))
+	if strings.Contains(decision, "QUESTION") {
+		return false, "Classified as a question/information request", nil
+	}
+
+	return true, "Classified as an implementation request", nil
+}
+
+// buildToolRegistry creates a tool registry with read tools and shell access.
+func (a *VerificationAgent) buildToolRegistry(verificationSession *session.Session) *tools.Registry {
+	// Use the orchestrator's authorizer (which respects session-level authorizations)
+	registry := tools.NewRegistryWithSecrets(a.orch.authorizer, secretdetect.NewDetector())
+
+	// Register tools
+	modelFamily := llm.DetectModelFamily(a.orch.getSummarizeModelID())
+
+	// Read File - essential for checking modified files
+	registry.Register(a.orch.getReadFileTool(modelFamily, verificationSession))
+
+	// Search tools - for finding related files
+	registry.Register(tools.NewSearchFilesTool(a.orch.fs))
+	registry.Register(tools.NewSearchFileContentTool(a.orch.fs))
+
+	// Shell tool - for running build/lint/test commands
+	registry.RegisterSpec(
+		&tools.ShellToolSpec{},
+		tools.NewShellToolFactory(verificationSession, a.orch.workingDir),
+	)
+
+	// Parallel execution tool
+	registry.Register(tools.NewParallelTool(registry))
+
+	return registry
+}
+
+// buildSystemPrompt creates the system prompt for the verification agent.
+func (a *VerificationAgent) buildSystemPrompt(projectTypes []project.ProjectType, filesModified []string) string {
+	var projectInfo string
+	if len(projectTypes) > 0 {
+		bestMatch := projectTypes[0]
+		projectInfo = fmt.Sprintf("- Language/Framework: %s", bestMatch.Name)
+		if bestMatch.Description != "" {
+			projectInfo += fmt.Sprintf(" (%s)", bestMatch.Description)
+		}
+	} else {
+		projectInfo = "- Language/Framework: Unknown"
+	}
+
+	filesModifiedStr := strings.Join(filesModified, "\n  - ")
+	if filesModifiedStr != "" {
+		filesModifiedStr = "  - " + filesModifiedStr
+	}
+
+	return fmt.Sprintf(`You are a Verification Agent responsible for ensuring implementation tasks were completed successfully.
+
+## Your Goal
+Verify that the code changes are correct by:
+1. Reading the modified files to check for obvious errors or incomplete changes
+2. Running the project build command to ensure it compiles
+3. Running the linter (if available) to catch style/quality issues
+4. Running relevant tests to ensure functionality works
+
+## Modified Files
+%s
+
+## Project Information
+%s
+
+## Available Shell Commands
+Build commands: go build, npm run build, cargo build, make, gradle build, mvn compile
+Lint commands: golangci-lint, eslint, cargo clippy, ruff, flake8, mypy
+Test commands: go test, npm test, pytest, cargo test, gradle test
+
+Note: Shell commands will go through normal authorization checks. The system will determine if user approval is needed.
+
+## Instructions
+1. First, briefly review the modified files to understand what changed
+2. Run the appropriate build command for this project type
+3. Run linting if a linter is configured
+4. Run tests, focusing on areas affected by the changes (use -short or similar flags for speed)
+5. Report any failures with clear error messages
+
+## Important Notes
+- Be efficient: don't read files that weren't modified
+- Use the parallel_tools to run independent checks concurrently
+- For large test suites, run only relevant tests or use -short flags
+- If a command fails, report the error but continue with other checks
+- Keep shell command output concise (avoid verbose flags unless debugging)
+
+When complete, provide a summary wrapped in <verification_result> tags:
+<verification_result>
+{
+  "success": true/false,
+  "build_passed": true/false,
+  "lint_passed": true/false,
+  "tests_passed": true/false,
+  "errors": ["error1", "error2"],
+  "warnings": ["warning1"],
+  "summary": "Brief summary of verification results"
+}
+</verification_result>
+
+If ALL checks pass, you can provide a short success message. If any check fails, provide details about what failed and why.`,
+		filesModifiedStr, projectInfo)
+}
+
+// extractVerificationResult parses the verification result from the LLM response.
+func extractVerificationResult(content string) *VerificationResult {
+	// Look for verification_result tags
+	startTag := "<verification_result>"
+	endTag := "</verification_result>"
+
+	startIdx := strings.Index(content, startTag)
+	endIdx := strings.Index(content, endTag)
+
+	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
+		// No tags found, try to infer from content
+		result := &VerificationResult{
+			Summary: content,
+		}
+		contentLower := strings.ToLower(content)
+		result.Success = !strings.Contains(contentLower, "fail") && !strings.Contains(contentLower, "error")
+		result.BuildPassed = result.Success
+		result.LintPassed = result.Success
+		result.TestsPassed = result.Success
+		return result
+	}
+
+	jsonContent := strings.TrimSpace(content[startIdx+len(startTag) : endIdx])
+
+	var result VerificationResult
+	if err := json.Unmarshal([]byte(jsonContent), &result); err != nil {
+		logger.Debug("Failed to parse verification result JSON: %v", err)
+		// Return a basic result
+		return &VerificationResult{
+			Summary: content,
+			Success: !strings.Contains(strings.ToLower(content), "fail"),
+		}
+	}
+
+	return &result
+}
+
+// Verify runs the verification process.
+func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, filesModified []string, progressCb progress.Callback) (*VerificationResult, error) {
+	// Pre-check: decide if verification is needed
+	shouldVerify, reason, err := a.decideVerificationNeeded(ctx, userPrompts, filesModified)
+	if err != nil {
+		logger.Warn("Error deciding verification need: %v", err)
+	}
+
+	if !shouldVerify {
+		logger.Debug("Skipping verification: %s", reason)
+		return nil, nil
+	}
+
+	logger.Info("Running verification: %s", reason)
+
+	sendStatus := func(msg string) {
+		dispatchProgress(progressCb, progress.Update{
+			Message:   msg,
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
+	}
+
+	sendStream := func(msg string) {
+		dispatchProgress(progressCb, progress.Update{
+			Message: msg,
+			Mode:    progress.ReportNoStatus,
+		})
+	}
+
+	// Send initial progress message
+	sendStream("\n\n---\n\n**Verification Phase**\n\n")
+	sendStatus("Running verification checks...")
+
+	// Create a new session for verification
+	verificationSession := session.NewSession(session.GenerateID(), a.orch.workingDir)
+
+	// Mark all modified files as read so the verification agent can access them
+	// We pass empty content since we only need the "was read" check to pass
+	for _, f := range filesModified {
+		verificationSession.TrackFileRead(f, "")
+	}
+
+	// Create tool registry with shell access
+	registry := a.buildToolRegistry(verificationSession)
+
+	// Detect project type
+	detector := project.NewDetector(a.orch.workingDir)
+	projectTypes, _ := detector.Detect(ctx)
+
+	// Build system prompt
+	systemPrompt := a.buildSystemPrompt(projectTypes, filesModified)
+
+	// Add initial message
+	verificationSession.AddMessage(&session.Message{
+		Role:    "user",
+		Content: "Please verify that the implementation was completed successfully. Check the modified files, build the project, run linting, and run tests.",
+	})
+
+	client := a.orch.summarizeClient
+	if client == nil {
+		return nil, fmt.Errorf("summarization client not available")
+	}
+
+	// Initialize loop detector
+	loopDetector := NewLoopDetector(12, 3)
+
+	maxTurns := 64 // Less than investigator since tasks are specific
+
+	for i := 0; i < maxTurns; i++ {
+		// Prepare messages
+		messages := verificationSession.GetMessages()
+		llmMessages := make([]*llm.Message, len(messages))
+		for j, msg := range messages {
+			llmMessages[j] = &llm.Message{
+				Role:      msg.Role,
+				Content:   msg.Content,
+				ToolCalls: msg.ToolCalls,
+				ToolID:    msg.ToolID,
+				ToolName:  msg.ToolName,
+			}
+		}
+
+		req := &llm.CompletionRequest{
+			Messages:      llmMessages,
+			Tools:         registry.ToJSONSchema(),
+			Temperature:   0,
+			MaxTokens:     4096,
+			SystemPrompt:  systemPrompt,
+			EnableCaching: true,
+			CacheTTL:      "5m",
+		}
+
+		resp, err := client.CompleteWithRequest(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("verification LLM error: %w", err)
+		}
+
+		// Add assistant response
+		verificationSession.AddMessage(&session.Message{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+
+		if len(resp.ToolCalls) == 0 {
+			// No tools called, this is the final answer
+			sendStream("Verification complete.\n\n")
+			sendStatus("")
+			return extractVerificationResult(resp.Content), nil
+		}
+
+		// Check for loops
+		for _, tc := range resp.ToolCalls {
+			if loopDetector.RecordCall(tc) {
+				sendStream("**Warning:** Loop detected in verification, stopping early.\n\n")
+				return &VerificationResult{
+					Success: false,
+					Summary: "Verification stopped due to detected loop in tool calls",
+					Errors:  []string{"Loop detected - verification incomplete"},
+				}, nil
+			}
+		}
+
+		// Send progress update for tool calls
+		for _, tc := range resp.ToolCalls {
+			if fn, ok := tc["function"].(map[string]interface{}); ok {
+				toolName, _ := fn["name"].(string)
+				argsJSON, _ := fn["arguments"].(string)
+
+				var args map[string]interface{}
+				if argsJSON != "" {
+					_ = json.Unmarshal([]byte(argsJSON), &args)
+				}
+
+				msg := a.formatVerificationToolCall(toolName, args)
+				if msg != "" {
+					sendStream(msg)
+					sendStatus(strings.TrimSpace(msg))
+				}
+			}
+		}
+
+		// Execute tools
+		enhancedStatusCb := func(update progress.Update) error {
+			if update.Message == "" && !update.ShouldStatus() {
+				return nil
+			}
+			if update.ShouldStatus() {
+				update.Ephemeral = true
+			}
+			return progress.Dispatch(progressCb, progress.Normalize(update))
+		}
+
+		execFn := func(execCtx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error) {
+			return registry.ExecuteWithCallbacks(execCtx, call, toolName, progressCb, toolCallCb, toolResultCb, approved), nil
+		}
+
+		err = a.orch.processToolCalls(ctx, resp.ToolCalls, verificationSession, enhancedStatusCb, nil, nil, nil, execFn)
+		if err != nil {
+			logger.Warn("Verification tool execution error: %v", err)
+		}
+	}
+
+	return &VerificationResult{
+		Success: false,
+		Summary: "Verification timed out after maximum turns",
+		Errors:  []string{"Verification incomplete - timed out"},
+	}, nil
+}
+
+// formatVerificationToolCall formats a tool call for display.
+func (a *VerificationAgent) formatVerificationToolCall(toolName string, args map[string]interface{}) string {
+	switch toolName {
+	case "shell":
+		if cmd, ok := args["command"].(string); ok {
+			// Truncate long commands
+			if len(cmd) > 80 {
+				cmd = cmd[:77] + "..."
+			}
+			return fmt.Sprintf("→ Running: `%s`\n", cmd)
+		}
+		return "→ Running shell command\n"
+
+	case "read_file":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("→ Checking: %s\n", path)
+		}
+		return "→ Reading file\n"
+
+	case "parallel_tools":
+		if toolCalls, ok := args["tool_calls"].([]interface{}); ok {
+			return fmt.Sprintf("→ Running %d checks in parallel\n", len(toolCalls))
+		}
+		return "→ Running parallel checks\n"
+
+	default:
+		return fmt.Sprintf("→ %s\n", toolName)
+	}
+}
+
+// formatVerificationFailureFeedback converts a failed verification result into actionable feedback for the LLM.
+func (a *VerificationAgent) formatVerificationFailureFeedback(result *VerificationResult, attempt int) string {
+	if result == nil || result.Success {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("VERIFICATION FAILED (Attempt %d/3)\n\n", attempt))
+	sb.WriteString("The following issues were found during verification. Please fix them:\n\n")
+
+	// Build errors
+	if !result.BuildPassed && len(result.Errors) > 0 {
+		sb.WriteString("BUILD ERRORS:\n")
+		for _, err := range result.Errors {
+			if strings.Contains(strings.ToLower(err), "build") ||
+				strings.Contains(strings.ToLower(err), "compile") ||
+				strings.Contains(strings.ToLower(err), "syntax") {
+				sb.WriteString(fmt.Sprintf("- %s\n", err))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Lint issues (from warnings)
+	if !result.LintPassed && len(result.Warnings) > 0 {
+		sb.WriteString("LINT ISSUES:\n")
+		for _, warn := range result.Warnings {
+			sb.WriteString(fmt.Sprintf("- %s\n", warn))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Test failures
+	if !result.TestsPassed {
+		sb.WriteString("TEST FAILURES:\n")
+		for _, err := range result.Errors {
+			if strings.Contains(strings.ToLower(err), "test") ||
+				strings.Contains(strings.ToLower(err), "fail") ||
+				strings.Contains(strings.ToLower(err), "assert") {
+				sb.WriteString(fmt.Sprintf("- %s\n", err))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// All other errors not categorized above
+	if len(result.Errors) > 0 {
+		hasUncategorized := false
+		for _, err := range result.Errors {
+			errLower := strings.ToLower(err)
+			if !strings.Contains(errLower, "build") &&
+				!strings.Contains(errLower, "compile") &&
+				!strings.Contains(errLower, "syntax") &&
+				!strings.Contains(errLower, "test") &&
+				!strings.Contains(errLower, "fail") &&
+				!strings.Contains(errLower, "assert") {
+				if !hasUncategorized {
+					sb.WriteString("OTHER ERRORS:\n")
+					hasUncategorized = true
+				}
+				sb.WriteString(fmt.Sprintf("- %s\n", err))
+			}
+		}
+		if hasUncategorized {
+			sb.WriteString("\n")
+		}
+	}
+
+	// Priority guidance
+	sb.WriteString("SUGGESTED FIXES:\n")
+	priority := 1
+	if !result.BuildPassed {
+		sb.WriteString(fmt.Sprintf("%d. Fix build/compilation errors first (these prevent the code from running)\n", priority))
+		if !result.TestsPassed || !result.LintPassed {
+			priority++
+		}
+	}
+	if !result.TestsPassed {
+		sb.WriteString(fmt.Sprintf("%d. Fix failing tests to ensure correctness\n", priority))
+		if !result.LintPassed {
+			priority++
+		}
+	}
+	if !result.LintPassed {
+		sb.WriteString(fmt.Sprintf("%d. Address linting issues for code quality\n", priority))
+	}
+	sb.WriteString("\n")
+	sb.WriteString("Please fix these issues using the available tools (read_file, write_file_diff, etc.).\n")
+
+	return sb.String()
+}
+
+// reportResults formats and sends the verification results to the user.
+func (a *VerificationAgent) reportResults(result *VerificationResult, progressCb progress.Callback) {
+	if result == nil {
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n**Verification Results**\n\n")
+
+	// Status emoji
+	if result.Success {
+		sb.WriteString("**Status:** All checks passed\n\n")
+	} else {
+		sb.WriteString("**Status:** Some checks failed\n\n")
+	}
+
+	// Individual check results
+	sb.WriteString(fmt.Sprintf("- Build: %s\n", statusText(result.BuildPassed)))
+	sb.WriteString(fmt.Sprintf("- Lint: %s\n", statusText(result.LintPassed)))
+	sb.WriteString(fmt.Sprintf("- Tests: %s\n", statusText(result.TestsPassed)))
+
+	// Errors
+	if len(result.Errors) > 0 {
+		sb.WriteString("\n**Errors:**\n")
+		for _, err := range result.Errors {
+			sb.WriteString(fmt.Sprintf("- %s\n", err))
+		}
+	}
+
+	// Warnings
+	if len(result.Warnings) > 0 {
+		sb.WriteString("\n**Warnings:**\n")
+		for _, warn := range result.Warnings {
+			sb.WriteString(fmt.Sprintf("- %s\n", warn))
+		}
+	}
+
+	// Summary
+	if result.Summary != "" {
+		sb.WriteString(fmt.Sprintf("\n**Summary:** %s\n", result.Summary))
+	}
+
+	sb.WriteString("\n---\n")
+
+	dispatchProgress(progressCb, progress.Update{
+		Message: sb.String(),
+		Mode:    progress.ReportNoStatus,
+	})
+}
+
+func statusText(passed bool) string {
+	if passed {
+		return "Passed"
+	}
+	return "Failed"
+}

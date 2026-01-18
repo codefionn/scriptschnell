@@ -49,6 +49,11 @@ type Session struct {
 	CurrentProvider     string          // Current LLM provider for native message format
 	CurrentModelFamily  string          // Current model family for native message format
 
+	// Verification retry tracking
+	VerificationAttempt    int  // Current verification attempt number (1-3)
+	VerificationInProgress bool // Whether verification is currently running
+	LastUserMessageCount   int  // User message count at start of verification
+
 	// Cost and usage tracking (accumulated across all LLM calls in the session)
 	TotalCost                float64 // Total cost in dollars (sum of all calls)
 	TotalTokens              int     // Total tokens used
@@ -614,4 +619,60 @@ func (s *Session) GetUsageStats() map[string]interface{} {
 	stats["total_cache_read_tokens"] = s.TotalCacheReadTokens
 
 	return stats
+}
+
+// StartVerificationAttempt increments and returns the verification attempt counter
+func (s *Session) StartVerificationAttempt() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.VerificationAttempt++
+	s.VerificationInProgress = true
+	s.LastUserMessageCount = s.userMessageCountLocked()
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+	return s.VerificationAttempt
+}
+
+// GetVerificationAttempt returns the current verification attempt number
+func (s *Session) GetVerificationAttempt() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.VerificationAttempt
+}
+
+// ResetVerification resets verification tracking state
+func (s *Session) ResetVerification() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.VerificationAttempt = 0
+	s.VerificationInProgress = false
+	s.LastUserMessageCount = 0
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// IsVerificationInProgress returns whether verification is currently running
+func (s *Session) IsVerificationInProgress() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.VerificationInProgress
+}
+
+// HasNewUserPrompt checks if a new user message was added since verification started
+func (s *Session) HasNewUserPrompt(previousCount int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	currentCount := s.userMessageCountLocked()
+	return currentCount > previousCount
+}
+
+// userMessageCountLocked counts user messages without acquiring the lock (assumes lock already held)
+func (s *Session) userMessageCountLocked() int {
+	count := 0
+	for _, msg := range s.Messages {
+		if msg != nil && msg.Role == "user" {
+			count++
+		}
+	}
+	return count
 }

@@ -19,7 +19,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
@@ -28,6 +27,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
+	"github.com/muesli/reflow/wordwrap"
 	"golang.org/x/term"
 )
 
@@ -2332,7 +2332,7 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
 			ctx := runtime.ctx
-			err := runtime.Orchestrator.ProcessPrompt(
+			err := runtime.Orchestrator.ProcessPromptWithVerification(
 				ctx,
 				input,
 				progressCallback,

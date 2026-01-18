@@ -280,29 +280,6 @@ func normalizeFetchURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
-// truncateStringToBytes trims a string to the specified byte limit without breaking characters.
-func truncateStringToBytes(s string, limit int) (string, bool) {
-	if len(s) <= limit {
-		return s, false
-	}
-
-	var (
-		builder strings.Builder
-		used    int
-	)
-
-	for _, r := range s {
-		rb := []byte(string(r))
-		if used+len(rb) > limit {
-			break
-		}
-		builder.Write(rb)
-		used += len(rb)
-	}
-
-	return builder.String(), true
-}
-
 // scanWebFetchRequest scans the web fetch request components for secrets
 func (t *WebFetchTool) scanWebFetchRequest(url string, headers map[string]string, body string) []secretdetect.SecretMatch {
 	var allMatches []secretdetect.SecretMatch

@@ -2130,10 +2130,12 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 ) error {
 	// Track initial user message count to detect new prompts during verification
 	initialUserMsgCount := o.session.UserMessageCount()
+	initialQueuedCount := 0 // Will be read from session
 
 	for attempt := 1; attempt <= maxVerificationRetries; attempt++ {
 		// Mark verification attempt in session
 		o.session.StartVerificationAttempt()
+		initialQueuedCount = o.session.GetQueuedUserPromptCount()
 
 		// Run main orchestration loop
 		err := o.ProcessPrompt(ctx, prompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback, openRouterUsageCallback)
@@ -2156,7 +2158,7 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 		}
 
 		// Verification failed - check if we should retry
-		if o.session.HasNewUserPrompt(initialUserMsgCount) {
+		if o.session.HasNewUserPromptOrQueued(initialUserMsgCount, initialQueuedCount) {
 			logger.Info("New user prompt detected, stopping verification retry")
 			o.session.ResetVerification()
 			return nil

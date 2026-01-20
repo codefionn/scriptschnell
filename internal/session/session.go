@@ -58,9 +58,10 @@ type Session struct {
 	CurrentModelFamily        string           // Current model family for native message format
 
 	// Verification retry tracking
-	VerificationAttempt    int  // Current verification attempt number (1-3)
-	VerificationInProgress bool // Whether verification is currently running
-	LastUserMessageCount   int  // User message count at start of verification
+	VerificationAttempt      int  // Current verification attempt number (1-3)
+	VerificationInProgress   bool // Whether verification is currently running
+	LastUserMessageCount     int  // User message count at start of verification
+	HasQueuedUserPromptCount int  // Number of queued user prompts at start of verification
 
 	// Cost and usage tracking (accumulated across all LLM calls in the session)
 	TotalCost                float64 // Total cost in dollars (sum of all calls)
@@ -638,6 +639,7 @@ func (s *Session) StartVerificationAttempt() int {
 	s.VerificationAttempt++
 	s.VerificationInProgress = true
 	s.LastUserMessageCount = s.userMessageCountLocked()
+	s.HasQueuedUserPromptCount = 0 // Reset queued prompt count
 	s.UpdatedAt = time.Now()
 	s.Dirty = true
 	return s.VerificationAttempt
@@ -657,6 +659,7 @@ func (s *Session) ResetVerification() {
 	s.VerificationAttempt = 0
 	s.VerificationInProgress = false
 	s.LastUserMessageCount = 0
+	s.HasQueuedUserPromptCount = 0
 	s.UpdatedAt = time.Now()
 	s.Dirty = true
 }
@@ -674,6 +677,39 @@ func (s *Session) HasNewUserPrompt(previousCount int) bool {
 	defer s.mu.RUnlock()
 	currentCount := s.userMessageCountLocked()
 	return currentCount > previousCount
+}
+
+// HasNewUserPromptOrQueued checks if a new user message was added or if there are queued prompts since verification started
+func (s *Session) HasNewUserPromptOrQueued(previousCount int, previousQueuedCount int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	currentCount := s.userMessageCountLocked()
+	return currentCount > previousCount || s.HasQueuedUserPromptCount > previousQueuedCount
+}
+
+// IncrementQueuedUserPromptCount increments the count of queued user prompts
+func (s *Session) IncrementQueuedUserPromptCount() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.HasQueuedUserPromptCount++
+	s.UpdatedAt = time.Now()
+}
+
+// DecrementQueuedUserPromptCount decrements the count of queued user prompts
+func (s *Session) DecrementQueuedUserPromptCount() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.HasQueuedUserPromptCount > 0 {
+		s.HasQueuedUserPromptCount--
+		s.UpdatedAt = time.Now()
+	}
+}
+
+// GetQueuedUserPromptCount returns the current count of queued user prompts
+func (s *Session) GetQueuedUserPromptCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.HasQueuedUserPromptCount
 }
 
 // userMessageCountLocked counts user messages without acquiring the lock (assumes lock already held)

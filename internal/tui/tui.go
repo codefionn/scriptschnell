@@ -2365,6 +2365,10 @@ func (m *Model) startPrompt(tabIdx int, input string) tea.Cmd {
 
 func (m *Model) queuePrompt(tabIdx int, input string) {
 	m.queuedPrompts[tabIdx] = append(m.queuedPrompts[tabIdx], input)
+	// Increment queued prompt count in session for verification detection
+	if m.validTabIndex(tabIdx) {
+		m.sessions[tabIdx].Session.IncrementQueuedUserPromptCount()
+	}
 	preview := formatQueuedPreview(input)
 	m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Queued prompt #%d: %s", len(m.queuedPrompts[tabIdx]), preview))
 }
@@ -2383,6 +2387,9 @@ func (m *Model) processNextQueuedPromptForTab(tabIdx int) tea.Cmd {
 	// Dequeue the next prompt
 	next := queue[0]
 	m.queuedPrompts[tabIdx] = queue[1:]
+	
+	// Decrement queued prompt count in session
+	m.sessions[tabIdx].Session.DecrementQueuedUserPromptCount()
 
 	preview := formatQueuedPreview(next)
 	remaining := len(m.queuedPrompts[tabIdx])

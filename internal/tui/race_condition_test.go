@@ -197,7 +197,9 @@ func TestRace_ConcurrentHandlerOperations(t *testing.T) {
 	// Test all handler operations happening concurrently
 	handler := NewTUIInteractionHandler(nil)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var wg sync.WaitGroup
 
 	// Start request
@@ -231,6 +233,13 @@ func TestRace_ConcurrentHandlerOperations(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		handler.Mode()
+	}()
+
+	go func() {
+		defer wg.Done()
+		// Ensure response is sent if not already sent
+		time.Sleep(20 * time.Millisecond)
+		handler.HandleAuthorizationResponse("race-handler-1", true)
 	}()
 
 	wg.Wait()
@@ -276,7 +285,7 @@ func TestRace_UserDialogStateTransitions(t *testing.T) {
 }
 
 func TestRace_PendingAuthorizationsMap(t *testing.T) {
-	// Test concurrent access to pending authorizations map
+	// Test concurrent access to pending authorizations map with proper mutex
 	m := New("test-model", "", false)
 	m.ready = true
 
@@ -290,7 +299,9 @@ func TestRace_PendingAuthorizationsMap(t *testing.T) {
 			defer wg.Done()
 			authID := fmt.Sprintf("pending-race-%d", idx)
 			req := CreateTestAuthorizationRequest(authID, "shell", "Test")
+			m.authorizationMu.Lock()
 			m.pendingAuthorizations[authID] = req
+			m.authorizationMu.Unlock()
 		}(i)
 	}
 
@@ -301,7 +312,9 @@ func TestRace_PendingAuthorizationsMap(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(1 * time.Millisecond)
 			authID := fmt.Sprintf("pending-race-%d", idx)
+			m.authorizationMu.Lock()
 			delete(m.pendingAuthorizations, authID)
+			m.authorizationMu.Unlock()
 		}(i)
 	}
 

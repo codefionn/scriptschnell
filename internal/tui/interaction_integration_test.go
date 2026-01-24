@@ -343,6 +343,7 @@ func TestIntegration_TabSwitchingWithPendingInteraction(t *testing.T) {
 	responseChan := make(chan bool, 1)
 	req := CreateTestAuthorizationRequest("auth-tab-1", "shell", "Test")
 	req.TabID = 1
+	req.ResponseChan = responseChan
 	m.authorizationDialog = NewAuthorizationDialog(req, "Tab 1")
 	m.authorizationDialogOpen = true
 	m.activeAuthorizationID = "auth-tab-1"
@@ -677,6 +678,7 @@ func TestIntegration_InteractionHandlerWithTUIModel(t *testing.T) {
 	// (in real scenario, this happens through Update method)
 
 	// Simulate user approval
+	handler.HandleAuthorizationResponse("integration-1", true)
 
 	select {
 	case resp := <-responseChan:

@@ -191,6 +191,7 @@ func TestTUIInteractionHandlerHandleMultipleQuestions(t *testing.T) {
 
 func TestTUIInteractionHandlerNilProgram(t *testing.T) {
 	handler := NewTUIInteractionHandler(nil)
+	handler.dialogTimeout = 50 * time.Millisecond
 
 	ctx := context.Background()
 	req := &actor.UserInteractionRequest{
@@ -201,13 +202,31 @@ func TestTUIInteractionHandlerNilProgram(t *testing.T) {
 		},
 	}
 
-	_, err := handler.HandleInteraction(ctx, req)
-	if err == nil {
-		t.Fatal("Expected error when program is nil")
-	}
+	// HandleInteraction should work with nil program (for testing)
+	// It will wait for response or timeout
+	done := make(chan *actor.UserInteractionResponse, 1)
+	go func() {
+		resp, err := handler.HandleInteraction(ctx, req)
+		if err != nil {
+			t.Errorf("HandleInteraction failed: %v", err)
+		}
+		done <- resp
+	}()
 
-	if err.Error() != "TUI program not available" {
-		t.Errorf("Expected 'TUI program not available' error, got %q", err.Error())
+	// Should timeout since no response is sent
+	select {
+	case resp := <-done:
+		if resp == nil {
+			t.Fatal("Expected non-nil response on timeout")
+		}
+		if !resp.TimedOut {
+			t.Error("Expected TimedOut to be true")
+		}
+		if resp.Error == nil {
+			t.Error("Expected error on timeout")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for response")
 	}
 }
 

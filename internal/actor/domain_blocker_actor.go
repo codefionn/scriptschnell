@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudflare/ahocorasick"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/stringsearch"
 )
 
 // DomainBlockerMessage represents different message types for the domain blocker actor
@@ -78,7 +78,7 @@ type BlocklistStatsResponse struct {
 type DomainBlockerActor struct {
 	id              string
 	mu              sync.RWMutex
-	matcher         *ahocorasick.Matcher
+	matcher         stringsearch.StringMatcher
 	domainCount     int
 	lastUpdated     time.Time
 	blocklistURL    string
@@ -470,7 +470,7 @@ func (a *DomainBlockerActor) initializeBlocklist() {
 	if domains, err := a.loadCachedBlocklist(); err == nil {
 		// Successfully loaded from cache
 		a.mu.Lock()
-		a.matcher = ahocorasick.NewStringMatcher(domains)
+		a.matcher = stringsearch.NewStringMatcher(domains)
 		a.domainCount = len(domains)
 		a.lastUpdated = time.Now() // Update lastUpdated to indicate we just loaded it
 		a.initialized = true
@@ -511,7 +511,7 @@ func (a *DomainBlockerActor) refreshBlocklist() error {
 
 	// Update the matcher with new domains
 	a.mu.Lock()
-	a.matcher = ahocorasick.NewStringMatcher(domains)
+	a.matcher = stringsearch.NewStringMatcher(domains)
 	a.domainCount = len(domains)
 	a.lastUpdated = time.Now()
 	a.initialized = true

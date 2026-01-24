@@ -266,6 +266,7 @@ func TestManualSuggestions(t *testing.T) {
 	registry.Register(&mockTool{name: "go_sandbox"})
 	registry.Register(&mockTool{name: "edit_file"})
 	registry.Register(&mockTool{name: "create_file"})
+	registry.Register(&mockTool{name: "replace_file"})
 	registry.Register(&mockTool{name: "read_file_summarized"})
 	registry.Register(&mockTool{name: "todo"})
 
@@ -299,6 +300,24 @@ func TestManualSuggestions(t *testing.T) {
 				"tool not found: edit_file",
 				"edit_file",
 				"modify files",
+			},
+		},
+		{
+			name:     "overwrite_file -> replace_file",
+			toolName: "overwrite_file",
+			shouldContain: []string{
+				"tool not found: overwrite_file",
+				"replace_file",
+				"replace the entire content",
+			},
+		},
+		{
+			name:     "rewrite_file -> replace_file",
+			toolName: "rewrite_file",
+			shouldContain: []string{
+				"tool not found: rewrite_file",
+				"replace_file",
+				"replace the entire content",
 			},
 		},
 		{

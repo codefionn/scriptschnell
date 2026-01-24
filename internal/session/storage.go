@@ -403,6 +403,29 @@ func (s *SessionStorage) ListSessions(workingDir string) ([]SessionMetadata, err
 	return sessions, nil
 }
 
+// GetMostRecentSession returns the most recently updated session in a workspace
+func (s *SessionStorage) GetMostRecentSession(workingDir string) (*Session, error) {
+	sessions, err := s.ListSessions(workingDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		return nil, nil // No sessions found
+	}
+
+	// Find the most recently updated session
+	mostRecent := sessions[0]
+	for _, session := range sessions[1:] {
+		if session.UpdatedAt.After(mostRecent.UpdatedAt) {
+			mostRecent = session
+		}
+	}
+
+	// Load the full session
+	return s.LoadSession(workingDir, mostRecent.ID)
+}
+
 // DeleteSession removes a session from disk
 func (s *SessionStorage) DeleteSession(workingDir, sessionID string) error {
 	path := s.getSessionPath(workingDir, sessionID)

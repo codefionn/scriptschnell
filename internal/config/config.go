@@ -112,6 +112,7 @@ type Config struct {
 	ContextDirectories map[string][]string           `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
 	OpenTabs           map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
 	AutoSave           AutoSaveConfig                `json:"auto_save,omitempty"`           // Session auto-save configuration
+	AutoResume         bool                          `json:"auto_resume"`                   // Automatically resume last session on startup
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
 	secretsPassword string       `json:"-"`
@@ -204,6 +205,7 @@ func DefaultConfig() *Config {
 			SaveIntervalSeconds: 5,    // Save every 5 seconds
 			MaxConcurrentSaves:  1,    // Only one save operation at a time
 		},
+		AutoResume: false, // Disable auto-resume by default for now
 	}
 }
 

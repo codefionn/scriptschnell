@@ -847,6 +847,13 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		false,
 		"",
 	)
+	addSpec(
+		&tools.ReplaceFileToolSpec{},
+		true,
+		tools.NewReplaceFileToolFactory(o.fs, o.session),
+		false,
+		"",
+	)
 	if o.shouldUseNonDiffUpdateTool(modelFamily) {
 		addSpec(&tools.WriteFileJSONToolSpec{}, true, tools.NewWriteFileJSONToolFactory(o.fs, o.session), false, "")
 	} else if o.shouldUseSimpleSingleDiffTool(modelFamily) {
@@ -2128,8 +2135,7 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 	toolResultCallback ToolResultCallback,
 	openRouterUsageCallback OpenRouterUsageCallback,
 ) error {
-	// Track initial user message count to detect new prompts during verification
-	initialUserMsgCount := o.session.UserMessageCount()
+	// Track queued prompt count to detect new prompts during verification
 	initialQueuedCount := 0 // Will be read from session
 
 	for attempt := 1; attempt <= maxVerificationRetries; attempt++ {
@@ -2143,6 +2149,8 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 			o.session.ResetVerification()
 			return err
 		}
+
+		userMsgCountAfterPrompt := o.session.UserMessageCount()
 
 		// After orchestration completes, run verification
 		result, err := o.runVerificationPhaseIfNeeded(ctx, prompt, progressCallback)
@@ -2158,7 +2166,7 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 		}
 
 		// Verification failed - check if we should retry
-		if o.session.HasNewUserPromptOrQueued(initialUserMsgCount, initialQueuedCount) {
+		if o.session.HasNewUserPromptOrQueued(userMsgCountAfterPrompt, initialQueuedCount) {
 			logger.Info("New user prompt detected, stopping verification retry")
 			o.session.ResetVerification()
 			return nil
@@ -2178,20 +2186,17 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 		// Feed failure back to LLM for next attempt
 		agent := NewVerificationAgent(o)
 		feedbackMsg := agent.formatVerificationFailureFeedback(result, attempt)
-
-		o.session.AddMessage(&session.Message{
-			Role:    "user",
-			Content: feedbackMsg,
-		})
+		if strings.TrimSpace(feedbackMsg) == "" {
+			feedbackMsg = "Verification failed, but no summary or errors were provided. Please review the verification output and fix any issues."
+		}
 
 		dispatchProgress(progressCallback, progress.Update{
 			Message: fmt.Sprintf("\n🔄 Verification attempt %d/%d failed. Requesting fixes from LLM...\n\n", attempt, maxVerificationRetries),
 			Mode:    progress.ReportNoStatus,
 		})
 
-		// Loop will call ProcessPrompt again with feedback already in session
-		// Clear the prompt for subsequent iterations since feedback is in session messages
-		prompt = ""
+		// Loop will call ProcessPrompt again with feedback as the next user prompt
+		prompt = feedbackMsg
 	}
 
 	o.session.ResetVerification()

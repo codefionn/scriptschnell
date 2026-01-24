@@ -361,6 +361,8 @@ func (a *AuthorizationActor) authorize(ctx context.Context, toolName string, par
 	switch toolName {
 	case ToolNameEditFile:
 		return a.authorizeWriteFileDiff(ctx, params)
+	case ToolNameReplaceFile:
+		return a.authorizeReplaceFile(ctx, params)
 	case ToolNameCreateFile:
 		return a.authorizeCreateFile(ctx, params)
 	case ToolNameGoSandboxDomain:
@@ -407,6 +409,46 @@ func (a *AuthorizationActor) authorizeWriteFileDiff(ctx context.Context, params 
 		return &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("File %s exists but was not read in this session. The LLM is trying to apply a diff without reading it first.", path),
+			RequiresUserInput: true,
+		}, nil
+	}
+
+	return &AuthorizationDecision{Allowed: true}, nil
+}
+
+// authorizeReplaceFile enforces the read-before-write policy for replacing entire file content.
+func (a *AuthorizationActor) authorizeReplaceFile(ctx context.Context, params map[string]interface{}) (*AuthorizationDecision, error) {
+	path := GetStringParam(params, "path", "")
+	if path == "" {
+		return &AuthorizationDecision{Allowed: false, Reason: "path is required"}, nil
+	}
+
+	if a.isPathPreauthorized(path) {
+		return &AuthorizationDecision{Allowed: true}, nil
+	}
+
+	if a.fs == nil {
+		return &AuthorizationDecision{Allowed: true}, nil
+	}
+
+	// Check file exists first
+	exists, err := a.fs.Exists(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("authorization failed while checking file existence: %w", err)
+	}
+
+	if !exists {
+		return &AuthorizationDecision{
+			Allowed: false,
+			Reason:  fmt.Sprintf("File %s does not exist. Use the %s tool to create new files before replacing content.", path, ToolNameCreateFile),
+		}, nil
+	}
+
+	// Enforce read-before-write policy
+	if a.session != nil && !a.session.WasFileRead(path) {
+		return &AuthorizationDecision{
+			Allowed:           false,
+			Reason:            fmt.Sprintf("File %s exists but was not read in this session. The LLM is trying to replace content without reading it first.", path),
 			RequiresUserInput: true,
 		}, nil
 	}

@@ -75,3 +75,6 @@ build/
 *_templ.go
 
 /test-build
+
+*.prof
+*.pprof

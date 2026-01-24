@@ -347,7 +347,19 @@ func (r *Registry) initializeDefaultSuggestions() {
 
 	r.AddManualSuggestion("write_file", &ManualSuggestion{
 		SuggestedTools: []string{"create_file", "edit_file"},
-		Reason:         "Use 'create_file' for new files or 'write_file_diff' to modify existing files with diffs",
+		Reason:         "Use 'create_file' for new files, 'replace_file' to replace entire file content, or 'write_file_diff' to modify existing files with diffs",
+		MatchPattern:   "exact",
+	})
+
+	r.AddManualSuggestion("overwrite_file", &ManualSuggestion{
+		SuggestedTools: []string{"replace_file"},
+		Reason:         "Use 'replace_file' to replace the entire content of an existing file",
+		MatchPattern:   "exact",
+	})
+
+	r.AddManualSuggestion("rewrite_file", &ManualSuggestion{
+		SuggestedTools: []string{"replace_file"},
+		Reason:         "Use 'replace_file' to replace the entire content of an existing file",
 		MatchPattern:   "exact",
 	})
 

@@ -16,6 +16,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/cli"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/pprof"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secrets"
@@ -62,7 +63,7 @@ func main() {
 }
 
 func run() (err error) {
-	prompt, cliOptions, cliMode, parseErr := parseCLIArgs(os.Args[1:])
+	prompt, cliOptions, cliMode, pprofCfg, parseErr := parseCLIArgs(os.Args[1:])
 	if parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			return nil
@@ -72,6 +73,24 @@ func run() (err error) {
 			return runACPMode()
 		}
 		return parseErr
+	}
+
+	// Start pprof handler if configured
+	var pprofHandler *pprof.Handler
+	if pprofCfg != nil && (pprofCfg.HTTPAddr != "" || pprofCfg.CPUProfile != "" || pprofCfg.HeapProfile != "" ||
+		pprofCfg.GoroutineProfile != "" || pprofCfg.BlockProfile != "" || pprofCfg.MutexProfile != "" || pprofCfg.TraceProfile != "") {
+		pprofHandler = pprof.NewHandler(*pprofCfg)
+		if err := pprofHandler.Start(); err != nil {
+			return fmt.Errorf("failed to start pprof: %w", err)
+		}
+		defer func() {
+			if stopErr := pprofHandler.Stop(); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to stop pprof: %v\n", stopErr)
+			}
+		}()
+		fmt.Fprintf(os.Stderr, "Profiling enabled (HTTP: %s, CPU: %s, Heap: %s, Goroutine: %s, Block: %s, Mutex: %s, Trace: %s)\n",
+			pprofCfg.HTTPAddr, pprofCfg.CPUProfile, pprofCfg.HeapProfile, pprofCfg.GoroutineProfile,
+			pprofCfg.BlockProfile, pprofCfg.MutexProfile, pprofCfg.TraceProfile)
 	}
 
 	var loggerInitialized bool
@@ -277,7 +296,7 @@ func runACPMode() error {
 	return acp.RunACPAgent(ctx, cfg, providerMgr)
 }
 
-func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
+func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, error) {
 	fs := flag.NewFlagSet("scriptschnell", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -294,6 +313,17 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		jsonOutput   bool
 		jsonExtended bool
 		jsonFull     bool
+
+		// pprof flags
+		pprofAddr                 string
+		pprofCPU                  string
+		pprofHeap                 string
+		pprofGoroutine            string
+		pprofBlock                string
+		pprofMutex                string
+		pprofTrace                string
+		pprofBlockProfileRate     int
+		pprofMutexProfileFraction int
 	)
 
 	fs.BoolVar(&dangerous, "dangerous-allow-all", false, "Bypass all authorization checks (dangerous)")
@@ -308,6 +338,17 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	fs.BoolVar(&jsonExtended, "json-extended", false, "Output all messages as JSON one-liners plus usage statistics")
 	fs.BoolVar(&jsonFull, "json-full", false, "Output all messages with full tool call outputs as single JSON object")
 	fs.BoolVar(&showHelp, "help", false, "Show CLI usage information")
+
+	// pprof flags
+	fs.StringVar(&pprofAddr, "pprof.addr", ":6060", "Enable pprof HTTP server on specified address (default: :6060, use empty string to disable)")
+	fs.StringVar(&pprofCPU, "pprof.cpu", "", "Path to write CPU profile file (e.g., cpu.prof)")
+	fs.StringVar(&pprofHeap, "pprof.heap", "", "Path to write heap profile file (e.g., heap.prof)")
+	fs.StringVar(&pprofGoroutine, "pprof.goroutine", "", "Path to write goroutine profile file (e.g., goroutine.prof)")
+	fs.StringVar(&pprofBlock, "pprof.block", "", "Path to write blocking profile file (e.g., block.prof)")
+	fs.StringVar(&pprofMutex, "pprof.mutex", "", "Path to write mutex profile file (e.g., mutex.prof)")
+	fs.StringVar(&pprofTrace, "pprof.trace", "", "Path to write execution trace file (e.g., trace.out)")
+	fs.IntVar(&pprofBlockProfileRate, "pprof.block-rate", 1, "Blocking profile sampling rate (1/n events, default: 1)")
+	fs.IntVar(&pprofMutexProfileFraction, "pprof.mutex-fraction", 1, "Mutex profile sampling fraction (1/n events, default: 1)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0])
 		fmt.Fprintln(fs.Output(), "Options:")
@@ -316,14 +357,14 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return "", nil, false, flag.ErrHelp
+			return "", nil, false, nil, flag.ErrHelp
 		}
-		return "", nil, false, err
+		return "", nil, false, nil, err
 	}
 
 	if showHelp {
 		fs.Usage()
-		return "", nil, false, flag.ErrHelp
+		return "", nil, false, nil, flag.ErrHelp
 	}
 
 	remaining := fs.Args()
@@ -332,25 +373,25 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 	// Handle ACP mode
 	if acpMode {
 		if len(remaining) > 0 {
-			return "", nil, false, fmt.Errorf("ACP mode does not accept prompt arguments")
+			return "", nil, false, nil, fmt.Errorf("ACP mode does not accept prompt arguments")
 		}
 		if optionsUsed {
-			return "", nil, false, fmt.Errorf("authorization flags are not supported in ACP mode")
+			return "", nil, false, nil, fmt.Errorf("authorization flags are not supported in ACP mode")
 		}
 		// Return special values to indicate ACP mode
-		return "", nil, false, errACPMode
+		return "", nil, false, nil, errACPMode
 	}
 
 	if len(remaining) == 0 {
 		if optionsUsed {
-			return "", nil, false, fmt.Errorf("authorization flags require a prompt in CLI mode")
+			return "", nil, false, nil, fmt.Errorf("authorization flags require a prompt in CLI mode")
 		}
-		return "", nil, false, nil
+		return "", nil, false, nil, nil
 	}
 
 	prompt := strings.TrimSpace(strings.Join(remaining, " "))
 	if prompt == "" {
-		return "", nil, false, fmt.Errorf("prompt must not be empty")
+		return "", nil, false, nil, fmt.Errorf("prompt must not be empty")
 	}
 
 	opts := &cli.Options{
@@ -369,7 +410,20 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, error) {
 		opts.AllowAllNetwork = true
 	}
 
-	return prompt, opts, true, nil
+	// Build pprof config
+	pprofCfg := &pprof.Config{
+		HTTPAddr:             pprofAddr,
+		CPUProfile:           pprofCPU,
+		HeapProfile:          pprofHeap,
+		GoroutineProfile:     pprofGoroutine,
+		BlockProfile:         pprofBlock,
+		MutexProfile:         pprofMutex,
+		TraceProfile:         pprofTrace,
+		BlockProfileRate:     pprofBlockProfileRate,
+		MutexProfileFraction: pprofMutexProfileFraction,
+	}
+
+	return prompt, opts, true, pprofCfg, nil
 }
 
 func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
@@ -912,6 +966,19 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	})
 
 	// Planning questions are handled via the per-tab user input callbacks configured in the TUI.
+
+	// Attempt to resume the last session if auto-resume is enabled
+	if cfg.AutoResume {
+		logger.Info("Auto-resume enabled, attempting to resume last session")
+		storageRef := factory.GetSessionStorageRef()
+		if storageRef != nil {
+			if err := model.ResumeLastSession(ctx, storageRef); err != nil {
+				logger.Warn("Failed to resume last session: %v", err)
+			}
+		} else {
+			logger.Warn("Session storage not available for auto-resume")
+		}
+	}
 
 	// Run TUI
 	program = tea.NewProgram(model, tea.WithAltScreen())

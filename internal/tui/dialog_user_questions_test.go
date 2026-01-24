@@ -33,7 +33,7 @@ func TestUserQuestionDialogCreation(t *testing.T) {
 	}
 }
 
-func TestUserQuestionDialogResponsiveSizing(t *testing.T) {
+func TestUserQuestionDialogResponsiveSizing_Component(t *testing.T) {
 	questions := []QuestionWithOptions{
 		{
 			Question: "Test question?",
@@ -46,7 +46,7 @@ func TestUserQuestionDialogResponsiveSizing(t *testing.T) {
 	// Simulate window resize
 	msg := tea.WindowSizeMsg{Width: 200, Height: 50}
 	updatedModel, _ := dialog.Update(msg)
-	dialog = updatedModel.(UserQuestionDialog)
+	dialog = updatedModel.(*UserQuestionDialog)
 
 	// Verify dialog received size update
 	if dialog.width != 200 {
@@ -75,7 +75,7 @@ func TestUserQuestionDialogSmallTerminal(t *testing.T) {
 	// Simulate small terminal (less than 80 chars)
 	msg := tea.WindowSizeMsg{Width: 60, Height: 20}
 	updatedModel, _ := dialog.Update(msg)
-	dialog = updatedModel.(UserQuestionDialog)
+	dialog = updatedModel.(*UserQuestionDialog)
 
 	// Should still use minimum width of 80
 	if dialog.width != 60 {
@@ -112,8 +112,8 @@ func TestUserQuestionDialogEscapeKey(t *testing.T) {
 	}
 
 	// Model should not change
-	if _, ok := updatedModel.(UserQuestionDialog); !ok {
-		t.Fatalf("expected UserQuestionDialog model, got %T", updatedModel)
+	if _, ok := updatedModel.(*UserQuestionDialog); !ok {
+		t.Fatalf("expected *UserQuestionDialog model, got %T", updatedModel)
 	}
 }
 
@@ -133,13 +133,13 @@ func TestQuestionOptionsDialogCreation(t *testing.T) {
 		index:    0,
 	}
 
-	optDialog := NewQuestionOptionsDialog(questionItem, &parent)
+	optDialog := NewQuestionOptionsDialog(questionItem, parent)
 
 	if optDialog.question.index != 0 {
 		t.Fatalf("expected question index 0, got %d", optDialog.question.index)
 	}
 
-	if optDialog.parent != &parent {
+	if optDialog.parent != parent {
 		t.Fatal("expected parent reference to be set")
 	}
 }
@@ -162,7 +162,7 @@ func TestQuestionOptionsDialogSelectAndReturn(t *testing.T) {
 		index:    0,
 	}
 
-	optDialog := NewQuestionOptionsDialog(questionItem, &parent)
+	optDialog := NewQuestionOptionsDialog(questionItem, parent)
 	optDialog.list.Select(1) // Select option B (index 1)
 
 	// Send Enter key
@@ -203,7 +203,7 @@ func TestQuestionOptionsDialogCompleteAllQuestions(t *testing.T) {
 		index:    0,
 	}
 
-	optDialog := NewQuestionOptionsDialog(questionItem, &parent)
+	optDialog := NewQuestionOptionsDialog(questionItem, parent)
 	optDialog.list.Select(0) // Select option A
 
 	// Send Enter key - this should complete all questions

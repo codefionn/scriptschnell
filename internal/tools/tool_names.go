@@ -4,6 +4,7 @@ const (
 	ToolNameReadFile             = "read_file"
 	ToolNameReadFileSummarized   = "read_file_summarized"
 	ToolNameCreateFile           = "create_file"
+	ToolNameReplaceFile          = "replace_file"
 	ToolNameEditFile             = "edit_file"
 	ToolNameShell                = "shell"
 	ToolNameCommand              = "command"

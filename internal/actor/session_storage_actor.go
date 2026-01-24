@@ -111,6 +111,15 @@ func (a *SessionStorageActor) Receive(ctx context.Context, msg Message) error {
 		logger.Debug("SessionStorageActor: StopAutoSave completed")
 		m.ResponseChan <- SessionStorageStopAutoSaveResponse{Err: nil}
 		return nil
+	case SessionStorageGetMostRecentMsg:
+		logger.Debug("SessionStorageActor: received get most recent message for workspace %s", m.WorkingDir)
+		session, err := a.storage.GetMostRecentSession(m.WorkingDir)
+		logger.Debug("SessionStorageActor: GetMostRecentSession returned err=%v", err)
+		if err != nil && a.health != nil {
+			a.health.RecordError(err)
+		}
+		m.ResponseChan <- SessionStorageGetMostRecentResponse{Session: session, Err: err}
+		return nil
 	default:
 		// Try health check handler first
 		if a.health != nil {
@@ -193,6 +202,18 @@ func (SessionStorageStopAutoSaveMsg) Type() string { return "sessionStorageStopA
 
 type SessionStorageStopAutoSaveResponse struct {
 	Err error
+}
+
+type SessionStorageGetMostRecentMsg struct {
+	WorkingDir   string
+	ResponseChan chan SessionStorageGetMostRecentResponse
+}
+
+func (SessionStorageGetMostRecentMsg) Type() string { return "sessionStorageGetMostRecentMsg" }
+
+type SessionStorageGetMostRecentResponse struct {
+	Session *session.Session
+	Err     error
 }
 
 // Helper functions for sending messages to the session storage actor
@@ -341,6 +362,33 @@ func StopAutoSaveViaActor(ctx context.Context, storageRef *ActorRef) error {
 	case <-ctx.Done():
 		logger.Error("StopAutoSaveViaActor: context cancelled: %v", ctx.Err())
 		return ctx.Err()
+	}
+}
+
+// GetMostRecentSessionViaActor gets the most recently updated session for a workspace
+func GetMostRecentSessionViaActor(ctx context.Context, storageRef *ActorRef, workingDir string) (*session.Session, error) {
+	logger.Debug("GetMostRecentSessionViaActor: getting most recent session for workspace %s", workingDir)
+
+	responseChan := make(chan SessionStorageGetMostRecentResponse, 1)
+
+	msg := SessionStorageGetMostRecentMsg{
+		WorkingDir:   workingDir,
+		ResponseChan: responseChan,
+	}
+
+	if err := storageRef.Send(msg); err != nil {
+		logger.Error("GetMostRecentSessionViaActor: failed to send message: %v", err)
+		return nil, err
+	}
+	logger.Debug("GetMostRecentSessionViaActor: message sent, waiting for response")
+
+	select {
+	case response := <-responseChan:
+		logger.Debug("GetMostRecentSessionViaActor: received response with err=%v", response.Err)
+		return response.Session, response.Err
+	case <-ctx.Done():
+		logger.Error("GetMostRecentSessionViaActor: context cancelled: %v", ctx.Err())
+		return nil, ctx.Err()
 	}
 }
 

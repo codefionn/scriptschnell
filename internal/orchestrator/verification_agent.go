@@ -17,20 +17,21 @@ import (
 
 // VerificationAgent handles post-execution verification of implementation tasks.
 // It runs after the main orchestrator loop stops (LLM EOS + auto-continue didn't trigger)
-// to verify that implementation tasks were completed successfully by building/linting/testing.
+// to verify that implementation tasks were completed successfully by building/formatting/linting/testing.
 type VerificationAgent struct {
 	orch *Orchestrator
 }
 
 // VerificationResult represents the outcome of verification checks.
 type VerificationResult struct {
-	Success     bool     `json:"success"`
-	BuildPassed bool     `json:"build_passed"`
-	LintPassed  bool     `json:"lint_passed"`
-	TestsPassed bool     `json:"tests_passed"`
-	Errors      []string `json:"errors,omitempty"`
-	Warnings    []string `json:"warnings,omitempty"`
-	Summary     string   `json:"summary"`
+	Success      bool     `json:"success"`
+	BuildPassed  bool     `json:"build_passed"`
+	FormatPassed bool     `json:"format_passed"`
+	LintPassed   bool     `json:"lint_passed"`
+	TestsPassed  bool     `json:"tests_passed"`
+	Errors       []string `json:"errors,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
+	Summary      string   `json:"summary"`
 }
 
 // NewVerificationAgent creates a new verification agent.
@@ -177,6 +178,7 @@ Verify that the code changes are correct by:
 - **parallel_tools**: Run multiple checks concurrently
 
 Build commands (via go_sandbox): go build, npm run build, cargo build, make, gradle build, mvn compile
+Format commands (via go_sandbox): gofmt, npm run format, cargo fmt, black, prettier
 Lint commands (via go_sandbox): golangci-lint, eslint, cargo clippy, ruff, flake8, mypy
 Test commands (via go_sandbox): go test, npm test, pytest, cargo test, gradle test
 
@@ -185,9 +187,10 @@ Note: Commands will go through normal authorization checks. The system will dete
 ## Instructions
 1. First, briefly review the modified files to understand what changed
 2. Run the appropriate build command for this project type
-3. Run linting if a linter is configured
-4. Run tests, focusing on areas affected by the changes (use -short or similar flags for speed)
-5. Report any failures with clear error messages
+3. Run code formatting to ensure code follows project style conventions
+4. Run linting if a linter is configured
+5. Run tests, focusing on areas affected by the changes (use -short or similar flags for speed)
+6. Report any failures with clear error messages
 
 ## Important Notes
 - Be efficient: don't read files that weren't modified
@@ -202,6 +205,7 @@ When complete, provide a summary wrapped in <verification_result> tags:
 {
   "success": true/false,
   "build_passed": true/false,
+  "format_passed": true/false,
   "lint_passed": true/false,
   "tests_passed": true/false,
   "errors": ["error1", "error2"],
@@ -231,6 +235,7 @@ func extractVerificationResult(content string) *VerificationResult {
 		contentLower := strings.ToLower(content)
 		result.Success = !strings.Contains(contentLower, "fail") && !strings.Contains(contentLower, "error")
 		result.BuildPassed = result.Success
+		result.FormatPassed = result.Success
 		result.LintPassed = result.Success
 		result.TestsPassed = result.Success
 		return result
@@ -465,94 +470,46 @@ func (a *VerificationAgent) formatVerificationToolCall(toolName string, args map
 	}
 }
 
-// formatVerificationFailureFeedback converts a failed verification result into actionable feedback for the LLM.
+// formatVerificationFailureFeedback converts a failed verification result into a user prompt for fixes.
 func (a *VerificationAgent) formatVerificationFailureFeedback(result *VerificationResult, attempt int) string {
 	if result == nil || result.Success {
 		return ""
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("VERIFICATION FAILED (Attempt %d/3)\n\n", attempt))
-	sb.WriteString("The following issues were found during verification. Please fix them:\n\n")
+	sb.WriteString(fmt.Sprintf("VERIFICATION FAILED (Attempt %d/%d)\n\n", attempt, maxVerificationRetries))
 
-	// Build errors
-	if !result.BuildPassed && len(result.Errors) > 0 {
-		sb.WriteString("BUILD ERRORS:\n")
-		for _, err := range result.Errors {
-			if strings.Contains(strings.ToLower(err), "build") ||
-				strings.Contains(strings.ToLower(err), "compile") ||
-				strings.Contains(strings.ToLower(err), "syntax") {
-				sb.WriteString(fmt.Sprintf("- %s\n", err))
-			}
-		}
-		sb.WriteString("\n")
+	hasDetails := false
+	if result.Summary != "" {
+		sb.WriteString("Summary:\n")
+		sb.WriteString(result.Summary)
+		sb.WriteString("\n\n")
+		hasDetails = true
 	}
 
-	// Lint issues (from warnings)
-	if !result.LintPassed && len(result.Warnings) > 0 {
-		sb.WriteString("LINT ISSUES:\n")
+	if len(result.Errors) > 0 {
+		sb.WriteString("Errors:\n")
+		for _, err := range result.Errors {
+			sb.WriteString(fmt.Sprintf("- %s\n", err))
+		}
+		sb.WriteString("\n")
+		hasDetails = true
+	}
+
+	if len(result.Warnings) > 0 {
+		sb.WriteString("Warnings:\n")
 		for _, warn := range result.Warnings {
 			sb.WriteString(fmt.Sprintf("- %s\n", warn))
 		}
 		sb.WriteString("\n")
+		hasDetails = true
 	}
 
-	// Test failures
-	if !result.TestsPassed {
-		sb.WriteString("TEST FAILURES:\n")
-		for _, err := range result.Errors {
-			if strings.Contains(strings.ToLower(err), "test") ||
-				strings.Contains(strings.ToLower(err), "fail") ||
-				strings.Contains(strings.ToLower(err), "assert") {
-				sb.WriteString(fmt.Sprintf("- %s\n", err))
-			}
-		}
-		sb.WriteString("\n")
+	if !hasDetails {
+		sb.WriteString("No verification summary or errors were provided.\n\n")
 	}
 
-	// All other errors not categorized above
-	if len(result.Errors) > 0 {
-		hasUncategorized := false
-		for _, err := range result.Errors {
-			errLower := strings.ToLower(err)
-			if !strings.Contains(errLower, "build") &&
-				!strings.Contains(errLower, "compile") &&
-				!strings.Contains(errLower, "syntax") &&
-				!strings.Contains(errLower, "test") &&
-				!strings.Contains(errLower, "fail") &&
-				!strings.Contains(errLower, "assert") {
-				if !hasUncategorized {
-					sb.WriteString("OTHER ERRORS:\n")
-					hasUncategorized = true
-				}
-				sb.WriteString(fmt.Sprintf("- %s\n", err))
-			}
-		}
-		if hasUncategorized {
-			sb.WriteString("\n")
-		}
-	}
-
-	// Priority guidance
-	sb.WriteString("SUGGESTED FIXES:\n")
-	priority := 1
-	if !result.BuildPassed {
-		sb.WriteString(fmt.Sprintf("%d. Fix build/compilation errors first (these prevent the code from running)\n", priority))
-		if !result.TestsPassed || !result.LintPassed {
-			priority++
-		}
-	}
-	if !result.TestsPassed {
-		sb.WriteString(fmt.Sprintf("%d. Fix failing tests to ensure correctness\n", priority))
-		if !result.LintPassed {
-			priority++
-		}
-	}
-	if !result.LintPassed {
-		sb.WriteString(fmt.Sprintf("%d. Address linting issues for code quality\n", priority))
-	}
-	sb.WriteString("\n")
-	sb.WriteString("Please fix these issues using the available tools (read_file, write_file_diff, etc.).\n")
+	sb.WriteString("Please fix the issues above.\n")
 
 	return sb.String()
 }
@@ -575,6 +532,7 @@ func (a *VerificationAgent) reportResults(result *VerificationResult, progressCb
 
 	// Individual check results
 	sb.WriteString(fmt.Sprintf("- Build: %s\n", statusText(result.BuildPassed)))
+	sb.WriteString(fmt.Sprintf("- Format: %s\n", statusText(result.FormatPassed)))
 	sb.WriteString(fmt.Sprintf("- Lint: %s\n", statusText(result.LintPassed)))
 	sb.WriteString(fmt.Sprintf("- Tests: %s\n", statusText(result.TestsPassed)))
 

@@ -25,6 +25,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"github.com/muesli/reflow/wordwrap"
@@ -39,6 +40,26 @@ const (
 )
 
 var ErrQuitRequested = errors.New("quit requested")
+
+// safeSendError safely sends an error to a channel, handling closed channels
+func safeSendError(ch chan<- error, err error) {
+	defer func() {
+		if recover() != nil {
+			// Channel was closed, ignore the panic
+			logger.Debug("Attempted to send to closed error channel, ignoring")
+		}
+	}()
+
+	if ch != nil {
+		select {
+		case ch <- err:
+			// Successfully sent
+		default:
+			// Channel is full, ignore
+			logger.Debug("Error channel is full, skipping error send")
+		}
+	}
+}
 
 var (
 	titleStyle = lipgloss.NewStyle().
@@ -187,11 +208,16 @@ type Model struct {
 	authorizationDialogOpen bool                             // Is authorization dialog visible
 	authorizationDialog     AuthorizationDialog              // The authorization dialog component
 
+	// Pending handler-based user interactions (requestID -> channels)
+	pendingUserInteractions map[string]pendingUserInteraction
+	userInteractionMu       sync.RWMutex
+
 	// User Question Dialog state
-	userQuestionDialogOpen bool        // Is user question dialog visible
-	userQuestionDialog     tea.Model   // The user question dialog component
-	userQuestionResponse   chan string // Channel to send the answer back
-	userQuestionError      chan error  // Channel to send any error
+	userQuestionDialogOpen  bool        // Is user question dialog visible
+	userQuestionDialog      tea.Model   // The user question dialog component
+	userQuestionResponse    chan string // Channel to send the answer back
+	userQuestionError       chan error  // Channel to send any error
+	activeUserInteractionID string      // Currently active handler-based interaction
 
 	// User interaction handler for actor-based authorization
 	userInteractionHandler *TUIInteractionHandler
@@ -329,6 +355,13 @@ type AuthorizationRequest struct {
 	ResponseChan chan bool // Channel to send approval result
 }
 
+// pendingUserInteraction stores channels for handler-based user interactions
+type pendingUserInteraction struct {
+	requestID string
+	response  chan string
+	err       chan error
+}
+
 // AuthorizationResponseMsg is sent when user approves/denies authorization
 type AuthorizationResponseMsg struct {
 	AuthID   string
@@ -387,21 +420,22 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	}
 
 	m := &Model{
-		textarea:              ta,
-		viewport:              vp,
-		messages:              []message{},
-		currentModel:          currentModel,
-		contextFile:           contextFile,
-		renderer:              renderer,
-		rendererCache:         rendererCache,
-		spinner:               sp,
-		animationsDisabled:    disableAnimations,
-		contextFreePercent:    100,
-		renderWrapWidth:       80,
-		queuedPrompts:         make(map[int][]string),
-		concurrentGens:        make(map[int]bool),
-		pendingAuthorizations: make(map[string]*AuthorizationRequest),
-		authorizationCounter:  0,
+		textarea:                ta,
+		viewport:                vp,
+		messages:                []message{},
+		currentModel:            currentModel,
+		contextFile:             contextFile,
+		renderer:                renderer,
+		rendererCache:           rendererCache,
+		spinner:                 sp,
+		animationsDisabled:      disableAnimations,
+		contextFreePercent:      100,
+		renderWrapWidth:         80,
+		queuedPrompts:           make(map[int][]string),
+		concurrentGens:          make(map[int]bool),
+		pendingAuthorizations:   make(map[string]*AuthorizationRequest),
+		pendingUserInteractions: make(map[string]pendingUserInteraction),
+		authorizationCounter:    0,
 	}
 
 	if width, height, ok := detectTerminalSize(); ok {
@@ -1367,8 +1401,9 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Collect answers based on dialog type
 		var response string
+		var isMultipleChoice bool
 
-		if dialog, ok := m.userQuestionDialog.(UserQuestionDialog); ok {
+		if dialog, ok := m.userQuestionDialog.(*UserQuestionDialog); ok {
 			// Multiple choice dialog
 			answers := dialog.GetAnswers()
 			logger.Debug("Collected %d answers from multiple choice dialog", len(answers))
@@ -1379,12 +1414,27 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			response = formattedAnswers.String()
+			isMultipleChoice = true
 		} else if dialog, ok := m.userQuestionDialog.(UserInputDialog); ok {
 			// Single text input dialog
 			response = dialog.GetAnswer()
 			logger.Debug("Collected answer from single input dialog")
+			isMultipleChoice = false
 		}
 
+		// If this is a handler-based interaction, notify the handler
+		if m.activeUserInteractionID != "" && m.userInteractionHandler != nil {
+			logger.Debug("Sending response to handler for requestID %s", m.activeUserInteractionID)
+			if isMultipleChoice {
+				// Parse the formatted response back into answers map
+				answers := m.parseFormattedAnswers(response)
+				m.userInteractionHandler.HandleMultipleAnswersResponse(m.activeUserInteractionID, answers, false)
+			} else {
+				m.userInteractionHandler.HandleUserInputResponse(m.activeUserInteractionID, response, false)
+			}
+		}
+
+		// Also send response via the legacy channel for backward compatibility
 		// Send response with timeout to prevent blocking indefinitely
 		if response != "" {
 			logger.Debug("Attempting to send user question response: %d bytes", len(response))
@@ -1409,6 +1459,7 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Close dialog
 		m.userQuestionDialogOpen = false
 		m.userQuestionDialog = nil
+		m.activeUserInteractionID = "" // Clear active handler interaction
 
 		// Clear overlay and restore focus to textarea
 		m.SetOverlayActive(false)
@@ -1866,6 +1917,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UserMultipleQuestionsRequestMsg:
 		cmd := m.handleUserMultipleQuestionsRequest(msg)
+		return m, cmd
+
+	// Handler-based user interaction messages
+	case TUIUserInputRequestMsg:
+		// Handler-based single question request
+		logger.Debug("Received TUIUserInputRequestMsg for requestID %s", msg.RequestID)
+		// Create a temporary UserInputRequestMsg for the dialog
+		tempMsg := UserInputRequestMsg{
+			Question: msg.Question,
+			Response: make(chan string, 1),
+			Error:    make(chan error, 1),
+		}
+		// Store the request mapping for later response
+		m.pendingUserInteractionStore(msg.RequestID, tempMsg.Response, tempMsg.Error)
+		cmd := m.handleUserInputRequest(tempMsg)
+		return m, cmd
+
+	case TUIMultipleQuestionsRequestMsg:
+		// Handler-based multiple questions request
+		logger.Debug("Received TUIMultipleQuestionsRequestMsg for requestID %s", msg.RequestID)
+		// Create a temporary UserMultipleQuestionsRequestMsg for the dialog
+		tempMsg := UserMultipleQuestionsRequestMsg{
+			Questions: msg.Questions,
+			Response:  make(chan string, 1),
+			Error:     make(chan error, 1),
+		}
+		// Store the request mapping for later response
+		m.pendingUserInteractionStore(msg.RequestID, tempMsg.Response, tempMsg.Error)
+		cmd := m.handleUserMultipleQuestionsRequest(tempMsg)
 		return m, cmd
 
 	// Tab-specific message handlers for concurrent generation
@@ -2387,7 +2467,7 @@ func (m *Model) processNextQueuedPromptForTab(tabIdx int) tea.Cmd {
 	// Dequeue the next prompt
 	next := queue[0]
 	m.queuedPrompts[tabIdx] = queue[1:]
-	
+
 	// Decrement queued prompt count in session
 	m.sessions[tabIdx].Session.DecrementQueuedUserPromptCount()
 
@@ -3958,6 +4038,36 @@ func (m *Model) RestoreLoadedSession(info *LoadedSessionInfo) {
 	m.updateViewport()
 }
 
+// ResumeLastSession attempts to resume the most recent session for the current workspace
+func (m *Model) ResumeLastSession(ctx context.Context, storageRef *actor.ActorRef) error {
+	if !m.config.AutoResume {
+		logger.Debug("Auto-resume is disabled in config")
+		return nil
+	}
+
+	// Get the most recent session
+	session, err := actor.GetMostRecentSessionViaActor(ctx, storageRef, m.workingDir)
+	if err != nil {
+		logger.Warn("Failed to get most recent session: %v", err)
+		return err
+	}
+
+	if session == nil {
+		logger.Debug("No previous sessions found for auto-resume")
+		return nil
+	}
+
+	logger.Info("Resuming last session: %s (ID: %s, %d messages)", session.Title, session.ID, len(session.GetMessages()))
+
+	// Restore the session in the active tab
+	m.RestoreLoadedSession(&LoadedSessionInfo{
+		Session: session,
+		Name:    session.Title,
+	})
+
+	return nil
+}
+
 // sessionMessagesToTuiMessages converts persisted session messages into the TUI's display format
 func sessionMessagesToTuiMessages(stored []*session.Message) []message {
 	messages := make([]message, 0, len(stored))
@@ -4012,6 +4122,12 @@ func (m *Model) handleUserInputRequest(msg UserInputRequestMsg) tea.Cmd {
 
 // handleUserMultipleQuestionsRequest handles multiple choice question requests
 func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequestMsg) tea.Cmd {
+	if msg.Error == nil {
+		// Create a logger warning if error channel is nil
+		logger.Warn("UserMultipleQuestionsRequestMsg received with nil Error channel")
+		// Return early to prevent panic
+		return nil
+	}
 	logger.Debug("handleUserMultipleQuestionsRequest called, parsing questions")
 
 	// Parse the questions from the formatted string
@@ -4093,10 +4209,9 @@ func (m *Model) handleUserMultipleQuestionsRequest(msg UserMultipleQuestionsRequ
 
 	if len(questions) == 0 {
 		logger.Warn("Failed to parse any questions from multiple choice prompt")
-		select {
-		case msg.Error <- fmt.Errorf("no questions found in formatted prompt"):
-		case <-time.After(5 * time.Second):
-			logger.Error("Timeout sending 'no questions found' error - error channel blocked")
+		// Try to send error message but don't block if channel is closed or nil
+		if msg.Error != nil {
+			safeSendError(msg.Error, fmt.Errorf("no questions found in formatted prompt"))
 		}
 		return nil
 	}
@@ -4210,4 +4325,36 @@ func (m *Model) awaitUserResponse(ctx context.Context, resp <-chan string, errc 
 		logger.Debug("awaitUserResponse context cancelled: %v", ctx.Err())
 		return "", ctx.Err()
 	}
+}
+
+// pendingUserInteractionStore stores a handler-based user interaction for later response
+func (m *Model) pendingUserInteractionStore(requestID string, response chan string, err chan error) {
+	m.userInteractionMu.Lock()
+	defer m.userInteractionMu.Unlock()
+	m.pendingUserInteractions[requestID] = pendingUserInteraction{
+		requestID: requestID,
+		response:  response,
+		err:       err,
+	}
+	m.activeUserInteractionID = requestID
+	logger.Debug("Stored pending user interaction for requestID %s", requestID)
+}
+
+// parseFormattedAnswers parses the formatted answers string back into a map
+func (m *Model) parseFormattedAnswers(formatted string) map[string]string {
+	answers := make(map[string]string)
+	lines := strings.Split(formatted, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Format: "Question 1: answer"
+		if strings.HasPrefix(line, "Question ") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				questionNum := strings.TrimSpace(strings.TrimPrefix(parts[0], "Question"))
+				answer := strings.TrimSpace(parts[1])
+				answers[questionNum] = answer
+			}
+		}
+	}
+	return answers
 }

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,6 +249,175 @@ func TestAuthorizationActorAuthorizeSandboxDomainAllowedByOptions(t *testing.T) 
 	}
 	if decision.RequiresUserInput {
 		t.Fatalf("preauthorized domain should not require user input")
+	}
+}
+
+func TestAuthorizationActorAuthorizeReplaceFileExistingNotRead(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	if err := mockFS.WriteFile(ctx, "existing.txt", []byte("original content")); err != nil {
+		t.Fatalf("write file failed: %v", err)
+	}
+
+	decision, err := actor.authorize(ctx, ToolNameReplaceFile, map[string]interface{}{
+		"path":    "existing.txt",
+		"content": "new content",
+	})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected replace_file to be blocked when file not read")
+	}
+	if !decision.RequiresUserInput {
+		t.Fatalf("expected existing unread file to require user input")
+	}
+	if decision.Reason == "" {
+		t.Fatalf("expected reason explaining denial")
+	}
+}
+
+func TestAuthorizationActorAuthorizeReplaceFileMissingFileDenied(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameReplaceFile, map[string]interface{}{
+		"path":    "missing.txt",
+		"content": "new content",
+	})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected replace_file to be denied for missing file")
+	}
+	if decision.Reason == "" {
+		t.Fatalf("expected denial reason for missing file")
+	}
+	// Should mention create_file in the error
+	if !strings.Contains(decision.Reason, "create_file") {
+		t.Fatalf("expected reason to mention create_file, got: %s", decision.Reason)
+	}
+}
+
+func TestAuthorizationActorAuthorizeReplaceFileExistingReadAllowed(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	if err := mockFS.WriteFile(ctx, "existing.txt", []byte("original content")); err != nil {
+		t.Fatalf("write file failed: %v", err)
+	}
+	sess.TrackFileRead("existing.txt", "original content")
+
+	decision, err := actor.authorize(ctx, ToolNameReplaceFile, map[string]interface{}{
+		"path":    "existing.txt",
+		"content": "new content",
+	})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if !decision.Allowed {
+		t.Fatalf("expected replace_file to be allowed after file was read")
+	}
+	if decision.RequiresUserInput {
+		t.Fatalf("no user input should be required once file was read")
+	}
+}
+
+func TestAuthorizationActorAuthorizeReplaceFilePreauthorizedFile(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+
+	if err := mockFS.WriteFile(ctx, "allowed.txt", []byte("content")); err != nil {
+		t.Fatalf("write file failed: %v", err)
+	}
+
+	opts := &AuthorizationOptions{
+		AllowedFiles: []string{"allowed.txt"},
+	}
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
+
+	decision, err := actor.authorize(ctx, ToolNameReplaceFile, map[string]interface{}{
+		"path":    "allowed.txt",
+		"content": "new content",
+	})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil || !decision.Allowed {
+		t.Fatalf("expected preauthorized file replace to be allowed")
+	}
+	if decision.RequiresUserInput {
+		t.Fatalf("preauthorized file replace should not require user input")
+	}
+}
+
+func TestAuthorizationActorAuthorizeReplaceFileMissingPath(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameReplaceFile, map[string]interface{}{
+		"content": "new content",
+	})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected replace_file to be denied for missing path")
+	}
+	if decision.Reason != "path is required" {
+		t.Fatalf("expected 'path is required' error, got: %s", decision.Reason)
+	}
+}
+
+func TestAuthorizationActorAuthorizeReplaceFilePreauthorizedDir(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+
+	if err := mockFS.WriteFile(ctx, "outside/data.txt", []byte("content")); err != nil {
+		t.Fatalf("write file failed: %v", err)
+	}
+
+	opts := &AuthorizationOptions{
+		AllowedDirs: []string{"outside"},
+	}
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, opts)
+
+	decision, err := actor.authorize(ctx, ToolNameReplaceFile, map[string]interface{}{
+		"path":    "outside/data.txt",
+		"content": "new content",
+	})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil || !decision.Allowed {
+		t.Fatalf("expected preauthorized directory replace to be allowed")
+	}
+	if decision.RequiresUserInput {
+		t.Fatalf("preauthorized directory replace should not require user input")
 	}
 }
 

@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudflare/ahocorasick"
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/secrets"
+	"github.com/codefionn/scriptschnell/internal/stringsearch"
 )
 
 // Provider represents an LLM provider
@@ -85,7 +85,7 @@ type Config struct {
 type Manager struct {
 	config        *Config
 	configPath    string
-	matcher       *ahocorasick.Matcher
+	matcher       stringsearch.StringMatcher
 	cacheActorRef *actor.ActorRef
 	mu            sync.RWMutex
 	password      string
@@ -147,28 +147,57 @@ func (m *Manager) Load() error {
 		}
 
 		if len(provider.Models) > 0 {
+			// Persist embedded models to cache, but don't keep in memory during startup
 			if err := m.saveProviderModels(name, provider.Models); err != nil {
 				logger.Warn("provider: failed to persist embedded models for %s: %v", name, err)
 			}
-			continue
+			provider.Models = nil // Clear from memory - will be lazy-loaded
 		}
-
-		models, err := m.loadProviderModels(name)
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				logger.Warn("provider: failed to load cached models for %s: %v", name, err)
-			}
-			continue
-		}
-		provider.Models = models
 	}
 
 	m.mu.Lock()
 	m.config = &config
 	m.mu.Unlock()
 
-	m.rebuildMatcher()
+	// Don't rebuild matcher at startup - will be done on first use
 	return nil
+}
+
+// ensureModelsLoaded lazily loads models for a provider if not already loaded
+func (m *Manager) ensureModelsLoaded(providerName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	provider, ok := m.config.Providers[providerName]
+	if !ok || provider == nil {
+		return fmt.Errorf("provider not found: %s", providerName)
+	}
+
+	// Already loaded
+	if len(provider.Models) > 0 {
+		return nil
+	}
+
+	// Load from cache
+	models, err := m.loadProviderModels(providerName)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			logger.Warn("provider: failed to load cached models for %s: %v", providerName, err)
+		}
+		return err
+	}
+
+	provider.Models = models
+	return nil
+}
+
+// ensureMatcherBuilt ensures the search matcher is built
+func (m *Manager) ensureMatcherBuilt() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.matcher == nil {
+		m.rebuildMatcher()
+	}
 }
 
 // Save saves configuration to disk
@@ -430,6 +459,15 @@ func (m *Manager) GetProvider(name string) (*Provider, bool) {
 	return p, ok
 }
 
+// GetProviderWithModels gets a provider by name and ensures models are loaded
+func (m *Manager) GetProviderWithModels(name string) (*Provider, bool) {
+	_ = m.ensureModelsLoaded(name)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.config.Providers[name]
+	return p, ok
+}
+
 // ListProviders lists all providers
 func (m *Manager) ListProviders() []*Provider {
 	m.mu.RLock()
@@ -556,6 +594,8 @@ func (m *Manager) GetPlanningModel() string {
 
 // SearchModels searches for models using Aho-Corasick algorithm
 func (m *Manager) SearchModels(query string) []*Model {
+	m.ensureMatcherBuilt()
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -568,6 +608,18 @@ func (m *Manager) SearchModels(query string) []*Model {
 
 	// Collect all models and search
 	for _, provider := range m.config.Providers {
+		// Ensure models are loaded for this provider
+		if len(provider.Models) == 0 {
+			// Release lock temporarily to load models
+			m.mu.RUnlock()
+			_ = m.ensureModelsLoaded(provider.Name)
+			m.mu.RLock()
+			// Get provider again since it may have been reloaded
+			p := m.config.Providers[provider.Name]
+			if p != nil {
+				provider = p
+			}
+		}
 		for _, model := range provider.Models {
 			// Check if query matches model ID or name
 			modelText := strings.ToLower(model.ID + " " + model.Name + " " + model.Description)
@@ -582,6 +634,8 @@ func (m *Manager) SearchModels(query string) []*Model {
 
 // ListAllModels returns all available models
 func (m *Manager) ListAllModels() []*Model {
+	m.ensureMatcherBuilt()
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -816,7 +870,7 @@ func (m *Manager) rebuildMatcher() {
 		return
 	}
 
-	m.matcher = ahocorasick.NewStringMatcher(terms)
+	m.matcher = stringsearch.NewStringMatcher(terms)
 }
 
 func (m *Manager) saveProviderModels(providerName string, models []*Model) error {

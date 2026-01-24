@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -39,6 +40,8 @@ type SandboxTool struct {
 	progressCb      progress.Callback
 	detector        secretdetect.Detector
 	featureFlags    FeatureFlagsProvider // Interface to check feature flags
+	compactor       *OutputCompactor     // Output compaction handler
+	contextWindow   int                  // Model's context window in tokens
 }
 
 func NewSandboxTool(workingDir, tempDir string) *SandboxTool {
@@ -83,6 +86,10 @@ func (t *SandboxTool) SetAuthorizer(auth Authorizer) {
 // SetSummarizeClient sets the summarization LLM client
 func (t *SandboxTool) SetSummarizeClient(client llm.Client) {
 	t.summarizeClient = client
+	// Also update the compactor if it exists
+	if t.compactor != nil {
+		t.compactor.SetSummarizeClient(client)
+	}
 }
 
 // SetSecretDetector sets the secret detector for scanning web requests
@@ -103,6 +110,30 @@ func (t *SandboxTool) SetProgressCallback(cb progress.Callback) {
 // SetShellExecutor sets the shell executor for command execution
 func (t *SandboxTool) SetShellExecutor(executor ShellExecutor) {
 	t.shellExecutor = executor
+}
+
+// SetCompactionConfig sets the output compaction configuration
+func (t *SandboxTool) SetCompactionConfig(compactionConfig config.SandboxOutputCompactionConfig) {
+	t.compactor = NewOutputCompactor(compactionConfig, t.contextWindow)
+	if t.summarizeClient != nil {
+		t.compactor.SetSummarizeClient(t.summarizeClient)
+	}
+}
+
+// SetContextWindow sets the model's context window in tokens for compaction decisions
+func (t *SandboxTool) SetContextWindow(contextWindow int) {
+	t.contextWindow = contextWindow
+	if t.compactor != nil {
+		// Update compactor with new context window
+		*t.compactor = *NewOutputCompactor(config.SandboxOutputCompactionConfig{
+			Enabled:              t.compactor.compactionConfig.Enabled,
+			ContextWindowPercent: t.compactor.compactionConfig.ContextWindowPercent,
+			ChunkSize:            t.compactor.compactionConfig.ChunkSize,
+		}, contextWindow)
+		if t.summarizeClient != nil {
+			t.compactor.SetSummarizeClient(t.summarizeClient)
+		}
+	}
 }
 
 // ListFilesInDir returns the entries inside the provided directory.
@@ -697,6 +728,60 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 	if err != nil {
 		sendStatus(fmt.Sprintf("✗ Sandbox failed: %v", err))
 		return &ToolResult{Error: err.Error()}
+	}
+
+	// Apply output compaction if enabled and needed
+	if t.compactor != nil {
+		if resMap, ok := result.(map[string]interface{}); ok {
+			// Compact stdout if present and large enough
+			if stdout, hasStdout := resMap["stdout"]; hasStdout {
+				if stdoutStr, ok := stdout.(string); ok && t.compactor.ShouldCompact(stdoutStr) {
+					sendProgress(progress.Update{
+						Message:    "→ Compacting large sandbox output...",
+						AddNewLine: true,
+						Mode:       progress.ReportJustStatus,
+						Ephemeral:  true,
+					})
+					compactResult, err := t.compactor.Compact(ctx, stdoutStr)
+					if err != nil {
+						logger.Debug("sandbox compaction failed: %v", err)
+					} else if compactResult.WasCompacted {
+						resMap["stdout"] = compactResult.Output
+						// Add compaction metadata to execution metadata
+						if metaVal, ok := resMap["_execution_metadata"]; ok {
+							if metaObj, ok := metaVal.(*ExecutionMetadata); ok {
+								if metaObj.Details == nil {
+									metaObj.Details = make(map[string]interface{})
+								}
+								metaObj.Details["output_compaction"] = map[string]interface{}{
+									"was_compacted":  compactResult.WasCompacted,
+									"original_size":  compactResult.OriginalSize,
+									"compacted_size": compactResult.CompactedSize,
+									"summary_count":  compactResult.SummaryCount,
+									"chunks_kept":    compactResult.ChunksKept,
+								}
+							}
+						}
+						sendStatus(fmt.Sprintf("✓ Output compacted from %d to %d chars", compactResult.OriginalSize, compactResult.CompactedSize))
+					}
+				}
+			}
+
+			// Compact stderr if present and large enough
+			if stderr, hasStderr := resMap["stderr"]; hasStderr {
+				if stderrStr, ok := stderr.(string); ok && t.compactor.ShouldCompact(stderrStr) {
+					compactResult, err := t.compactor.Compact(ctx, stderrStr)
+					if err != nil {
+						logger.Debug("sandbox stderr compaction failed: %v", err)
+					} else if compactResult.WasCompacted {
+						resMap["stderr"] = compactResult.Output
+					}
+				}
+			}
+
+			// Update result with possibly compacted values
+			result = resMap
+		}
 	}
 
 	var (

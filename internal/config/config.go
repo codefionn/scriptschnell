@@ -89,30 +89,38 @@ type AutoSaveConfig struct {
 	MaxConcurrentSaves  int  `json:"max_concurrent_saves"`
 }
 
+// SandboxOutputCompactionConfig holds configuration for sandbox output compaction
+type SandboxOutputCompactionConfig struct {
+	Enabled              bool    `json:"enabled"`
+	ContextWindowPercent float64 `json:"context_window_percent"` // Compaction threshold as percentage of context window (e.g., 0.1 for 10%)
+	ChunkSize            int     `json:"chunk_size"`             // Size of each chunk in characters
+}
+
 // Config represents application configuration
 type Config struct {
-	WorkingDir         string                        `json:"working_dir"`
-	CacheTTL           int                           `json:"cache_ttl_seconds"`
-	MaxCacheEntries    int                           `json:"max_cache_entries"`
-	DefaultTimeout     int                           `json:"default_timeout_seconds"`
-	TempDir            string                        `json:"-"`
-	Temperature        float64                       `json:"temperature"`
-	MaxTokens          int                           `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
-	ProviderConfigPath string                        `json:"-"`
-	DisableAnimations  bool                          `json:"disable_animations"`
-	LogLevel           string                        `json:"log_level"` // debug, info, warn, error, none
-	LogPath            string                        `json:"-"`
-	AuthorizedDomains  map[string]bool               `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
-	AuthorizedCommands map[string]bool               `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
-	Search             SearchConfig                  `json:"search"`                        // Web search provider configuration
-	MCP                MCPConfig                     `json:"mcp,omitempty"`                 // Custom MCP server configuration
-	Secrets            SecretsSettings               `json:"secrets,omitempty"`             // Encryption settings
-	EnablePromptCache  bool                          `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI). Disabled by default as some providers like Mistral don't support cache_control ephemeral
-	PromptCacheTTL     string                        `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
-	ContextDirectories map[string][]string           `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
-	OpenTabs           map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
-	AutoSave           AutoSaveConfig                `json:"auto_save,omitempty"`           // Session auto-save configuration
-	AutoResume         bool                          `json:"auto_resume"`                   // Automatically resume last session on startup
+	WorkingDir              string                        `json:"working_dir"`
+	CacheTTL                int                           `json:"cache_ttl_seconds"`
+	MaxCacheEntries         int                           `json:"max_cache_entries"`
+	DefaultTimeout          int                           `json:"default_timeout_seconds"`
+	TempDir                 string                        `json:"-"`
+	Temperature             float64                       `json:"temperature"`
+	MaxTokens               int                           `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
+	ProviderConfigPath      string                        `json:"-"`
+	DisableAnimations       bool                          `json:"disable_animations"`
+	LogLevel                string                        `json:"log_level"` // debug, info, warn, error, none
+	LogPath                 string                        `json:"-"`
+	AuthorizedDomains       map[string]bool               `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
+	AuthorizedCommands      map[string]bool               `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
+	Search                  SearchConfig                  `json:"search"`                        // Web search provider configuration
+	MCP                     MCPConfig                     `json:"mcp,omitempty"`                 // Custom MCP server configuration
+	Secrets                 SecretsSettings               `json:"secrets,omitempty"`             // Encryption settings
+	EnablePromptCache       bool                          `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI). Disabled by default as some providers like Mistral don't support cache_control ephemeral
+	PromptCacheTTL          string                        `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
+	ContextDirectories      map[string][]string           `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
+	OpenTabs                map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
+	AutoSave                AutoSaveConfig                `json:"auto_save,omitempty"`           // Session auto-save configuration
+	AutoResume              bool                          `json:"auto_resume"`                   // Automatically resume last session on startup
+	SandboxOutputCompaction SandboxOutputCompactionConfig `json:"sandbox_output_compaction"`     // Sandbox output compaction configuration
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
 	secretsPassword string       `json:"-"`
@@ -206,6 +214,11 @@ func DefaultConfig() *Config {
 			MaxConcurrentSaves:  1,    // Only one save operation at a time
 		},
 		AutoResume: false, // Disable auto-resume by default for now
+		SandboxOutputCompaction: SandboxOutputCompactionConfig{
+			Enabled:              true,
+			ContextWindowPercent: 0.1, // 10% of context window
+			ChunkSize:            50000,
+		},
 	}
 }
 

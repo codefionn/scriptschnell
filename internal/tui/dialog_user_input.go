@@ -54,13 +54,13 @@ func (d UserInputDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		// Handle window resize
-		d.width = msg.Width
-		d.height = msg.Height
 		// Update textarea width to be responsive
 		// Use most of the dialog width (85%) with max of 100 chars
-		dialogWidth := min(max(80, d.width*90/100), 120)
+		dialogWidth := min(max(80, msg.Width*90/100), 120)
 		textareaWidth := min(dialogWidth-8, 100) // Account for padding and border
 		d.textarea.SetWidth(textareaWidth)
+		d.width = msg.Width
+		d.height = msg.Height
 		return d, cmd
 	}
 

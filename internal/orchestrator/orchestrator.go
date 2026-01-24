@@ -98,6 +98,8 @@ type Orchestrator struct {
 	planningAgent          *planning.PlanningAgent
 	planningAgentCancel    context.CancelFunc
 	featureFlags           *features.FeatureFlags
+	compactionAttemptCount int // Tracks compaction attempts for current request
+	compactionAttemptMu    sync.Mutex
 	userInputCb            UserInputCallback
 	userInteractionRef     *actor.ActorRef
 	userInteractionCancel  context.CancelFunc
@@ -113,6 +115,32 @@ const (
 	deepSeekAutoContinueMaxAttempts = 12
 	errorRetryMaxAttempts           = 5
 	preconnectThrottle              = 2 * time.Second
+)
+
+// Multi-stage compaction configuration
+const (
+	// Compaction threshold: trigger compaction when context usage exceeds this percentage
+	compactionThresholdPercent = 90
+	// Re-compaction threshold: after first compaction, if still above this, retry with forceful prompt
+	recompactionThresholdPercent = 80
+	// Maximum number of compaction attempts for a single request
+	maxCompactionAttempts = 3
+	// Max summary bytes for each compaction attempt (decreases with each attempt for more aggressive summarization)
+	compactionMaxBytesAttempt1 = 16_384 // 16KB
+	compactionMaxBytesAttempt2 = 8_192  // 8KB
+	compactionMaxBytesAttempt3 = 4_096  // 4KB
+)
+
+// Compaction prompts for each attempt
+var (
+	// Standard compaction prompt - balanced approach
+	compactionPromptStandard = "Summarize the earlier part of this conversation so the assistant can continue later without losing context. Capture tasks in progress, key decisions, file operations, and remaining follow-ups. Use concise bullet points; preserve critical commands, file paths, and TODOs."
+
+	// Forceful compaction prompt - maximum brevity
+	compactionPromptForceful = "EXTREMELY CONCISE SUMMARY REQUIRED. Summarize this conversation in the fewest words possible while preserving only the ESSENTIAL information needed to continue work. Focus on: current task, completed actions, and next steps only. Use ultra-compact bullet points with no explanations or background. Omit all non-critical details. Target: under 50 words per major topic."
+
+	// Extreme compaction prompt - minimal viable summary
+	compactionPromptExtreme = "MINIMAL SUMMARY - ABSOLUTE BREVITY. Create the smallest possible summary preserving only: (1) current primary task, (2) any completed file operations with paths, (3) immediate next step. Use single words or short phrases only. No sentences. No explanations. No background. Maximum 5 bullet points total. Each bullet maximum 10 words."
 )
 
 var toolCallValidationRegex = regexp.MustCompile(`(?i)tool call validation failed.*?missing required parameter ['"]?([^'"]+)['"]?.*?in ['"]?([^'"]+)['"]?(?: function call)?`)
@@ -1118,6 +1146,21 @@ func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
 		sandboxTool.SetAuthorizer(o.authorizer)
 	}
 	sandboxTool.SetSummarizeClient(o.summarizeClient)
+	// Set output compaction configuration
+	sandboxTool.SetCompactionConfig(o.config.SandboxOutputCompaction)
+	// Set context window from orchestration model for compaction decisions
+	if o.orchestrationClient != nil {
+		modelID := o.orchestrationClient.GetModelName()
+		contextWindow := o.providerMgr.GetModelContextWindow(modelID)
+		if contextWindow > 0 {
+			sandboxTool.SetContextWindow(contextWindow)
+		} else {
+			// Fallback to maxTokens from config if model info not available
+			sandboxTool.SetContextWindow(o.config.MaxTokens)
+		}
+	} else if o.config.MaxTokens > 0 {
+		sandboxTool.SetContextWindow(o.config.MaxTokens)
+	}
 	// Set secret detector and feature flags for fetch requests
 	sandboxTool.SetSecretDetector(secretdetect.NewDetector())
 	sandboxTool.SetFeatureFlags(o.featureFlags)
@@ -1943,6 +1986,32 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 				logger.Info("Context size exceeded, triggering forced compaction: %s", ctxSizeErr.reason)
 				sendStatus("Compacting context...")
 				o.forceCompactContext(modelID, systemPrompt, sessionMessages, progressCallback, contextCallback)
+
+				// Check if compaction was effective by estimating context size after compaction
+				currentMessages := o.session.GetMessages()
+				// Add system prompt to estimate properly
+				fullMessages := make([]*session.Message, len(currentMessages)+1)
+				fullMessages[0] = &session.Message{Role: "system", Content: systemPrompt}
+				copy(fullMessages[1:], currentMessages)
+				newTotalTokens, _, _ := estimateContextTokens(modelID, "", fullMessages)
+				contextWindow := o.getContextWindow(modelID)
+
+				// If still exceeding re-compaction threshold, try again with more forceful prompt
+				if contextWindow > 0 && (newTotalTokens*100/contextWindow) >= recompactionThresholdPercent {
+					currentAttempt := o.getCurrentCompactionAttempt()
+					if currentAttempt < maxCompactionAttempts {
+						logger.Info("Compaction attempt %d insufficient (%d/%d tokens, %d%%), triggering re-compaction...",
+							currentAttempt, newTotalTokens, contextWindow, newTotalTokens*100/contextWindow)
+						sendStatus(fmt.Sprintf("Re-compacting (attempt %d/%d)...", currentAttempt+1, maxCompactionAttempts))
+						o.forceCompactContext(modelID, systemPrompt, o.session.GetMessages(), progressCallback, contextCallback)
+					} else {
+						logger.Warn("Reached max compaction attempts (%d), context may still be too large", maxCompactionAttempts)
+					}
+				}
+
+				// Reset compaction attempt counter after finishing
+				o.resetCompactionAttempts()
+
 				// Continue to retry with compacted context
 				continue
 			}
@@ -2791,7 +2860,7 @@ func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, session
 		return
 	}
 
-	if totalTokens*100/contextWindow < 90 {
+	if totalTokens*100/contextWindow < compactionThresholdPercent {
 		return
 	}
 
@@ -2831,6 +2900,12 @@ func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, session
 }
 
 func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallback ContextUsageCallback, messages []*session.Message, progressCallback progress.Callback) {
+	o.compactContextWithAttempt(modelID, systemPrompt, contextCallback, messages, progressCallback, 1)
+}
+
+// compactContextWithAttempt performs compaction with a specific attempt number,
+// using increasingly forceful prompts for subsequent attempts.
+func (o *Orchestrator) compactContextWithAttempt(modelID, systemPrompt string, contextCallback ContextUsageCallback, messages []*session.Message, progressCallback progress.Callback, attemptNumber int) {
 	defer func() {
 		o.compactionMu.Lock()
 		o.compactionInProgress = false
@@ -2841,11 +2916,45 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 		return
 	}
 
+	// Clamp attempt number to valid range
+	if attemptNumber < 1 {
+		attemptNumber = 1
+	}
+	if attemptNumber > maxCompactionAttempts {
+		attemptNumber = maxCompactionAttempts
+	}
+
 	contextWindow := o.getContextWindow(modelID)
 	_, perMessageTokens, _ := estimateContextTokens(modelID, "", messages)
 	latestUserPrompt := findLatestUserPrompt(o.session.GetMessages())
 
 	summary := ""
+
+	// Determine prompt and max bytes based on attempt number
+	var basePrompt string
+	var maxBytes int
+	var attemptDesc string
+
+	switch attemptNumber {
+	case 1:
+		basePrompt = compactionPromptStandard
+		maxBytes = compactionMaxBytesAttempt1
+		attemptDesc = "standard"
+	case 2:
+		basePrompt = compactionPromptForceful
+		maxBytes = compactionMaxBytesAttempt2
+		attemptDesc = "forceful"
+	case 3:
+		basePrompt = compactionPromptExtreme
+		maxBytes = compactionMaxBytesAttempt3
+		attemptDesc = "extreme"
+	default:
+		basePrompt = compactionPromptExtreme
+		maxBytes = compactionMaxBytesAttempt3
+		attemptDesc = "extreme"
+	}
+
+	logger.Info("compaction: attempt %d/%d using %s prompt (max %d bytes)", attemptNumber, maxCompactionAttempts, attemptDesc, maxBytes)
 
 	// Use the abstracted chunked summarizer
 	if o.summarizeClient != nil {
@@ -2857,20 +2966,23 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 
 		// Summarize with automatic chunking
 		result, err := chunkedSummarizer.Summarize(context.Background(), conversationContent, summarizer.SummarizeOptions{
-			BasePrompt: "Summarize the earlier part of this conversation so the assistant can continue later without losing context. Capture tasks in progress, key decisions, file operations, and remaining follow-ups. Use concise bullet points; preserve critical commands, file paths, and TODOs.",
-			MaxBytes:   16_384,
+			BasePrompt: basePrompt,
+			MaxBytes:   maxBytes,
 			ProgressCallback: func(status string) {
-				logger.Debug("compaction: %s", status)
+				logger.Debug("compaction[%d]: %s", attemptNumber, status)
 			},
 		})
 
 		if err != nil {
-			logger.Warn("Context compaction summary failed: %v", err)
+			logger.Warn("compaction[%d]: summary failed: %v", attemptNumber, err)
 			summary = fallbackConversationSummary(messages)
 		} else {
 			summary = strings.TrimSpace(result.Summary)
-			logger.Debug("compaction: summarized %d messages using %d chunks, %d total tokens", len(messages), result.ChunksUsed, result.TotalTokens)
+			logger.Info("compaction[%d]: summarized %d messages using %d chunks, %d total tokens, %d chars output",
+				attemptNumber, len(messages), result.ChunksUsed, result.TotalTokens, len(summary))
 		}
+	} else {
+		summary = fallbackConversationSummary(messages)
 	}
 
 	if summary == "" {
@@ -2881,7 +2993,15 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 		return
 	}
 
-	summaryContent := fmt.Sprintf("Summary of earlier context (auto-compacted):\n%s", summary)
+	// Update summary content to indicate attempt number if it's a retry
+	var summaryLabel string
+	if attemptNumber == 1 {
+		summaryLabel = "auto-compacted"
+	} else {
+		summaryLabel = fmt.Sprintf("auto-compacted (attempt %d/%d)", attemptNumber, maxCompactionAttempts)
+	}
+
+	summaryContent := fmt.Sprintf("Summary of earlier context (%s):\n%s", summaryLabel, summary)
 	userSection := buildUserCompactionSection(messages, perMessageTokens, contextWindow, latestUserPrompt)
 	if userSection != "" {
 		summaryContent = fmt.Sprintf("%s\n\n%s", summaryContent, userSection)
@@ -2894,13 +3014,21 @@ func (o *Orchestrator) compactContext(modelID, systemPrompt string, contextCallb
 
 	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
+	// Update progress message based on attempt number
+	var progressMsg string
+	if attemptNumber == 1 {
+		progressMsg = "\n🧹 Auto-compacted earlier context.\n"
+	} else {
+		progressMsg = fmt.Sprintf("\n🧹 Auto-compacted earlier context (attempt %d/%d).\n", attemptNumber, maxCompactionAttempts)
+	}
+
 	dispatchProgress(progressCallback, progress.Update{
-		Message: "\n🧹 Auto-compacted earlier context.\n",
+		Message: progressMsg,
 	})
 }
 
-// forceCompactContext runs compaction synchronously when context size is exceeded
-// This is more aggressive than maybeCompactContext - it compacts 60% of messages
+// forceCompactContext runs compaction synchronously when context size is exceeded.
+// It uses multi-stage compaction with increasingly forceful prompts if needed.
 func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, sessionMessages []*session.Message, progressCallback progress.Callback, contextCallback ContextUsageCallback) {
 	if len(sessionMessages) < 4 {
 		logger.Debug("forceCompactContext: not enough messages to compact (%d)", len(sessionMessages))
@@ -2955,30 +3083,62 @@ func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, session
 	messagesCopy := append([]*session.Message(nil), sessionMessages[:prefixCount]...)
 	logger.Info("forceCompactContext: compacting %d messages", len(messagesCopy))
 
-	// Run compaction synchronously
+	// Run compaction synchronously with attempt-based retry
 	contextWindow := o.getContextWindow(modelID)
 	latestUserPrompt := findLatestUserPrompt(o.session.GetMessages())
 
 	summary := ""
 
+	// Use increasing forceful prompts based on attempt count
+	o.compactionAttemptMu.Lock()
+	attemptNum := o.compactionAttemptCount + 1
+	o.compactionAttemptMu.Unlock()
+
 	if o.summarizeClient != nil {
 		conversationContent := buildConversationContent(messagesCopy)
 		chunkedSummarizer := summarizer.NewChunkedSummarizer(o.summarizeClient)
 
+		// Determine prompt and max bytes based on attempt number
+		var basePrompt string
+		var maxBytes int
+		var attemptDesc string
+
+		switch attemptNum {
+		case 1:
+			basePrompt = compactionPromptStandard
+			maxBytes = compactionMaxBytesAttempt1
+			attemptDesc = "standard"
+		case 2:
+			basePrompt = compactionPromptForceful
+			maxBytes = compactionMaxBytesAttempt2
+			attemptDesc = "forceful"
+		case 3:
+			basePrompt = compactionPromptExtreme
+			maxBytes = compactionMaxBytesAttempt3
+			attemptDesc = "extreme"
+		default:
+			basePrompt = compactionPromptExtreme
+			maxBytes = compactionMaxBytesAttempt3
+			attemptDesc = "extreme"
+		}
+
+		logger.Info("forceCompactContext: attempt %d/%d using %s prompt (max %d bytes)", attemptNum, maxCompactionAttempts, attemptDesc, maxBytes)
+
 		result, err := chunkedSummarizer.Summarize(context.Background(), conversationContent, summarizer.SummarizeOptions{
-			BasePrompt: "Summarize the earlier part of this conversation so the assistant can continue later without losing context. Capture tasks in progress, key decisions, file operations, and remaining follow-ups. Use concise bullet points; preserve critical commands, file paths, and TODOs.",
-			MaxBytes:   16_384,
+			BasePrompt: basePrompt,
+			MaxBytes:   maxBytes,
 			ProgressCallback: func(status string) {
-				logger.Debug("forceCompactContext: %s", status)
+				logger.Debug("forceCompactContext[%d]: %s", attemptNum, status)
 			},
 		})
 
 		if err != nil {
-			logger.Warn("forceCompactContext: summary failed: %v", err)
+			logger.Warn("forceCompactContext[%d]: summary failed: %v", attemptNum, err)
 			summary = fallbackConversationSummary(messagesCopy)
 		} else {
 			summary = strings.TrimSpace(result.Summary)
-			logger.Debug("forceCompactContext: summarized %d messages using %d chunks", len(messagesCopy), result.ChunksUsed)
+			logger.Info("forceCompactContext[%d]: summarized %d messages using %d chunks, %d total tokens, %d chars output",
+				attemptNum, len(messagesCopy), result.ChunksUsed, result.TotalTokens, len(summary))
 		}
 	}
 
@@ -2991,7 +3151,20 @@ func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, session
 		return
 	}
 
-	summaryContent := fmt.Sprintf("Summary of earlier context (force-compacted due to context size limit):\n%s", summary)
+	// Update compaction attempt counter
+	o.compactionAttemptMu.Lock()
+	o.compactionAttemptCount = attemptNum
+	o.compactionAttemptMu.Unlock()
+
+	// Update summary content to indicate attempt number if it's a retry
+	var summaryLabel string
+	if attemptNum == 1 {
+		summaryLabel = "force-compacted due to context size limit"
+	} else {
+		summaryLabel = fmt.Sprintf("force-compacted (attempt %d/%d) due to context size limit", attemptNum, maxCompactionAttempts)
+	}
+
+	summaryContent := fmt.Sprintf("Summary of earlier context (%s):\n%s", summaryLabel, summary)
 	userSection := buildUserCompactionSection(messagesCopy, perMessageTokens, contextWindow, latestUserPrompt)
 	if userSection != "" {
 		summaryContent = fmt.Sprintf("%s\n\n%s", summaryContent, userSection)
@@ -3004,11 +3177,19 @@ func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, session
 
 	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
+	// Update progress message based on attempt number
+	var progressMsg string
+	if attemptNum == 1 {
+		progressMsg = "\n🧹 Force-compacted context due to size limit.\n"
+	} else {
+		progressMsg = fmt.Sprintf("\n🧹 Force-compacted context (attempt %d/%d) due to size limit.\n", attemptNum, maxCompactionAttempts)
+	}
+
 	dispatchProgress(progressCallback, progress.Update{
-		Message: "\n🧹 Force-compacted context due to size limit.\n",
+		Message: progressMsg,
 	})
 
-	logger.Info("forceCompactContext: completed successfully")
+	logger.Info("forceCompactContext: completed successfully (attempt %d)", attemptNum)
 }
 
 func (o *Orchestrator) dispatchContextUsage(modelID string, totalTokens int, callback ContextUsageCallback) {
@@ -3064,6 +3245,20 @@ func (o *Orchestrator) getContextWindow(modelID string) int {
 
 	// Fallback to default context window
 	return 8192
+}
+
+// getCurrentCompactionAttempt returns the current compaction attempt number
+func (o *Orchestrator) getCurrentCompactionAttempt() int {
+	o.compactionAttemptMu.Lock()
+	defer o.compactionAttemptMu.Unlock()
+	return o.compactionAttemptCount
+}
+
+// resetCompactionAttempts resets the compaction attempt counter
+func (o *Orchestrator) resetCompactionAttempts() {
+	o.compactionAttemptMu.Lock()
+	o.compactionAttemptCount = 0
+	o.compactionAttemptMu.Unlock()
 }
 
 // processOpenRouterUsage processes and sends OpenRouter usage data to the callback

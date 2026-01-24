@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,6 +32,7 @@ type UserQuestionDialog struct {
 	current   int
 	width     int
 	height    int
+	mu        sync.Mutex // Protects concurrent access to answers
 }
 
 type QuestionWithOptions struct {
@@ -77,7 +79,7 @@ func NewUserQuestionDialog(questions []QuestionWithOptions) *UserQuestionDialog 
 	}
 }
 
-func (d UserQuestionDialog) Init() tea.Cmd {
+func (d *UserQuestionDialog) Init() tea.Cmd {
 	return nil
 }
 
@@ -141,7 +143,7 @@ func clampListSelection(l *list.Model) {
 	}
 }
 
-func (d UserQuestionDialog) View() string {
+func (d *UserQuestionDialog) View() string {
 	var sb strings.Builder
 
 	// Title
@@ -178,7 +180,7 @@ func (d UserQuestionDialog) View() string {
 	return dialogBoxStyle.Render(sb.String())
 }
 
-func (d UserQuestionDialog) GetAnswers() []string {
+func (d *UserQuestionDialog) GetAnswers() []string {
 	return d.answers
 }
 
@@ -250,7 +252,8 @@ func (d *QuestionOptionsDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d.parent, nil // Go back to questions
 		case tea.KeyEnter:
 			if selected, ok := d.list.SelectedItem().(optionItem); ok {
-				// Store the answer
+				// Store the answer with mutex protection
+				d.parent.mu.Lock()
 				d.parent.answers[d.question.index] = fmt.Sprintf("%d) %s", selected.index+1, selected.option)
 				// Check if all questions are answered
 				allAnswered := true
@@ -260,6 +263,7 @@ func (d *QuestionOptionsDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
+				d.parent.mu.Unlock()
 				// If all answered, close dialog, otherwise go back to question list
 				if allAnswered {
 					return d.parent, func() tea.Msg { return EndUserQuestionsMsg{} }

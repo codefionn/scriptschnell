@@ -199,6 +199,7 @@ type Model struct {
 	program          *tea.Program    // Reference to tea.Program for self-messaging
 	concurrentGens   map[int]bool    // Track which tabs are generating (tabID -> bool)
 	concurrentGensMu sync.RWMutex    // Protect concurrentGens map
+	overlayActiveMu  sync.RWMutex    // Protect overlayActive field
 
 	// Authorization state
 	pendingAuthorizations   map[string]*AuthorizationRequest // authID -> request
@@ -1529,7 +1530,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if !(m.overlayActive && isKeyMsg(msg)) && !shouldBlockTextarea {
+	m.overlayActiveMu.RLock()
+	overlayActive := m.overlayActive
+	m.overlayActiveMu.RUnlock()
+	if !(overlayActive && isKeyMsg(msg)) && !shouldBlockTextarea {
 		m.textarea, tiCmd = m.textarea.Update(msg)
 
 		// Sanitize ANSI sequences
@@ -1585,9 +1589,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		m.overlayActiveMu.RLock()
 		if m.overlayActive {
+			m.overlayActiveMu.RUnlock()
 			return m, baseCmd
 		}
+		m.overlayActiveMu.RUnlock()
 		if cmdStr, ok := m.commandShortcutForKey(msg, prevValue); ok {
 			m.commandMode = false
 			m.resetInputState()
@@ -3921,12 +3928,14 @@ func (m *Model) SetOnCommand(fn func(string) error) {
 }
 
 func (m *Model) SetOverlayActive(active bool) {
+	m.overlayActiveMu.Lock()
 	m.overlayActive = active
 	if active {
 		m.textarea.Blur()
 	} else {
 		m.textarea.Focus()
 	}
+	m.overlayActiveMu.Unlock()
 }
 
 func (m *Model) SetOnStop(fn func() error) {

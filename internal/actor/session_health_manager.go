@@ -204,19 +204,29 @@ func (shm *SessionHealthManager) calculateOverallStatus(actorReports map[string]
 
 // healthMonitoringLoop runs periodic health checks if enabled
 func (shm *SessionHealthManager) healthMonitoringLoop() {
-	ticker := time.NewTicker(shm.checkInterval)
+	// Read checkInterval and stopChan under lock to avoid race condition
+	shm.mu.RLock()
+	checkInterval := shm.checkInterval
+	stopChan := shm.stopChan
+	shm.mu.RUnlock()
+
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	logger.Debug("Starting health monitoring loop for session %s", shm.sessionID)
 
 	for {
 		select {
-		case <-shm.stopChan:
+		case <-stopChan:
 			logger.Debug("Health monitoring loop stopped for session %s", shm.sessionID)
 			return
 		case <-ticker.C:
-			if !shm.IsEnabled() {
-				// Double-check enabled state before processing
+			// Check enabled state under lock to avoid race with Disable()
+			shm.mu.RLock()
+			enabled := shm.enabled
+			shm.mu.RUnlock()
+
+			if !enabled {
 				continue
 			}
 

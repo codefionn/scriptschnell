@@ -1,0 +1,136 @@
+stages:
+  - lint
+  - test
+  - build
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  IMAGE_NAME: scriptschnell
+
+# Docker in Docker template
+.docker_template:
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker buildx version || docker run --privileged --rm tonistiigi/binfmt --install all
+    - docker buildx create --use --driver docker-container || docker buildx use default
+    - docker buildx inspect --bootstrap
+  variables:
+    FF_ENABLE_COMMIT_HASH: "true"
+
+# Lint stage
+lint:
+  extends: .docker_template
+  stage: lint
+  script:
+    - |
+      set -euo pipefail
+      docker buildx bake \
+        --set "*.cache-from=type=local,src=.cache/lint" \
+        --set "*.cache-to=type=local,dest=.cache/lint" \
+        lint
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-lint
+    paths:
+      - .cache/lint
+    when: always
+  artifacts:
+    when: always
+    paths:
+      - .cache/lint
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+# Test stage
+test:
+  extends: .docker_template
+  stage: test
+  script:
+    - |
+      set -euo pipefail
+      docker buildx bake \
+        --set "*.cache-from=type=local,src=.cache/test" \
+        --set "*.cache-to=type=local,dest=.cache/test" \
+        test
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-test
+    paths:
+      - .cache/test
+    when: always
+  artifacts:
+    when: always
+    paths:
+      - .cache/test
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    expire_in: 1 week
+  coverage: '/total:\s+\(statements\)\s+\d+.\d+%/'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+  needs:
+    - lint
+
+# Build stage
+build:
+  extends: .docker_template
+  stage: build
+  script:
+    - |
+      set -euo pipefail
+      BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      docker buildx bake \
+        --set "*.cache-from=type=local,src=.cache/build" \
+        --set "*.cache-to=type=local,dest=.cache/build" \
+        --set "*.args.VERSION=${CI_COMMIT_SHA}" \
+        --set "*.args.COMMIT=${CI_COMMIT_SHA}" \
+        --set "*.args.BUILD_TIME=${BUILD_TIME}" \
+        build
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-build
+    paths:
+      - .cache/build
+    when: always
+  artifacts:
+    when: on_success
+    paths:
+      - bin/
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+  needs:
+    - lint
+    - test
+
+# Build on merge requests (no artifact preservation)
+build:mr:
+  extends: .docker_template
+  stage: build
+  script:
+    - |
+      set -euo pipefail
+      BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      docker buildx bake \
+        --set "*.cache-from=type=local,src=.cache/build" \
+        --set "*.cache-to=type=local,dest=.cache/build" \
+        --set "*.args.VERSION=${CI_COMMIT_SHA}" \
+        --set "*.args.COMMIT=${CI_COMMIT_SHA}" \
+        --set "*.args.BUILD_TIME=${BUILD_TIME}" \
+        build
+  artifacts:
+    when: on_success
+    paths:
+      - bin/
+    expire_in: 3 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  needs:
+    - lint
+    - test

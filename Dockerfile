@@ -39,9 +39,16 @@ RUN echo "Running golangci-lint..." && \
 
 # Testing stage
 FROM base AS test
+# Install templ
+RUN go install github.com/a-h/templ/cmd/templ@latest
+
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+
+# Generate templ templates before testing
+RUN echo "Generating templ templates..." && \
+    templ generate
 
 # Run tests with CGO enabled for tree-sitter
 ARG CI=1
@@ -49,9 +56,16 @@ RUN CGO_ENABLED=1 go test -short ./...
 
 # Build stage for main binary
 FROM base AS build
+# Install templ
+RUN go install github.com/a-h/templ/cmd/templ@latest
+
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+
+# Generate templ templates before building
+RUN echo "Generating templ templates..." && \
+    templ generate
 
 # Build the main application
 RUN CGO_ENABLED=0 GOOS=linux go build \
@@ -62,9 +76,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # Build debug HTML tool
 FROM base AS build-debug
+# Install templ
+RUN go install github.com/a-h/templ/cmd/templ@latest
+
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+
+# Generate templ templates before building
+RUN echo "Generating templ templates..." && \
+    templ generate
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s" \
@@ -75,10 +96,15 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Development stage with all tools
 FROM base AS development
 RUN go install github.com/cosmtrek/air@latest && \
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && \
+    go install github.com/a-h/templ/cmd/templ@latest
 
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+
+# Generate templ templates
+RUN echo "Generating templ templates..." && \
+    templ generate
 
 CMD ["air", "-c", ".air.toml"]

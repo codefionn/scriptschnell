@@ -146,6 +146,10 @@ var (
 var toolCallValidationRegex = regexp.MustCompile(`(?i)tool call validation failed.*?missing required parameter ['"]?([^'"]+)['"]?.*?in ['"]?([^'"]+)['"]?(?: function call)?`)
 var toolNotInRequestRegex = regexp.MustCompile(`(?i)tool call validation failed.*?attempted to call tool ['"]?([^'"]+)['"]?.*?which was not in request\.tools`)
 
+// @fileReferenceRegex matches @filename pattern for file inclusion
+// Supports: @filename, @filename.ext, @path/to/file, @path/to/file.ext
+var fileReferenceRegex = regexp.MustCompile(`@([\w\-./]+)`)
+
 type toolCallValidationError struct {
 	toolName     string
 	missingParam string
@@ -694,6 +698,69 @@ func (o *Orchestrator) getSummarizeModelID() string {
 		modelID = o.providerMgr.GetOrchestrationModel()
 	}
 	return modelID
+}
+
+// expandFileReferences expands @file references in the prompt by including file content directly.
+// Files smaller than 10% of the context window are included directly.
+// Returns the expanded prompt with @file references replaced by their content.
+func (o *Orchestrator) expandFileReferences(ctx context.Context, prompt string) string {
+	// Find all @file references in the prompt
+	matches := fileReferenceRegex.FindAllStringSubmatch(prompt, -1)
+	if len(matches) == 0 {
+		return prompt
+	}
+
+	// Get the context window size for the current model
+	modelID := o.providerMgr.GetOrchestrationModel()
+	contextWindow := o.getContextWindow(modelID)
+	if contextWindow <= 0 {
+		contextWindow = 8192 // Default fallback
+	}
+
+	// Calculate 10% of context window as the threshold for direct inclusion
+	thresholdTokens := contextWindow / 10
+	thresholdBytes := thresholdTokens * 4 // Approximate 4 chars per token
+
+	// Track files we've already expanded to avoid duplicates
+	expandedFiles := make(map[string]bool)
+
+	// Build the expanded prompt by replacing @file references
+	expandedPrompt := prompt
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		filePath := match[1]
+		if expandedFiles[filePath] {
+			continue
+		}
+
+		// Try to read the file
+		content, err := o.fs.ReadFile(ctx, filePath)
+		if err != nil {
+			logger.Debug("@file expansion: could not read file %s: %v", filePath, err)
+			// Keep the @file reference as-is if file doesn't exist or can't be read
+			expandedFiles[filePath] = true
+			continue
+		}
+
+		// Check if file is small enough to include directly
+		fileSize := len(content)
+		if fileSize <= thresholdBytes {
+			// Include file content directly (only replace first occurrence to handle duplicates)
+			fileMarker := fmt.Sprintf("@%s", filePath)
+			fileInsertion := fmt.Sprintf("@%s\n---\n%s\n---", filePath, string(content))
+			expandedPrompt = strings.Replace(expandedPrompt, fileMarker, fileInsertion, 1)
+			logger.Debug("@file expansion: included %s (%d bytes, below threshold of %d bytes)", filePath, fileSize, thresholdBytes)
+		} else {
+			// File too large - keep the @file reference so LLM can use read_file tool
+			logger.Debug("@file expansion: skipping %s (%d bytes exceeds threshold of %d bytes)", filePath, fileSize, thresholdBytes)
+		}
+
+		expandedFiles[filePath] = true
+	}
+
+	return expandedPrompt
 }
 
 // detectProviderChange checks if the provider/model family has changed
@@ -1824,11 +1891,14 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		o.progressCbMu.Unlock()
 	}()
 
+	// Expand @file references in the prompt before adding to session
+	expandedPrompt := o.expandFileReferences(ctx, prompt)
+
 	// Add user message
-	logger.Debug("ProcessPrompt: Adding user message with prompt (len=%d): %q", len(prompt), prompt)
+	logger.Debug("ProcessPrompt: Adding user message with prompt (len=%d): %q", len(expandedPrompt), expandedPrompt)
 	o.session.AddMessage(&session.Message{
 		Role:    "user",
-		Content: prompt,
+		Content: expandedPrompt,
 	})
 	logger.Debug("ProcessPrompt: Session now has %d messages", len(o.session.GetMessages()))
 

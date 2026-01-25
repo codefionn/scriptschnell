@@ -119,3 +119,193 @@ func TestTodoTool_InMemoryNotPersisted(t *testing.T) {
 		t.Errorf("Expected new instance to have 0 todos (different actor), got %v", listResult["count"])
 	}
 }
+
+func TestTodoTool_AddMany(t *testing.T) {
+	todo, actorSystem, cancel := setupTodoToolForTest()
+	defer cancel()
+	defer func() {
+		if err := actorSystem.StopAll(context.Background()); err != nil {
+			t.Errorf("failed to stop todo actor system: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+
+	// Test adding multiple todos at once
+	result := todo.Execute(ctx, map[string]interface{}{
+		"action": "add_many",
+		"todos": []interface{}{
+			map[string]interface{}{"text": "Task 1", "status": "pending", "priority": "high"},
+			map[string]interface{}{"text": "Task 2", "status": "in_progress", "priority": "medium"},
+			map[string]interface{}{"text": "Task 3", "status": "completed", "priority": "low"},
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("Failed to add many todos: %s", result.Error)
+	}
+
+	addResult := result.Result.(map[string]interface{})
+	if addResult["count"] != 3 {
+		t.Errorf("Expected count 3, got %v", addResult["count"])
+	}
+
+	todos := addResult["todos"].([]map[string]interface{})
+	if len(todos) != 3 {
+		t.Errorf("Expected 3 todos in result, got %d", len(todos))
+	}
+
+	// Verify IDs were assigned
+	todo1 := todos[0]
+	todo2 := todos[1]
+	todo3 := todos[2]
+
+	if todo1["id"] != "todo_1" {
+		t.Errorf("Expected first ID to be todo_1, got %v", todo1["id"])
+	}
+	if todo2["id"] != "todo_2" {
+		t.Errorf("Expected second ID to be todo_2, got %v", todo2["id"])
+	}
+	if todo3["id"] != "todo_3" {
+		t.Errorf("Expected third ID to be todo_3, got %v", todo3["id"])
+	}
+
+	// Verify properties
+	if todo1["text"] != "Task 1" || todo1["status"] != "pending" || todo1["priority"] != "high" {
+		t.Error("First todo properties don't match")
+	}
+
+	// Verify list contains all todos
+	listResult := todo.Execute(ctx, map[string]interface{}{"action": "list"})
+	if listResult.Error != "" {
+		t.Fatalf("Failed to list todos: %s", listResult.Error)
+	}
+	listData := listResult.Result.(map[string]interface{})
+	if listData["count"] != 3 {
+		t.Errorf("Expected 3 todos in list, got %v", listData["count"])
+	}
+}
+
+func TestTodoTool_AddManyWithHierarchy(t *testing.T) {
+	todo, actorSystem, cancel := setupTodoToolForTest()
+	defer cancel()
+	defer func() {
+		if err := actorSystem.StopAll(context.Background()); err != nil {
+			t.Errorf("failed to stop todo actor system: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+
+	// Test adding hierarchical todos using array indices
+	result := todo.Execute(ctx, map[string]interface{}{
+		"action": "add_many",
+		"todos": []interface{}{
+			map[string]interface{}{"text": "Parent task", "priority": "high"},
+			map[string]interface{}{"text": "Sub-task 1", "parent_id": "0"},
+			map[string]interface{}{"text": "Sub-task 2", "parent_id": "0"},
+			map[string]interface{}{"text": "Nested sub-task", "parent_id": "1"},
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("Failed to add many todos: %s", result.Error)
+	}
+
+	addResult := result.Result.(map[string]interface{})
+	todos := addResult["todos"].([]map[string]interface{})
+
+	// Verify hierarchy
+	todo0 := todos[0]
+	todo1 := todos[1]
+	todo2 := todos[2]
+	todo3 := todos[3]
+
+	if todo0["parent_id"] != "" {
+		t.Errorf("Expected first todo to have no parent, got %v", todo0["parent_id"])
+	}
+	if todo1["parent_id"] != "todo_1" {
+		t.Errorf("Expected second todo to have parent todo_1, got %v", todo1["parent_id"])
+	}
+	if todo2["parent_id"] != "todo_1" {
+		t.Errorf("Expected third todo to have parent todo_1, got %v", todo2["parent_id"])
+	}
+	if todo3["parent_id"] != "todo_2" {
+		t.Errorf("Expected fourth todo to have parent todo_2, got %v", todo3["parent_id"])
+	}
+}
+
+func TestTodoTool_AddManyEmpty(t *testing.T) {
+	todo, actorSystem, cancel := setupTodoToolForTest()
+	defer cancel()
+	defer func() {
+		if err := actorSystem.StopAll(context.Background()); err != nil {
+			t.Errorf("failed to stop todo actor system: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+
+	// Test with empty array
+	result := todo.Execute(ctx, map[string]interface{}{
+		"action": "add_many",
+		"todos":  []interface{}{},
+	})
+
+	if result.Error == "" {
+		t.Error("Expected error for empty todos array")
+	}
+}
+
+func TestTodoTool_AddManyMissingTodos(t *testing.T) {
+	todo, actorSystem, cancel := setupTodoToolForTest()
+	defer cancel()
+	defer func() {
+		if err := actorSystem.StopAll(context.Background()); err != nil {
+			t.Errorf("failed to stop todo actor system: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+
+	// Test without todos parameter
+	result := todo.Execute(ctx, map[string]interface{}{
+		"action": "add_many",
+	})
+
+	if result.Error == "" {
+		t.Error("Expected error when todos parameter is missing")
+	}
+}
+
+func TestTodoTool_AddManyInvalidParentIndex(t *testing.T) {
+	todo, actorSystem, cancel := setupTodoToolForTest()
+	defer cancel()
+	defer func() {
+		if err := actorSystem.StopAll(context.Background()); err != nil {
+			t.Errorf("failed to stop todo actor system: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+
+	// Test with invalid parent index (forward reference)
+	result := todo.Execute(ctx, map[string]interface{}{
+		"action": "add_many",
+		"todos": []interface{}{
+			map[string]interface{}{"text": "Task 1"},
+			map[string]interface{}{"text": "Task 2", "parent_id": "2"}, // Invalid - index 2 doesn't exist
+		},
+	})
+
+	if result.Error == "" {
+		t.Error("Expected error for invalid parent index")
+	}
+
+	// Verify no todos were added (atomic operation)
+	listResult := todo.Execute(ctx, map[string]interface{}{"action": "list"})
+	listData := listResult.Result.(map[string]interface{})
+	if listData["count"] != 0 {
+		t.Errorf("Expected 0 todos after failed atomic operation, got %v", listData["count"])
+	}
+}

@@ -32,6 +32,16 @@ type (
 		ResponseChan chan *TodoItem
 	}
 
+	// TodoAddManyMsg adds multiple todos at once (atomic operation)
+	// ParentID can be either:
+	//   - An existing todo ID
+	//   - An array index string (e.g., "0", "1", "2") referencing an item in the same batch
+	TodoAddManyMsg struct {
+		Todos        []TodoInput
+		Timestamp    string
+		ResponseChan chan []*TodoItem
+	}
+
 	// TodoCheckMsg marks a todo as checked/unchecked
 	TodoCheckMsg struct {
 		ID           string
@@ -58,9 +68,18 @@ type (
 	}
 )
 
+// TodoInput represents a todo item for batch add operations
+type TodoInput struct {
+	Text     string
+	ParentID string
+	Status   string
+	Priority string
+}
+
 // Implement actor.Message interface for all message types
 func (m TodoListMsg) Type() string      { return "TodoListMsg" }
 func (m TodoAddMsg) Type() string       { return "TodoAddMsg" }
+func (m TodoAddManyMsg) Type() string   { return "TodoAddManyMsg" }
 func (m TodoCheckMsg) Type() string     { return "TodoCheckMsg" }
 func (m TodoSetStatusMsg) Type() string { return "TodoSetStatusMsg" }
 func (m TodoDeleteMsg) Type() string    { return "TodoDeleteMsg" }
@@ -177,6 +196,88 @@ func (a *TodoActor) Receive(ctx context.Context, msg actor.Message) error {
 
 		a.notifyChange()
 		m.ResponseChan <- item
+		return nil
+
+	case TodoAddManyMsg:
+		// Atomic batch add - add all todos or none
+		if len(m.Todos) == 0 {
+			m.ResponseChan <- nil
+			return fmt.Errorf("cannot add empty todo list")
+		}
+		a.mu.Lock()
+
+		// First pass: validate all parent references exist (in existing todos)
+		for i, input := range m.Todos {
+			if input.ParentID != "" {
+				// Check if parent_id is an array index (e.g., "0", "1", "2")
+				var idx int
+				_, err := fmt.Sscanf(input.ParentID, "%d", &idx)
+				if err == nil {
+					// Array index reference - validate it's within bounds
+					if idx < 0 || idx >= i {
+						a.mu.Unlock()
+						m.ResponseChan <- nil
+						return fmt.Errorf("parent index %d out of range for todo at index %d", idx, i)
+					}
+				} else {
+					// Not an index, must be an existing todo ID
+					parentExists := false
+					for _, item := range a.todos.Items {
+						if item.ID == input.ParentID {
+							parentExists = true
+							break
+						}
+					}
+					if !parentExists {
+						a.mu.Unlock()
+						m.ResponseChan <- nil
+						return fmt.Errorf("parent todo not found: %s", input.ParentID)
+					}
+				}
+			}
+		}
+
+		// Second pass: create all todos and resolve array index parent references
+		items := make([]*TodoItem, len(m.Todos))
+		for i, input := range m.Todos {
+			// Resolve parent_id if it's an array index
+			parentID := input.ParentID
+			if parentID != "" {
+				var idx int
+				_, err := fmt.Sscanf(parentID, "%d", &idx)
+				if err == nil {
+					// It's an index, use the ID of the item at that index
+					parentID = items[idx].ID
+				}
+			}
+
+			// Set defaults
+			status := input.Status
+			if status == "" {
+				status = "pending"
+			}
+			priority := input.Priority
+			if priority == "" {
+				priority = "medium"
+			}
+
+			id := nextTodoID(a.todos)
+			items[i] = &TodoItem{
+				ID:        id,
+				Text:      input.Text,
+				Completed: status == "completed",
+				Status:    status,
+				Priority:  priority,
+				Created:   m.Timestamp,
+				ParentID:  parentID,
+			}
+			a.todos.Items = append(a.todos.Items, items[i])
+		}
+
+		a.mu.Unlock()
+
+		a.notifyChange()
+		m.ResponseChan <- items
 		return nil
 
 	case TodoCheckMsg:
@@ -333,6 +434,29 @@ func (c *TodoActorClient) Add(text string, timestamp string, parentID string, st
 		return nil, fmt.Errorf("failed to add todo")
 	}
 	return item, nil
+}
+
+// AddMany adds multiple todos at once (atomic operation)
+// The inputs slice should contain TodoInput structs where ParentID can be:
+//   - An existing todo ID
+//   - An array index string (e.g., "0", "1", "2") referencing an item in the same batch
+func (c *TodoActorClient) AddMany(inputs []TodoInput, timestamp string) ([]*TodoItem, error) {
+	if len(inputs) == 0 {
+		return nil, fmt.Errorf("cannot add empty todo list")
+	}
+	respChan := make(chan []*TodoItem, 1)
+	if err := c.actorRef.Send(TodoAddManyMsg{
+		Todos:        inputs,
+		Timestamp:    timestamp,
+		ResponseChan: respChan,
+	}); err != nil {
+		return nil, err
+	}
+	items := <-respChan
+	if items == nil {
+		return nil, fmt.Errorf("failed to add todos")
+	}
+	return items, nil
 }
 
 // SetStatus sets the status of a todo

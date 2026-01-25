@@ -371,3 +371,303 @@ func TestTodoActorClear(t *testing.T) {
 		t.Fatalf("Expected 0 todos after clear, got %d", len(list.Items))
 	}
 }
+
+func TestTodoActorAddManySimple(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	inputs := []TodoInput{
+		{Text: "Task 1", Status: "pending", Priority: "high"},
+		{Text: "Task 2", Status: "in_progress", Priority: "medium"},
+		{Text: "Task 3", Status: "completed", Priority: "low"},
+	}
+
+	items, err := client.AddMany(inputs, "2024-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to add many todos: %v", err)
+	}
+
+	if len(items) != 3 {
+		t.Errorf("Expected 3 items, got %d", len(items))
+	}
+
+	// Verify IDs are sequential
+	if items[0].ID != "todo_1" {
+		t.Errorf("Expected first ID to be todo_1, got %s", items[0].ID)
+	}
+	if items[1].ID != "todo_2" {
+		t.Errorf("Expected second ID to be todo_2, got %s", items[1].ID)
+	}
+	if items[2].ID != "todo_3" {
+		t.Errorf("Expected third ID to be todo_3, got %s", items[2].ID)
+	}
+
+	// Verify properties
+	if items[0].Text != "Task 1" || items[0].Status != "pending" || items[0].Priority != "high" {
+		t.Error("First item properties don't match")
+	}
+	if items[1].Text != "Task 2" || items[1].Status != "in_progress" || items[1].Priority != "medium" {
+		t.Error("Second item properties don't match")
+	}
+	if items[2].Text != "Task 3" || items[2].Status != "completed" || items[2].Priority != "low" {
+		t.Error("Third item properties don't match")
+	}
+
+	// Verify all todos were added to the list
+	list, _ := client.List()
+	if len(list.Items) != 3 {
+		t.Errorf("Expected 3 todos in list, got %d", len(list.Items))
+	}
+}
+
+func TestTodoActorAddManyWithHierarchy(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	inputs := []TodoInput{
+		{Text: "Parent task", Status: "pending", Priority: "high"},
+		{Text: "Sub-task 1", ParentID: "0", Status: "pending", Priority: "medium"},
+		{Text: "Sub-task 2", ParentID: "0", Status: "pending", Priority: "medium"},
+		{Text: "Nested sub-task", ParentID: "1", Status: "pending", Priority: "low"},
+	}
+
+	items, err := client.AddMany(inputs, "2024-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to add many todos: %v", err)
+	}
+
+	if len(items) != 4 {
+		t.Errorf("Expected 4 items, got %d", len(items))
+	}
+
+	// Verify hierarchy
+	if items[0].ParentID != "" {
+		t.Errorf("Expected first item to have no parent, got %s", items[0].ParentID)
+	}
+	if items[1].ParentID != "todo_1" {
+		t.Errorf("Expected second item to have parent todo_1, got %s", items[1].ParentID)
+	}
+	if items[2].ParentID != "todo_1" {
+		t.Errorf("Expected third item to have parent todo_1, got %s", items[2].ParentID)
+	}
+	if items[3].ParentID != "todo_2" {
+		t.Errorf("Expected fourth item to have parent todo_2, got %s", items[3].ParentID)
+	}
+
+	// Verify in list
+	list, _ := client.List()
+	if len(list.Items) != 4 {
+		t.Errorf("Expected 4 todos in list, got %d", len(list.Items))
+	}
+
+	// Count hierarchy
+	parentChildren := 0
+	sub1Children := 0
+	for _, item := range list.Items {
+		if item.ParentID == "todo_1" {
+			parentChildren++
+		}
+		if item.ParentID == "todo_2" {
+			sub1Children++
+		}
+	}
+	if parentChildren != 2 {
+		t.Errorf("Expected 2 children of parent, got %d", parentChildren)
+	}
+	if sub1Children != 1 {
+		t.Errorf("Expected 1 child of sub-task 1, got %d", sub1Children)
+	}
+}
+
+func TestTodoActorAddManyWithExistingParent(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	// Add an existing parent todo first
+	parent, err := client.Add("Existing parent", "2024-01-01T00:00:00Z", "", "pending", "high")
+	if err != nil {
+		t.Fatalf("Failed to add parent: %v", err)
+	}
+
+	// Add batch with reference to existing parent
+	inputs := []TodoInput{
+		{Text: "Child 1", ParentID: parent.ID, Status: "pending", Priority: "medium"},
+		{Text: "Child 2", ParentID: parent.ID, Status: "pending", Priority: "low"},
+	}
+
+	items, err := client.AddMany(inputs, "2024-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to add many todos: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Errorf("Expected 2 items, got %d", len(items))
+	}
+
+	// Verify parent references
+	if items[0].ParentID != parent.ID {
+		t.Errorf("Expected first item to have parent %s, got %s", parent.ID, items[0].ParentID)
+	}
+	if items[1].ParentID != parent.ID {
+		t.Errorf("Expected second item to have parent %s, got %s", parent.ID, items[1].ParentID)
+	}
+
+	// Verify total todos
+	list, _ := client.List()
+	if len(list.Items) != 3 {
+		t.Errorf("Expected 3 todos in list, got %d", len(list.Items))
+	}
+}
+
+func TestTodoActorAddManyInvalidParentIndex(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	// Try to reference an index that doesn't exist yet (forward reference)
+	inputs := []TodoInput{
+		{Text: "Task 1", Status: "pending"},
+		{Text: "Task 2", ParentID: "2", Status: "pending"}, // Invalid: index 2 doesn't exist yet
+	}
+
+	_, err = client.AddMany(inputs, "2024-01-01T00:00:00Z")
+	if err == nil {
+		t.Error("Expected error when referencing non-existent parent index")
+	}
+
+	// Verify no todos were added (atomic operation)
+	list, _ := client.List()
+	if len(list.Items) != 0 {
+		t.Errorf("Expected 0 todos after failed atomic operation, got %d", len(list.Items))
+	}
+}
+
+func TestTodoActorAddManyInvalidExistingParent(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	// Try to reference a non-existent existing parent
+	inputs := []TodoInput{
+		{Text: "Task 1", ParentID: "nonexistent_id", Status: "pending"},
+		{Text: "Task 2", Status: "pending"},
+	}
+
+	_, err = client.AddMany(inputs, "2024-01-01T00:00:00Z")
+	if err == nil {
+		t.Error("Expected error when referencing non-existent parent ID")
+	}
+
+	// Verify no todos were added (atomic operation)
+	list, _ := client.List()
+	if len(list.Items) != 0 {
+		t.Errorf("Expected 0 todos after failed atomic operation, got %d", len(list.Items))
+	}
+}
+
+func TestTodoActorAddManyEmpty(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	inputs := []TodoInput{}
+
+	_, err = client.AddMany(inputs, "2024-01-01T00:00:00Z")
+	if err == nil {
+		t.Error("Expected error for empty todos array")
+	}
+}
+
+func TestTodoActorAddManyWithDefaults(t *testing.T) {
+	actorSystem := actor.NewSystem()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	todoActor := NewTodoActor("test-todo")
+	todoRef, err := actorSystem.Spawn(ctx, "test-todo", todoActor, 16)
+	if err != nil {
+		t.Fatalf("Failed to spawn todo actor: %v", err)
+	}
+	defer func() { _ = actorSystem.StopAll(context.Background()) }()
+
+	client := NewTodoActorClient(todoRef)
+
+	inputs := []TodoInput{
+		{Text: "Task 1"}, // No status or priority specified
+		{Text: "Task 2", Status: ""},
+		{Text: "Task 3", Priority: ""},
+		{Text: "Task 4", Status: "", Priority: ""},
+	}
+
+	items, err := client.AddMany(inputs, "2024-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to add many todos: %v", err)
+	}
+
+	// Verify all have default status and priority
+	for i, item := range items {
+		if item.Status != "pending" {
+			t.Errorf("Expected item %d to have status 'pending', got '%s'", i, item.Status)
+		}
+		if item.Priority != "medium" {
+			t.Errorf("Expected item %d to have priority 'medium', got '%s'", i, item.Priority)
+		}
+	}
+}

@@ -30,7 +30,7 @@ func (s *TodoToolSpec) Name() string {
 }
 
 func (s *TodoToolSpec) Description() string {
-	return "Manage todo items with hierarchical sub-todos. Supports reading, writing, checking/unchecking todos, and adding sub-todos to parent tasks. Each todo has a status (pending/in_progress/completed) and priority (high/medium/low)."
+	return "Manage todo items with hierarchical sub-todos. Supports reading, writing, checking/unchecking todos, adding sub-todos to parent tasks, and batch adding multiple todos at once. Each todo has a status (pending/in_progress/completed) and priority (high/medium/low)."
 }
 
 func (s *TodoToolSpec) Parameters() map[string]interface{} {
@@ -39,8 +39,8 @@ func (s *TodoToolSpec) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "Action to perform: 'list', 'add', 'check', 'uncheck', 'delete', 'clear', 'set_status'",
-				"enum":        []string{"list", "add", "check", "uncheck", "delete", "clear", "set_status"},
+				"description": "Action to perform: 'list', 'add', 'add_many', 'check', 'uncheck', 'delete', 'clear', 'set_status'",
+				"enum":        []string{"list", "add", "add_many", "check", "uncheck", "delete", "clear", "set_status"},
 			},
 			"text": map[string]interface{}{
 				"type":        "string",
@@ -61,8 +61,36 @@ func (s *TodoToolSpec) Parameters() map[string]interface{} {
 			},
 			"priority": map[string]interface{}{
 				"type":        "string",
-				"description": "Priority of the todo (for 'add' action): 'high', 'medium', 'low'. Defaults to 'medium' if not specified.",
+				"description": "Priority of the todo (for 'add' and 'add_many' actions): 'high', 'medium', 'low'. Defaults to 'medium' if not specified.",
 				"enum":        []string{"high", "medium", "low"},
+			},
+			"todos": map[string]interface{}{
+				"type":        "array",
+				"description": "Array of todo items (for 'add_many' action). Each item can have: text (required), parent_id (optional, use array index like '0', '1' to reference other items in same batch), status (optional, defaults to 'pending'), priority (optional, defaults to 'medium').",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"text": map[string]interface{}{
+							"type":        "string",
+							"description": "Todo text (required)",
+						},
+						"parent_id": map[string]interface{}{
+							"type":        "string",
+							"description": "Parent todo reference as array index (e.g., '0', '1') to create sub-todos within the same batch, or an existing todo ID",
+						},
+						"status": map[string]interface{}{
+							"type":        "string",
+							"description": "Status of the todo: 'pending', 'in_progress', 'completed'. Defaults to 'pending'.",
+							"enum":        []string{"pending", "in_progress", "completed"},
+						},
+						"priority": map[string]interface{}{
+							"type":        "string",
+							"description": "Priority of the todo: 'high', 'medium', 'low'. Defaults to 'medium'.",
+							"enum":        []string{"high", "medium", "low"},
+						},
+					},
+					"required": []string{"text"},
+				},
 			},
 		},
 		"required": []string{"action"},
@@ -106,6 +134,17 @@ func (t *TodoTool) Execute(ctx context.Context, params map[string]interface{}) *
 		status := GetStringParam(params, "status", "pending")
 		priority := GetStringParam(params, "priority", "medium")
 		result, err := t.addTodo(ctx, text, parentID, status, priority)
+		if err != nil {
+			return &ToolResult{Error: err.Error()}
+		}
+		return &ToolResult{Result: result}
+
+	case "add_many":
+		todosParam, ok := params["todos"]
+		if !ok {
+			return &ToolResult{Error: "todos array is required for add_many action"}
+		}
+		result, err := t.addManyTodos(ctx, todosParam)
 		if err != nil {
 			return &ToolResult{Error: err.Error()}
 		}
@@ -217,6 +256,76 @@ func (t *TodoTool) addTodo(ctx context.Context, text string, parentID string, st
 		"status":    item.Status,
 		"priority":  item.Priority,
 		"message":   message,
+	}, nil
+}
+
+func (t *TodoTool) addManyTodos(ctx context.Context, todosParam interface{}) (interface{}, error) {
+	todosSlice, ok := todosParam.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("todos must be an array")
+	}
+
+	if len(todosSlice) == 0 {
+		return nil, fmt.Errorf("todos array cannot be empty")
+	}
+
+	// Parse all todos first to validate structure
+	inputs := make([]TodoInput, len(todosSlice))
+	for i, item := range todosSlice {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("todo at index %d must be an object", i)
+		}
+
+		text := GetStringParam(itemMap, "text", "")
+		if text == "" {
+			return nil, fmt.Errorf("todo at index %d must have a text field", i)
+		}
+
+		parentID := GetStringParam(itemMap, "parent_id", "")
+		status := GetStringParam(itemMap, "status", "pending")
+		priority := GetStringParam(itemMap, "priority", "medium")
+
+		// Validate status
+		if status != "pending" && status != "in_progress" && status != "completed" {
+			status = "pending"
+		}
+
+		// Validate priority
+		if priority != "high" && priority != "medium" && priority != "low" {
+			priority = "medium"
+		}
+
+		inputs[i] = TodoInput{
+			Text:     text,
+			ParentID: parentID,
+			Status:   status,
+			Priority: priority,
+		}
+	}
+
+	timestamp := todoTimestamp(ctx)
+	items, err := t.client.AddMany(inputs, timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build response with summary and details
+	addedTodos := make([]map[string]interface{}, len(items))
+	for i, item := range items {
+		addedTodos[i] = map[string]interface{}{
+			"id":        item.ID,
+			"text":      item.Text,
+			"parent_id": item.ParentID,
+			"status":    item.Status,
+			"priority":  item.Priority,
+		}
+	}
+
+	return map[string]interface{}{
+		"message": fmt.Sprintf("Successfully added %d todos", len(items)),
+		"count":   len(items),
+		"todos":   addedTodos,
 	}, nil
 }
 

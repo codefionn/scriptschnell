@@ -39,18 +39,19 @@ target "test" {
 target "build" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "build"
+  target = "final-build"
   tags = ["${IMAGE_NAME}:build"]
   output = ["type=local,dest=./bin"]
   cache-from = ["type=local,src=.cache/build"]
   cache-to = ["type=local,dest=.cache/build"]
+  platforms = ["linux/amd64", "linux/arm64"]
 }
 
 # CI pipeline target (lint -> test -> build)
 target "ci" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "build"
+  target = "final-build"
   tags = ["${IMAGE_NAME}:ci"]
   output = ["type=local,dest=./bin"]
   cache-from = ["type=local,src=.cache/build"]
@@ -72,11 +73,12 @@ target "build-debug" {
 target "default" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "build"
+  target = "final-build"
   tags = ["${IMAGE_NAME}:latest"]
   output = ["type=local,dest=./bin"]
   cache-from = ["type=local,src=.cache/build"]
   cache-to = ["type=local,dest=.cache/build"]
+  platforms = ["linux/amd64", "linux/arm64"]
 }
 
 # Group for CI pipeline (lint -> test -> build)

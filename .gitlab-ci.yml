@@ -92,6 +92,7 @@ build:
         --set "*.args.VERSION=${CI_COMMIT_SHA}" \
         --set "*.args.COMMIT=${CI_COMMIT_SHA}" \
         --set "*.args.BUILD_TIME=${BUILD_TIME}" \
+        --set "*.platform=linux/amd64,linux/arm64,linux/arm" \
         build
   cache:
     key: ${CI_COMMIT_REF_SLUG}-build
@@ -123,6 +124,7 @@ build:mr:
         --set "*.args.VERSION=${CI_COMMIT_SHA}" \
         --set "*.args.COMMIT=${CI_COMMIT_SHA}" \
         --set "*.args.BUILD_TIME=${BUILD_TIME}" \
+        --set "*.platform=linux/amd64,linux/arm64,linux/arm" \
         build
   artifacts:
     when: on_success

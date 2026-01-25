@@ -53,6 +53,14 @@ build/
 /.gocache
 /.golangci-cache
 
+# Static build artifacts
+*.musl
+*.static
+
+# Platform-specific static binaries
+/scriptschnell-linux-*
+/debug_html-linux-*
+
 # Local Docker cache
 .cache/
 
@@ -78,3 +86,7 @@ build/
 
 *.prof
 *.pprof
+
+/test-scriptschnell
+/bin
+/test-scriptschnell-static

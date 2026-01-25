@@ -50,19 +50,19 @@ steps:
   build:
     image: golang:${GOLANG_VERSION}-alpine
     commands:
-      - apk add --no-cache git ca-certificates tzdata
+      - apk add --no-cache git ca-certificates tzdata musl-gcc
       - update-ca-certificates
       # Install TinyGo (required for the project)
       - wget https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
       - tar -C /usr/local -xzf tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
       - rm tinygo${TINYGO_VERSION}.linux-amd64.tar.gz
       - export PATH="/usr/local/tinygo/bin:${PATH}"
-      # Download dependencies and build
+      # Download dependencies and build with static linking
       - go mod download
-      - echo "Building main binary..."
-      - CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o scriptschnell ./cmd/scriptschnell
-      - echo "Building debug HTML tool..."
-      - CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o debug_html ./cmd/debug_html
+      - echo "Building main binary with static linking..."
+      - CGO_ENABLED=1 CC=musl-gcc GOOS=linux go build -ldflags="-w -s -linkmode external -extldflags '-static'" -o scriptschnell ./cmd/scriptschnell
+      - echo "Building debug HTML tool with static linking..."
+      - CGO_ENABLED=1 CC=musl-gcc GOOS=linux go build -ldflags="-w -s -linkmode external -extldflags '-static'" -o debug_html ./cmd/debug_html
       - ls -la scriptschnell debug_html
     when:
       - event: push

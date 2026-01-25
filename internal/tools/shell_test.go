@@ -131,6 +131,9 @@ func TestWaitProgramTool_WaitsForCompletion(t *testing.T) {
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	// Give the background job a brief moment to complete and capture output
+	time.Sleep(100 * time.Millisecond)
+
 	waitRes := waitTool.Execute(waitCtx, map[string]interface{}{"job_id": jobID})
 	if waitRes.Error != "" {
 		t.Fatalf("wait_program failed: %s", waitRes.Error)

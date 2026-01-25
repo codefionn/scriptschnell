@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -45,8 +44,7 @@ func (tg *TitleGenerator) GenerateTitle(ctx context.Context, userPrompt string, 
 		Title string `json:"title"`
 	}
 
-	cleanedResponse := cleanLLMJSONResponse(response)
-	if err := json.Unmarshal([]byte(cleanedResponse), &result); err != nil {
+	if err := llm.ParseLLMJSONResponse(response, &result); err != nil {
 		logger.Warn("Failed to parse LLM title response, using fallback: %v", err)
 		return generateSimpleTitle(userPrompt), nil
 	}
@@ -144,18 +142,6 @@ func generateSimpleTitle(userPrompt string) string {
 	}
 
 	return title
-}
-
-// cleanLLMJSONResponse removes markdown code blocks and cleans up LLM JSON responses
-func cleanLLMJSONResponse(response string) string {
-	response = strings.TrimSpace(response)
-
-	// Remove markdown code blocks
-	response = strings.TrimPrefix(response, "```json")
-	response = strings.TrimPrefix(response, "```")
-	response = strings.TrimSuffix(response, "```")
-
-	return strings.TrimSpace(response)
 }
 
 // GetWorkspaceFiles returns a list of files in the workspace (up to maxFiles)

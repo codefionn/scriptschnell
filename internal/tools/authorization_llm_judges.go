@@ -2,12 +2,13 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/codefionn/scriptschnell/internal/llm"
 )
 
-type llmAuthorizationRecord struct {
+type authorizationRecord struct {
 	Kind   string
 	Target string
 	Reason string
@@ -21,7 +22,7 @@ func (a *AuthorizationActor) judgeDomainWithLLM(ctx context.Context, displayDoma
 			Reason:            fmt.Sprintf("Domain %s requires authorization for network access", displayDomain),
 			RequiresUserInput: true,
 		}
-		a.recordLLMDecision(false, llmAuthorizationRecord{
+		a.recordLLMDecision(false, authorizationRecord{
 			Kind:   "domain",
 			Target: displayDomain,
 			Reason: decision.Reason,
@@ -69,7 +70,7 @@ For example:
 			Reason:            fmt.Sprintf("Domain %s requires authorization (LLM analysis failed)", displayDomain),
 			RequiresUserInput: true,
 		}
-		a.recordLLMDecision(false, llmAuthorizationRecord{
+		a.recordLLMDecision(false, authorizationRecord{
 			Kind:   "domain",
 			Target: displayDomain,
 			Reason: decision.Reason,
@@ -83,13 +84,13 @@ For example:
 		Prefix string `json:"prefix"`
 	}
 
-	if err := json.Unmarshal([]byte(cleanLLMJSONResponse(response)), &result); err != nil {
+	if err := llm.ParseLLMJSONResponse(response, &result); err != nil {
 		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Domain %s requires authorization (failed to parse LLM response)", displayDomain),
 			RequiresUserInput: true,
 		}
-		a.recordLLMDecision(false, llmAuthorizationRecord{
+		a.recordLLMDecision(false, authorizationRecord{
 			Kind:   "domain",
 			Target: displayDomain,
 			Reason: decision.Reason,
@@ -103,7 +104,7 @@ For example:
 		if recordReason == "" {
 			recordReason = fmt.Sprintf("LLM judged %s safe", displayDomain)
 		}
-		a.recordLLMDecision(true, llmAuthorizationRecord{
+		a.recordLLMDecision(true, authorizationRecord{
 			Kind:   "domain",
 			Target: displayDomain,
 			Reason: recordReason,
@@ -121,7 +122,7 @@ For example:
 		Reason:            reason,
 		RequiresUserInput: true,
 	}
-	a.recordLLMDecision(false, llmAuthorizationRecord{
+	a.recordLLMDecision(false, authorizationRecord{
 		Kind:   "domain",
 		Target: displayDomain,
 		Reason: reason,
@@ -137,7 +138,7 @@ func (a *AuthorizationActor) judgeShellCommandWithLLM(ctx context.Context, comma
 			Reason:            fmt.Sprintf("Command requires authorization: %s", command),
 			RequiresUserInput: true,
 		}
-		a.recordLLMDecision(false, llmAuthorizationRecord{
+		a.recordLLMDecision(false, authorizationRecord{
 			Kind:   "shell",
 			Target: command,
 			Reason: decision.Reason,
@@ -186,7 +187,7 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 			Reason:            fmt.Sprintf("Command requires authorization (LLM analysis failed): %s", command),
 			RequiresUserInput: true,
 		}
-		a.recordLLMDecision(false, llmAuthorizationRecord{
+		a.recordLLMDecision(false, authorizationRecord{
 			Kind:   "shell",
 			Target: command,
 			Reason: decision.Reason,
@@ -200,15 +201,14 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 		Prefix   string `json:"prefix"`
 	}
 
-	cleaned := cleanLLMJSONResponse(response)
-	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+	if err := llm.ParseLLMJSONResponse(response, &result); err != nil {
 		decision := &AuthorizationDecision{
 			Allowed:                false,
 			Reason:                 fmt.Sprintf("Command requires authorization (failed to parse LLM response): %s", command),
 			RequiresUserInput:      true,
 			SuggestedCommandPrefix: "",
 		}
-		a.recordLLMDecision(false, llmAuthorizationRecord{
+		a.recordLLMDecision(false, authorizationRecord{
 			Kind:   "shell",
 			Target: command,
 			Reason: decision.Reason,
@@ -223,7 +223,7 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 		if recordReason == "" {
 			recordReason = fmt.Sprintf("LLM judged %s harmless", command)
 		}
-		a.recordLLMDecision(true, llmAuthorizationRecord{
+		a.recordLLMDecision(true, authorizationRecord{
 			Kind:   "shell",
 			Target: command,
 			Reason: recordReason,
@@ -246,7 +246,7 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 		RequiresUserInput:      true,
 		SuggestedCommandPrefix: suggestedPrefix,
 	}
-	a.recordLLMDecision(false, llmAuthorizationRecord{
+	a.recordLLMDecision(false, authorizationRecord{
 		Kind:   "shell",
 		Target: command,
 		Reason: reason,
@@ -254,15 +254,7 @@ If uncertain or potentially harmful, set prefix to empty string.`, command)
 	return decision, nil
 }
 
-func cleanLLMJSONResponse(response string) string {
-	cleaned := strings.TrimSpace(response)
-	cleaned = strings.TrimPrefix(cleaned, "```json")
-	cleaned = strings.TrimPrefix(cleaned, "```")
-	cleaned = strings.TrimSuffix(cleaned, "```")
-	return strings.TrimSpace(cleaned)
-}
-
-func (a *AuthorizationActor) recordLLMDecision(success bool, record llmAuthorizationRecord) {
+func (a *AuthorizationActor) recordLLMDecision(success bool, record authorizationRecord) {
 	if a == nil {
 		return
 	}
@@ -273,7 +265,7 @@ func (a *AuthorizationActor) recordLLMDecision(success bool, record llmAuthoriza
 	a.lastLLMDeclines = appendLLMRecord(a.lastLLMDeclines, record)
 }
 
-func appendLLMRecord(records []llmAuthorizationRecord, record llmAuthorizationRecord) []llmAuthorizationRecord {
+func appendLLMRecord(records []authorizationRecord, record authorizationRecord) []authorizationRecord {
 	records = append(records, record)
 	if len(records) > 10 {
 		records = records[len(records)-10:]

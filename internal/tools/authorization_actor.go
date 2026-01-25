@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,8 +50,8 @@ type AuthorizationActor struct {
 	allowedDomains   map[string]struct{}
 	allowedCommands  []string // Prefixes of commands that are pre-authorized
 	workingDir       string
-	lastLLMSuccesses []llmAuthorizationRecord
-	lastLLMDeclines  []llmAuthorizationRecord
+	lastLLMSuccesses []authorizationRecord
+	lastLLMDeclines  []authorizationRecord
 }
 
 // NewAuthorizationActor constructs a new authorization actor instance.
@@ -605,7 +604,7 @@ If "allowed" is false, the user will be prompted for approval.`, toolName, param
 		Reason  string `json:"reason"`
 	}
 
-	if err := json.Unmarshal([]byte(cleanLLMJSONResponse(response)), &result); err != nil {
+	if err := llm.ParseLLMJSONResponse(response, &result); err != nil {
 		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Tool %s contains secrets and requires user approval (failed to parse LLM response)", toolName),

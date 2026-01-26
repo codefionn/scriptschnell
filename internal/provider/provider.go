@@ -419,6 +419,46 @@ func (m *Manager) RefreshAllModels(ctx context.Context) {
 	}()
 }
 
+// RefreshAllModelsSync refreshes models for all configured providers synchronously
+// Returns the first error encountered, if any
+func (m *Manager) RefreshAllModelsSync(ctx context.Context) error {
+	providers := m.ListProviders()
+	if len(providers) == 0 {
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(providers))
+
+	for _, p := range providers {
+		// Skip if context is cancelled
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Refresh each provider in parallel
+		wg.Add(1)
+		go func(providerName string) {
+			defer wg.Done()
+			// Refresh models and send any errors to channel
+			if err := m.RefreshModels(ctx, providerName); err != nil {
+				errChan <- fmt.Errorf("failed to refresh models for provider %s: %w", providerName, err)
+			}
+		}(p.Name)
+	}
+
+	// Wait for all refreshes to complete
+	wg.Wait()
+	close(errChan)
+
+	// Return first error if any
+	for err := range errChan {
+		return err
+	}
+
+	return nil
+}
+
 // createLLMProviderWithBaseURL creates an LLM provider instance with optional base URL
 func (m *Manager) createLLMProviderWithBaseURL(name, apiKey, baseURL string) (llm.Provider, error) {
 	normalized := canonicalProviderName(name)

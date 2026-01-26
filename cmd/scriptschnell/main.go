@@ -152,10 +152,20 @@ func run() (err error) {
 		return fmt.Errorf("failed to initialize provider manager: %w", err)
 	}
 
-	// Refresh models from APIs in background on startup
+	// Refresh models from APIs - use synchronous version in CLI mode to ensure models are available
+	// before orchestrator creation, use async in TUI mode for better startup performance
 	ctx := context.Background()
 	logger.Debug("Refreshing models from provider APIs")
-	providerMgr.RefreshAllModels(ctx)
+	if cliMode {
+		// Synchronous refresh for CLI mode to ensure models are loaded before use
+		if err := providerMgr.RefreshAllModelsSync(ctx); err != nil {
+			// Non-fatal, log warning and continue
+			logger.Warn("Failed to refresh models: %v", err)
+		}
+	} else {
+		// Async refresh for TUI mode
+		providerMgr.RefreshAllModels(ctx)
+	}
 
 	if cliMode {
 		return runCLI(cfg, providerMgr, prompt, cliOptions)
@@ -340,7 +350,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, err
 	fs.BoolVar(&showHelp, "help", false, "Show CLI usage information")
 
 	// pprof flags
-	fs.StringVar(&pprofAddr, "pprof.addr", ":6060", "Enable pprof HTTP server on specified address (default: :6060, use empty string to disable)")
+	fs.StringVar(&pprofAddr, "pprof.addr", "", "Enable pprof HTTP server on specified address (e.g., :6060)")
 	fs.StringVar(&pprofCPU, "pprof.cpu", "", "Path to write CPU profile file (e.g., cpu.prof)")
 	fs.StringVar(&pprofHeap, "pprof.heap", "", "Path to write heap profile file (e.g., heap.prof)")
 	fs.StringVar(&pprofGoroutine, "pprof.goroutine", "", "Path to write goroutine profile file (e.g., goroutine.prof)")

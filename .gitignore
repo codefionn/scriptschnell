@@ -90,3 +90,12 @@ build/
 /test-scriptschnell
 /bin
 /test-scriptschnell-static
+/scriptschnell-build
+/scriptschnell-debug
+/scriptschnell-debug2
+/scriptschnell-debug3
+/scriptschnell-debug4
+/scriptschnell-fixed
+/scriptschnell-fresh
+/scriptschnell-simple
+/scriptschnell-test2

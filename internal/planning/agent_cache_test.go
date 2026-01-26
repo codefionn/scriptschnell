@@ -261,3 +261,11 @@ func (m *MessageTrackingClient) Stream(ctx context.Context, req *llm.CompletionR
 func (m *MessageTrackingClient) GetModelName() string {
 	return "test-tracking-model"
 }
+
+func (m *MessageTrackingClient) GetLastResponseID() string {
+	return "" // Not used in tests
+}
+
+func (m *MessageTrackingClient) SetPreviousResponseID(responseID string) {
+	// Not used in tests
+}

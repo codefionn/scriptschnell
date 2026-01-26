@@ -31,6 +31,12 @@ func (m *mockClassifierLLM) Stream(ctx context.Context, req *llm.CompletionReque
 func (m *mockClassifierLLM) GetModelName() string {
 	return "mock-classifier"
 }
+func (m *mockClassifierLLM) GetLastResponseID() string {
+	return ""
+}
+
+func (m *mockClassifierLLM) SetPreviousResponseID(responseID string) {
+}
 
 func TestParseSimplicityResponse(t *testing.T) {
 	simple, reason, ok := parseSimplicityResponse(`{"simple":true,"reason":"short task"}`)

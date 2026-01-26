@@ -2025,6 +2025,12 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 			CacheTTL:      o.config.PromptCacheTTL,
 		}
 
+		// Set previous_response_id for clients that support it (e.g., OpenRouter) for better prompt caching
+		if prevID := o.orchestrationClient.GetLastResponseID(); prevID != "" {
+			req.PreviousResponseID = prevID
+			logger.Debug("Setting previous_response_id=%s for request", prevID)
+		}
+
 		// Apply model-specific defaults
 		o.applyModelSpecificDefaults(req, modelID)
 

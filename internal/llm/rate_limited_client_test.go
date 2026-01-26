@@ -38,6 +38,13 @@ func (f *fakeClient) GetModelName() string {
 	return "fake"
 }
 
+func (f *fakeClient) GetLastResponseID() string {
+	return ""
+}
+
+func (f *fakeClient) SetPreviousResponseID(responseID string) {
+}
+
 func (f *fakeClient) callTimes() []time.Time {
 	f.mu.Lock()
 	defer f.mu.Unlock()

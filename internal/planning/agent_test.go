@@ -82,6 +82,13 @@ func (m *MockLLMClient) GetModelName() string {
 	return "mock-planning-model"
 }
 
+func (m *MockLLMClient) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClient) SetPreviousResponseID(responseID string) {
+}
+
 func (m *MockLLMClient) LastRequest() *llm.CompletionRequest {
 	return m.lastReq
 }
@@ -795,6 +802,13 @@ func (m *MockLLMClientWithCancellation) Complete(ctx context.Context, prompt str
 	default:
 		return "test response", nil
 	}
+}
+
+func (m *MockLLMClientWithCancellation) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClientWithCancellation) SetPreviousResponseID(responseID string) {
 }
 
 func (m *MockLLMClientWithCancellation) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {

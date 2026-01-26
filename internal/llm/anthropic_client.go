@@ -47,6 +47,14 @@ func (c *AnthropicClient) GetModelName() string {
 	return c.model
 }
 
+func (c *AnthropicClient) GetLastResponseID() string {
+	return "" // Not applicable for Anthropic
+}
+
+func (c *AnthropicClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for Anthropic
+}
+
 func (c *AnthropicClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.CompleteWithRequest(ctx, &CompletionRequest{
 		Messages: []*Message{

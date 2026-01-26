@@ -40,6 +40,14 @@ func (c *GoogleGenAIClient) GetModelName() string {
 	return c.modelName
 }
 
+func (c *GoogleGenAIClient) GetLastResponseID() string {
+	return "" // Not applicable for Google
+}
+
+func (c *GoogleGenAIClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for Google
+}
+
 func (c *GoogleGenAIClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.client.Models.GenerateContent(ctx, c.modelName, genai.Text(prompt), nil)
 	if err != nil {

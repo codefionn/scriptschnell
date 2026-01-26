@@ -87,3 +87,10 @@ func (c *captureRequestClient) Stream(ctx context.Context, req *llm.CompletionRe
 func (c *captureRequestClient) GetModelName() string {
 	return "test-model"
 }
+
+func (c *captureRequestClient) GetLastResponseID() string {
+	return ""
+}
+
+func (c *captureRequestClient) SetPreviousResponseID(responseID string) {
+}

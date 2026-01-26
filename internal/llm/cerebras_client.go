@@ -49,6 +49,14 @@ func (c *CerebrasClient) GetModelName() string {
 	return c.model
 }
 
+func (c *CerebrasClient) GetLastResponseID() string {
+	return "" // Not applicable for Cerebras
+}
+
+func (c *CerebrasClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for Cerebras
+}
+
 func (c *CerebrasClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.CompleteWithRequest(ctx, &CompletionRequest{
 		Messages: []*Message{

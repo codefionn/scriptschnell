@@ -106,6 +106,13 @@ func (m *mockLLMClient) Complete(ctx context.Context, prompt string) (string, er
 	return m.response, nil
 }
 
+func (m *mockLLMClient) GetLastResponseID() string {
+	return ""
+}
+
+func (m *mockLLMClient) SetPreviousResponseID(responseID string) {
+}
+
 func (m *mockLLMClient) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	return &llm.CompletionResponse{Content: m.response}, nil
 }

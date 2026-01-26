@@ -80,6 +80,13 @@ func (c *CaptureRequestClient) CompleteWithRequest(ctx context.Context, req *llm
 	return &resp, nil
 }
 
+func (c *CaptureRequestClient) GetLastResponseID() string {
+	return ""
+}
+
+func (c *CaptureRequestClient) SetPreviousResponseID(responseID string) {
+}
+
 func (c *CaptureRequestClient) Complete(ctx context.Context, prompt string) (string, error) {
 	panic("not implemented")
 }

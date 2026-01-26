@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -22,10 +23,12 @@ const (
 
 // OpenRouterClient implements the Client interface using the native OpenRouter API.
 type OpenRouterClient struct {
-	apiKey     string
-	model      string
-	baseURL    string
-	httpClient *http.Client
+	apiKey         string
+	model          string
+	baseURL        string
+	httpClient     *http.Client
+	lastResponseID string // Tracks the last response ID for prompt caching
+	mu             sync.RWMutex
 }
 
 // NewOpenRouterClient creates a new OpenRouter client.
@@ -51,6 +54,20 @@ func NewOpenRouterClient(apiKey, modelID string) (Client, error) {
 
 func (c *OpenRouterClient) GetModelName() string {
 	return c.model
+}
+
+// GetLastResponseID returns the last response ID for prompt caching
+func (c *OpenRouterClient) GetLastResponseID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastResponseID
+}
+
+// SetPreviousResponseID sets the previous response ID for the next request
+func (c *OpenRouterClient) SetPreviousResponseID(responseID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastResponseID = responseID
 }
 
 func (c *OpenRouterClient) Complete(ctx context.Context, prompt string) (string, error) {
@@ -99,7 +116,13 @@ func (c *OpenRouterClient) CompleteWithRequest(ctx context.Context, req *Complet
 		return nil, fmt.Errorf("openrouter completion failed: %w", err)
 	}
 
-	logger.Debug("OpenRouter: received response with %d choices, usage: %v", len(chatResp.Choices), chatResp.Usage)
+	logger.Debug("OpenRouter: received response with %d choices, usage: %v, id: %s", len(chatResp.Choices), chatResp.Usage, chatResp.ID)
+
+	// Store the response ID for next request's prompt caching
+	c.mu.Lock()
+	c.lastResponseID = chatResp.ID
+	c.mu.Unlock()
+	logger.Debug("OpenRouter: stored response_id %s for next request", chatResp.ID)
 
 	if len(chatResp.Choices) == 0 || chatResp.Choices[0].Message == nil {
 		logger.Debug("OpenRouter: no valid choices in response, returning stop reason")
@@ -181,6 +204,16 @@ func (c *OpenRouterClient) Stream(ctx context.Context, req *CompletionRequest, c
 		logger.Debug("OpenRouter: received chunk %d with %d choices", chunkCount+1, len(chunk.Choices))
 		chunkCount++
 
+		// Store the response ID from the first chunk for next request's prompt caching
+		if chunk.ID != "" {
+			c.mu.Lock()
+			if c.lastResponseID != chunk.ID {
+				c.lastResponseID = chunk.ID
+				logger.Debug("OpenRouter: stored stream response_id %s for next request", chunk.ID)
+			}
+			c.mu.Unlock()
+		}
+
 		for _, choice := range chunk.Choices {
 			if choice.Delta == nil {
 				continue
@@ -233,6 +266,10 @@ func (c *OpenRouterClient) buildChatRequest(req *CompletionRequest, stream bool)
 	if len(req.Tools) > 0 {
 		payload.Tools = req.Tools
 		logger.Debug("OpenRouter: set %d tools", len(req.Tools))
+	}
+	if req.PreviousResponseID != "" {
+		payload.PreviousResponseID = req.PreviousResponseID
+		logger.Debug("OpenRouter: set previous_response_id to %s", req.PreviousResponseID)
 	}
 
 	return payload, nil
@@ -518,12 +555,13 @@ func extractOpenRouterText(content interface{}) string {
 }
 
 type openRouterChatRequest struct {
-	Model       string                   `json:"model"`
-	Messages    []openRouterChatMessage  `json:"messages"`
-	Tools       []map[string]interface{} `json:"tools,omitempty"`
-	Temperature *float64                 `json:"temperature,omitempty"`
-	MaxTokens   int                      `json:"max_tokens,omitempty"`
-	Stream      bool                     `json:"stream,omitempty"`
+	Model              string                   `json:"model"`
+	Messages           []openRouterChatMessage  `json:"messages"`
+	Tools              []map[string]interface{} `json:"tools,omitempty"`
+	Temperature        *float64                 `json:"temperature,omitempty"`
+	MaxTokens          int                      `json:"max_tokens,omitempty"`
+	Stream             bool                     `json:"stream,omitempty"`
+	PreviousResponseID string                   `json:"previous_response_id,omitempty"` // For prompt caching
 }
 
 type openRouterChatMessage struct {

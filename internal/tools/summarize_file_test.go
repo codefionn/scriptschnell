@@ -36,6 +36,13 @@ func (m *MockSummarizeClient) GetModelName() string {
 	return "mock-model"
 }
 
+func (m *MockSummarizeClient) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockSummarizeClient) SetPreviousResponseID(responseID string) {
+}
+
 func TestSummarizeFileToolSpec_Name(t *testing.T) {
 	spec := &SummarizeFileToolSpec{}
 	if spec.Name() != ToolNameReadFileSummarized {
@@ -401,18 +408,35 @@ type CapturingMockClient struct {
 	onComplete func(ctx context.Context, prompt string) (string, error)
 }
 
-func (m *CapturingMockClient) Complete(ctx context.Context, prompt string) (string, error) {
-	return m.onComplete(ctx, prompt)
+func (c *CapturingMockClient) Complete(ctx context.Context, prompt string) (string, error) {
+	if c.onComplete != nil {
+		return c.onComplete(ctx, prompt)
+	}
+	return "", nil
 }
 
-func (m *CapturingMockClient) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	return nil, fmt.Errorf("not implemented")
+func (c *CapturingMockClient) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
+	if c.onComplete != nil {
+		resp, err := c.onComplete(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		return &llm.CompletionResponse{Content: resp}, nil
+	}
+	return &llm.CompletionResponse{}, nil
 }
 
-func (m *CapturingMockClient) Stream(ctx context.Context, req *llm.CompletionRequest, callback func(chunk string) error) error {
-	return fmt.Errorf("not implemented")
+func (c *CapturingMockClient) Stream(ctx context.Context, req *llm.CompletionRequest, callback func(chunk string) error) error {
+	return nil
 }
 
-func (m *CapturingMockClient) GetModelName() string {
-	return "mock-model"
+func (c *CapturingMockClient) GetModelName() string {
+	return "capturing-mock"
+}
+
+func (c *CapturingMockClient) GetLastResponseID() string {
+	return ""
+}
+
+func (c *CapturingMockClient) SetPreviousResponseID(responseID string) {
 }

@@ -41,6 +41,14 @@ func (c *OllamaClient) GetModelName() string {
 	return c.model
 }
 
+func (c *OllamaClient) GetLastResponseID() string {
+	return "" // Not applicable for Ollama
+}
+
+func (c *OllamaClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for Ollama
+}
+
 func (c *OllamaClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.CompleteWithRequest(ctx, &CompletionRequest{
 		Messages: []*Message{

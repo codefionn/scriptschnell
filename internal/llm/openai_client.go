@@ -62,6 +62,14 @@ func (c *OpenAIClient) GetModelName() string {
 	return c.model
 }
 
+func (c *OpenAIClient) GetLastResponseID() string {
+	return "" // Not applicable for OpenAI
+}
+
+func (c *OpenAIClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for OpenAI
+}
+
 func (c *OpenAIClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.CompleteWithRequest(ctx, &CompletionRequest{
 		Messages: []*Message{

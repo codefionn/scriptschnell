@@ -64,6 +64,13 @@ func (m *MockSummarizeClient) GetModelName() string {
 	return "test-model"
 }
 
+func (m *MockSummarizeClient) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockSummarizeClient) SetPreviousResponseID(responseID string) {
+}
+
 // Test VerificationAgent creation
 func TestNewVerificationAgent(t *testing.T) {
 	providerMgr, err := provider.NewManager("", "")

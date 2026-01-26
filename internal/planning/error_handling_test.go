@@ -512,6 +512,13 @@ func (m *MockLLMClientWithError) Complete(ctx context.Context, prompt string) (s
 	return "", m.error
 }
 
+func (m *MockLLMClientWithError) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClientWithError) SetPreviousResponseID(responseID string) {
+}
+
 func (m *MockLLMClientWithError) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	return nil, m.error
 }
@@ -536,6 +543,13 @@ func (m *MockLLMClientWithTimeout) Complete(ctx context.Context, prompt string) 
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
+}
+
+func (m *MockLLMClientWithTimeout) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClientWithTimeout) SetPreviousResponseID(responseID string) {
 }
 
 func (m *MockLLMClientWithTimeout) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -567,6 +581,13 @@ func (m *MockLLMClientWithDelay) Complete(ctx context.Context, prompt string) (s
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
+}
+
+func (m *MockLLMClientWithDelay) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClientWithDelay) SetPreviousResponseID(responseID string) {
 }
 
 func (m *MockLLMClientWithDelay) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -605,6 +626,13 @@ func (m *MockLLMClientWithContextCancellation) Complete(ctx context.Context, pro
 	response := m.responses[m.index]
 	m.index++
 	return response, nil
+}
+
+func (m *MockLLMClientWithContextCancellation) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClientWithContextCancellation) SetPreviousResponseID(responseID string) {
 }
 
 func (m *MockLLMClientWithContextCancellation) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -656,6 +684,13 @@ func (m *MockLLMClientWithRandomErrors) Complete(ctx context.Context, prompt str
 		return resp, nil
 	}
 	return `{"plan": ["random response"], "complete": true}`, nil
+}
+
+func (m *MockLLMClientWithRandomErrors) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClientWithRandomErrors) SetPreviousResponseID(responseID string) {
 }
 
 func (m *MockLLMClientWithRandomErrors) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {

@@ -30,6 +30,13 @@ func (m *MockLLMClient) CompleteWithRequest(ctx context.Context, req *llm.Comple
 	}, nil
 }
 
+func (m *MockLLMClient) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockLLMClient) SetPreviousResponseID(responseID string) {
+}
+
 func (m *MockLLMClient) Stream(ctx context.Context, req *llm.CompletionRequest, callback func(string) error) error {
 	if m.err != nil {
 		return m.err

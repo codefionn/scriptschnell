@@ -31,6 +31,13 @@ func (m *MockClient) Stream(ctx context.Context, req *llm.CompletionRequest, cal
 	return nil
 }
 
+func (m *MockClient) GetLastResponseID() string {
+	return ""
+}
+
+func (m *MockClient) SetPreviousResponseID(responseID string) {
+}
+
 func (m *MockClient) GetModelName() string {
 	if m.modelName != "" {
 		return m.modelName

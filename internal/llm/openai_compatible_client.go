@@ -63,6 +63,14 @@ func (c *OpenAICompatibleClient) GetModelName() string {
 	return c.model
 }
 
+func (c *OpenAICompatibleClient) GetLastResponseID() string {
+	return "" // Not applicable for generic OpenAI-compatible
+}
+
+func (c *OpenAICompatibleClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for generic OpenAI-compatible
+}
+
 func (c *OpenAICompatibleClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.CompleteWithRequest(ctx, &CompletionRequest{
 		Messages: []*Message{

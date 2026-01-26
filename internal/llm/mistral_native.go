@@ -53,6 +53,14 @@ func (c *MistralClient) GetModelName() string {
 	return c.model
 }
 
+func (c *MistralClient) GetLastResponseID() string {
+	return "" // Not applicable for Mistral
+}
+
+func (c *MistralClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for Mistral
+}
+
 func (c *MistralClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.CompleteWithRequest(ctx, &CompletionRequest{
 		Messages: []*Message{

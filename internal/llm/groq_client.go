@@ -66,6 +66,14 @@ func (c *GroqClient) GetModelName() string {
 	return c.model
 }
 
+func (c *GroqClient) GetLastResponseID() string {
+	return "" // Not applicable for Groq
+}
+
+func (c *GroqClient) SetPreviousResponseID(responseID string) {
+	// Not applicable for Groq
+}
+
 func (c *GroqClient) Complete(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.CompleteWithRequest(ctx, &CompletionRequest{
 		Messages: []*Message{

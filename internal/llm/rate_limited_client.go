@@ -145,6 +145,14 @@ func (c *rateLimitedClient) GetModelName() string {
 	return c.delegate.GetModelName()
 }
 
+func (c *rateLimitedClient) GetLastResponseID() string {
+	return c.delegate.GetLastResponseID()
+}
+
+func (c *rateLimitedClient) SetPreviousResponseID(responseID string) {
+	c.delegate.SetPreviousResponseID(responseID)
+}
+
 func estimateTokensForPrompt(prompt string) int {
 	chars := len(prompt)
 	estimated := charsToTokens(chars)

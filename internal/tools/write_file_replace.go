@@ -9,6 +9,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/syntax"
 )
 
 // WriteFileReplaceToolSpec is the static specification for the write_file_replace tool
@@ -204,6 +205,18 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 		totalReplacements += count
 	}
 
+	// Validate syntax before writing (non-blocking)
+	var validationWarning string
+	language := syntax.DetectLanguage(path)
+	if language != "" && syntax.IsValidationSupported(language) {
+		validator := syntax.NewValidator()
+		validationResult, err := validator.Validate(finalContent, language)
+		if err == nil && !validationResult.Valid {
+			validationWarning = formatValidationWarning(path, finalContent, validationResult)
+			logger.Warn("edit_file(replace): syntax validation found %d error(s) in %s", len(validationResult.Errors), path)
+		}
+	}
+
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {
 		logger.Error("edit_file(replace): error writing file: %v", err)
 		return &ToolResult{Error: fmt.Sprintf("error writing file: %v", err)}
@@ -215,14 +228,26 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 
 	logger.Info("edit_file(replace): updated %s (%d replacements)", path, totalReplacements)
 
+	// Build result with optional validation warning
+	resultMap := map[string]interface{}{
+		"path":          path,
+		"replacements":  totalReplacements,
+		"edits_applied": len(edits),
+		"updated":       true,
+	}
+	if validationWarning != "" {
+		resultMap["validation_warning"] = validationWarning
+	}
+
+	// Generate UI result with validation warning if present
+	uiResult := generateGitDiff(path, content, finalContent)
+	if validationWarning != "" {
+		uiResult = fmt.Sprintf("%s\n\n⚠️  **Syntax Validation**\n%s", uiResult, validationWarning)
+	}
+
 	return &ToolResult{
-		Result: map[string]interface{}{
-			"path":          path,
-			"replacements":  totalReplacements,
-			"edits_applied": len(edits),
-			"updated":       true,
-		},
-		UIResult: generateGitDiff(path, content, finalContent),
+		Result:   resultMap,
+		UIResult: uiResult,
 	}
 }
 

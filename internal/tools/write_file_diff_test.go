@@ -137,3 +137,167 @@ func TestWriteFileDiffTool_FailsIfMissingFile(t *testing.T) {
 		t.Fatalf("expected missing file error, got %s", result.Error)
 	}
 }
+
+func TestWriteFileDiffTool_SyntaxValidationWithInvalidGo(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	tool := NewWriteFileDiffTool(mockFS, sess)
+
+	original := `package main
+
+func main() {
+	println("Hello")
+}`
+
+	if err := mockFS.WriteFile(ctx, "file.go", []byte(original)); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+	sess.TrackFileRead("file.go", original)
+
+	// Apply a diff that creates invalid Go syntax (missing closing parenthesis)
+	diff := `@@ -1,4 +1,4 @@
+ package main
+ 
+-func main() {
++func main( {
+ 	println("Hello")
+ }`
+
+	result := tool.Execute(ctx, map[string]interface{}{
+		"path": "file.go",
+		"diff": diff,
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got type %T", result.Result)
+	}
+
+	// Check that validation warning was included
+	_, hasWarning := resultMap["validation_warning"]
+	if !hasWarning {
+		t.Fatal("expected validation_warning in result for invalid Go code")
+	}
+
+	// Check UI result contains warning
+	uiResult, ok := result.UIResult.(string)
+	if !ok {
+		t.Fatal("expected UIResult to be a string")
+	}
+
+	if !strings.Contains(uiResult, "Syntax Validation") {
+		t.Errorf("expected UIResult to contain 'Syntax Validation'")
+	}
+}
+
+func TestWriteFileDiffTool_SyntaxValidationWithValidGo(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	tool := NewWriteFileDiffTool(mockFS, sess)
+
+	original := `package main
+
+func main() {
+	println("Hello")
+}`
+
+	if err := mockFS.WriteFile(ctx, "file.go", []byte(original)); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+	sess.TrackFileRead("file.go", original)
+
+	// Apply a diff that creates valid Go syntax
+	diff := `@@ -1,4 +1,5 @@
+ package main
+ 
+ func main() {
++	fmt.Println("Updated")
+ 	println("Hello")
+ }`
+
+	result := tool.Execute(ctx, map[string]interface{}{
+		"path": "file.go",
+		"diff": diff,
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got type %T", result.Result)
+	}
+
+	// Check that no validation warning was included
+	if _, hasWarning := resultMap["validation_warning"]; hasWarning {
+		t.Fatal("expected no validation_warning in result for valid Go code")
+	}
+}
+
+func TestWriteFileDiffTool_SyntaxValidationContextDisplay(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	tool := NewWriteFileDiffTool(mockFS, sess)
+
+	original := `package main
+
+func main() {
+	println("Hello")
+}`
+
+	if err := mockFS.WriteFile(ctx, "file.go", []byte(original)); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+	sess.TrackFileRead("file.go", original)
+
+	// Apply a diff that creates syntax error with context
+	diff := `@@ -1,4 +1,8 @@
+ package main
+ 
++// New function
++func helper( {  // Missing closing parenthesis
++	return
++}
++
+ func main() {
+ 	println("Hello")
+ }`
+
+	result := tool.Execute(ctx, map[string]interface{}{
+		"path": "file.go",
+		"diff": diff,
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got type %T", result.Result)
+	}
+
+	// Check that validation warning was included
+	warning, hasWarning := resultMap["validation_warning"]
+	if !hasWarning {
+		t.Fatal("expected validation_warning in result")
+	}
+
+	warningStr, ok := warning.(string)
+	if !ok {
+		t.Fatal("expected validation_warning to be a string")
+	}
+
+	// Check that context lines are included in the warning
+	if !strings.Contains(warningStr, ":") {
+		t.Error("expected line numbers in validation warning")
+	}
+}

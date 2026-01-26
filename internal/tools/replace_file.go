@@ -96,7 +96,7 @@ func (t *ReplaceFileTool) Execute(ctx context.Context, params map[string]interfa
 		validator := syntax.NewValidator()
 		validationResult, err := validator.Validate(content, language)
 		if err == nil && !validationResult.Valid {
-			validationWarning = formatValidationWarning(path, validationResult)
+			validationWarning = formatValidationWarning(path, content, validationResult)
 			logger.Warn("replace_file: syntax validation found %d error(s) in %s", len(validationResult.Errors), path)
 		}
 	}

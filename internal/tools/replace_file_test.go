@@ -235,3 +235,183 @@ func TestReplaceFileToolFactory(t *testing.T) {
 		t.Fatal("expected session to be set")
 	}
 }
+
+func TestReplaceFileTool_SyntaxValidationWithInvalidGo(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test-session", ".")
+	tool := NewReplaceFileTool(mockFS, sess)
+
+	// First create a file
+	if err := mockFS.WriteFile(context.Background(), "test.go", []byte("original")); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	sess.TrackFileRead("test.go", "original")
+
+	// Replace with invalid Go syntax
+	invalidGo := `package main
+
+import (
+	"fmt"
+)
+
+func main( {  // Missing closing parenthesis
+	fmt.Println("Hello")
+}
+`
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"path":    "test.go",
+		"content": invalidGo,
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected result to be a map")
+	}
+
+	// Check that validation warning was included
+	_, hasWarning := resultMap["validation_warning"]
+	if !hasWarning {
+		t.Fatal("expected validation_warning in result for invalid Go code")
+	}
+
+	// Check UI result contains warning
+	uiResult, ok := result.UIResult.(string)
+	if !ok {
+		t.Fatal("expected UIResult to be a string")
+	}
+
+	if !strings.Contains(uiResult, "Syntax Validation") {
+		t.Errorf("expected UIResult to contain 'Syntax Validation', got: %s", uiResult)
+	}
+
+	// File should still be replaced
+	content, err := mockFS.ReadFile(context.Background(), "test.go")
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(content) != invalidGo {
+		t.Fatalf("expected invalid Go content, got: %s", string(content))
+	}
+}
+
+func TestReplaceFileTool_SyntaxValidationWithValidGo(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test-session", ".")
+	tool := NewReplaceFileTool(mockFS, sess)
+
+	// First create a file
+	if err := mockFS.WriteFile(context.Background(), "test.go", []byte("original")); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	sess.TrackFileRead("test.go", "original")
+
+	// Replace with valid Go syntax
+	validGo := `package main
+
+func main() {
+	println("Hello, World!")
+}
+`
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"path":    "test.go",
+		"content": validGo,
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected result to be a map")
+	}
+
+	// Check that no validation warning was included
+	if _, hasWarning := resultMap["validation_warning"]; hasWarning {
+		t.Fatal("expected no validation_warning in result for valid Go code")
+	}
+
+	// File should be replaced
+	content, err := mockFS.ReadFile(context.Background(), "test.go")
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(content) != validGo {
+		t.Fatalf("expected valid Go content, got: %s", string(content))
+	}
+}
+
+func TestReplaceFileTool_SyntaxValidationContextDisplay(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test-session", ".")
+	tool := NewReplaceFileTool(mockFS, sess)
+
+	// First create a file
+	if err := mockFS.WriteFile(context.Background(), "test.go", []byte("original")); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	sess.TrackFileRead("test.go", "original")
+
+	// Create invalid Go with context lines
+	invalidGo := `package main
+
+import (
+	"fmt"
+)
+
+// Line above has error
+func main( {  // Missing closing parenthesis
+	fmt.Println("Hello")
+}
+
+// Some more context
+func helper() {
+	return
+}
+`
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"path":    "test.go",
+		"content": invalidGo,
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected result to be a map")
+	}
+
+	// Check that validation warning was included
+	warning, hasWarning := resultMap["validation_warning"]
+	if !hasWarning {
+		t.Fatal("expected validation_warning in result")
+	}
+
+	warningStr, ok := warning.(string)
+	if !ok {
+		t.Fatal("expected validation_warning to be a string")
+	}
+
+	// Check that context lines are included in the warning
+	if !strings.Contains(warningStr, ":") {
+		t.Error("expected line numbers in validation warning")
+	}
+
+	// Check UI result
+	uiResult, ok := result.UIResult.(string)
+	if !ok {
+		t.Fatal("expected UIResult to be a string")
+	}
+	if !strings.Contains(uiResult, "Syntax Validation") {
+		t.Errorf("expected UIResult to contain 'Syntax Validation'")
+	}
+}

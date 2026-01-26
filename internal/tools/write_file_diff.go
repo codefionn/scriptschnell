@@ -162,7 +162,7 @@ func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]inter
 		validator := syntax.NewValidator()
 		validationResult, err := validator.Validate(finalContent, language)
 		if err == nil && !validationResult.Valid {
-			validationWarning = formatValidationWarning(path, validationResult)
+			validationWarning = formatValidationWarning(path, finalContent, validationResult)
 			logger.Warn("edit_file: syntax validation found %d error(s) in %s", len(validationResult.Errors), path)
 		}
 	}

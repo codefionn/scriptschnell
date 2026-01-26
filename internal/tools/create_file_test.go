@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/codefionn/scriptschnell/internal/fs"
@@ -177,5 +178,139 @@ func TestCreateFileTool_ThenWriteDiff(t *testing.T) {
 	expected := "line 1 modified\nline 2\nline 3"
 	if string(data) != expected {
 		t.Fatalf("unexpected file content after diff:\nGot:\n%s\nExpected:\n%s", data, expected)
+	}
+}
+
+func TestCreateFileTool_SyntaxValidationWithInvalidGo(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", "/workspace")
+	tool := NewCreateFileTool(mockFS, sess)
+
+	// Create a file with invalid Go syntax
+	invalidGo := `package main
+
+import (
+	"fmt"
+	"invalid"  // This should cause syntax error
+)
+
+func main() {
+	fmt.Println("Hello")
+`
+
+	params := map[string]interface{}{
+		"path":    "invalid.go",
+		"content": invalidGo,
+	}
+
+	result := tool.Execute(context.Background(), params)
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result.Result)
+	}
+
+	// Check that validation warning was included
+	_, hasWarning := resultMap["validation_warning"]
+	if !hasWarning {
+		t.Fatal("expected validation_warning in result for invalid Go code")
+	}
+
+	// Check UI result contains warning
+	if result.UIResult == "" {
+		t.Fatal("expected UIResult to be non-empty")
+	}
+
+	// The UI result should contain the validation warning marker
+	uiResult, ok := result.UIResult.(string)
+	if !ok {
+		t.Fatal("expected UIResult to be a string")
+	}
+	if !strings.Contains(uiResult, "Syntax Validation") {
+		t.Errorf("expected UIResult to contain 'Syntax Validation', got: %s", uiResult)
+	}
+
+	// File should still be created
+	data, err := mockFS.ReadFile(context.Background(), "invalid.go")
+	if err != nil {
+		t.Fatalf("file read failed: %v", err)
+	}
+	if string(data) != invalidGo {
+		t.Fatalf("unexpected file content: %s", data)
+	}
+}
+
+func TestCreateFileTool_SyntaxValidationWithValidGo(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", "/workspace")
+	tool := NewCreateFileTool(mockFS, sess)
+
+	// Create a file with valid Go syntax
+	validGo := `package main
+
+func main() {
+	println("Hello, World!")
+}
+`
+
+	params := map[string]interface{}{
+		"path":    "valid.go",
+		"content": validGo,
+	}
+
+	result := tool.Execute(context.Background(), params)
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result.Result)
+	}
+
+	// Check that no validation warning was included
+	if _, hasWarning := resultMap["validation_warning"]; hasWarning {
+		t.Fatal("expected no validation_warning in result for valid Go code")
+	}
+
+	// File should be created
+	data, err := mockFS.ReadFile(context.Background(), "valid.go")
+	if err != nil {
+		t.Fatalf("file read failed: %v", err)
+	}
+	if string(data) != validGo {
+		t.Fatalf("unexpected file content: %s", data)
+	}
+}
+
+func TestCreateFileTool_SyntaxValidationUnsupportedLanguage(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", "/workspace")
+	tool := NewCreateFileTool(mockFS, sess)
+
+	// Create a file with unsupported language extension
+	content := "some random text"
+
+	params := map[string]interface{}{
+		"path":    "file.xyz",
+		"content": content,
+	}
+
+	result := tool.Execute(context.Background(), params)
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result.Result)
+	}
+
+	// Check that no validation warning was included (unsupported language)
+	if _, hasWarning := resultMap["validation_warning"]; hasWarning {
+		t.Fatal("expected no validation_warning for unsupported language")
 	}
 }

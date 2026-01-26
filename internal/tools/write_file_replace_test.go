@@ -230,3 +230,145 @@ func TestWriteFileReplaceTool_FailsIfCountMismatch(t *testing.T) {
 		t.Fatalf("expected mismatch error, got %s", result.Error)
 	}
 }
+
+func TestWriteFileReplaceTool_SyntaxValidationWithInvalidGo(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	tool := NewWriteFileReplaceTool(mockFS, sess)
+
+	original := `package main
+
+func main() {
+	println("Hello")
+}`
+
+	if err := mockFS.WriteFile(ctx, "file.go", []byte(original)); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+	sess.TrackFileRead("file.go", original)
+
+	// Apply a replacement that creates invalid Go syntax
+	result := tool.Execute(ctx, map[string]interface{}{
+		"path": "file.go",
+		"edits": []map[string]interface{}{
+			{"old_string": "func main() {", "new_string": "func main( {"}, // Missing closing parenthesis
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got type %T", result.Result)
+	}
+
+	// Check that validation warning was included
+	_, hasWarning := resultMap["validation_warning"]
+	if !hasWarning {
+		t.Fatal("expected validation_warning in result for invalid Go code")
+	}
+
+	// Check UI result contains warning
+	uiResult, ok := result.UIResult.(string)
+	if !ok {
+		t.Fatal("expected UIResult to be a string")
+	}
+
+	if !strings.Contains(uiResult, "Syntax Validation") {
+		t.Errorf("expected UIResult to contain 'Syntax Validation'")
+	}
+}
+
+func TestWriteFileReplaceTool_SyntaxValidationWithValidGo(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	tool := NewWriteFileReplaceTool(mockFS, sess)
+
+	original := `package main
+
+func main() {
+	println("Hello")
+}`
+
+	if err := mockFS.WriteFile(ctx, "file.go", []byte(original)); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+	sess.TrackFileRead("file.go", original)
+
+	// Apply a replacement that creates valid Go syntax
+	result := tool.Execute(ctx, map[string]interface{}{
+		"path": "file.go",
+		"edits": []map[string]interface{}{
+			{"old_string": "println(\"Hello\")\n", "new_string": "fmt.Println(\"Hello\")\n"},
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got type %T", result.Result)
+	}
+
+	// Check that no validation warning was included
+	if _, hasWarning := resultMap["validation_warning"]; hasWarning {
+		t.Fatal("expected no validation_warning in result for valid Go code")
+	}
+}
+
+func TestWriteFileReplaceTool_SyntaxValidationContextDisplay(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	tool := NewWriteFileReplaceTool(mockFS, sess)
+
+	original := `package main
+
+func main() {
+	println("Hello")
+}`
+
+	if err := mockFS.WriteFile(ctx, "file.go", []byte(original)); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+	sess.TrackFileRead("file.go", original)
+
+	// Apply a replacement that creates syntax error with context
+	result := tool.Execute(ctx, map[string]interface{}{
+		"path": "file.go",
+		"edits": []map[string]interface{}{
+			{"old_string": "func main() {", "new_string": "func main( {"}, // Missing closing parenthesis
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got type %T", result.Result)
+	}
+
+	// Check that validation warning was included
+	warning, hasWarning := resultMap["validation_warning"]
+	if !hasWarning {
+		t.Fatal("expected validation_warning in result")
+	}
+
+	warningStr, ok := warning.(string)
+	if !ok {
+		t.Fatal("expected validation_warning to be a string")
+	}
+
+	// Check that context lines are included in the warning
+	if !strings.Contains(warningStr, ":") {
+		t.Error("expected line numbers in validation warning")
+	}
+}

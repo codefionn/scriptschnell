@@ -189,7 +189,7 @@ Note: Commands will go through normal authorization checks. The system will dete
 2. Run the appropriate build command for this project type
 3. Run code formatting to ensure code follows project style conventions
 4. Run linting if a linter is configured
-5. Run tests, focusing on areas affected by the changes (use -short or similar flags for speed)
+5. Run tests - if tests exist in the project, they MUST be run.
 6. Report any failures with clear error messages
 
 ## Important Notes

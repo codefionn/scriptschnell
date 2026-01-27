@@ -17,6 +17,7 @@ On first run, it will download tinygo (if not in PATH).
     - Orchestrator: writes the actual code
     - Summarization: summarizes and makes *small* choices
     - Planning: Plans the next steps
+    - Safety: Used for safety-critical tasks, falls back to summarize model if not configured
 - Read only contexts like external documentation, library sources, etc.
 - Experimental agent client protocol support
 

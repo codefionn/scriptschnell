@@ -14,13 +14,21 @@ package tools
 // To run integration tests: go test -run Integration ./internal/tools -integration
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 func TestTinyGoManager_GetCacheDir(t *testing.T) {
@@ -201,4 +209,551 @@ func findSubstring(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// New tests for embedded archive functionality
+
+// TestExtractTarGzData tests extraction of tar.gz data from memory
+func TestExtractTarGzData(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create test tar.gz data with the "tinygo/" prefix
+	var buf bytes.Buffer
+
+	// Create gzip writer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Add some test files
+	testFiles := []struct {
+		name    string
+		content string
+	}{
+		{"tinygo/bin/tinygo", "tinygo binary content"},
+		{"tinygo/pkg/path/to/file.txt", "some package file"},
+		{"tinygo/README.md", "TinyGo README"},
+	}
+
+	for _, tf := range testFiles {
+		hdr := &tar.Header{
+			Name:     tf.name,
+			Mode:     0644,
+			Size:     int64(len(tf.content)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("Failed to write header: %v", err)
+		}
+		if _, err := tw.Write([]byte(tf.content)); err != nil {
+			t.Fatalf("Failed to write content: %v", err)
+		}
+	}
+
+	// Add a directory
+	dirHdr := &tar.Header{
+		Name:     "tinygo/some/dir/",
+		Mode:     0755,
+		Typeflag: tar.TypeDir,
+	}
+	if err := tw.WriteHeader(dirHdr); err != nil {
+		t.Fatalf("Failed to write directory header: %v", err)
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Failed to close tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("Failed to close gzip writer: %v", err)
+	}
+
+	// Extract the archive
+	destDir := filepath.Join(tmpDir, "extracted")
+	if err := mgr.extractTarGzData(buf.Bytes(), destDir); err != nil {
+		t.Fatalf("Failed to extract tar.gz: %v", err)
+	}
+
+	// Verify files were extracted (without "tinygo/" prefix)
+	expectedFiles := []string{
+		"bin/tinygo",
+		"pkg/path/to/file.txt",
+		"README.md",
+		"some/dir",
+	}
+
+	for _, expectedFile := range expectedFiles {
+		expectedPath := filepath.Join(destDir, expectedFile)
+		if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+			t.Errorf("Expected file %s to exist", expectedPath)
+		}
+	}
+
+	// Verify content
+	tinygoPath := filepath.Join(destDir, "bin/tinygo")
+	content, err := os.ReadFile(tinygoPath)
+	if err != nil {
+		t.Fatalf("Failed to read extracted file: %v", err)
+	}
+	if string(content) != "tinygo binary content" {
+		t.Errorf("Content mismatch: expected %q, got %q", "tinygo binary content", string(content))
+	}
+}
+
+// TestExtractTarGzDataWithEmptyPrefix tests handling of files with empty prefix
+func TestExtractTarGzDataWithEmptyPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create tar.gz without "tinygo/" prefix
+	var buf bytes.Buffer
+
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	testFile := "direct/file.txt"
+	hdr := &tar.Header{
+		Name:     testFile,
+		Mode:     0644,
+		Size:     int64(9),
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("Failed to write header: %v", err)
+	}
+	if _, err := tw.Write([]byte("test data")); err != nil {
+		t.Fatalf("Failed to write content: %v", err)
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Failed to close tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("Failed to close gzip writer: %v", err)
+	}
+
+	// Extract
+	destDir := filepath.Join(tmpDir, "extracted")
+	if err := mgr.extractTarGzData(buf.Bytes(), destDir); err != nil {
+		t.Fatalf("Failed to extract tar.gz: %v", err)
+	}
+
+	// Verify file exists
+	expectedPath := filepath.Join(destDir, testFile)
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected file %s to exist", expectedPath)
+	}
+}
+
+// TestExtractTarGzDataInvalidGzip tests error handling for invalid gzip data
+func TestExtractTarGzDataInvalidGzip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Try to extract invalid gzip data
+	invalidData := []byte("not a valid gzip file")
+
+	destDir := filepath.Join(tmpDir, "extracted")
+	err := mgr.extractTarGzData(invalidData, destDir)
+
+	if err == nil {
+		t.Error("Expected error when extracting invalid gzip data")
+	}
+}
+
+// TestExtractTarGzDataInvalidTar tests error handling for invalid tar data
+func TestExtractTarGzDataInvalidTar(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create valid gzip but invalid tar data
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write([]byte("not valid tar")); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("Failed to close gzip writer: %v", err)
+	}
+
+	destDir := filepath.Join(tmpDir, "extracted")
+	err := mgr.extractTarGzData(buf.Bytes(), destDir)
+
+	// The tar reader will fail when trying to read the first header
+	// The error might vary, but it should fail
+	if err == nil {
+		t.Error("Expected error when extracting invalid tar data")
+	}
+}
+
+// TestExtractZipData tests extraction of zip data from memory
+func TestExtractZipData(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create test zip data with "tinygo/" prefix
+	var buf bytes.Buffer
+
+	w := zip.NewWriter(&buf)
+
+	testFiles := []struct {
+		name    string
+		content string
+		isDir   bool
+	}{
+		{"tinygo/bin/tinygo.exe", "tinygo binary content", false},
+		{"tinygo/pkg/path/to/file.txt", "some package file", false},
+		{"tinygo/README.md", "TinyGo README", false},
+		{"tinygo/some/dir/", "", true},
+	}
+
+	for _, tf := range testFiles {
+		if tf.isDir {
+			// Create directory
+			header := &zip.FileHeader{
+				Name:   tf.name,
+				Method: zip.Store,
+			}
+			header.SetMode(0755)
+			_, err := w.CreateHeader(header)
+			if err != nil {
+				t.Fatalf("Failed to create directory entry: %v", err)
+			}
+		} else {
+			// Create file
+			writer, err := w.Create(tf.name)
+			if err != nil {
+				t.Fatalf("Failed to create file entry: %v", err)
+			}
+			if _, err := writer.Write([]byte(tf.content)); err != nil {
+				t.Fatalf("Failed to write content: %v", err)
+			}
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Failed to close zip writer: %v", err)
+	}
+
+	// Extract the archive
+	destDir := filepath.Join(tmpDir, "extracted")
+	if err := mgr.extractZipData(buf.Bytes(), destDir, "embedded.zip"); err != nil {
+		t.Fatalf("Failed to extract zip: %v", err)
+	}
+
+	// Verify files were extracted (without "tinygo/" prefix)
+	expectedFiles := []string{
+		"bin/tinygo.exe",
+		"pkg/path/to/file.txt",
+		"README.md",
+		"some/dir",
+	}
+
+	for _, expectedFile := range expectedFiles {
+		expectedPath := filepath.Join(destDir, expectedFile)
+		if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+			t.Errorf("Expected file %s to exist", expectedPath)
+		}
+	}
+
+	// Verify content
+	tinygoPath := filepath.Join(destDir, "bin/tinygo.exe")
+	content, err := os.ReadFile(tinygoPath)
+	if err != nil {
+		t.Fatalf("Failed to read extracted file: %v", err)
+	}
+	if string(content) != "tinygo binary content" {
+		t.Errorf("Content mismatch: expected %q, got %q", "tinygo binary content", string(content))
+	}
+}
+
+// TestExtractZipDataWindowsPathHandling tests handling of Windows paths
+func TestExtractZipDataWindowsPathHandling(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create zip with Windows-style paths
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	// Use Windows-style path separators
+	testFile := "tinygo\\bin\\tinygo.exe"
+	writer, err := w.Create(testFile)
+	if err != nil {
+		t.Fatalf("Failed to create file entry: %v", err)
+	}
+	if _, err := writer.Write([]byte("test content")); err != nil {
+		t.Fatalf("Failed to write content: %v", err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Failed to close zip writer: %v", err)
+	}
+
+	// Extract
+	destDir := filepath.Join(tmpDir, "extracted")
+	if err := mgr.extractZipData(buf.Bytes(), destDir, "embedded.zip"); err != nil {
+		t.Fatalf("Failed to extract zip: %v", err)
+	}
+
+	// Verify file exists
+	// On non-Windows systems, backslashes in zip entries might be preserved in filenames
+	// Check both possibilities: normalized path and path with backslashes
+	expectedPathNormal := filepath.Join(destDir, "bin", "tinygo.exe")
+	expectedPathBackslash := filepath.Join(destDir, "bin\\tinygo.exe")
+
+	found := false
+	for _, expectedPath := range []string{expectedPathNormal, expectedPathBackslash} {
+		info, err := os.Stat(expectedPath)
+		if err == nil && !info.IsDir() {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected file to exist at %s or %s", expectedPathNormal, expectedPathBackslash)
+		// Print what actually exists for debugging
+		filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
+			if err == nil {
+				t.Logf("Found: %s", path)
+			}
+			return nil
+		})
+	}
+}
+
+// TestExtractZipDataInvalidZip tests error handling for invalid zip data
+func TestExtractZipDataInvalidZip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Try to extract invalid zip data
+	invalidData := []byte("not a valid zip file")
+
+	destDir := filepath.Join(tmpDir, "extracted")
+	err := mgr.extractZipData(invalidData, destDir, "embedded.zip")
+
+	if err == nil {
+		t.Error("Expected error when extracting invalid zip data")
+	}
+}
+
+// TestExtractZipDataEmptyZip tests handling of empty zip archive
+func TestExtractZipDataEmptyZip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create empty zip
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	if err := w.Close(); err != nil {
+		t.Fatalf("Failed to close zip writer: %v", err)
+	}
+
+	// Extract - should succeed but create no files
+	destDir := filepath.Join(tmpDir, "extracted")
+	// Ensure the destination directory exists before extraction
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatalf("Failed to create destination directory: %v", err)
+	}
+
+	if err := mgr.extractZipData(buf.Bytes(), destDir, "empty.zip"); err != nil {
+		t.Fatalf("Failed to extract empty zip: %v", err)
+	}
+
+	// Verify directory exists but is empty
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Expected empty directory, found %d entries", len(entries))
+	}
+}
+
+// TestTinyGoManagerStatusCallback tests status callback functionality
+func TestTinyGoManagerStatusCallback(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr, err := NewTinyGoManager()
+	if err != nil {
+		t.Fatalf("Failed to create TinyGo manager: %v", err)
+	}
+
+	// Override cache dir for testing
+	mgr.cacheDir = tmpDir
+
+	// Set status callback
+	statusUpdates := []string{}
+	var mu sync.Mutex
+	mgr.SetStatusCallback(func(status string) {
+		mu.Lock()
+		defer mu.Unlock()
+		statusUpdates = append(statusUpdates, status)
+	})
+
+	// Test updateStatus (non-locked version)
+	mgr.updateStatus("test status 1")
+
+	// Test updateStatusLocked (would be called from within GetTinyGoBinary)
+	mgr.mu.Lock()
+	mgr.updateStatusLocked("test status 2")
+	mgr.mu.Unlock()
+
+	// Verify callbacks were received
+	mu.Lock()
+	defer mu.Unlock()
+	if len(statusUpdates) != 2 {
+		t.Errorf("Expected 2 status updates, got %d", len(statusUpdates))
+	}
+
+	// Note: Order may vary due to concurrency
+	for i, update := range statusUpdates {
+		if update == "" {
+			t.Errorf("Status update %d is empty", i)
+		}
+	}
+}
+
+// TestExtractLargeArchive tests extraction of a larger archive
+func TestExtractLargeArchive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping large archive test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create a larger archive with many files
+	var buf bytes.Buffer
+
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	numFiles := 100
+	for i := 0; i < numFiles; i++ {
+		fileName := filepath.Join("tinygo", "dir", "subdir", fmt.Sprintf("file%d.txt", i))
+		content := fmt.Sprintf("content of file %d\n", i)
+
+		hdr := &tar.Header{
+			Name:     fileName,
+			Mode:     0644,
+			Size:     int64(len(content)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("Failed to write header: %v", err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("Failed to write content: %v", err)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Failed to close tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("Failed to close gzip writer: %v", err)
+	}
+
+	// Extract
+	destDir := filepath.Join(tmpDir, "extracted")
+	if err := mgr.extractTarGzData(buf.Bytes(), destDir); err != nil {
+		t.Fatalf("Failed to extract archive: %v", err)
+	}
+
+	// Verify all files were extracted
+	for i := 0; i < numFiles; i++ {
+		expectedPath := filepath.Join(destDir, "dir", "subdir", fmt.Sprintf("file%d.txt", i))
+		if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+			t.Errorf("Expected file %s to exist", expectedPath)
+		}
+	}
+}
+
+// TestExtractWithNestedDirectories tests extraction with deeply nested directories
+func TestExtractWithNestedDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mgr := &TinyGoManager{
+		cacheDir: tmpDir,
+		logger:   logger.Global().WithPrefix("test"),
+	}
+
+	// Create archive with deeply nested paths
+	var buf bytes.Buffer
+
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	nestedPath := "tinygo/very/deep/nested/path/to/file.txt"
+	content := "nested file content"
+
+	hdr := &tar.Header{
+		Name:     nestedPath,
+		Mode:     0644,
+		Size:     int64(len(content)),
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("Failed to write header: %v", err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatalf("Failed to write content: %v", err)
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Failed to close tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("Failed to close gzip writer: %v", err)
+	}
+
+	// Extract
+	destDir := filepath.Join(tmpDir, "extracted")
+	if err := mgr.extractTarGzData(buf.Bytes(), destDir); err != nil {
+		t.Fatalf("Failed to extract archive: %v", err)
+	}
+
+	// Verify nested file exists (without "tinygo/" prefix)
+	expectedPath := filepath.Join(destDir, "very/deep/nested/path/to/file.txt")
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected nested file %s to exist", expectedPath)
+	}
 }

@@ -49,10 +49,11 @@ Key actors in the system:
 
 #### Dual LLM System
 
-The application uses two separate LLM models ([internal/llm/client.go](internal/llm/client.go:1-49)):
+The application uses separate LLM models ([internal/llm/client.go](internal/llm/client.go:1-49)):
 
 1. **Orchestration Model**: Main conversation, tool calls, reasoning (e.g., Claude 3.5 Sonnet, GPT-4)
 2. **Summarization Model**: Fast summarization of large files (e.g., Claude 3 Haiku, GPT-3.5)
+3. **Safety Model**: Optional model for safety-critical tasks, falls back to summarize model if not configured
 
 This separation optimizes cost and performance - expensive models only where needed.
 

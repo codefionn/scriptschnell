@@ -801,11 +801,11 @@ func (ch *CommandHandler) handleModels(args []string) (MenuResult, error) {
 
 	case "menu":
 		if len(args) < 2 {
-			return MenuResult{}, fmt.Errorf("usage: /models menu <orchestration|summarize>")
+			return MenuResult{}, fmt.Errorf("usage: /models menu <orchestration|summarize|safety>")
 		}
 		modelType := args[1]
-		if modelType != "orchestration" && modelType != "summarize" {
-			return MenuResult{}, fmt.Errorf("unknown model type: %s (use 'orchestration' or 'summarize')", modelType)
+		if modelType != "orchestration" && modelType != "summarize" && modelType != "safety" {
+			return MenuResult{}, fmt.Errorf("unknown model type: %s (use 'orchestration', 'summarize', or 'safety')", modelType)
 		}
 
 		return NewModelsMenuResult(ModelRole(modelType)), nil

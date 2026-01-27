@@ -102,3 +102,4 @@ build/
 /test_amd64
 /test_arm64
 /scriptschnell-embedded
+/scriptschnell-final-test

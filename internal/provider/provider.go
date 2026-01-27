@@ -79,6 +79,7 @@ type Config struct {
 	OrchestrationModel string               `json:"orchestration_model"`
 	SummarizeModel     string               `json:"summarize_model"`
 	PlanningModel      string               `json:"planning_model"`
+	SafetyModel        string               `json:"safety_model,omitempty"`
 }
 
 // Manager manages LLM providers
@@ -603,6 +604,14 @@ func (m *Manager) SetSummarizeModel(modelID string) error {
 	return m.save()
 }
 
+// SetSafetyModel sets the safety model
+func (m *Manager) SetSafetyModel(modelID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config.SafetyModel = modelID
+	return m.save()
+}
+
 // SetPlanningModel sets the planning model
 func (m *Manager) SetPlanningModel(modelID string) error {
 	m.mu.Lock()
@@ -623,6 +632,13 @@ func (m *Manager) GetSummarizeModel() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.SummarizeModel
+}
+
+// GetSafetyModel gets the safety model ID
+func (m *Manager) GetSafetyModel() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.SafetyModel
 }
 
 // GetPlanningModel gets the planning model ID

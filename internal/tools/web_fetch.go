@@ -12,6 +12,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/safety"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/summarizer"
 )
@@ -180,6 +181,20 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 		summary, err = t.summarizeContent(ctx, summaryPrompt, body, finalURL, secretWarning)
 		if err != nil {
 			return &ToolResult{Error: err.Error()}
+		}
+	}
+
+	// Safety evaluation of web content
+	if t.summarizeClient != nil {
+		safetyEvaluator := safety.NewEvaluator(t.summarizeClient)
+		safetyResult, err := safetyEvaluator.EvaluateWebContent(ctx, body, finalURL)
+		if err != nil {
+			logger.Warn("Failed to evaluate web content safety: %v", err)
+		} else if !safetyResult.IsSafe {
+			return &ToolResult{
+				Error: fmt.Sprintf("Web content safety evaluation failed: %s (risk level: %s, category: %s)",
+					safetyResult.Reason, safetyResult.RiskLevel, safetyResult.Category),
+			}
 		}
 	}
 

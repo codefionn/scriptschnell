@@ -36,6 +36,8 @@ const (
 	ModelRoleOrchestration ModelRole = "orchestration"
 	// ModelRoleSummarization is for file summarization tasks
 	ModelRoleSummarization ModelRole = "summarize"
+	// ModelRoleSafety is for safety-critical tasks (fallback to summarize model)
+	ModelRoleSafety ModelRole = "safety"
 )
 
 // MenuResult represents the result of a command that may trigger a menu

@@ -75,6 +75,11 @@ func NewModelRoleDialog(modelName, defaultRole string) ModelRoleDialog {
 			value: "planning",
 			desc:  "Use for creating detailed plans and asking clarification questions.",
 		},
+		roleItem{
+			label: fmt.Sprintf("Set %s as safety model", modelName),
+			value: "safety",
+			desc:  "Use for safety-critical tasks, falls back to summarize model.",
+		},
 	}
 
 	const width = 80

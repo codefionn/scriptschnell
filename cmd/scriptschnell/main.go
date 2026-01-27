@@ -617,6 +617,15 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 									modelType = "orchestration"
 								}
 
+							case "safety":
+								if err := providerMgr.SetSafetyModel(selectedModel.ID); err != nil {
+									return fmt.Errorf("failed to set safety model: %w", err)
+								}
+								model.AddSystemMessage(fmt.Sprintf("✓ Safety model set to: %s", selectedModel.Name))
+								if modelType == "safety" {
+									modelType = "orchestration"
+								}
+
 							default:
 								model.AddSystemMessage("Model assignment cancelled")
 								continue

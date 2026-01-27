@@ -23,6 +23,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/planning"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/safety"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/summarizer"
@@ -54,6 +55,7 @@ type Orchestrator struct {
 	orchestrationClient    llm.Client
 	summarizeClient        llm.Client
 	planningClient         llm.Client
+	safetyEvaluator        *safety.Evaluator
 	config                 *config.Config
 	workingDir             string
 	ctx                    context.Context
@@ -255,6 +257,11 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	if err := orch.initializeClients(); err != nil {
 		// Non-fatal, user can configure later
 		logger.Warn("Failed to initialize clients: %v", err)
+	}
+
+	// Initialize safety evaluator
+	if orch.summarizeClient != nil {
+		orch.safetyEvaluator = safety.NewEvaluator(orch.summarizeClient)
 	}
 
 	// Set up authorization actor with summarize client
@@ -942,13 +949,15 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		false,
 		"",
 	)
-	addSpec(
-		&tools.ReplaceFileToolSpec{},
-		true,
-		tools.NewReplaceFileToolFactory(o.fs, o.session),
-		false,
-		"",
-	)
+	if o.shouldUseReplaceFileTool(modelFamily) {
+		addSpec(
+			&tools.ReplaceFileToolSpec{},
+			true,
+			tools.NewReplaceFileToolFactory(o.fs, o.session),
+			false,
+			"",
+		)
+	}
 	if o.shouldUseNonDiffUpdateTool(modelFamily) {
 		addSpec(&tools.WriteFileJSONToolSpec{}, true, tools.NewWriteFileJSONToolFactory(o.fs, o.session), false, "")
 	} else if o.shouldUseSimpleSingleDiffTool(modelFamily) {
@@ -1155,6 +1164,10 @@ func (o *Orchestrator) shouldUseShellTool(modelFamily llm.ModelFamily) bool {
 
 func (o *Orchestrator) shouldUseNumberedReadFileTool(modelFamily llm.ModelFamily) bool {
 	return false
+}
+
+func (o *Orchestrator) shouldUseReplaceFileTool(modelFamily llm.ModelFamily) bool {
+	return modelFamily != llm.FamilyZaiGLM
 }
 
 func (o *Orchestrator) shouldUseNonDiffUpdateTool(modelFamily llm.ModelFamily) bool {

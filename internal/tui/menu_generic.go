@@ -221,10 +221,21 @@ func (m *GenericMenu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.list.SetWidth(msg.Width)
-		m.list.SetHeight(msg.Height - 4)
+		// Ensure minimum dimensions to prevent panics
+		const minWidth = 40
+		const minHeight = 10
+		width := msg.Width
+		if width < minWidth {
+			width = minWidth
+		}
+		height := msg.Height
+		if height < minHeight {
+			height = minHeight
+		}
+		m.list.SetWidth(width)
+		m.list.SetHeight(height - 4)
 		// Update delegate width for proper text wrapping
-		m.delegate.width = msg.Width
+		m.delegate.width = width
 		m.list.SetDelegate(m.delegate)
 
 	case tea.KeyMsg:

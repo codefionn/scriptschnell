@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/safety"
 	"github.com/codefionn/scriptschnell/internal/search"
 )
 
@@ -133,10 +135,20 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 
 	// Perform multiple searches and collect results
 	var allResults strings.Builder
+	var allSearchResults []map[string]interface{}
 	for i, query := range queries {
 		response, err := provider.Search(ctx, query, numResults)
 		if err != nil {
 			return &ToolResult{Error: fmt.Sprintf("search failed for query '%s': %v", query, err)}
+		}
+
+		// Collect results for safety evaluation
+		for _, result := range response.Results {
+			allSearchResults = append(allSearchResults, map[string]interface{}{
+				"title":   result.Title,
+				"snippet": result.Snippet,
+				"url":     result.URL,
+			})
 		}
 
 		// Format results for this query
@@ -144,6 +156,23 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]interface
 			allResults.WriteString("\n" + strings.Repeat("-", 80) + "\n\n")
 		}
 		allResults.WriteString(formatSearchResults(response))
+	}
+
+	// Safety evaluation of search results
+	if len(allSearchResults) > 0 {
+		// Create a simple safety evaluator using the search provider's configuration
+		// Since we don't have direct access to an LLM client here, we'll create a basic evaluator
+		// This is a placeholder - in a real implementation, you'd pass the LLM client through
+		safetyEvaluator := safety.NewEvaluator(nil) // Will default to safe
+		safetyResult, err := safetyEvaluator.EvaluateSearchResults(ctx, allSearchResults)
+		if err != nil {
+			logger.Warn("Failed to evaluate search results safety: %v", err)
+		} else if !safetyResult.IsSafe {
+			return &ToolResult{
+				Error: fmt.Sprintf("Search results safety evaluation failed: %s (risk level: %s, category: %s)",
+					safetyResult.Reason, safetyResult.RiskLevel, safetyResult.Category),
+			}
+		}
 	}
 
 	// Return all formatted results

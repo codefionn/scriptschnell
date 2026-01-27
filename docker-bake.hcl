@@ -35,27 +35,35 @@ target "test" {
   cache-to = ["type=local,dest=.cache/test"]
 }
 
-# Target for building the main application
-target "build" {
+# Platform-specific build targets
+target "build-amd64" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final-build"
-  tags = ["${IMAGE_NAME}:build"]
-  output = ["type=local,dest=./bin"]
+  target = "final-build-amd64"
+  tags = ["${IMAGE_NAME}:build-amd64"]
+  output = ["type=local,dest=./bin/linux_amd64"]
   cache-from = ["type=local,src=.cache/build"]
   cache-to = ["type=local,dest=.cache/build"]
-  platforms = ["linux/amd64", "linux/arm64"]
 }
 
-# CI pipeline target (lint -> test -> build)
-target "ci" {
+target "build-arm64" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final-build"
-  tags = ["${IMAGE_NAME}:ci"]
-  output = ["type=local,dest=./bin"]
+  target = "final-build-arm64"
+  tags = ["${IMAGE_NAME}:build-arm64"]
+  output = ["type=local,dest=./bin/linux_arm64"]
   cache-from = ["type=local,src=.cache/build"]
   cache-to = ["type=local,dest=.cache/build"]
+}
+
+# Combined build target (both platforms)
+group "build" {
+  targets = ["build-amd64", "build-arm64"]
+}
+
+# CI pipeline target (lint -> test -> build both platforms)
+group "ci" {
+  targets = ["lint", "test", "build-amd64", "build-arm64"]
 }
 
 # Target for building debug HTML tool
@@ -69,22 +77,16 @@ target "build-debug" {
   cache-to = ["type=local,dest=.cache/build-debug"]
 }
 
-# Default target
+# Default target (amd64 only for backward compatibility)
 target "default" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final-build"
+  target = "final-build-amd64"
   tags = ["${IMAGE_NAME}:latest"]
-  output = ["type=local,dest=./bin"]
-  cache-from = ["type=local,src=.cache/build"]
+  output = ["type=local,dest=./bin/linux_amd64"]
   cache-to = ["type=local,dest=.cache/build"]
-  platforms = ["linux/amd64", "linux/arm64"]
 }
 
-# Group for CI pipeline (lint -> test -> build)
-group "ci" {
-  targets = ["lint", "test", "build"]
-}
 
 # Group for all targets
 group "all" {

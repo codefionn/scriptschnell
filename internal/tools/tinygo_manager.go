@@ -3,6 +3,7 @@ package tools
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -220,6 +221,38 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 
 // downloadTinyGo downloads and extracts the TinyGo distribution for the current platform
 func (m *TinyGoManager) downloadTinyGo(ctx context.Context) error {
+	// First, try to use embedded archive if available
+	if HasEmbeddedArchive() {
+		m.logger.Info("Using embedded TinyGo archive from binary")
+		archiveData := GetEmbeddedArchive()
+		if len(archiveData) > 0 {
+			// The embedded data is already a valid tar.gz file
+			// extractTarGzData expects gzipped data, so pass it directly
+
+			extractDir := filepath.Join(m.cacheDir, tinyGoVersion)
+			if err := os.MkdirAll(extractDir, 0755); err != nil {
+				return fmt.Errorf("failed to create cache directory: %w", err)
+			}
+
+			m.updateStatusLocked(fmt.Sprintf("Extracting embedded TinyGo %s...", tinyGoVersion))
+			if runtime.GOOS == "windows" {
+				if err := m.extractZipData(archiveData, extractDir, "embedded.zip"); err != nil {
+					m.logger.Warn("Failed to extract embedded archive, falling back to download: %v", err)
+				} else {
+					m.logger.Info("Successfully extracted embedded TinyGo")
+					return nil
+				}
+			} else {
+				if err := m.extractTarGzData(archiveData, extractDir); err != nil {
+					m.logger.Warn("Failed to extract embedded archive, falling back to download: %v", err)
+				} else {
+					m.logger.Info("Successfully extracted embedded TinyGo")
+					return nil
+				}
+			}
+		}
+	}
+
 	// Determine platform-specific download URL
 	downloadURL, fileName, err := m.getTinyGoDownloadURL()
 	if err != nil {
@@ -337,6 +370,59 @@ func (m *TinyGoManager) getTinyGoDownloadURL() (string, string, error) {
 }
 
 // extractTarGz extracts a tar.gz file to the destination directory
+func (m *TinyGoManager) extractTarGzData(data []byte, destDir string) error {
+	gzr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tar entry: %w", err)
+		}
+
+		// Remove the top-level "tinygo" directory from the path
+		targetPath := strings.TrimPrefix(header.Name, "tinygo/")
+		if targetPath == "" {
+			continue
+		}
+
+		target := filepath.Join(destDir, targetPath)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return fmt.Errorf("failed to create directory: %w", err)
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return fmt.Errorf("failed to create parent directory: %w", err)
+			}
+
+			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return fmt.Errorf("failed to create file: %w", err)
+			}
+
+			if _, err := io.Copy(outFile, tr); err != nil {
+				outFile.Close()
+				return fmt.Errorf("failed to extract file: %w", err)
+			}
+			outFile.Close()
+		}
+	}
+
+	return nil
+}
+
+// extractTarGz extracts a tar.gz file to the destination directory
 func (m *TinyGoManager) extractTarGz(archivePath, destDir string) error {
 	file, err := os.Open(archivePath)
 	if err != nil {
@@ -390,6 +476,58 @@ func (m *TinyGoManager) extractTarGz(archivePath, destDir string) error {
 			}
 			outFile.Close()
 		}
+	}
+
+	return nil
+}
+
+// extractZipData extracts a zip file from memory to the destination directory (Windows)
+func (m *TinyGoManager) extractZipData(data []byte, destDir, fileName string) error {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return fmt.Errorf("failed to open zip archive: %w", err)
+	}
+
+	for _, f := range r.File {
+		// Remove the top-level "tinygo" directory from the path
+		targetPath := strings.TrimPrefix(f.Name, "tinygo/")
+		targetPath = strings.TrimPrefix(targetPath, "tinygo\\")
+		if targetPath == "" {
+			continue
+		}
+
+		target := filepath.Join(destDir, targetPath)
+
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return fmt.Errorf("failed to create directory: %w", err)
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return fmt.Errorf("failed to create parent directory: %w", err)
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("failed to open file in archive: %w", err)
+		}
+
+		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, f.Mode())
+		if err != nil {
+			rc.Close()
+			return fmt.Errorf("failed to create file: %w", err)
+		}
+
+		if _, err := io.Copy(outFile, rc); err != nil {
+			outFile.Close()
+			rc.Close()
+			return fmt.Errorf("failed to extract file: %w", err)
+		}
+
+		outFile.Close()
+		rc.Close()
 	}
 
 	return nil

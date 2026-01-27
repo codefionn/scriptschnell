@@ -73,18 +73,33 @@ RUN go install github.com/a-h/templ/cmd/templ@latest
 
 COPY go.mod go.sum ./
 RUN go mod download
+
+# Download and create embedded TinyGo archive for linux/amd64 (cached layer - only runs when go.mod changes)
+RUN echo "Preparing embedded TinyGo for linux/amd64..." && \
+    mkdir -p internal/tools/embedded && \
+    cd internal/tools/embedded && \
+    curl -fsSL "https://github.com/tinygo-org/tinygo/releases/download/v0.39.0/tinygo0.39.0.linux-amd64.tar.gz" -o tinygo_linux_amd64.tar.gz && \
+    echo "Re-compressing TinyGo archive with maximum compression..." && \
+    gunzip -c tinygo_linux_amd64.tar.gz | gzip -9 > tinygo_linux_amd64.tar.gz.tmp && \
+    mv tinygo_linux_amd64.tar.gz.tmp tinygo_linux_amd64.tar.gz
+
 COPY . .
 
 # Generate templ templates before building
 RUN echo "Generating templ templates..." && \
     templ generate
 
-# Build for linux/amd64 with static linking using cross-compiler
+# Generate embedded TinyGo file for linux/amd64
+RUN echo "Generating embedded TinyGo for linux/amd64..." && \
+    GOOS=linux GOARCH=amd64 go run internal/tools/embed_tinygo_gen.go -goos=linux -goarch=amd64 internal/tools/embedded/tinygo_linux_amd64.tar.gz
+
+# Build for linux/amd64 with static linking and embedded TinyGo
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     CC=x86_64-linux-gnu-gcc \
     CXX=x86_64-linux-gnu-g++ \
     go build \
     -ldflags="-w -s -linkmode external -extldflags '-static'" \
+    -tags="tinygo_embed,tinygo_has_embed_data" \
     -o scriptschnell-amd64 \
     ./cmd/scriptschnell
 
@@ -95,18 +110,33 @@ RUN go install github.com/a-h/templ/cmd/templ@latest
 
 COPY go.mod go.sum ./
 RUN go mod download
+
+# Download and create embedded TinyGo archive for linux/arm64 (cached layer - only runs when go.mod changes)
+RUN echo "Preparing embedded TinyGo for linux/arm64..." && \
+    mkdir -p internal/tools/embedded && \
+    cd internal/tools/embedded && \
+    curl -fsSL "https://github.com/tinygo-org/tinygo/releases/download/v0.39.0/tinygo0.39.0.linux-arm64.tar.gz" -o tinygo_linux_arm64.tar.gz && \
+    echo "Re-compressing TinyGo archive with maximum compression..." && \
+    gunzip -c tinygo_linux_arm64.tar.gz | gzip -9 > tinygo_linux_arm64.tar.gz.tmp && \
+    mv tinygo_linux_arm64.tar.gz.tmp tinygo_linux_arm64.tar.gz
+
 COPY . .
 
 # Generate templ templates before building
 RUN echo "Generating templ templates..." && \
     templ generate
 
-# Build for linux/arm64 with static linking using cross-compiler
+# Generate embedded TinyGo file for linux/arm64
+RUN echo "Generating embedded TinyGo for linux/arm64..." && \
+    GOOS=linux GOARCH=arm64 go run internal/tools/embed_tinygo_gen.go -goos=linux -goarch=arm64 internal/tools/embedded/tinygo_linux_arm64.tar.gz
+
+# Build for linux/arm64 with static linking and embedded TinyGo
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=arm64 \
     CC=aarch64-linux-gnu-gcc \
     CXX=aarch64-linux-gnu-g++ \
     go build \
     -ldflags="-w -s -linkmode external -extldflags '-static'" \
+    -tags="tinygo_embed,tinygo_has_embed_data" \
     -o scriptschnell-arm64 \
     ./cmd/scriptschnell
 
@@ -134,29 +164,6 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     -ldflags="-w -s -linkmode external -extldflags '-static'" \
     -o debug_html \
     ./cmd/debug_html
-
-# Final stage for amd64 - minimal Alpine image with just the binary
-FROM alpine:3.18 AS final-amd64
-WORKDIR /app
-
-# Copy only the built binary from the build stage
-COPY --from=build-amd64 /app/scriptschnell-amd64 /app/scriptschnell
-
-# Set entrypoint to run the binary
-ENTRYPOINT ["./scriptschnell"]
-
-# Final stage for arm64 - minimal Alpine image with just the binary
-FROM alpine:3.18 AS final-arm64
-WORKDIR /app
-
-# Copy only the built binary from the build stage
-COPY --from=build-arm64 /app/scriptschnell-arm64 /app/scriptschnell
-
-# Set entrypoint to run the binary
-ENTRYPOINT ["./scriptschnell"]
-
-# Default final stage (amd64 for backward compatibility)
-FROM final-amd64 AS final
 
 # Development stage with all tools
 FROM base AS development

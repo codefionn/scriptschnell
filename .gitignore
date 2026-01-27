@@ -99,3 +99,6 @@ build/
 /scriptschnell-fresh
 /scriptschnell-simple
 /scriptschnell-test2
+/test_amd64
+/test_arm64
+/scriptschnell-embedded

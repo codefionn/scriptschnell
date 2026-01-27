@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -397,16 +398,24 @@ func (c *Config) GetContextDirectories(workspace string) []string {
 	return result
 }
 
-// Save saves configuration to file using atomic writes
+// Save saves configuration to file using atomic writes, but only if something has changed
 func (c *Config) Save(path string) error {
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// Check if the file already exists and if content is unchanged
+	data, err := c.marshalWithEncryptedSecrets()
+	if err != nil {
 		return err
 	}
 
-	data, err := c.marshalWithEncryptedSecrets()
-	if err != nil {
+	// Read existing file content for comparison
+	existingData, readErr := os.ReadFile(path)
+	if readErr == nil && bytes.Equal(existingData, data) {
+		// Content is identical, no need to save
+		return nil
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 

@@ -81,7 +81,7 @@ On first run, it will download tinygo (if not in PATH).
 
 ## Agentic Workflow
 
-The orchestrator coordinates LLM calls, tool execution, and adaptive control loops. The diagram below shows how the orchestration model, tool registry, summarization model, and auto-continue judge work together.
+The orchestrator coordinates LLM calls, tool execution, and adaptive control loops. The diagram below shows how the orchestration model, safety evaluator and model, tool registry, summarization model, and auto-continue judge work together.
 
 ```mermaid
 flowchart TD
@@ -109,7 +109,13 @@ flowchart TD
     secretAwareAuth -->|Authorization decision| registry
     secretAuth -->|No| registry
     registry --> tools["Tool Actors<br/>(read_file, write_file_diff, shell, sandbox, MCP, ...)"]
-    tools -->|Tool outputs| orchestrator
+    tools -->|Tool outputs| contentGate{External content?}
+    contentGate -->|No| orchestrator
+    contentGate -->|Yes| safetyEval[Safety Evaluator]
+    safetyEval -->|Safety prompt| safetyLLM[(Safety Model)]
+    safetyLLM -->|Safe / Unsafe| safetyEval
+    safetyEval -.->|Fallback if unset| summarizer
+    safetyEval -->|Allow / Block| orchestrator
     orchestrator -->|Record message| session
     orchestrator -->|Stream status| ui[TUI / CLI Output]
 

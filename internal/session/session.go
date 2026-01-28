@@ -36,6 +36,22 @@ type QuestionAnswer struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// PlanningTask represents a task in the planning board
+type PlanningTask struct {
+	ID          string         `json:"id"`
+	Text        string         `json:"text"`
+	Subtasks    []PlanningTask `json:"subtasks,omitempty"`
+	Priority    string         `json:"priority,omitempty"`    // "high", "medium", "low"
+	Status      string         `json:"status,omitempty"`      // "pending", "in_progress", "completed"
+	Description string         `json:"description,omitempty"`
+}
+
+// PlanningBoard represents a hierarchical planning board with primary tasks and subtasks
+type PlanningBoard struct {
+	PrimaryTasks []PlanningTask `json:"primary_tasks"`
+	Description  string         `json:"description,omitempty"`
+}
+
 // Session manages a conversation session
 type Session struct {
 	ID                        string
@@ -51,6 +67,7 @@ type Session struct {
 	PlanningObjective         string           // objective of current planning phase
 	PlanningStartTime         time.Time        // when current planning phase started
 	PlanningQuestionsAnswered []QuestionAnswer // questions asked and answered during planning
+	PlanningBoard             *PlanningBoard   // hierarchical planning board with primary tasks and subtasks
 	LastSandboxExitCode       int              // exit code from last sandbox execution
 	LastSandboxStdout         string           // stdout from last sandbox execution
 	LastSandboxStderr         string           // stderr from last sandbox execution
@@ -254,6 +271,22 @@ func (s *Session) GetPlanningStatus() (active bool, objective string, startTime 
 	return s.PlanningActive, s.PlanningObjective, s.PlanningStartTime
 }
 
+// SetPlanningBoard sets the planning board for the current session
+func (s *Session) SetPlanningBoard(board *PlanningBoard) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.PlanningBoard = board
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// GetPlanningBoard returns the planning board for the current session
+func (s *Session) GetPlanningBoard() *PlanningBoard {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.PlanningBoard
+}
+
 // Clear clears the session but keeps working directory
 func (s *Session) Clear() {
 	s.mu.Lock()
@@ -268,6 +301,7 @@ func (s *Session) Clear() {
 	s.PlanningObjective = ""
 	s.PlanningStartTime = time.Time{}
 	s.PlanningQuestionsAnswered = make([]QuestionAnswer, 0)
+	s.PlanningBoard = nil
 	s.UpdatedAt = time.Now()
 	s.Dirty = true
 }

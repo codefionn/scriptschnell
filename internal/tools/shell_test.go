@@ -109,7 +109,7 @@ func TestWaitProgramTool_WaitsForCompletion(t *testing.T) {
 
 	ctx := context.Background()
 	cmdParams := map[string]interface{}{
-		"command":    "printf 'hello world'",
+		"command":    "printf 'hello world\n'",
 		"background": true,
 	}
 

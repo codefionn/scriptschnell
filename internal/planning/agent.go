@@ -108,12 +108,40 @@ type PlanningRequest struct {
 	MaxQuestions   int      `json:"max_questions,omitempty"`
 }
 
+// PlanningTask represents a task in the planning board
+type PlanningTask struct {
+	ID          string         `json:"id"`
+	Text        string         `json:"text"`
+	Subtasks    []PlanningTask `json:"subtasks,omitempty"`
+	Priority    string         `json:"priority,omitempty"` // "high", "medium", "low"
+	Status      string         `json:"status,omitempty"`   // "pending", "in_progress", "completed"
+	Description string         `json:"description,omitempty"`
+}
+
+// PlanningBoard represents a hierarchical planning board with primary tasks and subtasks
+type PlanningBoard struct {
+	PrimaryTasks []PlanningTask `json:"primary_tasks"`
+	Description  string         `json:"description,omitempty"`
+}
+
+// PlanningMode represents the output mode of the planning agent
+type PlanningMode string
+
+const (
+	// PlanningModeSimple is the traditional simple task list output
+	PlanningModeSimple PlanningMode = "simple"
+	// PlanningModeBoard is the hierarchical planning board output
+	PlanningModeBoard PlanningMode = "board"
+)
+
 // PlanningResponse represents a planning response
 type PlanningResponse struct {
-	Plan       []string `json:"plan"`
-	Questions  []string `json:"questions,omitempty"`
-	NeedsInput bool     `json:"needs_input"`
-	Complete   bool     `json:"complete"`
+	Mode       PlanningMode   `json:"mode"`
+	Plan       []string       `json:"plan,omitempty"`  // For simple mode
+	Board      *PlanningBoard `json:"board,omitempty"` // For board mode
+	Questions  []string       `json:"questions,omitempty"`
+	NeedsInput bool           `json:"needs_input"`
+	Complete   bool           `json:"complete"`
 }
 
 // UserInputCallback is called when the planning agent needs user input
@@ -435,7 +463,10 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		// 2. It explicitly needs input (with or without questions) - this is a signal from LLM
 		var hasContent, needsUserInput bool
 		if planResp != nil {
-			hasContent = len(planResp.Plan) > 0 || planResp.Complete
+			// Check for content in both simple mode (Plan) and board mode (Board.PrimaryTasks)
+			hasPlanContent := len(planResp.Plan) > 0
+			hasBoardContent := planResp.Board != nil && len(planResp.Board.PrimaryTasks) > 0
+			hasContent = hasPlanContent || hasBoardContent || planResp.Complete
 			needsUserInput = planResp.NeedsInput && req.AllowQuestions
 		}
 		shouldReturn := hasContent || needsUserInput
@@ -827,23 +858,107 @@ func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 	}
 
 	prompt.WriteString("\n")
-	prompt.WriteString("When you have enough information, provide your final response wrapped in <answer> tags.\n")
-	prompt.WriteString("Inside the <answer> tags, format your response as a JSON object:\n")
+	prompt.WriteString("**OUTPUT MODES:**\n\n")
+	prompt.WriteString("You have two possible output modes. Choose the appropriate one based on the task complexity:\n\n")
+	prompt.WriteString("1. **SIMPLE MODE** (mode: \"simple\"):\n")
+	prompt.WriteString("   - Use for simple, straightforward tasks or small changes\n")
+	prompt.WriteString("   - Returns a flat list of steps\n\n")
+	prompt.WriteString("2. **BOARD MODE** (mode: \"board\"):\n")
+	prompt.WriteString("   - Use for complex, multi-step tasks, architectural changes, or creating new codebases\n")
+	prompt.WriteString("   - Returns hierarchical primary tasks with subtasks\n")
+	prompt.WriteString("   - Primary tasks are executed one by one with their subtasks in the orchestrator\n\n")
+
+	prompt.WriteString("When you have enough information, provide your final response wrapped in <answer> tags.\n\n")
+	prompt.WriteString("For SIMPLE MODE, use this format:\n")
+	prompt.WriteString("<answer>\n")
 	prompt.WriteString("{\n")
+	prompt.WriteString("  \"mode\": \"simple\",\n")
 	prompt.WriteString("  \"plan\": [\"Step 1: ...\", \"Step 2: ...\", \"Step 3: ...\"],\n")
 	prompt.WriteString("  \"questions\": [\"Question 1...\", \"Question 2...\"], // optional\n")
 	prompt.WriteString("  \"needs_input\": false,\n")
 	prompt.WriteString("  \"complete\": true\n")
-	prompt.WriteString("}\n\n")
-	prompt.WriteString("Example format:\n")
+	prompt.WriteString("}\n")
+	prompt.WriteString("</answer>\n\n")
+
+	prompt.WriteString("For BOARD MODE, use this format:\n")
 	prompt.WriteString("<answer>\n")
 	prompt.WriteString("{\n")
+	prompt.WriteString("  \"mode\": \"board\",\n")
+	prompt.WriteString("  \"board\": {\n")
+	prompt.WriteString("    \"description\": \"Brief overview of what this plan accomplishes\",\n")
+	prompt.WriteString("    \"primary_tasks\": [\n")
+	prompt.WriteString("      {\n")
+	prompt.WriteString("        \"id\": \"task_1\",\n")
+	prompt.WriteString("        \"text\": \"Primary task description\",\n")
+	prompt.WriteString("        \"priority\": \"high\",  // optional: \"high\", \"medium\", \"low\"\n")
+	prompt.WriteString("        \"description\": \"More detailed description\",\n")
+	prompt.WriteString("        \"subtasks\": [\n")
+	prompt.WriteString("          {\n")
+	prompt.WriteString("            \"id\": \"task_1_1\",\n")
+	prompt.WriteString("            \"text\": \"Subtask 1 description\",\n")
+	prompt.WriteString("            \"priority\": \"high\",\n")
+	prompt.WriteString("            \"status\": \"pending\"\n")
+	prompt.WriteString("          },\n")
+	prompt.WriteString("          {\n")
+	prompt.WriteString("            \"id\": \"task_1_2\",\n")
+	prompt.WriteString("            \"text\": \"Subtask 2 description\",\n")
+	prompt.WriteString("            \"priority\": \"medium\",\n")
+	prompt.WriteString("            \"status\": \"pending\"\n")
+	prompt.WriteString("          }\n")
+	prompt.WriteString("        ]\n")
+	prompt.WriteString("      }\n")
+	prompt.WriteString("    ]\n")
+	prompt.WriteString("  },\n")
+	prompt.WriteString("  \"questions\": [],  // optional, for clarifying questions\n")
+	prompt.WriteString("  \"needs_input\": false,\n")
+	prompt.WriteString("  \"complete\": true\n")
+	prompt.WriteString("}\n")
+	prompt.WriteString("</answer>\n\n")
+
+	prompt.WriteString("Examples:\n\n")
+	prompt.WriteString("SIMPLE MODE Example:\n")
+	prompt.WriteString("<answer>\n")
+	prompt.WriteString("{\n")
+	prompt.WriteString("  \"mode\": \"simple\",\n")
 	prompt.WriteString("  \"plan\": [\n")
-	prompt.WriteString("    \"Step 1: Analyze requirements and existing codebase\",\n")
-	prompt.WriteString("    \"Step 2: Design the new component architecture\",\n")
-	prompt.WriteString("    \"Step 3: Implement core functionality\",\n")
-	prompt.WriteString("    \"Step 4: Write tests and documentation\"\n")
+	prompt.WriteString("    \"Step 1: Analyze the function signature\",\n")
+	prompt.WriteString("    \"Step 2: Fix the bug in the conditional logic\",\n")
+	prompt.WriteString("    \"Step 3: Add error handling\"\n")
 	prompt.WriteString("  ],\n")
+	prompt.WriteString("  \"questions\": [],\n")
+	prompt.WriteString("  \"needs_input\": false,\n")
+	prompt.WriteString("  \"complete\": true\n")
+	prompt.WriteString("}\n")
+	prompt.WriteString("</answer>\n\n")
+
+	prompt.WriteString("BOARD MODE Example:\n")
+	prompt.WriteString("<answer>\n")
+	prompt.WriteString("{\n")
+	prompt.WriteString("  \"mode\": \"board\",\n")
+	prompt.WriteString("  \"board\": {\n")
+	prompt.WriteString("    \"description\": \"Create a new REST API service with authentication and database integration\",\n")
+	prompt.WriteString("    \"primary_tasks\": [\n")
+	prompt.WriteString("      {\n")
+	prompt.WriteString("        \"id\": \"task_1\",\n")
+	prompt.WriteString("        \"text\": \"Set up project structure and dependencies\",\n")
+	prompt.WriteString("        \"priority\": \"high\",\n")
+	prompt.WriteString("        \"subtasks\": [\n")
+	prompt.WriteString("          {\"id\": \"task_1_1\", \"text\": \"Initialize Go module\", \"status\": \"pending\"},\n")
+	prompt.WriteString("          {\"id\": \"task_1_2\", \"text\": \"Create directory structure\", \"status\": \"pending\"},\n")
+	prompt.WriteString("          {\"id\": \"task_1_3\", \"text\": \"Add dependencies to go.mod\", \"status\": \"pending\"}\n")
+	prompt.WriteString("        ]\n")
+	prompt.WriteString("      },\n")
+	prompt.WriteString("      {\n")
+	prompt.WriteString("        \"id\": \"task_2\",\n")
+	prompt.WriteString("        \"text\": \"Implement authentication system\",\n")
+	prompt.WriteString("        \"priority\": \"high\",\n")
+	prompt.WriteString("        \"subtasks\": [\n")
+	prompt.WriteString("          {\"id\": \"task_2_1\", \"text\": \"Design JWT token flow\", \"status\": \"pending\"},\n")
+	prompt.WriteString("          {\"id\": \"task_2_2\", \"text\": \"Implement auth middleware\", \"status\": \"pending\"}\n")
+	prompt.WriteString("        ]\n")
+	prompt.WriteString("      }\n")
+	prompt.WriteString("    ]\n")
+	prompt.WriteString("  },\n")
 	prompt.WriteString("  \"questions\": [],\n")
 	prompt.WriteString("  \"needs_input\": false,\n")
 	prompt.WriteString("  \"complete\": true\n")
@@ -863,8 +978,9 @@ func (p *PlanningAgent) extractPlan(content string) *PlanningResponse {
 		if planResp := p.tryParseJSONPlan(answer); planResp != nil {
 			return planResp
 		}
-		// If not JSON, treat as a single-step plan
+		// If not JSON, treat as a single-step plan with default simple mode
 		return &PlanningResponse{
+			Mode:     PlanningModeSimple,
 			Plan:     []string{answer},
 			Complete: true,
 		}
@@ -911,6 +1027,7 @@ func (p *PlanningAgent) extractPlan(content string) *PlanningResponse {
 
 	if len(plan) > 0 || len(questions) > 0 {
 		return &PlanningResponse{
+			Mode:       PlanningModeSimple,
 			Plan:       plan,
 			Questions:  questions,
 			NeedsInput: len(questions) > 0,
@@ -918,8 +1035,9 @@ func (p *PlanningAgent) extractPlan(content string) *PlanningResponse {
 		}
 	}
 
-	// Last resort: return the content as a single step
+	// Last resort: return the content as a single step with default simple mode
 	return &PlanningResponse{
+		Mode:     PlanningModeSimple,
 		Plan:     []string{content},
 		Complete: true,
 	}
@@ -949,12 +1067,53 @@ func (p *PlanningAgent) tryParseJSONPlan(jsonStr string) *PlanningResponse {
 		return nil
 	}
 	logger.Debug("Parsed JSON: %+v from %s", resp, jsonStr)
-	// Validate that we have at least a plan or questions, or it's an explicit empty plan or needs input
-	if len(resp.Plan) > 0 || len(resp.Questions) > 0 || resp.NeedsInput || (resp.Complete && strings.Contains(jsonStr, "\"plan\"")) {
+
+	// Validate based on mode
+	switch resp.Mode {
+	case PlanningModeSimple:
+		// Simple mode: validate that we have a plan array or questions
+		if len(resp.Plan) > 0 || len(resp.Questions) > 0 || resp.NeedsInput {
+			return &resp
+		}
+		logger.Debug("Simple mode validation failed: plan=%d, questions=%d", len(resp.Plan), len(resp.Questions))
+		return nil
+
+	case PlanningModeBoard:
+		// Board mode: validate that we have a board with primary tasks
+		if resp.Board == nil {
+			logger.Debug("Board mode validation failed: board is nil")
+			return nil
+		}
+		if len(resp.Board.PrimaryTasks) == 0 && !resp.NeedsInput && !resp.Complete {
+			logger.Debug("Board mode validation failed: no primary tasks and not marked as complete")
+			return nil
+		}
 		return &resp
+
+	case "":
+		// Backward compatibility: no mode specified, try to infer
+		if len(resp.Plan) > 0 || len(resp.Questions) > 0 {
+			// Has plan array, assume simple mode
+			resp.Mode = PlanningModeSimple
+			return &resp
+		}
+		if resp.Board != nil && len(resp.Board.PrimaryTasks) > 0 {
+			// Has board, assume board mode
+			resp.Mode = PlanningModeBoard
+			return &resp
+		}
+		if resp.Complete || resp.NeedsInput {
+			// Valid but minimal response, default to simple mode
+			resp.Mode = PlanningModeSimple
+			return &resp
+		}
+		logger.Debug("Cannot infer mode, validation failed")
+		return nil
+
+	default:
+		logger.Debug("Unknown mode: %s", resp.Mode)
+		return nil
 	}
-	logger.Debug("JSON parsed but validation failed: plan=%d, questions=%d", len(resp.Plan), len(resp.Questions))
-	return nil
 }
 
 // extractPartialPlan extracts a partial plan when we can't continue
@@ -975,8 +1134,9 @@ func (p *PlanningAgent) extractPartialPlan(messages []*llm.Message) *PlanningRes
 					plan.Complete = false
 					return plan
 				}
-				// If not JSON, treat as single-step partial plan
+				// If not JSON, treat as single-step partial plan with default simple mode
 				return &PlanningResponse{
+					Mode:       PlanningModeSimple,
 					Plan:       []string{answer},
 					NeedsInput: true,
 					Complete:   false,
@@ -985,7 +1145,10 @@ func (p *PlanningAgent) extractPartialPlan(messages []*llm.Message) *PlanningRes
 
 			// Fallback to original extraction logic
 			plan := p.extractPlan(msg.Content)
-			if plan != nil && len(plan.Plan) > 0 {
+			// Check for content in both simple mode (Plan) and board mode (Board.PrimaryTasks)
+			hasPlanContent := plan != nil && len(plan.Plan) > 0
+			hasBoardContent := plan != nil && plan.Board != nil && len(plan.Board.PrimaryTasks) > 0
+			if hasPlanContent || hasBoardContent {
 				plan.NeedsInput = true
 				plan.Complete = false
 				return plan
@@ -993,8 +1156,9 @@ func (p *PlanningAgent) extractPartialPlan(messages []*llm.Message) *PlanningRes
 		}
 	}
 
-	// Return minimal response
+	// Return minimal response with default simple mode
 	return &PlanningResponse{
+		Mode:       PlanningModeSimple,
 		Plan:       []string{},
 		NeedsInput: true,
 		Complete:   false,

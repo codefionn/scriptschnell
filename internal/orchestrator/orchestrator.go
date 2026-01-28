@@ -1701,7 +1701,84 @@ func heuristicPromptSimplicity(prompt string) (bool, string) {
 	return false, "no complexity indicators found => using planner"
 }
 
-func formatPlanForDisplay(plan []string) string {
+// convertPlanningBoardToSession converts a planning.PlanningBoard to session.PlanningBoard
+func convertPlanningBoardToSession(planningBoard *planning.PlanningBoard) *session.PlanningBoard {
+	if planningBoard == nil {
+		return nil
+	}
+
+	sessionBoard := &session.PlanningBoard{
+		Description: planningBoard.Description,
+		PrimaryTasks: make([]session.PlanningTask, len(planningBoard.PrimaryTasks)),
+	}
+
+	for i, task := range planningBoard.PrimaryTasks {
+		sessionBoard.PrimaryTasks[i] = convertPlanningTaskToSession(&task)
+	}
+
+	return sessionBoard
+}
+
+// convertPlanningTaskToSession converts a planning.PlanningTask to session.PlanningTask
+func convertPlanningTaskToSession(planningTask *planning.PlanningTask) session.PlanningTask {
+	return session.PlanningTask{
+		ID:          planningTask.ID,
+		Text:        planningTask.Text,
+		Priority:    planningTask.Priority,
+		Status:      planningTask.Status,
+		Description: planningTask.Description,
+		Subtasks:    convertPlanningTasksToSession(planningTask.Subtasks),
+	}
+}
+
+// convertPlanningTasksToSession converts a slice of planning.PlanningTask to session.PlanningTask
+func convertPlanningTasksToSession(planningTasks []planning.PlanningTask) []session.PlanningTask {
+	if planningTasks == nil {
+		return nil
+	}
+	sessionTasks := make([]session.PlanningTask, len(planningTasks))
+	for i, task := range planningTasks {
+		sessionTasks[i] = convertPlanningTaskToSession(&task)
+	}
+	return sessionTasks
+}
+
+func formatPlanForDisplay(mode planning.PlanningMode, plan []string, board *planning.PlanningBoard) string {
+	if mode == planning.PlanningModeBoard && board != nil {
+		// Board mode: display hierarchical tasks
+		var sb strings.Builder
+		sb.WriteString("\nPlanning Board (read-only):\n")
+		if board.Description != "" {
+			sb.WriteString(fmt.Sprintf("\nDescription: %s\n", board.Description))
+		}
+		sb.WriteString("\nPrimary Tasks:\n")
+		for i, task := range board.PrimaryTasks {
+			sb.WriteString(fmt.Sprintf("%d. %s", i+1, task.Text))
+			if task.Priority != "" && task.Priority != "medium" {
+				sb.WriteString(fmt.Sprintf(" [%s]", task.Priority))
+			}
+			sb.WriteString("\n")
+			if task.Description != "" {
+				sb.WriteString(fmt.Sprintf("   Description: %s\n", task.Description))
+			}
+			if len(task.Subtasks) > 0 {
+				sb.WriteString("   Subtasks:\n")
+				for j, subtask := range task.Subtasks {
+					sb.WriteString(fmt.Sprintf("   %c. %s", 'a'+j, subtask.Text))
+					if subtask.Priority != "" && subtask.Priority != "medium" {
+						sb.WriteString(fmt.Sprintf(" [%s]", subtask.Priority))
+					}
+					if subtask.Status != "" && subtask.Status != "pending" {
+						sb.WriteString(fmt.Sprintf(" (%s)", subtask.Status))
+					}
+					sb.WriteString("\n")
+				}
+			}
+		}
+		return strings.TrimRight(sb.String(), "\n")
+	}
+
+	// Simple mode: display flat list
 	if len(plan) == 0 {
 		return ""
 	}
@@ -1831,7 +1908,25 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		return fmt.Errorf("planning failed: %w", err)
 	}
 
-	if len(response.Plan) > 0 {
+	// Handle the planning response based on mode
+	if response.Mode == planning.PlanningModeBoard && response.Board != nil {
+		// Board mode: store the board and display it
+		boardJSON, _ := json.Marshal(response.Board)
+		o.session.AddMessage(&session.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("Planning agent generated board for '%s': %s", prompt, string(boardJSON)),
+		})
+
+		// Store the board in session for orchestrator to use
+		o.session.SetPlanningBoard(convertPlanningBoardToSession(response.Board))
+
+		dispatchProgress(progressCallback, progress.Update{
+			Message:    "\n\n" + formatPlanForDisplay(response.Mode, response.Plan, response.Board) + "\n",
+			AddNewLine: false,
+			Mode:       progress.ReportNoStatus,
+		})
+	} else if len(response.Plan) > 0 {
+		// Simple mode: store and display the plan
 		planJSON, _ := json.Marshal(response.Plan)
 		o.session.AddMessage(&session.Message{
 			Role:    "system",
@@ -1839,7 +1934,7 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		})
 
 		dispatchProgress(progressCallback, progress.Update{
-			Message:    "\n\n" + formatPlanForDisplay(response.Plan) + "\n",
+			Message:    "\n\n" + formatPlanForDisplay(response.Mode, response.Plan, response.Board) + "\n",
 			AddNewLine: false,
 			Mode:       progress.ReportNoStatus,
 		})

@@ -103,3 +103,5 @@ build/
 /test_arm64
 /scriptschnell-embedded
 /scriptschnell-final-test
+/test-write
+/test-server.go

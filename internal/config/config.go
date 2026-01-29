@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/secrets"
 )
 
@@ -413,6 +414,27 @@ func (c *Config) Save(path string) error {
 		return nil
 	}
 
+	// Defensive check: warn if we're about to clear search settings that exist on disk
+	if readErr == nil {
+		var existingConfig Config
+		if jsonErr := json.Unmarshal(existingData, &existingConfig); jsonErr == nil {
+			existingHasSearch := existingConfig.Search.Provider != "" ||
+				existingConfig.Search.Exa.APIKey != "" ||
+				existingConfig.Search.GooglePSE.APIKey != "" ||
+				existingConfig.Search.Perplexity.APIKey != ""
+			newHasSearch := c.Search.Provider != "" ||
+				c.Search.Exa.APIKey != "" ||
+				c.Search.GooglePSE.APIKey != "" ||
+				c.Search.Perplexity.APIKey != ""
+
+			if existingHasSearch && !newHasSearch {
+				// Log warning about clearing search settings (this helps diagnose the issue)
+				logger.Warn("Config save would clear existing search settings! Existing provider=%q, new provider=%q",
+					existingConfig.Search.Provider, c.Search.Provider)
+			}
+		}
+	}
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -489,28 +511,30 @@ func (c *Config) decryptSensitiveFields(password string) error {
 
 func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 	copyCfg := Config{
-		WorkingDir:         c.WorkingDir,
-		CacheTTL:           c.CacheTTL,
-		MaxCacheEntries:    c.MaxCacheEntries,
-		DefaultTimeout:     c.DefaultTimeout,
-		TempDir:            c.TempDir,
-		Temperature:        c.Temperature,
-		MaxTokens:          c.MaxTokens,
-		ProviderConfigPath: c.ProviderConfigPath,
-		DisableAnimations:  c.DisableAnimations,
-		LogLevel:           c.LogLevel,
-		LogPath:            c.LogPath,
-		AuthorizedDomains:  c.AuthorizedDomains,
-		AuthorizedCommands: c.AuthorizedCommands,
-		Search:             c.Search,
-		MCP:                c.MCP,
-		Secrets:            c.Secrets,
-		EnablePromptCache:  c.EnablePromptCache,
-		AutoSave:           c.AutoSave,
-		PromptCacheTTL:     c.PromptCacheTTL,
-		ContextDirectories: c.ContextDirectories,
-		OpenTabs:           c.OpenTabs,
-		secretsPassword:    c.secretsPassword,
+		WorkingDir:              c.WorkingDir,
+		CacheTTL:                c.CacheTTL,
+		MaxCacheEntries:         c.MaxCacheEntries,
+		DefaultTimeout:          c.DefaultTimeout,
+		TempDir:                 c.TempDir,
+		Temperature:             c.Temperature,
+		MaxTokens:               c.MaxTokens,
+		ProviderConfigPath:      c.ProviderConfigPath,
+		DisableAnimations:       c.DisableAnimations,
+		LogLevel:                c.LogLevel,
+		LogPath:                 c.LogPath,
+		AuthorizedDomains:       c.AuthorizedDomains,
+		AuthorizedCommands:      c.AuthorizedCommands,
+		Search:                  c.Search,
+		MCP:                     c.MCP,
+		Secrets:                 c.Secrets,
+		EnablePromptCache:       c.EnablePromptCache,
+		AutoSave:                c.AutoSave,
+		PromptCacheTTL:          c.PromptCacheTTL,
+		ContextDirectories:      c.ContextDirectories,
+		OpenTabs:                c.OpenTabs,
+		AutoResume:              c.AutoResume,
+		SandboxOutputCompaction: c.SandboxOutputCompaction,
+		secretsPassword:         c.secretsPassword,
 	}
 
 	var err error

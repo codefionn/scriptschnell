@@ -1,0 +1,94 @@
+package web
+
+import "time"
+
+templ Message(role string, content string, variant string) {
+	<div class={ "alert alert-" + variant + " mb-2 message-content" }>
+		<div class="d-flex justify-content-between align-items-start mb-1">
+			<strong>{ role }:</strong>
+			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
+		</div>
+		<div>{ content }</div>
+	</div>
+}
+
+templ ToolCall(name string, id string) {
+	<div class="alert alert-secondary mb-2">
+		<strong>Tool Call:</strong> { name } <small class="text-muted">(ID: { id })</small>
+	</div>
+}
+
+templ ToolResult(id string, result string, errorMsg string) {
+	if errorMsg != "" {
+		<div class="alert alert-danger mb-2">
+			<strong>Tool Error:</strong> { errorMsg }
+		</div>
+	} else {
+		<div class="alert alert-light mb-2 border">
+			<strong>Tool Result:</strong>
+			<pre class="mb-0">{ result }</pre>
+		</div>
+	}
+}
+
+templ SystemMessage(content string) {
+	<div class="alert alert-info mb-2">
+		<div class="d-flex justify-content-between align-items-start mb-1">
+			<strong>System:</strong>
+			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
+		</div>
+		<div>{ content }</div>
+	</div>
+}
+
+templ MarkdownMessage(role string, content string) {
+	<div class="alert alert-secondary mb-2 message-content">
+		<div class="d-flex justify-content-between align-items-start mb-1">
+			<strong>{ role }:</strong>
+			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
+		</div>
+		<div class="markdown-content">{ content }</div>
+	</div>
+}
+
+templ ErrorMessage(content string) {
+	<div class="alert alert-danger mb-2">
+		<div class="d-flex justify-content-between align-items-start mb-1">
+			<strong>Error:</strong>
+			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
+		</div>
+		<div>{ content }</div>
+	</div>
+}
+
+templ ToolInteraction(name string, id string, status string, result string, errorMsg string) {
+	if status == "calling" {
+		<div class="alert alert-secondary mb-2 tool-interaction" id={ "tool-" + id }>
+			<div class="d-flex justify-content-between align-items-center">
+				<strong>Tool Call:</strong> { name }
+				<small class="text-muted">Calling...</small>
+			</div>
+			<div class="progress mt-2">
+				<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+			</div>
+		</div>
+	} else if errorMsg != "" {
+		<div class="alert alert-danger mb-2 tool-interaction" id={ "tool-" + id }>
+			<div class="d-flex justify-content-between align-items-center">
+				<strong>Tool Error:</strong>
+				<small class="text-muted">Failed</small>
+			</div>
+			<div class="mt-2">{ errorMsg }</div>
+		</div>
+	} else {
+		<div class="alert alert-light mb-2 border tool-interaction" id={ "tool-" + id }>
+			<div class="d-flex justify-content-between align-items-center">
+				<strong>Tool Result:</strong>
+				<small class="text-muted">Completed</small>
+			</div>
+			<div class="mt-2">
+				<pre class="mb-0 tool-result">{ result }</pre>
+			</div>
+		</div>
+	}
+}

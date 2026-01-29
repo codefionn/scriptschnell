@@ -157,6 +157,9 @@ When modifying the codebase:
    - Actors must be thread-safe (use mutexes)
    - Messages should be immutable
    - Always handle context cancellation in Receive()
+
+5. When changing templ templates only change the .templ file
+   and generate the go file with `templ generate`
    
 - Format Go code with `gofmt -s -w .` after making changes
 

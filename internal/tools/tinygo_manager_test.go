@@ -537,7 +537,7 @@ func TestExtractZipDataWindowsPathHandling(t *testing.T) {
 	if !found {
 		t.Errorf("Expected file to exist at %s or %s", expectedPathNormal, expectedPathBackslash)
 		// Print what actually exists for debugging
-		filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
 			if err == nil {
 				t.Logf("Found: %s", path)
 			}

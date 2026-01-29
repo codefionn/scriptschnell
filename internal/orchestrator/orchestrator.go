@@ -1708,7 +1708,7 @@ func convertPlanningBoardToSession(planningBoard *planning.PlanningBoard) *sessi
 	}
 
 	sessionBoard := &session.PlanningBoard{
-		Description: planningBoard.Description,
+		Description:  planningBoard.Description,
 		PrimaryTasks: make([]session.PlanningTask, len(planningBoard.PrimaryTasks)),
 	}
 

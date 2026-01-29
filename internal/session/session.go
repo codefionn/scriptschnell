@@ -41,8 +41,8 @@ type PlanningTask struct {
 	ID          string         `json:"id"`
 	Text        string         `json:"text"`
 	Subtasks    []PlanningTask `json:"subtasks,omitempty"`
-	Priority    string         `json:"priority,omitempty"`    // "high", "medium", "low"
-	Status      string         `json:"status,omitempty"`      // "pending", "in_progress", "completed"
+	Priority    string         `json:"priority,omitempty"` // "high", "medium", "low"
+	Status      string         `json:"status,omitempty"`   // "pending", "in_progress", "completed"
 	Description string         `json:"description,omitempty"`
 }
 

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/codefionn/scriptschnell/internal/acp"
@@ -21,12 +23,14 @@ import (
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secrets"
 	"github.com/codefionn/scriptschnell/internal/tui"
+	"github.com/codefionn/scriptschnell/internal/web"
 	"golang.org/x/term"
 )
 
 var (
 	ErrQuitRequested = errors.New("quit requested")
 	errACPMode       = errors.New("ACP mode requested")
+	errWebMode       = errors.New("web mode requested")
 )
 
 type stringSlice []string
@@ -63,7 +67,7 @@ func main() {
 }
 
 func run() (err error) {
-	prompt, cliOptions, cliMode, pprofCfg, parseErr := parseCLIArgs(os.Args[1:])
+	prompt, cliOptions, cliMode, pprofCfg, webMode, webDebug, parseErr := parseCLIArgs(os.Args[1:])
 	if parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			return nil
@@ -72,7 +76,12 @@ func run() (err error) {
 			// Handle ACP mode separately
 			return runACPMode()
 		}
-		return parseErr
+		if errors.Is(parseErr, errWebMode) {
+			// Handle web mode separately (after config is loaded)
+			// Fall through to config loading
+		} else if parseErr != nil {
+			return parseErr
+		}
 	}
 
 	// Start pprof handler if configured
@@ -165,6 +174,11 @@ func run() (err error) {
 	} else {
 		// Async refresh for TUI mode
 		providerMgr.RefreshAllModels(ctx)
+	}
+
+	// Check for web mode flag after config is loaded
+	if webMode {
+		return runWeb(cfg, providerMgr, secretsPassword, webDebug)
 	}
 
 	if cliMode {
@@ -306,7 +320,82 @@ func runACPMode() error {
 	return acp.RunACPAgent(ctx, cfg, providerMgr)
 }
 
-func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, error) {
+func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword string, webDebug bool) error {
+	fmt.Fprintf(os.Stderr, "Starting scriptschnell in web mode...\n")
+
+	// Initialize logger if not already initialized
+	if logger.Global() == nil {
+		logLevel := logger.ParseLevel(cfg.LogLevel)
+		if initErr := logger.Init(logLevel, cfg.LogPath); initErr != nil {
+			return fmt.Errorf("failed to initialize logger: %w", initErr)
+		}
+		defer func() {
+			if closeErr := logger.Global().Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to close logger: %v\n", closeErr)
+			}
+		}()
+	}
+
+	logger.Info("scriptschnell starting in web mode")
+
+	// Ensure temp directory exists
+	if err := os.MkdirAll(cfg.TempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	// Refresh models from APIs
+	ctx := context.Background()
+	providerMgr.RefreshAllModels(ctx)
+
+	// Create and start web server
+	srv, err := web.NewServer(ctx, cfg, providerMgr, secretsPassword, webDebug)
+	if err != nil {
+		return fmt.Errorf("failed to create web server: %w", err)
+	}
+
+	// Start server in background
+	if err := srv.Start(); err != nil {
+		return fmt.Errorf("failed to start web server: %w", err)
+	}
+
+	// Get URL with auth token
+	url := srv.GetURL()
+
+	// Print URL to console
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "========================================")
+	fmt.Fprintf(os.Stderr, "  Web UI available at:\n")
+	fmt.Fprintf(os.Stderr, "  %s\n", url)
+	fmt.Fprintln(os.Stderr, "========================================")
+	fmt.Fprintln(os.Stderr)
+
+	// Open browser automatically
+	if err := srv.OpenBrowser(); err != nil {
+		logger.Warn("Failed to open browser: %v", err)
+		fmt.Fprintf(os.Stderr, "Could not open browser automatically. Please visit the URL above.\n")
+	}
+
+	// Wait for shutdown signal
+	logger.Info("Web server started, waiting for shutdown signal")
+
+	// Setup signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	<-sigChan
+	logger.Info("Shutdown signal received")
+
+	// Stop server
+	if err := srv.Stop(); err != nil {
+		logger.Error("Error stopping server: %v", err)
+		return err
+	}
+
+	logger.Info("Web server stopped")
+	return nil
+}
+
+func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, bool, bool, error) {
 	fs := flag.NewFlagSet("scriptschnell", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -320,6 +409,8 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, err
 		model        string
 		provider     string
 		acpMode      bool
+		webMode      bool
+		webDebug     bool
 		jsonOutput   bool
 		jsonExtended bool
 		jsonFull     bool
@@ -344,6 +435,8 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, err
 	fs.StringVar(&model, "model", "", "Model to use (e.g., gpt-5, claude-sonnet-4.5, gemini-2.5-pro)")
 	fs.StringVar(&provider, "provider", "", "Provider name (e.g., openai, anthropic, google)")
 	fs.BoolVar(&acpMode, "acp", false, "Run in Agent Client Protocol (ACP) mode for integration with code editors")
+	fs.BoolVar(&webMode, "web", false, "Run in web mode with browser-based UI")
+	fs.BoolVar(&webDebug, "web-debug", false, "Enable debug logging for web server and WebSocket connections")
 	fs.BoolVar(&jsonOutput, "json", false, "Output final assistant message and usage as JSON")
 	fs.BoolVar(&jsonExtended, "json-extended", false, "Output all messages as JSON one-liners plus usage statistics")
 	fs.BoolVar(&jsonFull, "json-full", false, "Output all messages with full tool call outputs as single JSON object")
@@ -367,14 +460,14 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, err
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return "", nil, false, nil, flag.ErrHelp
+			return "", nil, false, nil, false, false, flag.ErrHelp
 		}
-		return "", nil, false, nil, err
+		return "", nil, false, nil, false, false, err
 	}
 
 	if showHelp {
 		fs.Usage()
-		return "", nil, false, nil, flag.ErrHelp
+		return "", nil, false, nil, false, false, flag.ErrHelp
 	}
 
 	remaining := fs.Args()
@@ -383,25 +476,37 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, err
 	// Handle ACP mode
 	if acpMode {
 		if len(remaining) > 0 {
-			return "", nil, false, nil, fmt.Errorf("ACP mode does not accept prompt arguments")
+			return "", nil, false, nil, false, false, nil
 		}
 		if optionsUsed {
-			return "", nil, false, nil, fmt.Errorf("authorization flags are not supported in ACP mode")
+			return "", nil, false, nil, false, false, nil
 		}
 		// Return special values to indicate ACP mode
-		return "", nil, false, nil, errACPMode
+		return "", nil, false, nil, false, false, errACPMode
+	}
+
+	// Handle web mode
+	if webMode {
+		if len(remaining) > 0 {
+			return "", nil, false, nil, false, false, flag.ErrHelp
+		}
+		if optionsUsed {
+			return "", nil, false, nil, false, false, flag.ErrHelp
+		}
+		// Return special values to indicate web mode
+		return "", nil, false, nil, true, webDebug, nil
 	}
 
 	if len(remaining) == 0 {
 		if optionsUsed {
-			return "", nil, false, nil, fmt.Errorf("authorization flags require a prompt in CLI mode")
+			return "", nil, false, nil, false, false, nil
 		}
-		return "", nil, false, nil, nil
+		return "", nil, false, nil, false, false, nil
 	}
 
 	prompt := strings.TrimSpace(strings.Join(remaining, " "))
 	if prompt == "" {
-		return "", nil, false, nil, fmt.Errorf("prompt must not be empty")
+		return "", nil, false, nil, false, false, fmt.Errorf("prompt must not be empty")
 	}
 
 	opts := &cli.Options{
@@ -433,7 +538,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, err
 		MutexProfileFraction: pprofMutexProfileFraction,
 	}
 
-	return prompt, opts, true, pprofCfg, nil
+	return prompt, opts, true, pprofCfg, false, false, nil
 }
 
 func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {

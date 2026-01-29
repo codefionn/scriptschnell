@@ -52,12 +52,9 @@ func TestShellBackgroundJobDoneChannelOrdering(t *testing.T) {
 		// Read stdout/stderr (like the actual implementation)
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
-		if stdout != nil {
-			// Scanner would run here
-		}
-		if stderr != nil {
-			// Scanner would run here
-		}
+		// Keep references to prevent GC (simulating actual pipe usage)
+		_ = stdout
+		_ = stderr
 	}()
 
 	// Wait for completion (this is the actual implementation pattern)
@@ -295,10 +292,8 @@ func TestSendSignalToBackgroundJob(t *testing.T) {
 	}()
 
 	select {
-	case err := <-done:
-		if err == nil {
-			// Command terminated, which is expected
-		}
+	case <-done:
+		// Command terminated, which is expected
 	case <-time.After(5 * time.Second):
 		t.Fatal("Timed out waiting for command to terminate")
 	}

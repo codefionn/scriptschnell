@@ -763,13 +763,16 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 		return nil, fmt.Errorf("model not found: %s", modelID)
 	}
 
+	// Get the canonical provider name
+	provName := canonicalProviderName(model.Provider)
+
 	// Create client based on provider
 	apiKey := resolveAPIKey(provider.Name, provider.APIKey)
 	var (
 		client llm.Client
 		err    error
 	)
-	switch canonicalProviderName(model.Provider) {
+	switch provName {
 	case "openai":
 		client, err = llm.NewOpenAIClient(apiKey, model.ID)
 	case "anthropic":
@@ -798,6 +801,9 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Wrap with caching-aware client to disable caching for OpenAI-compatible providers
+	client = llm.NewCachingAwareClient(client, provName)
 
 	interval := provider.rateLimitInterval()
 	tokensPerMinute := provider.tokensPerMinute()

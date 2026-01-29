@@ -2113,6 +2113,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.pendingAuthorizations, msg.AuthID)
 			logger.Debug("Found pending authorization request for authID %s, will send response", msg.AuthID)
 		} else {
+			// No pendingAuthorizations entry (handler-based path). Look up the
+			// tab from the dialog's request so WaitingForAuth is still cleared.
+			if m.authorizationDialog.request != nil {
+				tabIdxToUpdate = m.findTabIndexByID(m.authorizationDialog.request.TabID)
+			}
 			logger.Debug("No legacy pending authorization found for authID %s (may be handler-based)", msg.AuthID)
 		}
 
@@ -2129,18 +2134,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case <-time.After(5 * time.Second):
 				logger.Error("Timeout sending authorization response for authID %s after 5 seconds - receiver may have timed out", msg.AuthID)
 			}
-
-			// Update tab state (briefly re-acquire lock)
-			if tabIdxToUpdate >= 0 {
-				m.authorizationMu.Lock()
-				if tabIdxToUpdate < len(m.sessions) {
-					m.sessions[tabIdxToUpdate].WaitingForAuth = false
-				}
-				m.authorizationMu.Unlock()
-			}
 		}
 
-		return m, baseCmd
+		// Update tab state: clear WaitingForAuth for both legacy and handler paths
+		if tabIdxToUpdate >= 0 {
+			m.authorizationMu.Lock()
+			if tabIdxToUpdate < len(m.sessions) {
+				m.sessions[tabIdxToUpdate].WaitingForAuth = false
+			}
+			m.authorizationMu.Unlock()
+		}
+
+		// Restart spinner tick chain if it was active before the dialog opened.
+		// While the dialog is open, spinner.TickMsg messages are routed to
+		// handleAuthorizationDialog which returns nil cmd, breaking the tick
+		// chain. Without this restart, the spinner dies permanently and the
+		// TUI appears frozen.
+		var spinnerRestart tea.Cmd
+		if !m.animationsDisabled && m.spinnerActive {
+			spinnerRestart = m.spinner.Tick
+		}
+
+		return m, tea.Batch(baseCmd, spinnerRestart)
 
 	case TabContextUsageMsg:
 		tabIdx := m.findTabIndexByID(msg.TabID)

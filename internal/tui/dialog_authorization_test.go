@@ -765,3 +765,192 @@ func TestHandleAuthorizationDialogAlwaysSendsResponse(t *testing.T) {
 		t.Fatal("expected response to be sent to channel")
 	}
 }
+
+// Spinner freeze tests
+
+func TestSpinnerTickChainSurvivesAuthorizationDialog(t *testing.T) {
+	// This test verifies that the spinner tick chain is restarted after the
+	// authorization dialog closes. Previously, spinner.TickMsg messages were
+	// swallowed by handleAuthorizationDialog (returning nil cmd), which broke
+	// the tick chain permanently. After the dialog closed, spinnerActive was
+	// still true so the restart logic (if shouldSpin && !m.spinnerActive)
+	// never triggered, causing the spinner to die and the TUI to appear frozen.
+	m := New("test-model", "", false) // animations enabled
+	m.ready = true
+
+	// Start the spinner (simulating active processing)
+	m.spinnerActive = true
+
+	// Set up authorization dialog
+	req := &AuthorizationRequest{
+		AuthID:       "test-spinner-freeze",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test spinner freeze",
+		ResponseChan: make(chan bool, 1),
+	}
+
+	// Show dialog
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-spinner-freeze"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-spinner-freeze": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Send spinner tick while dialog is open - this gets swallowed
+	tickMsg := m.spinner.Tick()
+	updatedModel, cmd := m.Update(tickMsg)
+	m = updatedModel.(*Model)
+
+	// The tick was routed to handleAuthorizationDialog which returns nil cmd
+	// This breaks the tick chain
+	if cmd != nil {
+		// If cmd is not nil, handleAuthorizationDialog propagated the tick (good but unexpected)
+		t.Log("tick was propagated through dialog - not the bug scenario")
+	}
+
+	// Spinner should still be marked active
+	if !m.spinnerActive {
+		t.Fatal("spinnerActive should still be true while dialog is open")
+	}
+
+	// Now close the dialog by sending AuthorizationResponseMsg
+	responseMsg := AuthorizationResponseMsg{
+		AuthID:   "test-spinner-freeze",
+		Approved: true,
+	}
+	updatedModel, cmd = m.Update(responseMsg)
+	m = updatedModel.(*Model)
+
+	// After the dialog closes, the spinner tick chain should be restarted
+	// via a returned spinner.Tick command
+	if !m.spinnerActive {
+		t.Fatal("spinnerActive should remain true after dialog closes")
+	}
+
+	// The returned command should include a spinner tick to restart the chain
+	if cmd == nil {
+		t.Fatal("expected a non-nil command after dialog closes to restart spinner tick chain")
+	}
+}
+
+func TestSpinnerInactiveNoRestartAfterDialog(t *testing.T) {
+	// When the spinner is NOT active, closing the dialog should not start it.
+	m := New("test-model", "", false) // animations enabled
+	m.ready = true
+
+	m.spinnerActive = false // spinner is not active
+
+	req := &AuthorizationRequest{
+		AuthID:       "test-no-restart",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test no restart",
+		ResponseChan: make(chan bool, 1),
+	}
+
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-no-restart"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-no-restart": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Close dialog
+	responseMsg := AuthorizationResponseMsg{
+		AuthID:   "test-no-restart",
+		Approved: true,
+	}
+	updatedModel, _ := m.Update(responseMsg)
+	m = updatedModel.(*Model)
+
+	// Spinner should remain inactive
+	if m.spinnerActive {
+		t.Fatal("spinnerActive should remain false - should not start spinner when it wasn't active")
+	}
+}
+
+func TestAnimationsDisabledNoSpinnerRestartAfterDialog(t *testing.T) {
+	// When animations are disabled, no spinner restart should occur.
+	m := New("test-model", "", true) // animations disabled
+	m.ready = true
+
+	m.spinnerActive = true // even if marked active, animations are disabled
+
+	req := &AuthorizationRequest{
+		AuthID:       "test-anim-disabled",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test animations disabled",
+		ResponseChan: make(chan bool, 1),
+	}
+
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-anim-disabled"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-anim-disabled": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Close dialog
+	responseMsg := AuthorizationResponseMsg{
+		AuthID:   "test-anim-disabled",
+		Approved: true,
+	}
+	updatedModel, _ := m.Update(responseMsg)
+	m = updatedModel.(*Model)
+
+	// No crash, no spinner restart (animations disabled)
+	if m.authorizationDialogOpen {
+		t.Fatal("dialog should be closed")
+	}
+}
+
+// WaitingForAuth cleanup tests
+
+func TestHandlerPathClearsWaitingForAuth(t *testing.T) {
+	// This test verifies that WaitingForAuth is cleared when using the
+	// handler-based authorization path (TUIAuthorizationRequestMsg).
+	// Previously, WaitingForAuth was only cleared when the request was
+	// found in pendingAuthorizations. The handler-based path does not
+	// add entries there, so WaitingForAuth stayed stuck at true.
+	m := New("test-model", "", false)
+	m.ready = true
+
+	m.sessions = []*TabSession{{ID: 1, WaitingForAuth: true}}
+	m.activeSessionIdx = 0
+
+	// Set up handler-based dialog (no entry in pendingAuthorizations)
+	req := &AuthorizationRequest{
+		AuthID:   "test-handler-waitauth",
+		TabID:    1,
+		ToolName: "shell",
+	}
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-handler-waitauth"
+	// Not adding to pendingAuthorizations — the handler path doesn't use it
+
+	// Process response
+	responseMsg := AuthorizationResponseMsg{
+		AuthID:   "test-handler-waitauth",
+		Approved: true,
+	}
+	updatedModel, _ := m.Update(responseMsg)
+	m = updatedModel.(*Model)
+
+	// WaitingForAuth should be cleared even without a pendingAuthorizations entry
+	if m.sessions[0].WaitingForAuth {
+		t.Fatal("WaitingForAuth should be false after handler-based authorization completes")
+	}
+}

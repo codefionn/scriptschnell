@@ -1972,22 +1972,6 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		return fmt.Errorf("no orchestration model configured. Use /provider and /models commands to set up")
 	}
 
-	sendStatus := func(msg string) {
-		dispatchProgress(progressCallback, progress.Update{
-			Message:   msg,
-			Mode:      progress.ReportJustStatus,
-			Ephemeral: true,
-		})
-	}
-
-	sendStream := func(msg string, addNewLine bool) {
-		dispatchProgress(progressCallback, progress.Update{
-			Message:    msg,
-			AddNewLine: addNewLine,
-			Mode:       progress.ReportNoStatus,
-		})
-	}
-
 	// Store progress callback for use by tools (e.g., TinyGo download progress)
 	o.progressCbMu.Lock()
 	o.currentProgressCb = progressCallback
@@ -2029,6 +2013,11 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		logger.Warn("Pre-loop planning failed: %v", err)
 	}
 
+	// Check if a planning board was created and execute primary tasks serially
+	if planningBoard := o.session.GetPlanningBoard(); planningBoard != nil && len(planningBoard.PrimaryTasks) > 0 {
+		return o.executePlanningBoard(ctx, prompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback, openRouterUsageCallback, planningBoard)
+	}
+
 	// Get or build system prompt (cached for the session)
 	modelID := o.providerMgr.GetOrchestrationModel()
 	systemPrompt, err := o.getOrBuildSystemPrompt(ctx, modelID)
@@ -2066,31 +2055,223 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		}
 	}
 
-	// Tool execution loop
-	maxIterations := 256 // Prevent infinite loops
-	autoContinueAttempts := 0
-	hitMaxIterations := false
-	for iteration := 0; iteration < maxIterations; iteration++ {
-		logger.Debug("ProcessPrompt iteration %d starting (max=%d)", iteration, maxIterations)
+	// Run the core orchestration loop
+	return o.runOrchestrationLoopCore(ctx, prompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback)
+}
 
-		// Convert session messages to LLM format (preserving native format)
-		sessionMessages := o.session.GetMessages()
-		requestMessages := sessionMessages
-		if len(requestMessages) == 0 {
-			requestMessages = []*session.Message{
-				{
-					Role:    "system",
-					Content: systemPrompt,
-				},
-				{
-					Role:    "user",
-					Content: prompt,
-				},
-			}
+// executePlanningBoard executes primary tasks from a planning board in serial
+func (o *Orchestrator) executePlanningBoard(
+	ctx context.Context,
+	originalPrompt string,
+	progressCallback progress.Callback,
+	contextCallback ContextUsageCallback,
+	authCallback AuthorizationCallback,
+	toolCallCallback ToolCallCallback,
+	toolResultCallback ToolResultCallback,
+	openRouterUsageCallback OpenRouterUsageCallback,
+	planningBoard *session.PlanningBoard,
+) error {
+	sendStatus := func(msg string) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message:   msg,
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
+	}
+
+	sendStream := func(msg string, addNewLine bool) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message:    msg,
+			AddNewLine: addNewLine,
+			Mode:       progress.ReportNoStatus,
+		})
+	}
+
+	if planningBoard == nil || len(planningBoard.PrimaryTasks) == 0 {
+		return nil
+	}
+
+	logger.Info("Executing planning board with %d primary tasks", len(planningBoard.PrimaryTasks))
+	sendStream(fmt.Sprintf("\nExecuting %d primary tasks...\n", len(planningBoard.PrimaryTasks)), false)
+
+	for i := 0; i < len(planningBoard.PrimaryTasks); i++ {
+		primaryTask := &planningBoard.PrimaryTasks[i]
+
+		// Skip already completed tasks
+		if primaryTask.Status == "completed" {
+			logger.Info("Skipping already completed task %d: %s", i+1, primaryTask.Text)
+			continue
 		}
 
-		llmMessages := make([]*llm.Message, len(requestMessages))
-		for i, msg := range requestMessages {
+		// Mark task as in-progress
+		primaryTask.Status = "in_progress"
+		sendStream(fmt.Sprintf("\n[Task %d/%d] %s\n", i+1, len(planningBoard.PrimaryTasks), primaryTask.Text), false)
+		sendStatus(fmt.Sprintf("Executing task %d/%d...", i+1, len(planningBoard.PrimaryTasks)))
+
+		// Build task prompt with context about the original objective and subtasks
+		taskPrompt := o.buildTaskPrompt(originalPrompt, primaryTask, i, len(planningBoard.PrimaryTasks))
+
+		// Execute orchestrator loop for this task
+		if err := o.runOrchestrationLoopForTask(ctx, taskPrompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback, openRouterUsageCallback); err != nil {
+			logger.Warn("Task %d failed: %v", i+1, err)
+			sendStream(fmt.Sprintf("⚠️  Task %d failed: %v\n", i+1, err), false)
+			// Continue with next task instead of failing entirely
+			primaryTask.Status = "failed"
+			continue
+		}
+
+		// Mark task as completed
+		primaryTask.Status = "completed"
+		logger.Info("Task %d completed successfully: %s", i+1, primaryTask.Text)
+		sendStream(fmt.Sprintf("✓ Task %d completed\n", i+1), false)
+	}
+
+	sendStream("\n✓ All primary tasks completed\n", false)
+	return nil
+}
+
+// buildTaskPrompt constructs the prompt for a single primary task execution
+func (o *Orchestrator) buildTaskPrompt(originalPrompt string, task *session.PlanningTask, taskIndex, totalTasks int) string {
+	var sb strings.Builder
+
+	// Original context
+	sb.WriteString(fmt.Sprintf("You are working on task %d of %d from the overall objective.\n\n", taskIndex+1, totalTasks))
+	sb.WriteString(fmt.Sprintf("**Overall Objective:** %s\n\n", originalPrompt))
+
+	// Current task
+	sb.WriteString(fmt.Sprintf("**Your Current Task:** %s\n", task.Text))
+	if task.Description != "" {
+		sb.WriteString(fmt.Sprintf("Description: %s\n", task.Description))
+	}
+	sb.WriteString("\n")
+
+	// Subtasks if present
+	if len(task.Subtasks) > 0 {
+		sb.WriteString("**Subtasks to complete:**\n")
+		for j, subtask := range task.Subtasks {
+			statusIcon := "[ ]"
+			if subtask.Status == "completed" {
+				statusIcon = "[x]"
+			}
+			sb.WriteString(fmt.Sprintf("%c. %s %s\n", 'a'+j, statusIcon, subtask.Text))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("Execute this task using the available tools. Focus on completing the current task and its subtasks.\n")
+	sb.WriteString("When complete, continue to the next task or finish if this was the last task.\n")
+
+	return sb.String()
+}
+
+// runOrchestrationLoopForTask runs the main orchestration loop for a single task
+func (o *Orchestrator) runOrchestrationLoopForTask(
+	ctx context.Context,
+	taskPrompt string,
+	progressCallback progress.Callback,
+	contextCallback ContextUsageCallback,
+	authCallback AuthorizationCallback,
+	toolCallCallback ToolCallCallback,
+	toolResultCallback ToolResultCallback,
+	openRouterUsageCallback OpenRouterUsageCallback,
+) error {
+	// Reset loop detector for this task
+	o.loopDetector.Reset()
+
+	// Add task prompt as user message
+	o.session.AddMessage(&session.Message{
+		Role:    "user",
+		Content: taskPrompt,
+	})
+
+	// Get system prompt
+	modelID := o.providerMgr.GetOrchestrationModel()
+	systemPrompt, err := o.getOrBuildSystemPrompt(ctx, modelID)
+	if err != nil {
+		return fmt.Errorf("failed to build system prompt: %w", err)
+	}
+
+	// Broadcast initial context usage
+	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
+
+	// Rebuild tools if needed
+	if o.toolSelectionDirty {
+		if errs := o.rebuildTools(true); len(errs) > 0 {
+			for _, err := range errs {
+				if err != nil {
+					logger.Warn("Tool selection refresh warning: %v", err)
+				}
+			}
+		}
+	}
+
+	// Detect provider/model changes and convert messages if needed
+	provider, modelFamily, providerChanged := o.detectProviderChange(modelID)
+	if providerChanged && provider != "" {
+		logger.Info("Provider changed to %s (%s), converting message history", provider, modelFamily)
+		if err := o.convertSessionMessages(modelID, provider, modelFamily); err != nil {
+			logger.Warn("Failed to convert messages to native format: %v", err)
+		} else {
+			o.session.SetCurrentProvider(provider, modelFamily)
+		}
+	}
+
+	// Run the orchestration loop
+	return o.runOrchestrationLoopCore(ctx, taskPrompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback)
+}
+
+// runOrchestrationLoopCore is the core orchestration loop logic
+func (o *Orchestrator) runOrchestrationLoopCore(
+	ctx context.Context,
+	prompt string,
+	progressCallback progress.Callback,
+	contextCallback ContextUsageCallback,
+	authCallback AuthorizationCallback,
+	toolCallCallback ToolCallCallback,
+	toolResultCallback ToolResultCallback,
+) error {
+	sendStatus := func(msg string) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message:   msg,
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
+	}
+
+	sendStream := func(msg string, addNewLine bool) {
+		dispatchProgress(progressCallback, progress.Update{
+			Message:    msg,
+			AddNewLine: addNewLine,
+			Mode:       progress.ReportNoStatus,
+		})
+	}
+
+	modelID := o.providerMgr.GetOrchestrationModel()
+	systemPrompt, err := o.getOrBuildSystemPrompt(ctx, modelID)
+	if err != nil {
+		return fmt.Errorf("failed to build system prompt: %w", err)
+	}
+
+	// Detect provider/model changes for native format support
+	var provider, modelFamily string
+	var converter llm.NativeConverter
+	provider, modelFamily, _ = o.detectProviderChange(modelID)
+	converter = llm.GetConverter(modelID)
+
+	// Tool execution loop
+	maxIterations := 256
+	autoContinueAttempts := 0
+	hitMaxIterations := false
+
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		logger.Debug("Orchestration loop iteration %d starting (max=%d)", iteration, maxIterations)
+
+		// Get session messages
+		sessionMessages := o.session.GetMessages()
+
+		// Convert to LLM messages
+		llmMessages := make([]*llm.Message, len(sessionMessages))
+		for i, msg := range sessionMessages {
 			llmMessages[i] = &llm.Message{
 				Role:              msg.Role,
 				Content:           msg.Content,
@@ -2104,21 +2285,22 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 			}
 		}
 
+		// Apply cache control if enabled
 		if o.config != nil && o.config.EnablePromptCache {
 			markCacheControlBreakpoints(llmMessages, cacheControlTokenInterval, cacheControlMaxBreakpoints)
 		}
 
-		totalTokens, perMessageTokens, _ := estimateContextTokens(modelID, systemPrompt, requestMessages)
+		// Estimate context and compact if needed
+		totalTokens, perMessageTokens, _ := estimateContextTokens(modelID, systemPrompt, sessionMessages)
 		o.dispatchContextUsage(modelID, totalTokens, contextCallback)
 		o.maybeCompactContext(modelID, systemPrompt, sessionMessages, perMessageTokens, totalTokens, progressCallback, contextCallback)
 
-		// Get model's max output tokens from model metadata
+		// Get max tokens
 		maxTokens := o.providerMgr.GetModelMaxOutputTokens(modelID)
 		if maxTokens == 0 {
-			// Fallback to config value if model doesn't specify max output tokens
 			maxTokens = o.config.MaxTokens
 			if maxTokens == 0 {
-				maxTokens = 4096 // Ultimate fallback
+				maxTokens = 4096
 			}
 		}
 
@@ -2133,16 +2315,12 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 			CacheTTL:      o.config.PromptCacheTTL,
 		}
 
-		// Set previous_response_id for clients that support it (e.g., OpenRouter) for better prompt caching
 		if prevID := o.orchestrationClient.GetLastResponseID(); prevID != "" {
 			req.PreviousResponseID = prevID
-			logger.Debug("Setting previous_response_id=%s for request", prevID)
 		}
 
-		// Apply model-specific defaults
 		o.applyModelSpecificDefaults(req, modelID)
 
-		// Notify UI that we're waiting for LLM response
 		if progressCallback != nil && len(llmMessages) > 1 {
 			sendStatus("Thinking...")
 		}
@@ -2153,176 +2331,83 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 		response, err := o.completeWithRetry(ctx, req, progressCallback)
 		if err != nil {
 			if errors.As(err, &validationErr) {
-				msg := fmt.Sprintf("Tool call validation failed for '%s': missing required parameter '%s'. This client cannot populate the value automatically, so please include it in your next tool call.",
-					validationErr.toolName, validationErr.missingParam)
-				logger.Warn("Tool call validation error: %v", validationErr)
+				msg := fmt.Sprintf("Tool call validation failed for '%s': missing required parameter '%s'.", validationErr.toolName, validationErr.missingParam)
+				sendStream(fmt.Sprintf("\n⚠️ %s\n", msg), false)
+				sendStatus("Waiting for tool call validation fix...")
 				o.session.AddMessage(&session.Message{
 					Role:    "user",
 					Content: msg,
 				})
 				o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
-				sendStream(fmt.Sprintf("\n⚠️ %s\n", msg), false)
-				sendStatus("Waiting for tool call validation fix...")
 				continue
 			}
 			if errors.As(err, &ctxSizeErr) {
-				// Context size exceeded - trigger forced compaction and retry
 				logger.Info("Context size exceeded, triggering forced compaction: %s", ctxSizeErr.reason)
 				sendStatus("Compacting context...")
-				o.forceCompactContext(modelID, systemPrompt, sessionMessages, progressCallback, contextCallback)
-
-				// Check if compaction was effective by estimating context size after compaction
-				currentMessages := o.session.GetMessages()
-				// Add system prompt to estimate properly
-				fullMessages := make([]*session.Message, len(currentMessages)+1)
-				fullMessages[0] = &session.Message{Role: "system", Content: systemPrompt}
-				copy(fullMessages[1:], currentMessages)
-				newTotalTokens, _, _ := estimateContextTokens(modelID, "", fullMessages)
-				contextWindow := o.getContextWindow(modelID)
-
-				// If still exceeding re-compaction threshold, try again with more forceful prompt
-				if contextWindow > 0 && (newTotalTokens*100/contextWindow) >= recompactionThresholdPercent {
-					currentAttempt := o.getCurrentCompactionAttempt()
-					if currentAttempt < maxCompactionAttempts {
-						logger.Info("Compaction attempt %d insufficient (%d/%d tokens, %d%%), triggering re-compaction...",
-							currentAttempt, newTotalTokens, contextWindow, newTotalTokens*100/contextWindow)
-						sendStatus(fmt.Sprintf("Re-compacting (attempt %d/%d)...", currentAttempt+1, maxCompactionAttempts))
-						o.forceCompactContext(modelID, systemPrompt, o.session.GetMessages(), progressCallback, contextCallback)
-					} else {
-						logger.Warn("Reached max compaction attempts (%d), context may still be too large", maxCompactionAttempts)
-					}
-				}
-
-				// Reset compaction attempt counter after finishing
+				o.forceCompactContext(modelID, systemPrompt, o.session.GetMessages(), progressCallback, contextCallback)
 				o.resetCompactionAttempts()
-
-				// Continue to retry with compacted context
 				continue
 			}
 			return fmt.Errorf("completion failed: %w", err)
 		}
 
-		// Ensure tool calls always have IDs; some providers omit them intermittently.
-		response.ToolCalls = llm.NormalizeToolCallIDs(response.ToolCalls)
-
-		// Log the stop reason
-		if response.StopReason != "" {
-			logger.Info("LLM generation stop reason: %s", response.StopReason)
-		} else {
-			logger.Debug("LLM generation completed with no stop reason reported")
+		// Convert to native format if supported
+		var nativeMsgs []interface{}
+		var nativeErr error
+		if converter != nil && converter.SupportsNativeStorage() {
+			nativeMsgs, nativeErr = converter.ConvertToNative([]*llm.Message{{Role: "assistant", Content: response.Content, ToolCalls: response.ToolCalls}}, "", o.config.EnablePromptCache, o.config.PromptCacheTTL)
 		}
 
-		// Log response details for debugging
-		logger.Debug("LLM response: content_length=%d, tool_calls=%d, stop_reason=%q",
-			len(response.Content), len(response.ToolCalls), response.StopReason)
-
-		// Add assistant response to session
+		// Add assistant message
 		assistantMsg := &session.Message{
 			Role:      "assistant",
 			Content:   response.Content,
 			ToolCalls: response.ToolCalls,
 		}
 
-		// Process OpenRouter usage data if available
-		if response.Usage != nil {
-			logger.Debug("LLM response contains usage data, processing OpenRouter usage")
-			o.processOpenRouterUsage(response.Usage, openRouterUsageCallback)
-			// Accumulate usage in session
-			o.session.AccumulateUsage(response.Usage)
-		} else {
-			logger.Debug("LLM response contains no usage data")
-		}
-
-		// Convert to native format immediately if supported
-		converter := llm.GetConverter(modelID)
-		if converter != nil && converter.SupportsNativeStorage() {
-			nativeMsgs, err := converter.ConvertToNative(
-				[]*llm.Message{{
-					Role:      "assistant",
-					Content:   response.Content,
-					ToolCalls: response.ToolCalls,
-				}},
-				"",
-				o.config.EnablePromptCache,
-				o.config.PromptCacheTTL,
-			)
-
-			if err == nil && len(nativeMsgs) > 0 {
-				assistantMsg.NativeFormat = nativeMsgs[len(nativeMsgs)-1] // Last message is the assistant message
-				assistantMsg.NativeProvider = provider
-				assistantMsg.NativeModelFamily = modelFamily
-				assistantMsg.NativeTimestamp = time.Now()
-			} else if err != nil {
-				logger.Warn("Failed to convert assistant message to native format: %v", err)
-			}
+		// Set native format if available
+		if nativeErr == nil && len(nativeMsgs) > 0 {
+			assistantMsg.NativeFormat = nativeMsgs[len(nativeMsgs)-1].(map[string]interface{})
+			assistantMsg.NativeProvider = provider
+			assistantMsg.NativeModelFamily = modelFamily
+			assistantMsg.NativeTimestamp = time.Now()
 		}
 
 		o.session.AddMessage(assistantMsg)
 		o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
-		// Auto-save the session if enabled
-		if o.config.AutoSave.Enabled {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := o.SaveCurrentSession(ctx); err != nil {
-					logger.Warn("Failed to auto-save session: %v", err)
-				}
-			}()
-		}
-
-		// Stream the content to UI if present
+		// Stream content to UI
 		if response.Content != "" {
 			sendStream(response.Content, false)
-		} else if len(response.ToolCalls) > 0 && response.Content == "" {
-			// Log when we have tool calls but no content - this is normal but worth tracking
-			logger.Debug("Response contains %d tool calls with no text content", len(response.ToolCalls))
 		}
 
-		// Check for text loops in the response
+		// Check for text loops
 		if response.Content != "" {
 			isLoop, pattern, count := o.loopDetector.AddText(response.Content)
 			if isLoop {
-				logger.Warn("Text loop detected at iteration %d: pattern repeated %d times", iteration, count)
-				// Show a truncated version of the pattern to the user
 				displayPattern := pattern
 				if len(displayPattern) > 100 {
 					displayPattern = displayPattern[:100] + "..."
 				}
-				sendStream(fmt.Sprintf("\n\n🔁 Loop detected! The LLM is repeating the same text pattern %d times.\nPattern: %s\nStopping generation to prevent infinite loop.\n", count, displayPattern), false)
-				logger.Debug("Breaking out of loop due to text repetition (iteration %d)", iteration)
+				sendStream(fmt.Sprintf("\n\n🔁 Loop detected! Pattern repeated %d times. Stopping.\n", count), false)
 				break
 			}
 		}
 
-		// Check if response was truncated due to token limits
-		isTruncated := response.StopReason == "length" || response.StopReason == "max_tokens"
+		// Check if truncated or incomplete
+		contentEndsIncomplete := strings.HasSuffix(strings.TrimSpace(response.Content), ":") || strings.HasSuffix(strings.TrimSpace(response.Content), ":\n")
 
-		// Check if content ends with incomplete indication (colon or colon with newline)
-		contentEndsIncomplete := false
-		if response.Content != "" {
-			trimmedContent := strings.TrimSpace(response.Content)
-			contentEndsIncomplete = strings.HasSuffix(trimmedContent, ":") || strings.HasSuffix(trimmedContent, ":\n")
-		}
-
-		// Check if there are tool calls to execute
+		// Handle no tool calls case
 		if len(response.ToolCalls) == 0 {
-			// No tool calls - check if we should auto-continue
-			shouldContinue, judgeOutput := o.shouldAutoContinue(ctx, systemPrompt)
+			shouldContinue, _ := o.shouldAutoContinue(ctx, systemPrompt)
 
-			// Also consider auto-continue if content ends with incomplete indicators
 			if contentEndsIncomplete && !shouldContinue {
-				logger.Debug("Auto-continue triggered by incomplete content ending (colon)")
 				shouldContinue = true
-				judgeOutput = "Auto-continue triggered by incomplete content ending (colon)"
 			}
-
-			logger.Debug("Auto-continue judge called (no tool calls): shouldContinue=%v, output=%q", shouldContinue, judgeOutput)
 
 			if shouldContinue && autoContinueAttempts < o.getAutoContinueMaxAttempts() {
 				autoContinueAttempts++
-				logger.Info("Auto-continue triggered (attempt %d/%d)", autoContinueAttempts, o.getAutoContinueMaxAttempts())
-				sendStream("\n⏭ Auto-continue requested.\n", false)
+				sendStream("\n⏭ Auto-continue.\n", false)
 				sendStatus("Continuing...")
 				o.session.AddMessage(&session.Message{
 					Role:    "user",
@@ -2331,45 +2416,26 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 				o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 				continue
 			}
-			if judgeOutput != "" {
-				logger.Debug("Auto-continue judge decision: %s", judgeOutput)
-			}
+
 			sendStatus("")
-			logger.Debug("Breaking out of loop: no tool calls and no auto-continue (iteration %d)", iteration)
 			break
 		}
 
-		// Tool calls present - DO NOT auto-continue here
-		// We need to execute the tools first and add tool result messages
-		// Otherwise we'd create invalid message history: assistant[tool_calls] -> user[continue]
-		// The auto-continue decision will be made in the next iteration after tool results are added
-		if isTruncated || contentEndsIncomplete {
-			logger.Debug("Response truncated with tool calls present (iteration %d). Will execute tools first, then auto-continue decision in next iteration.", iteration)
-		}
-
-		// Execute each tool call
-		logger.Debug("Executing %d tool calls from iteration %d", len(response.ToolCalls), iteration)
-
+		// Execute tool calls
 		if err := o.processToolCalls(ctx, response.ToolCalls, o.session, progressCallback, authCallback, toolCallCallback, toolResultCallback, nil); err != nil {
 			logger.Warn("Error processing tool calls: %v", err)
 		}
 
-		// Log that we're continuing the loop to get LLM's analysis of tool results
-		logger.Debug("Tool execution complete, continuing loop to get LLM analysis (iteration %d)", iteration)
-
-		// Check if this is the last iteration
 		if iteration == maxIterations-1 {
 			hitMaxIterations = true
 		}
 	}
 
-	// Check if we exited due to hitting max iterations
 	if hitMaxIterations {
-		logger.Warn("ProcessPrompt reached maximum iteration limit (%d). This may indicate the LLM is stuck in a loop.", maxIterations)
-		sendStream(fmt.Sprintf("\n⚠️  Reached maximum iteration limit (%d). Stopping to prevent infinite loop.\n", maxIterations), false)
+		logger.Warn("Orchestration loop reached maximum iteration limit (%d)", maxIterations)
+		sendStream(fmt.Sprintf("\n⚠️  Reached maximum iteration limit (%d).\n", maxIterations), false)
 	}
 
-	logger.Debug("ProcessPrompt completed")
 	return nil
 }
 

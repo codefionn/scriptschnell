@@ -123,8 +123,6 @@ const (
 const (
 	// Compaction threshold: trigger compaction when context usage exceeds this percentage
 	compactionThresholdPercent = 90
-	// Re-compaction threshold: after first compaction, if still above this, retry with forceful prompt
-	recompactionThresholdPercent = 80
 	// Maximum number of compaction attempts for a single request
 	maxCompactionAttempts = 3
 	// Max summary bytes for each compaction attempt (decreases with each attempt for more aggressive summarization)
@@ -2389,7 +2387,7 @@ func (o *Orchestrator) runOrchestrationLoopCore(
 				if len(displayPattern) > 100 {
 					displayPattern = displayPattern[:100] + "..."
 				}
-				sendStream(fmt.Sprintf("\n\n🔁 Loop detected! Pattern repeated %d times. Stopping.\n", count), false)
+				sendStream(fmt.Sprintf("\n\n🔁 Loop detected! Pattern '%s' repeated %d times. Stopping.\n", displayPattern, count), false)
 				break
 			}
 		}
@@ -3497,34 +3495,11 @@ func (o *Orchestrator) getContextWindow(modelID string) int {
 	return 8192
 }
 
-// getCurrentCompactionAttempt returns the current compaction attempt number
-func (o *Orchestrator) getCurrentCompactionAttempt() int {
-	o.compactionAttemptMu.Lock()
-	defer o.compactionAttemptMu.Unlock()
-	return o.compactionAttemptCount
-}
-
 // resetCompactionAttempts resets the compaction attempt counter
 func (o *Orchestrator) resetCompactionAttempts() {
 	o.compactionAttemptMu.Lock()
 	o.compactionAttemptCount = 0
 	o.compactionAttemptMu.Unlock()
-}
-
-// processOpenRouterUsage processes and sends OpenRouter usage data to the callback
-func (o *Orchestrator) processOpenRouterUsage(usage map[string]interface{}, callback OpenRouterUsageCallback) {
-	if callback == nil {
-		logger.Debug("OpenRouter usage callback is nil, skipping usage processing")
-		return
-	}
-
-	if usage != nil {
-		logger.Debug("Processing OpenRouter usage data: %v", usage)
-	} else {
-		logger.Debug("OpenRouter usage data is nil, still calling callback")
-	}
-
-	_ = callback(usage)
 }
 
 func selectCompactionPrefix(perMessageTokens []int, totalTokens int) int {

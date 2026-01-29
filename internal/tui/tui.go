@@ -391,7 +391,7 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	ta.Placeholder = defaultInputPlaceholder
 	ta.Focus()
 	ta.Prompt = "│ "
-	ta.CharLimit = 10000
+	ta.CharLimit = 20000
 	ta.SetWidth(80)
 	ta.SetHeight(3)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()

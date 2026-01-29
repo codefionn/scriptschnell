@@ -4,7 +4,7 @@ import "strings"
 
 // Button component with variants
 templ Button(text string, class string) {
-	<button 
+	<button
 		class={ "px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 " + class }
 	>
 		{ text }
@@ -53,7 +53,7 @@ func StatusBadge(status string) templ.Component {
 	default:
 		statusClasses += "bg-gray-100 text-gray-800"
 	}
-	
+
 	return templ.Raw(`<span class="` + statusClasses + `">` + statusText + `</span>`)
 }
 

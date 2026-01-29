@@ -16,6 +16,7 @@ var providerEnvVars = map[string][]string{
 	"mistral":           {"MISTRAL_API_KEY"},
 	"cerebras":          {"CEREBRAS_API_KEY"},
 	"groq":              {"GROQ_API_KEY"},
+	"kimi":              {"KIMI_API_KEY", "MOONSHOT_API_KEY"},
 	"exa":               {"EXA_API_KEY"},
 	"perplexity":        {"PERPLEXITY_API_KEY"},
 	"openai-compatible": {"OPENAI_COMPATIBLE_API_KEY", "OPENAI_API_KEY"},

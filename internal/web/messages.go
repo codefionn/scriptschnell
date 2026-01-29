@@ -29,8 +29,8 @@ type WebMessage struct {
 	Data       map[string]interface{} `json:"data,omitempty"`
 	Timestamp  time.Time              `json:"timestamp,omitempty"`
 	// For compact tool interactions
-	Status     string                 `json:"status,omitempty"` // "calling", "completed", "error"
-	Compact    bool                   `json:"compact,omitempty"`  // Whether this is a compact message
+	Status  string `json:"status,omitempty"`  // "calling", "completed", "error"
+	Compact bool   `json:"compact,omitempty"` // Whether this is a compact message
 }
 
 // SessionInfo represents session information

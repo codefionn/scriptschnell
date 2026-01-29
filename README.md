@@ -159,6 +159,8 @@ Supported providers:
 - Mistral
 - OpenRouter
 - Cerebras
+- Groq
+- Kimi (Moonshot AI)
 - Ollama
 - OpenAI-compatible
 

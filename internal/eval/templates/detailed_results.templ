@@ -1,36 +1,34 @@
 package templates
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // TestResult provides comprehensive view of a single test case
 type TestResult struct {
-	RunID                int64
-	TestCaseID          string
-	Passed              bool
-	ExpectedOutput      string
-	ActualOutput        string
-	ContainerName       string
-	ErrorInfo           string
-	RawOutput           string
-	DetailedExecInfo    string
-	ExecutionTime       int // in milliseconds
+	RunID            int64
+	TestCaseID       string
+	Passed           bool
+	ExpectedOutput   string
+	ActualOutput     string
+	ContainerName    string
+	ErrorInfo        string
+	RawOutput        string
+	DetailedExecInfo string
+	ExecutionTime    int // in milliseconds
 }
 
 type DetailedResultsProps struct {
-	RunID               int64
-	EvalID              string
-	ModelID             string
-	StartedAt           string
-	Status              string
-	AgentOutput         string
-	AgentExitCode       int
-	TotalTests          int
-	PassedTests         int
-	PassRate            float64
-	TestResults         []TestResult
-	Error               string
+	RunID         int64
+	EvalID        string
+	ModelID       string
+	StartedAt     string
+	Status        string
+	AgentOutput   string
+	AgentExitCode int
+	TotalTests    int
+	PassedTests   int
+	PassRate      float64
+	TestResults   []TestResult
+	Error         string
 }
 
 templ passedFailed(result TestResult) {
@@ -62,7 +60,6 @@ templ DetailedTestResultCard(result TestResult) {
 				Container: { result.ContainerName } | Execution Time: { fmt.Sprintf("%dms", result.ExecutionTime) }
 			</div>
 		</div>
-
 		<div class="px-6 py-4">
 			<div class="grid md:grid-cols-2 gap-4 mb-4">
 				<div>
@@ -74,7 +71,6 @@ templ DetailedTestResultCard(result TestResult) {
 					<pre class="text-xs bg-gray-50 p-3 rounded border border-gray-200">{ result.ActualOutput }</pre>
 				</div>
 			</div>
-
 			if result.ErrorInfo != "" || result.RawOutput != "" || result.DetailedExecInfo != "" {
 				<div class="bg-gray-50 p-3 rounded border border-gray-200">
 					if result.ErrorInfo != "" {
@@ -118,7 +114,6 @@ templ DetailedResultsSummary(props DetailedResultsProps) {
 				← Back to Results
 			</a>
 		</div>
-
 		// Summary Card with key metrics
 		@Card("mb-6") {
 			<div class="px-6 py-4 border-b border-gray-200">
@@ -145,7 +140,6 @@ templ DetailedResultsSummary(props DetailedResultsProps) {
 						<div class="text-sm font-medium text-gray-900">{ props.StartedAt }</div>
 					</div>
 				</div>
-
 				<div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
 					<div>
 						<div class="text-sm text-gray-500">Total Tests</div>
@@ -166,7 +160,6 @@ templ DetailedResultsSummary(props DetailedResultsProps) {
 				</div>
 			</div>
 		}
-
 		@ContainerInformationSelector(props)
 	</div>
 }
@@ -202,9 +195,7 @@ templ DetailedResults(props DetailedResultsProps) {
 		if props.Error != "" {
 			@Alert(props.Error, "error")
 		}
-
 		@DetailedResultsSummary(props)
-
 		// Agent Interaction / Solution Generation phase
 		<div class="mb-8">
 			<h2 class="text-xl font-semibold text-gray-900 mb-4">Solution Generation Phase (Agent Interaction)</h2>
@@ -235,14 +226,12 @@ templ DetailedResults(props DetailedResultsProps) {
 				</div>
 			}
 		</div>
-
 		<div class="mb-8">
 			<h2 class="text-xl font-semibold text-gray-900 mb-4">Detailed Test Results</h2>
 			for _, result := range props.TestResults {
 				@DetailedTestResultCard(result)
 			}
 		</div>
-
 		<div class="mt-8 bg-gray-50 p-4 rounded-lg border border-gray-200">
 			<h3 class="text-md font-semibold text-gray-900 mb-2">Container Execution Notes</h3>
 			<p class="text-sm text-gray-600">Each container execution includes detailed logging, error capture, and performance metrics. Click on individual test cards above to see comprehensive execution details including runtime output, container names, timing information, and any errors encountered during evaluation.</p>

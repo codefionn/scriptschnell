@@ -172,7 +172,7 @@ func (c *Client) handleMessage(msg *WebMessage) error {
 			if err := c.broker.Stop(); err != nil {
 				logger.Error("Failed to stop broker: %v", err)
 			}
-			
+
 			// Clear the session
 			if c.broker.GetSession() != nil {
 				c.broker.GetSession().Clear()

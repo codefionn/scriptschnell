@@ -32,7 +32,6 @@ templ QuickActionCard(title string, description string, href string) {
 templ Dashboard(props DashboardProps) {
 	<div class="space-y-6">
 		<h2 class="text-2xl font-bold">Dashboard</h2>
-		
 		<!-- Stats Grid -->
 		<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
 			@StatCard("Total Eval Runs", fmt.Sprintf("%d", props.Stats.TotalRuns))
@@ -40,7 +39,6 @@ templ Dashboard(props DashboardProps) {
 			@StatCard("Tokens Used", fmt.Sprintf("%d", props.Stats.TokensUsed))
 			@StatCard("Total Cost", fmt.Sprintf("$%.4f", props.Stats.TotalCost))
 		</div>
-
 		<!-- Quick Actions -->
 		<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
 			@QuickActionCard("Manage Models", "Select models for evaluation", "/models")

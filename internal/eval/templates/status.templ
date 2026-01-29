@@ -13,7 +13,7 @@ func StatusBadgeForText(text string, status string) templ.Component {
 	default:
 		statusClasses += "bg-gray-100 text-gray-800"
 	}
-	
+
 	return templ.Raw(`<span class="` + statusClasses + `">` + text + `</span>`)
 }
 

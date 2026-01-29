@@ -1,9 +1,9 @@
 package templates
 
 templ MenuItem(href string, text string, active bool) {
-	<a 
+	<a
 		href={ href }
-		class={ 
+		class={
 			"text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium",
 			templ.KV("bg-blue-50 border-b-2 border-blue-500 text-blue-700", active),
 		}

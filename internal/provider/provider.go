@@ -482,6 +482,8 @@ func (m *Manager) createLLMProviderWithBaseURL(name, apiKey, baseURL string) (ll
 		return llm.NewGroqProvider(resolvedKey), nil
 	case "ollama":
 		return llm.NewOllamaProvider(resolvedKey), nil
+	case "kimi":
+		return llm.NewKimiProvider(resolvedKey), nil
 	case "openai-compatible":
 		if baseURL == "" {
 			return nil, fmt.Errorf("base URL is required for openai-compatible provider")
@@ -789,6 +791,8 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 		client, err = llm.NewGroqClient(apiKey, model.ID)
 	case "ollama":
 		client, err = llm.NewOllamaClient(apiKey, model.ID)
+	case "kimi":
+		client, err = llm.NewKimiClient(apiKey, model.ID)
 	case "openai-compatible":
 		if provider.BaseURL == "" {
 			return nil, fmt.Errorf("base URL is required for openai-compatible provider")
@@ -984,6 +988,7 @@ var PreferredModels = map[string][]string{
 	},
 	"cerebras": {"zai-glm-4.6", "qwen-3-235b-a22b-instruct-2507"},
 	"groq":     {"llama-3.3-70b-versatile", "mixtral-8x7b-32768"},
+	"kimi":     {"kimi-k2.5", "kimi-k2-turbo-preview", "kimi-k2-thinking", "moonshot-v1-128k"},
 }
 
 // ChooseDefaultModel chooses the best default model for a provider based on preferred models list

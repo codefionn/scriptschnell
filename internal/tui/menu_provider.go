@@ -112,7 +112,7 @@ type ProviderMenuModel struct {
 	formMode          providerFormMode
 	formInputs        []formInput
 	focusIndex        int
-	addingType        string // provider key (openai, anthropic, google, openrouter, mistral, cerebras, groq, openai-compatible)
+	addingType        string // provider key (openai, anthropic, google, openrouter, mistral, cerebras, groq, kimi, openai-compatible)
 	addingLabel       string // human-friendly provider label
 	editProvider      string
 	editProviderLabel string
@@ -752,6 +752,13 @@ func buildProviderMenuItems(mgr *provider.Manager) []list.Item {
 			displayName:  "Groq",
 		},
 		{
+			title:        "Add Kimi Provider",
+			description:  "Configure Kimi (Moonshot AI) with API key",
+			action:       actionAddProvider,
+			providerType: "kimi",
+			displayName:  "Kimi",
+		},
+		{
 			title:        "Add OpenAI-Compatible Provider",
 			description:  "Configure any OpenAI-compatible API (LM Studio, LocalAI, vLLM, etc.)",
 			action:       actionAddProvider,
@@ -782,6 +789,8 @@ func friendlyProviderName(name string) string {
 		return "Cerebras"
 	case "groq":
 		return "Groq"
+	case "kimi":
+		return "Kimi"
 	case "ollama":
 		return "Ollama"
 	case "openai-compatible":

@@ -3,15 +3,15 @@ package templates
 import "fmt"
 
 type EvalStat struct {
-	RunID        int
-	EvalID       string
-	ModelID      string
-	Status       string
-	PassedCount  int
-	TotalCount   int
-	PassRate     float64
-	TotalTokens  int64
-	TotalCost    float64
+	RunID       int
+	EvalID      string
+	ModelID     string
+	Status      string
+	PassedCount int
+	TotalCount  int
+	PassRate    float64
+	TotalTokens int64
+	TotalCost   float64
 }
 
 type ResultsProps struct {
@@ -73,11 +73,9 @@ templ ResultsTable(stats []EvalStat) {
 templ Results(props ResultsProps) {
 	<div class="space-y-6">
 		<h2 class="text-2xl font-bold">Evaluation Results</h2>
-
 		if props.Error != "" {
 			@Alert(props.Error, "error")
 		}
-
 		if len(props.Stats) == 0 {
 			<div class="text-center py-12">
 				<h3 class="mt-2 text-sm font-medium text-gray-900">No results available</h3>
@@ -89,7 +87,6 @@ templ Results(props ResultsProps) {
 				</div>
 			</div>
 		}
-
 		if len(props.Stats) > 0 {
 			@ResultsTable(props.Stats)
 		}

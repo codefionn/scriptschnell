@@ -28,6 +28,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/summarizer"
 	"github.com/codefionn/scriptschnell/internal/tools"
+	"github.com/codefionn/scriptschnell/internal/vcs"
 )
 
 // AuthorizationCallback is called when a tool requires user authorization
@@ -108,6 +109,9 @@ type Orchestrator struct {
 	userInteractionClient  *actor.UserInteractionClient
 	userInteractionTabID   int
 	userInteractionTabIDMu sync.Mutex
+	vcsRef                 *actor.ActorRef
+	vcsCancel              context.CancelFunc
+	vcsClient              *tools.VCSActorClient
 }
 
 const (
@@ -411,6 +415,39 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 		cancel()
 	}
 
+	// Set up VCS actor for branch tracking
+	vcsCtx, vcsCancel := context.WithCancel(context.Background())
+	var gitVCS vcs.VCS
+	// Try to initialize Git VCS
+	gitVCS = vcs.NewGit(cfg.WorkingDir)
+	if _, err := gitVCS.RepositoryRoot(context.Background(), cfg.WorkingDir); err != nil {
+		// Not in a git repository, use nil VCS
+		gitVCS = nil
+		logger.Debug("Not in a git repository, VCS actor disabled")
+	}
+	vcsActor := tools.NewVCSActor("vcs", gitVCS)
+	vcsRef, err := orch.actorSystem.Spawn(vcsCtx, "vcs", vcsActor, 8)
+	if err != nil {
+		vcsCancel()
+		logger.Warn("Failed to start VCS actor: %v", err)
+		// Non-fatal, continue without VCS actor
+		orch.vcsRef = nil
+		orch.vcsClient = nil
+	} else {
+		logger.Debug("VCS actor spawned")
+		orch.vcsRef = vcsRef
+		orch.vcsClient = tools.NewVCSActorClient(vcsRef)
+		orch.vcsCancel = vcsCancel
+
+		// Set the current branch in the session
+		if gitVCS != nil {
+			if branch, err := orch.vcsClient.GetCurrentBranch(); err == nil && branch != "" {
+				sess.SetCurrentBranch(branch)
+				logger.Debug("Set initial branch in session: %s", branch)
+			}
+		}
+	}
+
 	// Set up error judge actor with summarize client
 	errorJudgeCtx, errorJudgeCancel := context.WithCancel(context.Background())
 	errorJudgeActor := tools.NewErrorJudgeActor("error_judge", orch.summarizeClient)
@@ -580,6 +617,39 @@ func NewOrchestratorWithSharedResources(
 	orch.sessionStorageRef = sharedSessionStorage
 	orch.sessionStorageCancel = nil // Don't own the cancel function - shared lifecycle
 	logger.Debug("Using shared session storage actor")
+
+	// Set up VCS actor for branch tracking
+	vcsCtx, vcsCancel := context.WithCancel(context.Background())
+	var gitVCS vcs.VCS
+	// Try to initialize Git VCS
+	gitVCS = vcs.NewGit(sess.WorkingDir)
+	if _, err := gitVCS.RepositoryRoot(context.Background(), sess.WorkingDir); err != nil {
+		// Not in a git repository, use nil VCS
+		gitVCS = nil
+		logger.Debug("Not in a git repository, VCS actor disabled")
+	}
+	vcsActor := tools.NewVCSActor("vcs", gitVCS)
+	vcsRef, err := orch.actorSystem.Spawn(vcsCtx, "vcs", vcsActor, 8)
+	if err != nil {
+		vcsCancel()
+		logger.Warn("Failed to start VCS actor: %v", err)
+		// Non-fatal, continue without VCS actor
+		orch.vcsRef = nil
+		orch.vcsClient = nil
+	} else {
+		logger.Debug("VCS actor spawned")
+		orch.vcsRef = vcsRef
+		orch.vcsClient = tools.NewVCSActorClient(vcsRef)
+		orch.vcsCancel = vcsCancel
+
+		// Set the current branch in the session
+		if gitVCS != nil {
+			if branch, err := orch.vcsClient.GetCurrentBranch(); err == nil && branch != "" {
+				sess.SetCurrentBranch(branch)
+				logger.Debug("Set initial branch in session: %s", branch)
+			}
+		}
+	}
 
 	// Start autosave for this session if enabled
 	if orch.config.AutoSave.Enabled {
@@ -3816,6 +3886,10 @@ func (o *Orchestrator) Close() error {
 		o.shellActorCancel()
 	}
 
+	if o.vcsCancel != nil {
+		o.vcsCancel()
+	}
+
 	// Note: domainBlockerCancel is now managed by RuntimeFactory as a shared resource
 	// and should NOT be cancelled here - it's lifecycle is managed externally
 
@@ -3971,6 +4045,11 @@ func (o *Orchestrator) GetTodoClient() *tools.TodoActorClient {
 // GetTodoActor returns the TodoActorInterface for ACP access
 func (o *Orchestrator) GetTodoActor() tools.TodoActorInterface {
 	return o.todoActor
+}
+
+// GetVCSClient returns the VCSActorClient for accessing VCS info
+func (o *Orchestrator) GetVCSClient() *tools.VCSActorClient {
+	return o.vcsClient
 }
 
 // UpdateModels updates the LLM clients

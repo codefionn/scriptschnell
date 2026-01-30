@@ -140,13 +140,13 @@ func TestExecutePlanningBoardSerialExecution(t *testing.T) {
 	_ = providerMgr.SetOrchestrationModel("gpt-4")
 
 	orch := &Orchestrator{
-		session:            session.NewSession("test-session", "."),
+		session:             session.NewSession("test-session", "."),
 		orchestrationClient: mockClient,
-		fs:                 fs.NewMockFS(),
-		config:             &config.Config{},
-		loopDetector:       loopdetector.NewLoopDetector(),
-		providerMgr:        providerMgr,
-		toolRegistry:       tools.NewRegistry(nil),
+		fs:                  fs.NewMockFS(),
+		config:              &config.Config{},
+		loopDetector:        loopdetector.NewLoopDetector(),
+		providerMgr:         providerMgr,
+		toolRegistry:        tools.NewRegistry(nil),
 	}
 
 	planningBoard := &session.PlanningBoard{
@@ -254,13 +254,13 @@ func TestExecutePlanningBoardSkipsCompletedTasks(t *testing.T) {
 	_ = providerMgr.SetOrchestrationModel("gpt-4")
 
 	orch := &Orchestrator{
-		session:            session.NewSession("test-session", "."),
+		session:             session.NewSession("test-session", "."),
 		orchestrationClient: mockClient,
-		fs:                 fs.NewMockFS(),
-		config:             &config.Config{},
-		loopDetector:       loopdetector.NewLoopDetector(),
-		providerMgr:        providerMgr,
-		toolRegistry:       tools.NewRegistry(nil),
+		fs:                  fs.NewMockFS(),
+		config:              &config.Config{},
+		loopDetector:        loopdetector.NewLoopDetector(),
+		providerMgr:         providerMgr,
+		toolRegistry:        tools.NewRegistry(nil),
 	}
 
 	planningBoard := &session.PlanningBoard{
@@ -334,17 +334,17 @@ func TestExecutePlanningBoardWithEmptyBoard(t *testing.T) {
 	_ = providerMgr.SetOrchestrationModel("gpt-4")
 
 	orch := &Orchestrator{
-		session:            session.NewSession("test-session", "."),
+		session:             session.NewSession("test-session", "."),
 		orchestrationClient: newSequentialMockClient(),
-		fs:                 fs.NewMockFS(),
-		config:             &config.Config{},
-		loopDetector:       loopdetector.NewLoopDetector(),
-		providerMgr:        providerMgr,
-		toolRegistry:       tools.NewRegistry(nil),
+		fs:                  fs.NewMockFS(),
+		config:              &config.Config{},
+		loopDetector:        loopdetector.NewLoopDetector(),
+		providerMgr:         providerMgr,
+		toolRegistry:        tools.NewRegistry(nil),
 	}
 
 	planningBoard := &session.PlanningBoard{
-		Description: "Empty board",
+		Description:  "Empty board",
 		PrimaryTasks: []session.PlanningTask{},
 	}
 
@@ -376,13 +376,13 @@ func TestExecutePlanningBoardWithNilBoard(t *testing.T) {
 	_ = providerMgr.SetOrchestrationModel("gpt-4")
 
 	orch := &Orchestrator{
-		session:            session.NewSession("test-session", "."),
+		session:             session.NewSession("test-session", "."),
 		orchestrationClient: newSequentialMockClient(),
-		fs:                 fs.NewMockFS(),
-		config:             &config.Config{},
-		loopDetector:       loopdetector.NewLoopDetector(),
-		providerMgr:        providerMgr,
-		toolRegistry:       tools.NewRegistry(nil),
+		fs:                  fs.NewMockFS(),
+		config:              &config.Config{},
+		loopDetector:        loopdetector.NewLoopDetector(),
+		providerMgr:         providerMgr,
+		toolRegistry:        tools.NewRegistry(nil),
 	}
 
 	ctx := context.Background()

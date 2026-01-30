@@ -28,6 +28,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
+	"github.com/codefionn/scriptschnell/internal/vcs"
 	"github.com/muesli/reflow/wordwrap"
 	"golang.org/x/term"
 )
@@ -187,6 +188,7 @@ type Model struct {
 	viewportRefreshToken int
 	config               *config.Config
 	activeMCPProvider    func() []string
+	vcs                  vcs.VCS // VCS interface for git operations
 
 	// Multi-session tab state
 	sessions         []*TabSession
@@ -530,9 +532,14 @@ func (m *Model) SetFilesystem(fs fs.FileSystem, workingDir string) {
 	m.filesystem = fs
 	m.workingDir = workingDir
 
-	if checker, err := newGitIgnoreChecker(workingDir); err == nil {
-		m.gitIgnore = checker
+	// Initialize VCS (Git) if in a git repository
+	gitVCS := vcs.NewGit(workingDir)
+	if _, err := gitVCS.RepositoryRoot(context.Background(), workingDir); err == nil {
+		m.vcs = gitVCS
+		// Also set gitIgnore for backward compatibility
+		m.gitIgnore = &gitIgnoreAdapter{vcs: gitVCS}
 	} else {
+		m.vcs = nil
 		m.gitIgnore = nil
 	}
 
@@ -2739,6 +2746,7 @@ func (m *Model) contextDisplay() string {
 	var totalCost float64
 	var totalTokens int
 	var cachedTokens int
+	var currentBranch string
 
 	if m.activeSessionIdx >= 0 && m.activeSessionIdx < len(m.sessions) {
 		sess := m.sessions[m.activeSessionIdx].Session
@@ -2746,7 +2754,13 @@ func (m *Model) contextDisplay() string {
 			totalCost = sess.GetTotalCost()
 			totalTokens = sess.GetTotalTokens()
 			cachedTokens = sess.TotalCachedTokens + sess.TotalCacheReadTokens
+			currentBranch = sess.GetCurrentBranch()
 		}
+	}
+
+	// Add branch info if available
+	if currentBranch != "" {
+		parts = append(parts, fmt.Sprintf("Branch: %s", currentBranch))
 	}
 
 	// Determine caching state

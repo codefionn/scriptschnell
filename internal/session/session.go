@@ -73,6 +73,7 @@ type Session struct {
 	LastSandboxStderr         string           // stderr from last sandbox execution
 	CurrentProvider           string           // Current LLM provider for native message format
 	CurrentModelFamily        string           // Current model family for native message format
+	CurrentBranch             string           // Current Git branch (if in a repository)
 
 	// Verification retry tracking
 	VerificationAttempt      int  // Current verification attempt number (1-3)
@@ -517,6 +518,22 @@ func (s *Session) GetCurrentProvider() (provider, modelFamily string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.CurrentProvider, s.CurrentModelFamily
+}
+
+// SetCurrentBranch sets the current Git branch
+func (s *Session) SetCurrentBranch(branch string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.CurrentBranch = branch
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// GetCurrentBranch returns the current Git branch
+func (s *Session) GetCurrentBranch() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.CurrentBranch
 }
 
 // NeedsConversion checks if messages need re-conversion for a new provider

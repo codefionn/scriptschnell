@@ -22,6 +22,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secrets"
+	"github.com/codefionn/scriptschnell/internal/securemem"
 	"github.com/codefionn/scriptschnell/internal/tui"
 	"github.com/codefionn/scriptschnell/internal/web"
 	"golang.org/x/term"
@@ -113,6 +114,8 @@ func run() (err error) {
 		if closeErr := logger.Global().Close(); closeErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to close logger: %v\n", closeErr)
 		}
+		// Securely clean up all sensitive memory before exit
+		securemem.Cleanup()
 	}()
 
 	configPath := config.GetConfigPath()
@@ -133,10 +136,12 @@ func run() (err error) {
 		cfg.LogPath = envLogPath
 	}
 
-	secretsPassword, err := ensureSecretsPassword(cfg)
+	// Get secrets password in secure memory
+	secretsPassword, err := ensureSecretsPasswordSecure(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to unlock API keys: %w", err)
 	}
+	defer secretsPassword.Destroy()
 
 	// Initialize logger
 	logLevel := logger.ParseLevel(cfg.LogLevel)
@@ -156,7 +161,7 @@ func run() (err error) {
 	}
 
 	// Load provider manager
-	providerMgr, err := provider.NewManager(cfg.ProviderConfigPath, secretsPassword)
+	providerMgr, err := provider.NewManagerSecure(cfg.ProviderConfigPath, secretsPassword)
 	if err != nil {
 		return fmt.Errorf("failed to initialize provider manager: %w", err)
 	}
@@ -245,6 +250,19 @@ func ensureSecretsPassword(cfg *config.Config) (string, error) {
 	return cfg.SecretsPassword(), nil
 }
 
+// ensureSecretsPasswordSecure returns the secrets password stored in secure memory
+func ensureSecretsPasswordSecure(cfg *config.Config) (*securemem.String, error) {
+	password, err := ensureSecretsPassword(cfg)
+	if err != nil {
+		return nil, err
+	}
+	// Store password in secure memory
+	secPassword := securemem.NewString(password)
+	// Wipe the plaintext password
+	securemem.SecureWipeString(&password)
+	return secPassword, nil
+}
+
 func promptForPassword(prompt string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	fmt.Fprint(os.Stderr, prompt)
@@ -292,6 +310,8 @@ func runACPMode() error {
 		if closeErr := logger.Global().Close(); closeErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to close logger: %v\n", closeErr)
 		}
+		// Securely clean up all sensitive memory before exit
+		securemem.Cleanup()
 	}()
 
 	logger.Info("scriptschnell starting in ACP mode")
@@ -302,12 +322,13 @@ func runACPMode() error {
 	}
 
 	// Load provider manager (without password for ACP mode)
-	secretsPassword, err := ensureSecretsPassword(cfg)
+	secretsPassword, err := ensureSecretsPasswordSecure(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to unlock API keys: %w", err)
 	}
+	defer secretsPassword.Destroy()
 
-	providerMgr, err := provider.NewManager(cfg.ProviderConfigPath, secretsPassword)
+	providerMgr, err := provider.NewManagerSecure(cfg.ProviderConfigPath, secretsPassword)
 	if err != nil {
 		return fmt.Errorf("failed to initialize provider manager: %w", err)
 	}
@@ -320,7 +341,7 @@ func runACPMode() error {
 	return acp.RunACPAgent(ctx, cfg, providerMgr)
 }
 
-func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword string, webDebug bool) error {
+func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, webDebug bool) error {
 	fmt.Fprintf(os.Stderr, "Starting scriptschnell in web mode...\n")
 
 	// Initialize logger if not already initialized

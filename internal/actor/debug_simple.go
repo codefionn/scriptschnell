@@ -3,6 +3,8 @@ package actor
 import (
 	"fmt"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // DebugHealthScenario shows what's happening in the test
@@ -37,9 +39,9 @@ func DebugHealthScenario() {
 	fmt.Println("\n4. Raw Health Check:")
 	fmt.Printf("   Mailbox Usage: %.1f%%\n", report.Metrics.MailboxUsage)
 	fmt.Printf("   Recent Error Check: %v (error count %d, last error %v)\n",
-		!report.Metrics.LastError.IsZero() && time.Since(report.Metrics.LastError) < 5*time.Minute && report.Metrics.ErrorCount > 0,
+		!report.Metrics.LastError.IsZero() && time.Since(report.Metrics.LastError) < consts.Timeout5Minutes && report.Metrics.ErrorCount > 0,
 		report.Metrics.ErrorCount, report.Metrics.LastError)
 	fmt.Printf("   Activity Check: %v (uptime %v, since last activity %v)\n",
-		report.Metrics.Uptime > 30*time.Minute && time.Since(report.Metrics.LastActivityTime) > time.Hour,
+		report.Metrics.Uptime > 30*time.Minute && time.Since(report.Metrics.LastActivityTime) > consts.Duration1Hour,
 		report.Metrics.Uptime, time.Since(report.Metrics.LastActivityTime))
 }

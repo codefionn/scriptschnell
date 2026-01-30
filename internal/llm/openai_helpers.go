@@ -163,8 +163,12 @@ func convertResponsesCompletion(resp *responses.Response) *CompletionResponse {
 		return &CompletionResponse{StopReason: ""}
 	}
 
+	// Extract reasoning content if available (for extended thinking models)
+	reasoning := extractResponsesReasoning(resp.Output)
+
 	return &CompletionResponse{
 		Content:    resp.OutputText(),
+		Reasoning:  reasoning,
 		ToolCalls:  extractResponsesToolCalls(resp.Output),
 		StopReason: string(resp.Status),
 	}
@@ -193,6 +197,55 @@ func extractResponsesToolCalls(items []responses.ResponseOutputItemUnion) []map[
 		})
 	}
 	return toolCalls
+}
+
+func extractResponsesReasoning(items []responses.ResponseOutputItemUnion) string {
+	var reasoning strings.Builder
+	for _, item := range items {
+		// Check for reasoning content blocks (for extended thinking models)
+		// The exact type name depends on the OpenAI responses API
+		if strings.Contains(item.Type, "reasoning") || strings.Contains(item.Type, "thinking") {
+			if len(item.Summary) > 0 {
+				for _, summary := range item.Summary {
+					if summary.Text == "" {
+						continue
+					}
+					reasoning.WriteString(summary.Text)
+				}
+				continue
+			}
+
+			if len(item.Content) > 0 {
+				reasoning.WriteString(extractResponsesMessageText(item.Content))
+			}
+		}
+	}
+	return reasoning.String()
+}
+
+func extractResponsesMessageText(content []responses.ResponseOutputMessageContentUnion) string {
+	var out strings.Builder
+	for _, part := range content {
+		switch part.Type {
+		case "output_text":
+			if part.Text == "" {
+				continue
+			}
+			out.WriteString(part.Text)
+		case "refusal":
+			if part.Refusal == "" {
+				continue
+			}
+			out.WriteString(part.Refusal)
+		default:
+			if part.Text != "" {
+				out.WriteString(part.Text)
+			} else if part.Refusal != "" {
+				out.WriteString(part.Refusal)
+			}
+		}
+	}
+	return out.String()
 }
 
 func isOpenAITemperatureUnsupported(modelName string) bool {

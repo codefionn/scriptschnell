@@ -9,8 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
@@ -40,7 +40,7 @@ func NewCerebrasClient(apiKey, modelID string) (Client, error) {
 		model:   model,
 		baseURL: cerebrasAPIBaseURL,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: consts.Timeout60Seconds,
 		},
 	}, nil
 }
@@ -113,6 +113,7 @@ func (c *CerebrasClient) CompleteWithRequest(ctx context.Context, req *Completio
 
 	return &CompletionResponse{
 		Content:    first.Message.Content,
+		Reasoning:  first.Message.Reasoning,
 		ToolCalls:  convertCerebrasToolCalls(first.Message.ToolCalls),
 		StopReason: stopReason,
 	}, nil
@@ -145,8 +146,8 @@ func (c *CerebrasClient) Stream(ctx context.Context, req *CompletionRequest, cal
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
-	buffer := make([]byte, 0, 256*1024)
-	scanner.Buffer(buffer, 1024*1024)
+	buffer := make([]byte, 0, consts.BufferSize256KB)
+	scanner.Buffer(buffer, consts.BufferSize1MB)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -434,5 +435,6 @@ type cerebrasStreamChoice struct {
 type cerebrasStreamDelta struct {
 	Role      string             `json:"role"`
 	Content   string             `json:"content"`
+	Reasoning string             `json:"reasoning,omitempty"`
 	ToolCalls []cerebrasToolCall `json:"tool_calls,omitempty"`
 }

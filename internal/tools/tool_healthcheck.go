@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
@@ -50,8 +51,8 @@ type ToolHealthMonitor struct {
 func NewToolHealthMonitor() *ToolHealthMonitor {
 	return &ToolHealthMonitor{
 		executions:       make(map[string]*ToolExecutionHealth),
-		stuckThreshold:   30 * time.Second, // No heartbeat for 30s = stuck
-		maxExecutionTime: 10 * time.Minute, // Max 10 minutes per tool
+		stuckThreshold:   consts.Timeout30Seconds, // No heartbeat for 30s = stuck
+		maxExecutionTime: consts.Timeout10Minutes, // Max 10 minutes per tool
 	}
 }
 
@@ -140,7 +141,7 @@ func (m *ToolHealthMonitor) CompleteExecution(toolID string, success bool) {
 
 		// Clean up after a delay (keep history for a bit)
 		go func(id string) {
-			time.Sleep(30 * time.Second)
+			time.Sleep(consts.Timeout30Seconds)
 			m.RemoveExecution(id)
 		}(toolID)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // DomainBlockerClient provides a convenient interface for interacting with the domain blocker actor
@@ -39,7 +41,7 @@ func (c *DomainBlockerClient) IsDomainBlocked(ctx context.Context, domain string
 		return response.Blocked, response.Reason, nil
 	case <-ctx.Done():
 		return false, "", ctx.Err()
-	case <-time.After(5 * time.Second):
+	case <-time.After(consts.Timeout5Seconds):
 		return false, "", fmt.Errorf("timeout waiting for domain block response")
 	}
 }
@@ -64,7 +66,7 @@ func (c *DomainBlockerClient) RefreshBlocklist(ctx context.Context) (bool, int, 
 		return response.Success, response.DomainCount, nil
 	case <-ctx.Done():
 		return false, 0, ctx.Err()
-	case <-time.After(30 * time.Second):
+	case <-time.After(consts.Timeout30Seconds):
 		return false, 0, fmt.Errorf("timeout waiting for refresh response")
 	}
 }
@@ -98,7 +100,7 @@ func (c *DomainBlockerClient) GetStats(ctx context.Context) (*BlocklistStats, er
 		}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-time.After(5 * time.Second):
+	case <-time.After(consts.Timeout5Seconds):
 		return nil, fmt.Errorf("timeout waiting for stats response")
 	}
 }

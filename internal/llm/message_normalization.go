@@ -44,6 +44,15 @@ func normalizeMistralConversation(messages []*Message) []*Message {
 				prev.Content += msg.Content
 			}
 
+			switch {
+			case prev.Reasoning != "" && msg.Reasoning != "":
+				prev.Reasoning = prev.Reasoning + "\n" + msg.Reasoning
+			case prev.Reasoning == "":
+				prev.Reasoning = msg.Reasoning
+			case msg.Reasoning != "":
+				prev.Reasoning += msg.Reasoning
+			}
+
 			if len(msg.ToolCalls) > 0 {
 				prev.ToolCalls = append(prev.ToolCalls, cloneToolCalls(msg.ToolCalls)...)
 			}
@@ -88,10 +97,11 @@ func cloneMessage(msg *Message) *Message {
 	}
 
 	cloned := &Message{
-		Role:     msg.Role,
-		Content:  msg.Content,
-		ToolID:   msg.ToolID,
-		ToolName: msg.ToolName,
+		Role:      msg.Role,
+		Content:   msg.Content,
+		Reasoning: msg.Reasoning,
+		ToolID:    msg.ToolID,
+		ToolName:  msg.ToolName,
 	}
 
 	if len(msg.ToolCalls) > 0 {

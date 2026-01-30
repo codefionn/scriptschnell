@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // CommandTool executes a local command and returns its output.
@@ -34,7 +36,7 @@ type CommandToolConfig struct {
 func NewCommandTool(cfg *CommandToolConfig) *CommandTool {
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = consts.Timeout30Seconds
 	}
 
 	envCopy := make(map[string]string, len(cfg.Env))

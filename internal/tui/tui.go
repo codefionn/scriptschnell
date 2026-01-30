@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -116,7 +117,7 @@ var (
 )
 
 const (
-	errorDisplayDuration   = 5 * time.Second
+	errorDisplayDuration   = consts.Timeout5Seconds
 	resizeViewportDebounce = 75 * time.Millisecond
 )
 
@@ -126,6 +127,7 @@ const defaultInputPlaceholder = "Type your prompt here... (@ for files, Alt+Ente
 type message struct {
 	role       string
 	content    string // raw markdown content
+	reasoning  string // reasoning/thinking content (e.g., from extended thinking models)
 	timestamp  string
 	toolName   string // for tool result messages
 	toolID     string // for tool result messages
@@ -304,6 +306,12 @@ type ProcessingStatusMsg struct {
 type TabGeneratingMsg struct {
 	TabID   int
 	Content string
+}
+
+// TabReasoningMsg is sent when a specific tab receives reasoning/thinking content
+type TabReasoningMsg struct {
+	TabID     int
+	Reasoning string
 }
 
 // TabProcessingStatusMsg updates the processing status for a specific tab
@@ -1456,7 +1464,7 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 				select {
 				case m.userQuestionError <- fmt.Errorf("timeout sending response to planning agent after 30 seconds"):
 					logger.Debug("Sent timeout error to planning agent")
-				case <-time.After(5 * time.Second):
+				case <-time.After(consts.Timeout5Seconds):
 					logger.Warn("Could not send error to planning agent - error channel also blocked")
 				}
 			}
@@ -1978,6 +1986,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, baseCmd
 
+	case TabReasoningMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx < 0 {
+			logger.Warn("Received TabReasoningMsg for unknown tab ID: %d", msg.TabID)
+			return m, baseCmd
+		}
+
+		// Store reasoning content for the current message (ephemeral - not persisted)
+		if msg.Reasoning != "" && m.validTabIndex(tabIdx) {
+			// Add reasoning to the current tab's last message
+			tabSessions := m.sessions[tabIdx].Messages
+			if len(tabSessions) > 0 {
+				// Update the last message to include reasoning
+				lastMsg := &tabSessions[len(tabSessions)-1]
+				if lastMsg.role == "Assistant" {
+					lastMsg.reasoning = msg.Reasoning
+					// Trigger viewport update for the active tab
+					if tabIdx == m.activeSessionIdx {
+						m.viewportDirty = true
+					}
+				}
+			}
+		}
+		return m, baseCmd
+
 	case TabProcessingStatusMsg:
 		tabIdx := m.findTabIndexByID(msg.TabID)
 		if tabIdx < 0 {
@@ -2138,7 +2171,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			select {
 			case request.ResponseChan <- msg.Approved:
 				logger.Info("Authorization response sent for authID %s: %v", msg.AuthID, msg.Approved)
-			case <-time.After(5 * time.Second):
+			case <-time.After(consts.Timeout5Seconds):
 				logger.Error("Timeout sending authorization response for authID %s after 5 seconds - receiver may have timed out", msg.AuthID)
 			}
 		}
@@ -2212,6 +2245,14 @@ func (m *Model) createProgressCallbackForTab(tabID int) progress.Callback {
 			m.program.Send(TabProcessingStatusMsg{
 				TabID:  tabID,
 				Status: strings.TrimRight(normalized.Message, "\n"),
+			})
+		}
+
+		// Handle reasoning/thinking content (for extended thinking models)
+		if normalized.Reasoning != "" && normalized.ShouldStream() {
+			m.program.Send(TabReasoningMsg{
+				TabID:     tabID,
+				Reasoning: normalized.Reasoning,
 			})
 		}
 
@@ -2335,7 +2376,7 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 		select {
 		case approved = <-responseChan:
 			logger.Debug("Tab %d: authorization response received: %v (authID: %s)", tab.ID, approved, authID)
-		case <-time.After(5 * time.Minute):
+		case <-time.After(consts.Timeout5Minutes):
 			// Timeout - something went wrong with message delivery
 			logger.Error("Tab %d: authorization timeout after 5 minutes (authID: %s) - denying by default", tab.ID, authID)
 			approved = false
@@ -3864,6 +3905,32 @@ func (m *Model) updateViewport() {
 		rendered.WriteString(header)
 		rendered.WriteString("\n")
 
+		// Render reasoning content if present (for extended thinking models)
+		if msg.reasoning != "" {
+			reasoningHeader := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("243")).
+				Bold(true).
+				Render("Thinking:")
+			rendered.WriteString(reasoningHeader)
+			rendered.WriteString("\n")
+
+			// Render reasoning as markdown with a subtle indent
+			if m.renderer != nil {
+				if mdRendered, err := m.renderer.Render(msg.reasoning); err == nil {
+					renderedContent := strings.TrimRight(mdRendered, "\n")
+					// Add a subtle separator line before reasoning
+					rendered.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("---"))
+					rendered.WriteString("\n")
+					rendered.WriteString(renderedContent)
+				} else {
+					rendered.WriteString(msg.reasoning)
+				}
+			} else {
+				rendered.WriteString(msg.reasoning)
+			}
+			rendered.WriteString("\n\n")
+		}
+
 		// Render content with markdown for Assistant and Tool messages
 		if (msg.role == "Assistant" || msg.role == "Tool") && m.renderer != nil && msg.content != "" {
 			// Render markdown with Glamour, which handles syntax highlighting internally via Chroma
@@ -4128,6 +4195,7 @@ func sessionMessagesToTuiMessages(stored []*session.Message) []message {
 		messages = append(messages, message{
 			role:      role,
 			content:   msg.Content,
+			reasoning: msg.Reasoning,
 			timestamp: timestamp,
 			toolName:  msg.ToolName,
 			toolID:    msg.ToolID,

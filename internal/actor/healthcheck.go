@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // HealthStatus represents the health status of an actor
@@ -161,13 +163,13 @@ func (h *HealthCheckable) IsHealthy() bool {
 	}
 
 	// Check for recent errors (last 5 minutes)
-	if !metrics.LastError.IsZero() && time.Since(metrics.LastError) < 5*time.Minute && metrics.ErrorCount > 0 {
+	if !metrics.LastError.IsZero() && time.Since(metrics.LastError) < consts.Timeout5Minutes && metrics.ErrorCount > 0 {
 		unhealthyConditions++
 	}
 
 	// Check for lack of meaningful activity (over 1 hour old, with some exceptions)
 	// We only consider no activity unhealthy if the actor has been running for at least 30 minutes
-	if metrics.Uptime > 30*time.Minute && time.Since(metrics.LastActivityTime) > time.Hour {
+	if metrics.Uptime > 30*time.Minute && time.Since(metrics.LastActivityTime) > consts.Duration1Hour {
 		unhealthyConditions++
 	}
 
@@ -193,11 +195,11 @@ func (h *HealthCheckable) GenerateHealthReport() HealthReport {
 			issues = append(issues, fmt.Sprintf("high mailbox usage (%.1f%%)", metrics.MailboxUsage))
 		}
 
-		if time.Since(metrics.LastError) < 5*time.Minute && metrics.ErrorCount > 0 {
+		if time.Since(metrics.LastError) < consts.Timeout5Minutes && metrics.ErrorCount > 0 {
 			issues = append(issues, fmt.Sprintf("recent errors (%d in last 5min)", metrics.ErrorCount))
 		}
 
-		if time.Since(metrics.LastActivityTime) > time.Hour {
+		if time.Since(metrics.LastActivityTime) > consts.Duration1Hour {
 			issues = append(issues, "no recent activity")
 		}
 

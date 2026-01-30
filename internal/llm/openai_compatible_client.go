@@ -9,7 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // OpenAICompatibleClient implements the Client interface for generic OpenAI-compatible APIs.
@@ -54,7 +55,7 @@ func NewOpenAICompatibleClient(apiKey, baseURL, modelName string) (*OpenAICompat
 		model:   model,
 		baseURL: trimmedBase,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: consts.Timeout60Seconds,
 		},
 	}, nil
 }
@@ -121,6 +122,7 @@ func (c *OpenAICompatibleClient) CompleteWithRequest(ctx context.Context, req *C
 
 	first := chatResp.Choices[0]
 	content := extractOpenAIText(first.Message.Content)
+	reasoning := extractOpenAIMessageReasoning(first.Message)
 	stopReason := first.FinishReason
 	if strings.TrimSpace(stopReason) == "" {
 		stopReason = "stop"
@@ -128,6 +130,7 @@ func (c *OpenAICompatibleClient) CompleteWithRequest(ctx context.Context, req *C
 
 	return &CompletionResponse{
 		Content:    content,
+		Reasoning:  reasoning,
 		ToolCalls:  convertOpenAIToolCalls(first.Message.ToolCalls),
 		StopReason: stopReason,
 		Usage:      chatResp.Usage,
@@ -161,8 +164,8 @@ func (c *OpenAICompatibleClient) Stream(ctx context.Context, req *CompletionRequ
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
-	buffer := make([]byte, 0, 256*1024)
-	scanner.Buffer(buffer, 1024*1024)
+	buffer := make([]byte, 0, consts.BufferSize256KB)
+	scanner.Buffer(buffer, consts.BufferSize1MB)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

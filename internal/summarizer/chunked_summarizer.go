@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
@@ -59,7 +60,7 @@ func (cs *ChunkedSummarizer) Summarize(ctx context.Context, content string, opts
 
 	// Set defaults
 	if opts.Timeout == 0 {
-		opts.Timeout = 60 * time.Second
+		opts.Timeout = consts.Timeout60Seconds
 	}
 	maxBytes := cs.MaxSummaryBytes
 	if opts.MaxBytes > 0 {

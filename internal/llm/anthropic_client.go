@@ -11,13 +11,15 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/shared/constant"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 const (
-	defaultAnthropicModel     = "claude-haiku-4-5"
-	defaultAnthropicMaxTokens = 1024
+	defaultAnthropicModel = "claude-haiku-4-5"
 )
+
+var defaultAnthropicMaxTokens = consts.DefaultMaxTokens
 
 // AnthropicClient implements the Client interface using the official Anthropic SDK.
 type AnthropicClient struct {
@@ -90,6 +92,7 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 			currentToolJSON  strings.Builder
 			stopReason       string
 			usage            map[string]interface{}
+			reasoningBuilder strings.Builder
 		)
 
 		for stream.Next() {
@@ -122,6 +125,11 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 						},
 					})
 				}
+				// Track reasoning/thinking blocks (extended thinking models)
+				if e.ContentBlock.Type == "thinking" || e.ContentBlock.Type == "reasoning" {
+					// Reset reasoning builder for a new reasoning block
+					reasoningBuilder.Reset()
+				}
 			case anthropic.BetaRawContentBlockDeltaEvent:
 				if e.Delta.Type == "text_delta" {
 					contentBuilder.WriteString(e.Delta.Text)
@@ -129,6 +137,9 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 					if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
 						currentToolJSON.WriteString(e.Delta.PartialJSON)
 					}
+				} else if e.Delta.Type == "thinking_delta" || e.Delta.Type == "reasoning_delta" {
+					// Capture reasoning/thinking content
+					reasoningBuilder.WriteString(e.Delta.Text)
 				}
 			case anthropic.BetaRawContentBlockStopEvent:
 				if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
@@ -151,6 +162,7 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 
 		resp = &CompletionResponse{
 			Content:    contentBuilder.String(),
+			Reasoning:  reasoningBuilder.String(),
 			ToolCalls:  toolCalls,
 			StopReason: stopReason,
 			Usage:      usage,
@@ -208,7 +220,7 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, ca
 }
 
 func (c *AnthropicClient) executeWithRetry(ctx context.Context, operation func() error) error {
-	const maxRetries = 5
+	maxRetries := consts.DefaultMaxRetries
 	baseDelay := 1 * time.Second
 
 	var err error

@@ -9,18 +9,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/project"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/summarizer"
 	"github.com/codefionn/scriptschnell/internal/tools"
 )
 
 type CodebaseInvestigatorAgent struct {
 	orch *Orchestrator
 }
+
+const codebaseInvestigatorOutputPercent = 0.2
 
 func NewCodebaseInvestigatorAgent(orch *Orchestrator) *CodebaseInvestigatorAgent {
 	return &CodebaseInvestigatorAgent{
@@ -320,6 +324,7 @@ The requested logic is found in internal/module/file.go function DoWork().
 			llmMessages[j] = &llm.Message{
 				Role:      msg.Role,
 				Content:   msg.Content,
+				Reasoning: msg.Reasoning,
 				ToolCalls: msg.ToolCalls,
 				ToolID:    msg.ToolID,
 				ToolName:  msg.ToolName,
@@ -345,6 +350,7 @@ The requested logic is found in internal/module/file.go function DoWork().
 		investigationSession.AddMessage(&session.Message{
 			Role:      "assistant",
 			Content:   resp.Content,
+			Reasoning: resp.Reasoning,
 			ToolCalls: resp.ToolCalls,
 		})
 
@@ -352,7 +358,7 @@ The requested logic is found in internal/module/file.go function DoWork().
 			// No tools called, this is the final answer
 			sendStream("✓ Investigation complete\n\n")
 			sendStatus("✓ Investigation complete")
-			return extractAnswer(resp.Content), nil
+			return a.finalizeInvestigationAnswer(ctx, resp.Content), nil
 		}
 
 		// Check for loops in tool calls and handle them
@@ -374,18 +380,18 @@ The requested logic is found in internal/module/file.go function DoWork().
 						}},
 						Tools:        []map[string]interface{}{},
 						Temperature:  0,
-						MaxTokens:    1024,
+						MaxTokens:    consts.DefaultMaxTokens,
 						SystemPrompt: "You are a helpful assistant. Help provide available insights about a codebase investigation that was terminated early due to detected loops.",
 					}
 
 					summaryResp, err := client.CompleteWithRequest(ctx, completionReq)
 					if err == nil && summaryResp.Content != "" {
 						sendStream("📝 Providing partial results due to loop detection\n\n")
-						return extractAnswer(summaryResp.Content), nil
+						return a.finalizeInvestigationAnswer(ctx, summaryResp.Content), nil
 					}
 
 					// Fallback if summary fails
-					return extractAnswer("Investigation stopped due to detected loop - no significant findings were discovered before termination."), nil
+					return a.finalizeInvestigationAnswer(ctx, "Investigation stopped due to detected loop - no significant findings were discovered before termination."), nil
 				}
 			}
 		}
@@ -603,4 +609,82 @@ func extractAnswer(content string) string {
 		return strings.TrimSpace(content)
 	}
 	return strings.TrimSpace(content[:end])
+}
+
+func (a *CodebaseInvestigatorAgent) finalizeInvestigationAnswer(ctx context.Context, content string) string {
+	answer := strings.TrimSpace(extractAnswer(content))
+	if answer == "" {
+		return answer
+	}
+
+	contextWindow := a.getInvestigationContextWindow()
+	if contextWindow == 0 {
+		return answer
+	}
+
+	threshold := int(float64(contextWindow) * codebaseInvestigatorOutputPercent)
+	if llm.EstimateTokenCount(answer) <= threshold {
+		return answer
+	}
+
+	return a.compactInvestigationAnswer(ctx, answer, threshold)
+}
+
+func (a *CodebaseInvestigatorAgent) compactInvestigationAnswer(ctx context.Context, answer string, threshold int) string {
+	client := a.orch.summarizeClient
+	if client == nil {
+		return answer
+	}
+
+	chunkedSummarizer := summarizer.NewChunkedSummarizer(client)
+	chunkedSummarizer.ChunkThresholdPercent = codebaseInvestigatorOutputPercent
+
+	maxBytes := threshold * 4
+	if maxBytes <= 0 {
+		return answer
+	}
+
+	prompt := fmt.Sprintf("Condense this codebase investigation result so it fits within %d tokens while preserving key findings, file paths, and line references:", threshold)
+	result, err := chunkedSummarizer.Summarize(ctx, answer, summarizer.SummarizeOptions{
+		BasePrompt: prompt,
+		MaxBytes:   maxBytes,
+	})
+	if err != nil || result == nil || strings.TrimSpace(result.Summary) == "" {
+		logger.Warn("codebase investigator: output compaction failed: %v", err)
+		return answer
+	}
+
+	return strings.TrimSpace(result.Summary)
+}
+
+func (a *CodebaseInvestigatorAgent) getInvestigationContextWindow() int {
+	contextWindow := a.getSummarizeContextWindow()
+	if contextWindow > 0 {
+		return contextWindow
+	}
+
+	if a.orch == nil || a.orch.providerMgr == nil {
+		return 0
+	}
+
+	modelID := a.orch.providerMgr.GetOrchestrationModel()
+	if modelID == "" {
+		return 0
+	}
+
+	return a.orch.getContextWindow(modelID)
+}
+
+func (a *CodebaseInvestigatorAgent) getSummarizeContextWindow() int {
+	if a.orch == nil || a.orch.summarizeClient == nil {
+		return 0
+	}
+
+	modelID := a.orch.summarizeClient.GetModelName()
+	if modelID == "" {
+		return 0
+	}
+
+	family := llm.DetectModelFamily(modelID)
+	return llm.DetectContextWindow(modelID, family)
 }

@@ -4,7 +4,7 @@ package llm
 // clients. It converts a CompletionRequest into an openAIChatRequest, injecting the
 // system prompt as the first message and normalizing roles/tool calls.
 func convertRequestToOpenAI(req *CompletionRequest, model string, stream bool, enforceOpenAITemperature bool) (*openAIChatRequest, error) {
-	messages, err := convertMessagesToOpenAI(req)
+	messages, err := convertMessagesToOpenAI(req, model)
 	if err != nil {
 		return nil, err
 	}
@@ -29,4 +29,8 @@ func convertRequestToOpenAI(req *CompletionRequest, model string, stream bool, e
 	}
 
 	return payload, nil
+}
+
+func shouldIncludeOpenAIReasoningMessages(model string) bool {
+	return DetectModelFamily(model) == FamilyKimi
 }

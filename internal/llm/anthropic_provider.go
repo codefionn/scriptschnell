@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // AnthropicProvider implements the Provider interface for Anthropic
@@ -128,7 +130,7 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error
 }
 
 func (p *AnthropicProvider) executeWithRetry(ctx context.Context, operation func() error) error {
-	const maxRetries = 5
+	maxRetries := consts.DefaultMaxRetries
 	baseDelay := 1 * time.Second
 
 	var err error

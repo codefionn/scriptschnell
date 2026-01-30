@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/orchestrator"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/securemem"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
@@ -30,7 +32,7 @@ func NewMessageBroker() *MessageBroker {
 }
 
 // InitializeSession initializes a new session
-func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *provider.Manager, secretsPassword string) error {
+func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String) error {
 	mb.cfg = cfg
 	mb.providerMgr = providerMgr
 
@@ -194,7 +196,7 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 	// This prevents sending to closed channels
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(consts.Timeout5Seconds):
 		logger.Warn("Timeout waiting for response goroutine to finish")
 	}
 

@@ -9,17 +9,19 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/securemem"
 	"github.com/gorilla/websocket"
 )
 
 const (
 	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
+	writeWait = consts.Timeout10Seconds
 
 	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
+	pongWait = consts.Timeout60Seconds
 
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
@@ -37,12 +39,12 @@ type Client struct {
 	broker          *MessageBroker
 	cfg             *config.Config
 	providerMgr     *provider.Manager
-	secretsPassword string
+	secretsPassword *securemem.String
 	debug           bool
 }
 
 // NewClient creates a new WebSocket client
-func NewClient(hub *Hub, conn *websocket.Conn, broker *MessageBroker, cfg *config.Config, providerMgr *provider.Manager, secretsPassword string, debug bool) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, broker *MessageBroker, cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, debug bool) *Client {
 	id, _ := generateClientID()
 
 	client := &Client{

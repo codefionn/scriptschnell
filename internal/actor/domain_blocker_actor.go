@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/stringsearch"
 )
@@ -224,10 +225,10 @@ func NewDomainBlockerActor(id string, config DomainBlockerConfig) *DomainBlocker
 		config.BlocklistURL = DefaultRPZURL
 	}
 	if config.RefreshInterval == 0 {
-		config.RefreshInterval = 6 * time.Hour // Default refresh every 6 hours
+		config.RefreshInterval = consts.Duration6Hours // Default refresh every 6 hours
 	}
 	if config.TTL == 0 {
-		config.TTL = 24 * time.Hour // Default TTL is 24 hours
+		config.TTL = consts.Duration24Hours // Default TTL is 24 hours
 	}
 	if config.CacheDir == "" {
 		cacheDir, err := domainBlocklistCacheDir()

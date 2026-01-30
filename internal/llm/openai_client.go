@@ -9,8 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"
@@ -45,7 +45,7 @@ func NewOpenAIClient(apiKey, modelName string) (Client, error) {
 		model:   model,
 		baseURL: openAIDefaultBaseURL,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: consts.Timeout60Seconds,
 		},
 	}
 
@@ -143,8 +143,13 @@ func (c *OpenAIClient) completeWithChat(ctx context.Context, req *CompletionRequ
 		stopReason = "stop"
 	}
 
+	// Extract reasoning from content if it's structured (for models that embed reasoning)
+	// Standard OpenAI chat completion doesn't separate reasoning, but we can check
+	reasoning := extractOpenAIMessageReasoning(first.Message)
+
 	return &CompletionResponse{
 		Content:    content,
+		Reasoning:  reasoning,
 		ToolCalls:  convertOpenAIToolCalls(first.Message.ToolCalls),
 		StopReason: stopReason,
 		Usage:      chatResp.Usage,
@@ -174,8 +179,8 @@ func (c *OpenAIClient) streamWithChat(ctx context.Context, req *CompletionReques
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
-	buffer := make([]byte, 0, 256*1024)
-	scanner.Buffer(buffer, 1024*1024)
+	buffer := make([]byte, 0, consts.BufferSize256KB)
+	scanner.Buffer(buffer, consts.BufferSize1MB)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -324,29 +329,31 @@ func (c *OpenAIClient) buildResponsesParams(req *CompletionRequest) (responses.R
 	return params, nil
 }
 
-func convertMessagesToOpenAI(req *CompletionRequest) ([]openAIChatMessage, error) {
+func convertMessagesToOpenAI(req *CompletionRequest, model string) ([]openAIChatMessage, error) {
 	if req == nil {
 		return nil, fmt.Errorf("openai completion request cannot be nil")
 	}
 
+	includeReasoning := shouldIncludeOpenAIReasoningMessages(model)
+
 	// Check if messages have native OpenAI format - if so, use directly for caching
-	hasNativeFormat := len(req.Messages) > 0 && req.Messages[0].NativeFormat != nil && req.Messages[0].NativeProvider == "openai"
+	hasNativeFormat := !includeReasoning && len(req.Messages) > 0 && req.Messages[0].NativeFormat != nil && req.Messages[0].NativeProvider == "openai"
 
 	if hasNativeFormat {
 		// Use native format directly to preserve caching metadata
 		messages, err := extractNativeOpenAIMessages(req.Messages, req.SystemPrompt, req.EnableCaching)
 		if err != nil {
 			// Fall back to conversion
-			return convertMessagesToOpenAIFromUnified(req)
+			return convertMessagesToOpenAIFromUnified(req, includeReasoning)
 		}
 		return messages, nil
 	}
 
 	// Convert from unified format
-	return convertMessagesToOpenAIFromUnified(req)
+	return convertMessagesToOpenAIFromUnified(req, includeReasoning)
 }
 
-func convertMessagesToOpenAIFromUnified(req *CompletionRequest) ([]openAIChatMessage, error) {
+func convertMessagesToOpenAIFromUnified(req *CompletionRequest, includeReasoning bool) ([]openAIChatMessage, error) {
 	messages := make([]openAIChatMessage, 0, len(req.Messages)+1)
 
 	if system := strings.TrimSpace(req.SystemPrompt); system != "" {
@@ -374,6 +381,15 @@ func convertMessagesToOpenAIFromUnified(req *CompletionRequest) ([]openAIChatMes
 		oMsg := openAIChatMessage{
 			Role:    role,
 			Content: msg.Content,
+		}
+
+		if includeReasoning && msg.Reasoning != "" {
+			oMsg.Reasoning = msg.Reasoning
+		}
+
+		if includeReasoning && role == "assistant" {
+			reasoningContent := msg.Reasoning
+			oMsg.ReasoningContent = &reasoningContent
 		}
 
 		if msg.ToolName != "" {
@@ -516,6 +532,55 @@ func extractOpenAIText(content interface{}) string {
 	return ""
 }
 
+func extractOpenAIReasoning(content interface{}) string {
+	// For standard OpenAI chat completion, reasoning is typically embedded in content
+	// Look for structured reasoning blocks if present
+	switch value := content.(type) {
+	case []interface{}:
+		var reasoning strings.Builder
+		for _, part := range value {
+			if partMap, ok := part.(map[string]interface{}); ok {
+				// Check for reasoning field in structured content
+				if r, ok := partMap["reasoning"].(string); ok {
+					reasoning.WriteString(r)
+				}
+				// Also check for thinking field
+				if t, ok := partMap["thinking"].(string); ok {
+					reasoning.WriteString(t)
+				}
+				if partType, ok := partMap["type"].(string); ok && (partType == "reasoning" || partType == "thinking") {
+					if text, ok := partMap["text"].(string); ok {
+						reasoning.WriteString(text)
+					} else if inner, ok := partMap["content"]; ok {
+						reasoning.WriteString(extractOpenAIText(inner))
+					}
+				}
+			}
+		}
+		return reasoning.String()
+	}
+	return ""
+}
+
+func extractOpenAIMessageReasoning(msg *openAIChatMessage) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Reasoning != "" {
+		return msg.Reasoning
+	}
+	if msg.Thinking != "" {
+		return msg.Thinking
+	}
+	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+		return *msg.ReasoningContent
+	}
+	if msg.ThinkingContent != nil && *msg.ThinkingContent != "" {
+		return *msg.ThinkingContent
+	}
+	return extractOpenAIReasoning(msg.Content)
+}
+
 type openAIChatRequest struct {
 	Model       string                   `json:"model"`
 	Messages    []openAIChatMessage      `json:"messages"`
@@ -526,12 +591,16 @@ type openAIChatRequest struct {
 }
 
 type openAIChatMessage struct {
-	Role         string                   `json:"role"`
-	Content      interface{}              `json:"content"`
-	Name         string                   `json:"name,omitempty"`
-	ToolCalls    []map[string]interface{} `json:"tool_calls,omitempty"`
-	ToolCallID   string                   `json:"tool_call_id,omitempty"`
-	CacheControl map[string]interface{}   `json:"cache_control,omitempty"` // For prompt caching
+	Role             string                   `json:"role"`
+	Content          interface{}              `json:"content"`
+	Reasoning        string                   `json:"reasoning,omitempty"`
+	Thinking         string                   `json:"thinking,omitempty"`
+	ReasoningContent *string                  `json:"reasoning_content,omitempty"`
+	ThinkingContent  *string                  `json:"thinking_content,omitempty"`
+	Name             string                   `json:"name,omitempty"`
+	ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
+	ToolCallID       string                   `json:"tool_call_id,omitempty"`
+	CacheControl     map[string]interface{}   `json:"cache_control,omitempty"` // For prompt caching
 }
 
 type openAIChatResponse struct {
@@ -564,6 +633,10 @@ type openAIStreamChoice struct {
 }
 
 type openAIChatDelta struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"`
+	Role             string      `json:"role"`
+	Content          interface{} `json:"content"`
+	Reasoning        string      `json:"reasoning,omitempty"`
+	Thinking         string      `json:"thinking,omitempty"`
+	ReasoningContent string      `json:"reasoning_content,omitempty"`
+	ThinkingContent  string      `json:"thinking_content,omitempty"`
 }

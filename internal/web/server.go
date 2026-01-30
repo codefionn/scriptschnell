@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/securemem"
 	"github.com/gorilla/websocket"
 )
 
@@ -34,7 +36,7 @@ type Server struct {
 	httpServer      *http.Server
 	cfg             *config.Config
 	providerMgr     *provider.Manager
-	secretsPassword string
+	secretsPassword *securemem.String
 	broker          *MessageBroker
 	hub             *Hub
 	quitChan        chan struct{}
@@ -42,7 +44,7 @@ type Server struct {
 }
 
 // NewServer creates a new web server
-func NewServer(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, secretsPassword string, debug bool) (*Server, error) {
+func NewServer(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, debug bool) (*Server, error) {
 	// Ensure .js files are served with correct MIME type
 	if err := mime.AddExtensionType(".js", "application/javascript"); err != nil {
 		logger.Warn("Failed to register .js MIME type: %v", err)
@@ -85,6 +87,31 @@ func (s *Server) Start() error {
 	}
 
 	// Setup HTTP routes
+	mux := s.newMux()
+
+	// HTTP server
+	s.httpServer = &http.Server{
+		Addr:         s.addr,
+		Handler:      mux,
+		ReadTimeout:  consts.Timeout60Seconds,
+		WriteTimeout: consts.Timeout60Seconds,
+	}
+
+	// Start hub
+	go s.hub.Run()
+
+	// Start server in background
+	go func() {
+		logger.Info("Web server listening on %s", s.addr)
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("HTTP server error: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+func (s *Server) newMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Serve static files from embedded filesystem with explicit MIME type handling
@@ -103,26 +130,7 @@ func (s *Server) Start() error {
 	// Page routes
 	mux.HandleFunc("/", s.handleIndex)
 
-	// HTTP server
-	s.httpServer = &http.Server{
-		Addr:         s.addr,
-		Handler:      mux,
-		ReadTimeout:  60 * time.Second,
-		WriteTimeout: 60 * time.Second,
-	}
-
-	// Start hub
-	go s.hub.Run()
-
-	// Start server in background
-	go func() {
-		logger.Info("Web server listening on %s", s.addr)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error: %v", err)
-		}
-	}()
-
-	return nil
+	return mux
 }
 
 // Stop stops the web server

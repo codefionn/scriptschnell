@@ -8,7 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // GroqClient implements the Client interface for Groq's API, supporting both
@@ -43,7 +44,7 @@ func NewGroqClient(apiKey, modelID string) (Client, error) {
 		model:   model,
 		baseURL: "https://api.groq.com/openai/v1",
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: consts.Timeout60Seconds,
 		},
 		useResponsesAPI: groqRequiresResponsesAPI(model),
 	}

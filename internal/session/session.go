@@ -17,6 +17,7 @@ import (
 type Message struct {
 	Role      string                   `json:"role"` // "user", "assistant", "tool"
 	Content   string                   `json:"content"`
+	Reasoning string                   `json:"reasoning,omitempty"` // Reasoning/thinking content (e.g., from extended thinking models)
 	ToolCalls []map[string]interface{} `json:"tool_calls,omitempty"`
 	ToolID    string                   `json:"tool_id,omitempty"`
 	ToolName  string                   `json:"tool_name,omitempty"` // Name of the tool for tool responses

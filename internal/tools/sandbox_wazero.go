@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/tetratelabs/wazero"
@@ -325,7 +326,7 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 
 	// Execute HTTP request
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: consts.Timeout30Seconds,
 	}
 	resp, err := client.Do(req)
 	if err != nil {

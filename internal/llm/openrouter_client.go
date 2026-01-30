@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
@@ -47,7 +47,7 @@ func NewOpenRouterClient(apiKey, modelID string) (Client, error) {
 		model:   model,
 		baseURL: openRouterAPIBaseURL,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: consts.Timeout60Seconds,
 		},
 	}, nil
 }
@@ -177,8 +177,8 @@ func (c *OpenRouterClient) Stream(ctx context.Context, req *CompletionRequest, c
 	logger.Debug("OpenRouter: stream connection established, processing chunks")
 
 	scanner := bufio.NewScanner(resp.Body)
-	buffer := make([]byte, 0, 256*1024)
-	scanner.Buffer(buffer, 1024*1024)
+	buffer := make([]byte, 0, consts.BufferSize256KB)
+	scanner.Buffer(buffer, consts.BufferSize1MB)
 
 	chunkCount := 0
 	for scanner.Scan() {

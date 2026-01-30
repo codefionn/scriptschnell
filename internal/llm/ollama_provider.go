@@ -7,7 +7,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // OllamaProvider implements the Provider interface for local or remote Ollama instances.
@@ -22,7 +23,7 @@ func NewOllamaProvider(apiKey string) *OllamaProvider {
 	return &OllamaProvider{
 		baseURL: normalizeOllamaBaseURL(apiKey),
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: consts.Timeout30Seconds,
 		},
 	}
 }

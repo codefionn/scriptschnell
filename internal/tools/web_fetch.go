@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	webFetchDefaultTimeout  = 30 * time.Second
 	webFetchMaxBodyBytes    = 16_384 // ~16KB cap to avoid overwhelming the UI/LLM
 	webFetchMaxSummaryBytes = 16_384 // limit summary input size
 )
@@ -69,7 +68,7 @@ type WebFetchTool struct {
 // NewWebFetchTool constructs a WebFetchTool.
 func NewWebFetchTool(client *http.Client, summarizeClient llm.Client, authorizer Authorizer, detector secretdetect.Detector, featureFlags FeatureFlagsProvider) *WebFetchTool {
 	if client == nil {
-		client = &http.Client{Timeout: webFetchDefaultTimeout}
+		client = &http.Client{Timeout: consts.Timeout30Seconds}
 	}
 	var chunkedSummarizer *summarizer.ChunkedSummarizer
 	if summarizeClient != nil {

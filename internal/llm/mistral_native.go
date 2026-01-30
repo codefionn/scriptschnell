@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
@@ -44,7 +44,7 @@ func NewMistralClient(apiKey, modelName string) (Client, error) {
 		model:   model,
 		baseURL: mistralDefaultBaseURL,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: consts.Timeout60Seconds,
 		},
 	}, nil
 }
@@ -157,8 +157,8 @@ func (c *MistralClient) Stream(ctx context.Context, req *CompletionRequest, call
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
-	buffer := make([]byte, 0, 256*1024)
-	scanner.Buffer(buffer, 1024*1024)
+	buffer := make([]byte, 0, consts.BufferSize256KB)
+	scanner.Buffer(buffer, consts.BufferSize1MB)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

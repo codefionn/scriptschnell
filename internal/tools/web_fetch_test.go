@@ -2,9 +2,8 @@ package tools
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -18,6 +17,32 @@ type mockFeatureFlags struct{}
 func (m *mockFeatureFlags) IsToolEnabled(toolName string) bool {
 	// Enable all features for testing
 	return true
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func newStubClient(status int, contentType, body string, onRequest func(*http.Request)) *http.Client {
+	return &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if onRequest != nil {
+				onRequest(req)
+			}
+			resp := &http.Response{
+				StatusCode: status,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    req,
+			}
+			if contentType != "" {
+				resp.Header.Set("Content-Type", contentType)
+			}
+			return resp, nil
+		}),
+	}
 }
 
 func TestWebFetchToolSpec(t *testing.T) {
@@ -35,18 +60,15 @@ func TestWebFetchToolSpec(t *testing.T) {
 }
 
 func TestWebFetchToolFetchesHTML(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Fatalf("expected GET request, got %s", r.Method)
-		}
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, "<html><body><h1>Hello</h1></body></html>")
-	}))
-	defer server.Close()
-
-	tool := NewWebFetchTool(server.Client(), nil, &mockAuthorizer{}, secretdetect.NewDetector(), &mockFeatureFlags{})
+	url := "https://example.com/hello"
+	var gotMethod, gotURL string
+	client := newStubClient(http.StatusOK, "text/html", "<html><body><h1>Hello</h1></body></html>", func(req *http.Request) {
+		gotMethod = req.Method
+		gotURL = req.URL.String()
+	})
+	tool := NewWebFetchTool(client, nil, &mockAuthorizer{}, secretdetect.NewDetector(), &mockFeatureFlags{})
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"url": server.URL,
+		"url": url,
 	})
 
 	if result == nil || result.Error != "" {
@@ -66,20 +88,22 @@ func TestWebFetchToolFetchesHTML(t *testing.T) {
 	if body == "" || !strings.Contains(body, "<h1>Hello</h1>") {
 		t.Fatalf("unexpected body: %q", body)
 	}
+
+	if gotMethod != http.MethodGet {
+		t.Fatalf("expected GET request, got %s", gotMethod)
+	}
+	if gotURL != url {
+		t.Fatalf("expected URL %s, got %s", url, gotURL)
+	}
 }
 
 func TestWebFetchToolSummarizesWhenPromptProvided(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, "<html><body><p>Example content</p></body></html>")
-	}))
-	defer server.Close()
-
 	mockLLM := &mockLLMClient{response: "short summary"}
-	tool := NewWebFetchTool(server.Client(), mockLLM, &mockAuthorizer{}, secretdetect.NewDetector(), &mockFeatureFlags{})
+	client := newStubClient(http.StatusOK, "text/html", "<html><body><p>Example content</p></body></html>", nil)
+	tool := NewWebFetchTool(client, mockLLM, &mockAuthorizer{}, secretdetect.NewDetector(), &mockFeatureFlags{})
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"url":              server.URL,
+		"url":              "https://example.com/summary",
 		"summarize_prompt": "summarize this page",
 	})
 

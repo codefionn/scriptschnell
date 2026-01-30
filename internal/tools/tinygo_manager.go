@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
@@ -211,7 +212,7 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 
 	// Clear status after a brief moment
 	go func() {
-		time.Sleep(2 * time.Second)
+		time.Sleep(consts.Timeout2Seconds)
 		m.updateStatus("")
 	}()
 

@@ -9,8 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
@@ -32,7 +32,7 @@ func NewOllamaClient(baseURL, model string) (Client, error) {
 		baseURL: normalized,
 		model:   model,
 		client: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: consts.Timeout60Seconds,
 		},
 	}, nil
 }
@@ -141,8 +141,8 @@ func (c *OllamaClient) Stream(ctx context.Context, req *CompletionRequest, callb
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
-	buffer := make([]byte, 0, 1024*256)
-	scanner.Buffer(buffer, 1024*1024)
+	buffer := make([]byte, 0, consts.BufferSize256KB)
+	scanner.Buffer(buffer, consts.BufferSize1MB)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

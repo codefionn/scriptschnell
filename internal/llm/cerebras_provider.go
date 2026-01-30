@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // CerebrasProvider implements the Provider interface for Cerebras Cloud AI.
@@ -20,7 +21,7 @@ func NewCerebrasProvider(apiKey string) *CerebrasProvider {
 	return &CerebrasProvider{
 		apiKey: apiKey,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: consts.Timeout30Seconds,
 		},
 	}
 }

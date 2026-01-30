@@ -17,6 +17,8 @@ const (
 type Update struct {
 	// Message is the content to deliver to the UI or client.
 	Message string
+	// Reasoning is the reasoning/thinking content (for extended thinking models).
+	Reasoning string
 	// AddNewLine appends a newline to Message if one is not already present.
 	AddNewLine bool
 	// Mode controls where the message should be surfaced.

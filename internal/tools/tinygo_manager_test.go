@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,7 +41,11 @@ func TestTinyGoManager_GetCacheDir(t *testing.T) {
 	// Verify the path contains expected components
 	switch runtime.GOOS {
 	case "linux":
-		if !contains(cacheDir, ".cache") {
+		if cacheHome := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); cacheHome != "" {
+			if !strings.HasPrefix(cacheDir, cacheHome) {
+				t.Errorf("Expected Linux cache dir to use XDG_CACHE_HOME %s, got: %s", cacheHome, cacheDir)
+			}
+		} else if !contains(cacheDir, ".cache") {
 			t.Errorf("Expected Linux cache dir to contain .cache, got: %s", cacheDir)
 		}
 	case "darwin":
@@ -115,7 +120,10 @@ func TestTinyGoManager_BinaryPath(t *testing.T) {
 // This test is skipped by default as it downloads ~50MB and takes several minutes
 func TestIntegration_TinyGoManager_Download(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping TinyGo download integration test - run with: go test -run Integration ./internal/tools -short=false")
+		t.Skip("Skipping TinyGo download integration test - run with: go test -run Integration ./internal/tools -short=false -integration")
+	}
+	if !*runIntegrationTests {
+		t.Skip("Skipping TinyGo download integration test - run with: go test -run Integration ./internal/tools -integration")
 	}
 
 	// Create a temporary cache directory for testing

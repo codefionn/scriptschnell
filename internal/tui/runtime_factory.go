@@ -9,6 +9,7 @@ import (
 
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/orchestrator"
@@ -84,9 +85,9 @@ func NewRuntimeFactory(cfg *config.Config, providerMgr *provider.Manager, workin
 	domainBlockerSystem := actor.NewSystem()
 	domainBlockerConfig := actor.DomainBlockerConfig{
 		BlocklistURL:    actor.DefaultRPZURL,
-		RefreshInterval: 6 * time.Hour,
-		TTL:             24 * time.Hour,
-		HTTPClient:      &http.Client{Timeout: 30 * time.Second},
+		RefreshInterval: consts.Duration6Hours,
+		TTL:             consts.Duration24Hours,
+		HTTPClient:      &http.Client{Timeout: consts.Timeout30Seconds},
 	}
 	domainBlockerActor := actor.NewDomainBlockerActor("domain-blocker", domainBlockerConfig)
 	domainBlockerRef, err := domainBlockerSystem.Spawn(domainBlockerCtx, "domain-blocker", domainBlockerActor, 16)

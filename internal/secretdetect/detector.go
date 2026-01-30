@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"os"
 	"strings"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // DetectorImpl implements the Detector interface.
@@ -92,8 +94,8 @@ func (d *DetectorImpl) ScanFile(path string) ([]SecretMatch, error) {
 	lineNum := 0
 
 	// Buffer for long lines
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 1024*1024) // 1MB max line size
+	buf := make([]byte, consts.BufferSize64KB)
+	scanner.Buffer(buf, consts.BufferSize1MB) // 1MB max line size
 
 	for scanner.Scan() {
 		lineNum++

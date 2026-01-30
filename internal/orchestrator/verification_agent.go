@@ -333,6 +333,7 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 			llmMessages[j] = &llm.Message{
 				Role:      msg.Role,
 				Content:   msg.Content,
+				Reasoning: msg.Reasoning,
 				ToolCalls: msg.ToolCalls,
 				ToolID:    msg.ToolID,
 				ToolName:  msg.ToolName,
@@ -358,6 +359,7 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 		verificationSession.AddMessage(&session.Message{
 			Role:      "assistant",
 			Content:   resp.Content,
+			Reasoning: resp.Reasoning,
 			ToolCalls: resp.ToolCalls,
 		})
 

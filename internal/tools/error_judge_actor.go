@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
@@ -105,7 +106,7 @@ func (a *ErrorJudgeActor) llmJudge(ctx context.Context, msg *ErrorJudgeMessage) 
 	prompt := a.buildErrorJudgePrompt(msg)
 
 	// Call LLM with timeout
-	judgeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	judgeCtx, cancel := context.WithTimeout(ctx, consts.Timeout10Seconds)
 	defer cancel()
 
 	result, err := a.llmClient.Complete(judgeCtx, prompt)
@@ -350,7 +351,7 @@ func (c *ErrorJudgeActorClient) Judge(ctx context.Context, err error, attemptNum
 		return ErrorJudgeDecision{}, ctx.Err()
 	case decision := <-response:
 		return decision, nil
-	case <-time.After(15 * time.Second):
+	case <-time.After(consts.Timeout10Seconds + consts.Timeout5Seconds):
 		return ErrorJudgeDecision{}, fmt.Errorf("error judge timeout")
 	}
 }

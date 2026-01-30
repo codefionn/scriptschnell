@@ -214,11 +214,15 @@ func convertGenericNativeToUnified(native []interface{}) ([]*Message, error) {
 		}
 
 		var genericMsg struct {
-			Role       string                   `json:"role"`
-			Content    interface{}              `json:"content"`
-			Name       string                   `json:"name,omitempty"`
-			ToolCalls  []map[string]interface{} `json:"tool_calls,omitempty"`
-			ToolCallID string                   `json:"tool_call_id,omitempty"`
+			Role             string                   `json:"role"`
+			Content          interface{}              `json:"content"`
+			Reasoning        string                   `json:"reasoning,omitempty"`
+			Thinking         string                   `json:"thinking,omitempty"`
+			ReasoningContent *string                  `json:"reasoning_content,omitempty"`
+			ThinkingContent  *string                  `json:"thinking_content,omitempty"`
+			Name             string                   `json:"name,omitempty"`
+			ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
+			ToolCallID       string                   `json:"tool_call_id,omitempty"`
 		}
 
 		if err := json.Unmarshal(data, &genericMsg); err != nil {
@@ -231,8 +235,15 @@ func convertGenericNativeToUnified(native []interface{}) ([]*Message, error) {
 		}
 
 		msg := &Message{
-			Role:      genericMsg.Role,
-			Content:   extractTextContent(genericMsg.Content),
+			Role:    genericMsg.Role,
+			Content: extractTextContent(genericMsg.Content),
+			Reasoning: extractOpenAIMessageReasoning(&openAIChatMessage{
+				Content:          genericMsg.Content,
+				Reasoning:        genericMsg.Reasoning,
+				Thinking:         genericMsg.Thinking,
+				ReasoningContent: genericMsg.ReasoningContent,
+				ThinkingContent:  genericMsg.ThinkingContent,
+			}),
 			ToolCalls: genericMsg.ToolCalls,
 			ToolName:  genericMsg.Name,
 			ToolID:    genericMsg.ToolCallID,

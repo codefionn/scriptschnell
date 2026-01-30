@@ -188,8 +188,8 @@ func (t *ShellTool) executeBackground(ctx context.Context, cmdStr, workingDir st
 
 	// Wait for completion in background
 	go func() {
-		err := cmd.Wait()
 		wg.Wait()
+		err := cmd.Wait()
 		defer close(job.Done)
 		job.Mu.Lock()
 		job.Completed = true

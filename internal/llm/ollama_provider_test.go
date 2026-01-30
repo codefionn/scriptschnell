@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -26,13 +25,12 @@ func TestNormalizeOllamaBaseURL(t *testing.T) {
 }
 
 func TestOllamaProviderListModelsFromAPI(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/tags" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
+	var gotMethod, gotPath string
+	provider := NewOllamaProvider("http://ollama.test")
+	provider.client = newTestHTTPClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		return newTestHTTPResponse(req, http.StatusOK, "application/json", `{
 			"models": [
 				{
 					"name": "llama3.1:8b",
@@ -45,12 +43,8 @@ func TestOllamaProviderListModelsFromAPI(t *testing.T) {
 					}
 				}
 			]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewOllamaProvider(server.URL)
-	provider.client = server.Client()
+		}`), nil
+	})
 
 	models, err := provider.ListModels(context.Background())
 	if err != nil {
@@ -74,16 +68,19 @@ func TestOllamaProviderListModelsFromAPI(t *testing.T) {
 	if !model.SupportsStreaming {
 		t.Fatalf("expected SupportsStreaming to be true")
 	}
+	if gotMethod != http.MethodGet {
+		t.Fatalf("expected GET request, got %s", gotMethod)
+	}
+	if gotPath != "/api/tags" {
+		t.Fatalf("expected path /api/tags, got %s", gotPath)
+	}
 }
 
 func TestOllamaProviderFallbackOnError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "boom", http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	provider := NewOllamaProvider(server.URL)
-	provider.client = server.Client()
+	provider := NewOllamaProvider("http://ollama.test")
+	provider.client = newTestHTTPClient(func(req *http.Request) (*http.Response, error) {
+		return newTestHTTPResponse(req, http.StatusInternalServerError, "text/plain", "boom"), nil
+	})
 
 	models, err := provider.ListModels(context.Background())
 	if err != nil {

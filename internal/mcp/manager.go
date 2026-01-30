@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"github.com/getkin/kin-openapi/openapi3"
@@ -29,7 +30,7 @@ func NewManager(cfg *config.Config, workingDir string, providerMgr *provider.Man
 		cfg:         cfg,
 		workingDir:  workingDir,
 		providerMgr: providerMgr,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  &http.Client{Timeout: consts.Timeout30Seconds},
 	}
 }
 
@@ -93,7 +94,7 @@ func (m *Manager) buildCommandTools(serverName string, serverCfg *config.MCPServ
 
 	timeout := time.Duration(cmdCfg.TimeoutSeconds) * time.Second
 	if cmdCfg.TimeoutSeconds == 0 {
-		timeout = 60 * time.Second
+		timeout = consts.Timeout60Seconds
 	}
 
 	name := uniqueToolName(fmt.Sprintf("mcp_%s", sanitizeName(serverName)), nameUsage)
@@ -244,7 +245,7 @@ func (m *Manager) buildOpenAPITools(serverName string, serverCfg *config.MCPServ
 				DefaultHeaders: headers,
 				DefaultQuery:   apiCfg.DefaultQuery,
 				HTTPClient:     m.httpClient,
-				Timeout:        60 * time.Second,
+				Timeout:        consts.Timeout60Seconds,
 			})
 
 			toolsForServer = append(toolsForServer, openapiTool)

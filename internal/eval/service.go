@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/provider"
 )
@@ -356,7 +357,7 @@ func (s *Service) executeEval(runID int64, evalDef *EvalDefinition, model *EvalM
 	config := &ContainerConfig{
 		Image:        imageName,
 		WorkspaceDir: workspaceDir,
-		Timeout:      10 * time.Minute,
+		Timeout:      consts.Timeout10Minutes,
 		Env:          env,
 	}
 

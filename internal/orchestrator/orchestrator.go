@@ -14,6 +14,7 @@ import (
 
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/features"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
@@ -103,6 +104,8 @@ type Orchestrator struct {
 	featureFlags           *features.FeatureFlags
 	compactionAttemptCount int // Tracks compaction attempts for current request
 	compactionAttemptMu    sync.Mutex
+	consecutiveCompactions int // Tracks consecutive compactions to limit to 2 in immediate succession
+	lastCompactionTime     time.Time
 	userInputCb            UserInputCallback
 	userInteractionRef     *actor.ActorRef
 	userInteractionCancel  context.CancelFunc
@@ -115,12 +118,12 @@ type Orchestrator struct {
 }
 
 const (
-	defaultAutoContinueMaxAttempts  = 3
-	kimiK2AutoContinueMaxAttempts   = 32
-	minimaxAutoContinueMaxAttempts  = 32
-	deepSeekAutoContinueMaxAttempts = 12
-	errorRetryMaxAttempts           = 5
-	preconnectThrottle              = 2 * time.Second
+	defaultAutoContinueMaxAttempts  = consts.DefaultMaxAttempts
+	kimiK2AutoContinueMaxAttempts   = consts.MaxExtendedAttempts
+	minimaxAutoContinueMaxAttempts  = consts.MaxExtendedAttempts
+	deepSeekAutoContinueMaxAttempts = consts.ExtendedMaxAttempts
+	errorRetryMaxAttempts           = consts.DefaultMaxRetries
+	preconnectThrottle              = consts.Timeout2Seconds
 )
 
 // Multi-stage compaction configuration
@@ -354,9 +357,9 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	domainBlockerCtx, domainBlockerCancel := context.WithCancel(context.Background())
 	domainBlockerConfig := actor.DomainBlockerConfig{
 		BlocklistURL:    actor.DefaultRPZURL,
-		RefreshInterval: 6 * time.Hour,  // Refresh every 6 hours
-		TTL:             24 * time.Hour, // Blocklist expires after 24 hours
-		HTTPClient:      &http.Client{Timeout: 30 * time.Second},
+		RefreshInterval: consts.Duration6Hours,  // Refresh every 6 hours
+		TTL:             consts.Duration24Hours, // Blocklist expires after 24 hours
+		HTTPClient:      &http.Client{Timeout: consts.Timeout30Seconds},
 	}
 	domainBlockerActor := actor.NewDomainBlockerActor("domain_blocker", domainBlockerConfig)
 	domainBlockerRef, err := orch.actorSystem.Spawn(domainBlockerCtx, "domain_blocker", domainBlockerActor, 16)
@@ -871,6 +874,7 @@ func (o *Orchestrator) convertSessionMessages(modelID, provider, modelFamily str
 		unifiedMsgs[i] = &llm.Message{
 			Role:      msg.Role,
 			Content:   msg.Content,
+			Reasoning: msg.Reasoning,
 			ToolCalls: msg.ToolCalls,
 			ToolID:    msg.ToolID,
 			ToolName:  msg.ToolName,
@@ -2062,6 +2066,12 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 	})
 	logger.Debug("ProcessPrompt: Session now has %d messages", len(o.session.GetMessages()))
 
+	// Reset consecutive compactions counter for new user prompt
+	o.compactionMu.Lock()
+	o.consecutiveCompactions = 0
+	o.compactionMu.Unlock()
+	logger.Debug("ProcessPrompt: Reset consecutive compactions counter for new user prompt")
+
 	// Auto-save the session if enabled
 	if o.config.AutoSave.Enabled {
 		go func() {
@@ -2343,6 +2353,7 @@ func (o *Orchestrator) runOrchestrationLoopCore(
 			llmMessages[i] = &llm.Message{
 				Role:              msg.Role,
 				Content:           msg.Content,
+				Reasoning:         msg.Reasoning,
 				ToolCalls:         msg.ToolCalls,
 				ToolID:            msg.ToolID,
 				ToolName:          msg.ToolName,
@@ -2423,13 +2434,14 @@ func (o *Orchestrator) runOrchestrationLoopCore(
 		var nativeMsgs []interface{}
 		var nativeErr error
 		if converter != nil && converter.SupportsNativeStorage() {
-			nativeMsgs, nativeErr = converter.ConvertToNative([]*llm.Message{{Role: "assistant", Content: response.Content, ToolCalls: response.ToolCalls}}, "", o.config.EnablePromptCache, o.config.PromptCacheTTL)
+			nativeMsgs, nativeErr = converter.ConvertToNative([]*llm.Message{{Role: "assistant", Content: response.Content, Reasoning: response.Reasoning, ToolCalls: response.ToolCalls}}, "", o.config.EnablePromptCache, o.config.PromptCacheTTL)
 		}
 
 		// Add assistant message
 		assistantMsg := &session.Message{
 			Role:      "assistant",
 			Content:   response.Content,
+			Reasoning: response.Reasoning,
 			ToolCalls: response.ToolCalls,
 		}
 
@@ -2443,6 +2455,15 @@ func (o *Orchestrator) runOrchestrationLoopCore(
 
 		o.session.AddMessage(assistantMsg)
 		o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
+
+		// Stream reasoning content to UI (if present)
+		if response.Reasoning != "" {
+			dispatchProgress(progressCallback, progress.Update{
+				Reasoning: response.Reasoning,
+				Mode:      progress.ReportNoStatus,
+				Ephemeral: true, // Reasoning is ephemeral - only shown during generation
+			})
+		}
 
 		// Stream content to UI
 		if response.Content != "" {
@@ -3206,7 +3227,13 @@ func (o *Orchestrator) maybeCompactContext(modelID, systemPrompt string, session
 
 	messagesCopy := append([]*session.Message(nil), sessionMessages[:prefixCount]...)
 
+	// Check if we've already had 2 consecutive compactions - if so, skip this one
 	o.compactionMu.Lock()
+	if o.consecutiveCompactions >= 2 {
+		o.compactionMu.Unlock()
+		logger.Info("maybeCompactContext: already had %d consecutive compactions, skipping to prevent over-compaction", o.consecutiveCompactions)
+		return
+	}
 	if o.compactionInProgress {
 		o.compactionMu.Unlock()
 		return
@@ -3330,6 +3357,12 @@ func (o *Orchestrator) compactContextWithAttempt(modelID, systemPrompt string, c
 		return
 	}
 
+	// Track consecutive compactions - increment counter
+	o.compactionMu.Lock()
+	o.consecutiveCompactions++
+	o.lastCompactionTime = time.Now()
+	o.compactionMu.Unlock()
+
 	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
 	// Update progress message based on attempt number
@@ -3397,6 +3430,16 @@ func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, session
 		logger.Debug("forceCompactContext: no messages to compact after boundary adjustment")
 		return
 	}
+
+	// Check if we've already had 2 consecutive compactions - if so, skip this one
+	o.compactionMu.Lock()
+	if o.consecutiveCompactions >= 2 {
+		o.compactionMu.Unlock()
+		logger.Info("forceCompactContext: already had %d consecutive compactions, skipping to prevent over-compaction", o.consecutiveCompactions)
+		return
+	}
+	// Note: We don't check compactionInProgress here since we already waited for it above
+	o.compactionMu.Unlock()
 
 	messagesCopy := append([]*session.Message(nil), sessionMessages[:prefixCount]...)
 	logger.Info("forceCompactContext: compacting %d messages", len(messagesCopy))
@@ -3493,6 +3536,12 @@ func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, session
 		return
 	}
 
+	// Track consecutive compactions - increment counter
+	o.compactionMu.Lock()
+	o.consecutiveCompactions++
+	o.lastCompactionTime = time.Now()
+	o.compactionMu.Unlock()
+
 	o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
 
 	// Update progress message based on attempt number
@@ -3565,11 +3614,17 @@ func (o *Orchestrator) getContextWindow(modelID string) int {
 	return 8192
 }
 
-// resetCompactionAttempts resets the compaction attempt counter
+// resetCompactionAttempts resets the compaction attempt counter and consecutive compactions counter
 func (o *Orchestrator) resetCompactionAttempts() {
 	o.compactionAttemptMu.Lock()
 	o.compactionAttemptCount = 0
 	o.compactionAttemptMu.Unlock()
+
+	o.compactionMu.Lock()
+	o.consecutiveCompactions = 0
+	o.compactionMu.Unlock()
+
+	logger.Debug("resetCompactionAttempts: reset compaction attempt count and consecutive compactions counter")
 }
 
 func selectCompactionPrefix(perMessageTokens []int, totalTokens int) int {

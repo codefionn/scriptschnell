@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
@@ -19,7 +20,7 @@ func (s *ReadFileToolSpec) Name() string {
 }
 
 func (s *ReadFileToolSpec) Description() string {
-	return "Read a file from the filesystem. Can read entire file or multiple specific line ranges using the sections parameter. Maximum 2000 lines per read. Files read during the session are tracked for diff operations."
+	return fmt.Sprintf("Read a file from the filesystem. Can read entire file or multiple specific line ranges using the sections parameter. Maximum %d lines per read. Files read during the session are tracked for diff operations.", consts.MaxLinesPerRead)
 }
 
 func (s *ReadFileToolSpec) Parameters() map[string]interface{} {
@@ -32,7 +33,7 @@ func (s *ReadFileToolSpec) Parameters() map[string]interface{} {
 			},
 			"sections": map[string]interface{}{
 				"type":        "array",
-				"description": "Array of line range sections to read (e.g., [{\"from_line\": 1, \"to_line\": 10}, {\"from_line\": 50, \"to_line\": 60}]). Total lines across all sections cannot exceed 2000. Omit to read entire file (up to 2000 lines).",
+				"description": fmt.Sprintf("Array of line range sections to read (e.g., [{\"from_line\": 1, \"to_line\": 10}, {\"from_line\": 50, \"to_line\": 60}]). Total lines across all sections cannot exceed %d. Omit to read entire file (up to %d lines).", consts.MaxLinesPerRead, consts.MaxLinesPerRead),
 				"items": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -113,14 +114,14 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 	wasTruncated := false
 	totalLines := lineCount
 
-	if lineCount > 2000 {
-		// Read only first 2000 lines
-		lines, err := t.fs.ReadFileLines(ctx, path, 1, 2000)
+	if lineCount > consts.MaxLinesPerRead {
+		// Read only first MaxLinesPerRead lines
+		lines, err := t.fs.ReadFileLines(ctx, path, 1, consts.MaxLinesPerRead)
 		if err != nil {
 			return &ToolResult{Error: fmt.Sprintf("error reading file lines: %v", err)}
 		}
 		content = strings.Join(lines, "\n")
-		content += fmt.Sprintf("\n\n[... file truncated, %d total lines, showing first 2000 lines. Use sections parameter to read specific ranges]", lineCount)
+		content += fmt.Sprintf("\n\n[... file truncated, %d total lines, showing first %d lines. Use sections parameter to read specific ranges]", lineCount, consts.MaxLinesPerRead)
 		wasTruncated = true
 	}
 
@@ -137,8 +138,8 @@ func (t *ReadFileTool) Execute(ctx context.Context, params map[string]interface{
 	var uiResult string
 	if wasTruncated {
 		// Remove the text truncation message from content for UI display
-		uiContent := strings.Join(strings.Split(content, "\n")[:2000], "\n")
-		uiResult = t.formatUIResultWithTruncation(path, uiContent, 2000, totalLines)
+		uiContent := strings.Join(strings.Split(content, "\n")[:consts.MaxLinesPerRead], "\n")
+		uiResult = t.formatUIResultWithTruncation(path, uiContent, consts.MaxLinesPerRead, totalLines)
 	} else {
 		uiResult = t.formatUIResult(path, content, actualLineCount)
 	}
@@ -203,8 +204,8 @@ func (t *ReadFileTool) executeMultiSection(ctx context.Context, path string, sec
 		ranges = append(ranges, lineRange{fromLine: fromLine, toLine: toLine})
 	}
 
-	if totalLines > 2000 {
-		return &ToolResult{Error: fmt.Sprintf("cannot read more than 2000 lines at once (requested %d lines across %d sections)", totalLines, len(sections))}
+	if totalLines > consts.MaxLinesPerRead {
+		return &ToolResult{Error: fmt.Sprintf("cannot read more than %d lines at once (requested %d lines across %d sections)", consts.MaxLinesPerRead, totalLines, len(sections))}
 	}
 
 	// Read all sections

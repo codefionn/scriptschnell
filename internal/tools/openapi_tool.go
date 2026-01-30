@@ -11,6 +11,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/consts"
 )
 
 // OpenAPIParameter describes an OpenAPI parameter exposed to the tool schema.
@@ -64,7 +66,7 @@ type OpenAPITool struct {
 func NewOpenAPITool(cfg *OpenAPIToolConfig) *OpenAPITool {
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = consts.Timeout30Seconds
 	}
 
 	client := cfg.HTTPClient

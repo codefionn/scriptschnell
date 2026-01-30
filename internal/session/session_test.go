@@ -1,6 +1,7 @@
 package session
 
 import (
+	"runtime"
 	"testing"
 )
 
@@ -50,6 +51,7 @@ func TestCompactWithSummaryMismatch(t *testing.T) {
 func TestSaveEmptySession(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
+	setSessionStorageEnv(t, tempDir)
 
 	// Create session storage
 	storage, err := NewSessionStorage()
@@ -141,5 +143,17 @@ func TestUserMessageCount(t *testing.T) {
 
 	if count := s.UserMessageCount(); count != 2 {
 		t.Fatalf("expected 2 user messages, got %d", count)
+	}
+}
+
+func setSessionStorageEnv(t *testing.T, dir string) {
+	t.Helper()
+	switch runtime.GOOS {
+	case "linux":
+		t.Setenv("XDG_STATE_HOME", dir)
+	case "windows":
+		t.Setenv("LOCALAPPDATA", dir)
+	default:
+		t.Setenv("HOME", dir)
 	}
 }

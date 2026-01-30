@@ -15,6 +15,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/secrets"
+	"github.com/codefionn/scriptschnell/internal/securemem"
 	"github.com/codefionn/scriptschnell/internal/stringsearch"
 )
 
@@ -84,12 +85,13 @@ type Config struct {
 
 // Manager manages LLM providers
 type Manager struct {
-	config        *Config
-	configPath    string
-	matcher       stringsearch.StringMatcher
-	cacheActorRef *actor.ActorRef
-	mu            sync.RWMutex
-	password      string
+	config         *Config
+	configPath     string
+	matcher        stringsearch.StringMatcher
+	cacheActorRef  *actor.ActorRef
+	mu             sync.RWMutex
+	password       string            // For backward compatibility, kept as plaintext
+	securePassword *securemem.String // Secure password storage
 }
 
 // NewManager creates a new provider manager
@@ -112,6 +114,46 @@ func NewManager(configPath, password string) (*Manager, error) {
 			Providers: make(map[string]*Provider),
 		},
 		password: password,
+	}
+
+	// Load config if exists
+	if err := m.Load(); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	// Build search matcher
+	m.rebuildMatcher()
+
+	return m, nil
+}
+
+// NewManagerSecure creates a new provider manager with secure password storage
+func NewManagerSecure(configPath string, password *securemem.String) (*Manager, error) {
+	cacheDir, err := providerModelsCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine provider cache directory: %w", err)
+	}
+
+	cacheActor := newProviderModelsCacheActor("provider-model-cache", cacheDir)
+	cacheRef := actor.NewActorRef(cacheActor.ID(), cacheActor, 32)
+	if err := cacheRef.Start(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to start provider cache actor: %w", err)
+	}
+
+	// Get plaintext password for backward compatibility
+	passwordStr := ""
+	if password != nil {
+		passwordStr = password.String()
+	}
+
+	m := &Manager{
+		configPath:    configPath,
+		cacheActorRef: cacheRef,
+		config: &Config{
+			Providers: make(map[string]*Provider),
+		},
+		password:       passwordStr,
+		securePassword: password,
 	}
 
 	// Load config if exists

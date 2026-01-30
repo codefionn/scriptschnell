@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/wasi"
 )
 
@@ -56,7 +57,7 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 
 	// Use parent context for TinyGo download (not the execution timeout)
 	// TinyGo download can take time on slow connections and should not be limited by sandbox timeout
-	downloadCtx, downloadCancel := context.WithTimeout(ctx, 10*time.Minute)
+	downloadCtx, downloadCancel := context.WithTimeout(ctx, consts.Timeout10Minutes)
 	tinyGoBinary, err := t.tinygoManager.GetTinyGoBinary(downloadCtx)
 	downloadCancel()
 	if err != nil {
@@ -141,7 +142,7 @@ func (t *SandboxTool) compileWithTinyGo(ctx context.Context, tinyGoBinary string
 // executeDirectCommand executes a command directly without using the shell executor
 // This is a fallback when no shell executor is configured
 func (t *SandboxTool) executeDirectCommand(ctx context.Context, commandArgs []string, stdinData []byte) (string, string, int) {
-	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	cmdCtx, cancel := context.WithTimeout(ctx, consts.Timeout30Seconds)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, commandArgs[0], commandArgs[1:]...)

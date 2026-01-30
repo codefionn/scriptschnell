@@ -125,7 +125,7 @@ type Config struct {
 	SandboxOutputCompaction SandboxOutputCompactionConfig `json:"sandbox_output_compaction"`     // Sandbox output compaction configuration
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
-	secretsPassword string       `json:"-"`
+	secretsPassword string       `json:"-"` // Kept for backward compatibility
 }
 
 // SecretsSettings keeps track of password-protection state.
@@ -190,7 +190,7 @@ func DefaultConfig() *Config {
 		MaxCacheEntries:    100,
 		DefaultTimeout:     30,
 		TempDir:            filepath.Join(os.TempDir(), "scriptschnell"),
-		Temperature:        0.7,
+		Temperature:        1.0,
 		MaxTokens:          4096,
 		ProviderConfigPath: filepath.Join(configDir, "providers.json"),
 		LogLevel:           "info",

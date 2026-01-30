@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	. "github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
 )
 
@@ -74,7 +74,7 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 			if t.shellExecutor != nil {
 				// Use the shell executor (actor-based) with direct argv execution
 				var err error
-				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandArgs, "", 30*time.Second, string(stdinData))
+				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandArgs, "", consts.Timeout30Seconds, string(stdinData))
 				_ = err // Error information is captured in exitCode and stderr
 			} else {
 				// Fallback to direct execution if no executor is set

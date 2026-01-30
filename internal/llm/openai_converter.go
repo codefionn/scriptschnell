@@ -113,11 +113,15 @@ func convertOpenAIMessageToUnified(native interface{}) (*Message, error) {
 	}
 
 	var openaiMsg struct {
-		Role       string                   `json:"role"`
-		Content    interface{}              `json:"content"`
-		Name       string                   `json:"name,omitempty"`
-		ToolCalls  []map[string]interface{} `json:"tool_calls,omitempty"`
-		ToolCallID string                   `json:"tool_call_id,omitempty"`
+		Role             string                   `json:"role"`
+		Content          interface{}              `json:"content"`
+		Reasoning        string                   `json:"reasoning,omitempty"`
+		Thinking         string                   `json:"thinking,omitempty"`
+		ReasoningContent *string                  `json:"reasoning_content,omitempty"`
+		ThinkingContent  *string                  `json:"thinking_content,omitempty"`
+		Name             string                   `json:"name,omitempty"`
+		ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
+		ToolCallID       string                   `json:"tool_call_id,omitempty"`
 	}
 
 	if err := json.Unmarshal(data, &openaiMsg); err != nil {
@@ -130,8 +134,15 @@ func convertOpenAIMessageToUnified(native interface{}) (*Message, error) {
 	}
 
 	msg := &Message{
-		Role:      openaiMsg.Role,
-		Content:   extractOpenAITextContent(openaiMsg.Content),
+		Role:    openaiMsg.Role,
+		Content: extractOpenAITextContent(openaiMsg.Content),
+		Reasoning: extractOpenAIMessageReasoning(&openAIChatMessage{
+			Content:          openaiMsg.Content,
+			Reasoning:        openaiMsg.Reasoning,
+			Thinking:         openaiMsg.Thinking,
+			ReasoningContent: openaiMsg.ReasoningContent,
+			ThinkingContent:  openaiMsg.ThinkingContent,
+		}),
 		ToolCalls: openaiMsg.ToolCalls,
 		ToolName:  openaiMsg.Name,
 		ToolID:    openaiMsg.ToolCallID,

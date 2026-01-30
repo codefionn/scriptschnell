@@ -4,53 +4,47 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
 func TestOpenAICompatibleClient_UsageData(t *testing.T) {
-	// Mock server that returns a response with usage data
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify we're hitting the chat completions endpoint
-		if r.URL.Path != "/chat/completions" {
-			t.Errorf("Expected /chat/completions, got %s", r.URL.Path)
-		}
-
-		response := openAIChatResponse{
-			ID:      "chatcmpl-123",
-			Object:  "chat.completion",
-			Model:   "gpt-3.5-turbo",
-			Created: 1234567890,
-			Choices: []openAIChatChoice{
-				{
-					Index:        0,
-					FinishReason: "stop",
-					Message: &openAIChatMessage{
-						Role:    "assistant",
-						Content: "Hello, world!",
-					},
+	response := openAIChatResponse{
+		ID:      "chatcmpl-123",
+		Object:  "chat.completion",
+		Model:   "gpt-3.5-turbo",
+		Created: 1234567890,
+		Choices: []openAIChatChoice{
+			{
+				Index:        0,
+				FinishReason: "stop",
+				Message: &openAIChatMessage{
+					Role:    "assistant",
+					Content: "Hello, world!",
 				},
 			},
-			Usage: map[string]interface{}{
-				"prompt_tokens":     10,
-				"completion_tokens": 5,
-				"total_tokens":      15,
-			},
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}))
-	defer server.Close()
-
+		},
+		Usage: map[string]interface{}{
+			"prompt_tokens":     10,
+			"completion_tokens": 5,
+			"total_tokens":      15,
+		},
+	}
+	var gotMethod, gotPath, gotAuth string
 	client := &OpenAICompatibleClient{
-		apiKey:     "test-key",
-		model:      "gpt-3.5-turbo",
-		baseURL:    server.URL,
-		httpClient: &http.Client{},
+		apiKey:  "test-key",
+		model:   "gpt-3.5-turbo",
+		baseURL: "http://openai.test",
+		httpClient: newTestHTTPClient(func(req *http.Request) (*http.Response, error) {
+			gotMethod = req.Method
+			gotPath = req.URL.Path
+			gotAuth = req.Header.Get("Authorization")
+
+			payload, err := json.Marshal(response)
+			if err != nil {
+				return newTestHTTPResponse(req, http.StatusInternalServerError, "text/plain", err.Error()), nil
+			}
+			return newTestHTTPResponse(req, http.StatusOK, "application/json", string(payload)), nil
+		}),
 	}
 
 	req := &CompletionRequest{
@@ -68,6 +62,16 @@ func TestOpenAICompatibleClient_UsageData(t *testing.T) {
 	// Verify content
 	if resp.Content != "Hello, world!" {
 		t.Errorf("Expected content 'Hello, world!', got '%s'", resp.Content)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Errorf("Expected POST request, got %s", gotMethod)
+	}
+	if gotPath != "/chat/completions" {
+		t.Errorf("Expected /chat/completions, got %s", gotPath)
+	}
+	if gotAuth != "Bearer test-key" {
+		t.Errorf("Expected Authorization header, got %s", gotAuth)
 	}
 
 	// Verify usage data
@@ -92,39 +96,39 @@ func TestOpenAICompatibleClient_UsageData(t *testing.T) {
 }
 
 func TestOpenAICompatibleClient_UsageData_NoUsage(t *testing.T) {
-	// Test when usage data is not provided
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := openAIChatResponse{
-			ID:      "chatcmpl-123",
-			Object:  "chat.completion",
-			Model:   "gpt-3.5-turbo",
-			Created: 1234567890,
-			Choices: []openAIChatChoice{
-				{
-					Index:        0,
-					FinishReason: "stop",
-					Message: &openAIChatMessage{
-						Role:    "assistant",
-						Content: "Hello, world!",
-					},
+	response := openAIChatResponse{
+		ID:      "chatcmpl-123",
+		Object:  "chat.completion",
+		Model:   "gpt-3.5-turbo",
+		Created: 1234567890,
+		Choices: []openAIChatChoice{
+			{
+				Index:        0,
+				FinishReason: "stop",
+				Message: &openAIChatMessage{
+					Role:    "assistant",
+					Content: "Hello, world!",
 				},
 			},
-			// No Usage field
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}))
-	defer server.Close()
-
+		},
+		// No Usage field
+	}
+	var gotMethod, gotPath, gotAuth string
 	client := &OpenAICompatibleClient{
-		apiKey:     "test-key",
-		model:      "gpt-3.5-turbo",
-		baseURL:    server.URL,
-		httpClient: &http.Client{},
+		apiKey:  "test-key",
+		model:   "gpt-3.5-turbo",
+		baseURL: "http://openai.test",
+		httpClient: newTestHTTPClient(func(req *http.Request) (*http.Response, error) {
+			gotMethod = req.Method
+			gotPath = req.URL.Path
+			gotAuth = req.Header.Get("Authorization")
+
+			payload, err := json.Marshal(response)
+			if err != nil {
+				return newTestHTTPResponse(req, http.StatusInternalServerError, "text/plain", err.Error()), nil
+			}
+			return newTestHTTPResponse(req, http.StatusOK, "application/json", string(payload)), nil
+		}),
 	}
 
 	req := &CompletionRequest{
@@ -142,6 +146,16 @@ func TestOpenAICompatibleClient_UsageData_NoUsage(t *testing.T) {
 	// Verify content
 	if resp.Content != "Hello, world!" {
 		t.Errorf("Expected content 'Hello, world!', got '%s'", resp.Content)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Errorf("Expected POST request, got %s", gotMethod)
+	}
+	if gotPath != "/chat/completions" {
+		t.Errorf("Expected /chat/completions, got %s", gotPath)
+	}
+	if gotAuth != "Bearer test-key" {
+		t.Errorf("Expected Authorization header, got %s", gotAuth)
 	}
 
 	// Verify usage data is nil when not provided

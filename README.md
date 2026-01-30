@@ -166,6 +166,6 @@ Supported providers:
 
 Recommended since 2025-12-10:
 - Orchestrator model: Kimi K2.5 or ZAI GLM 4.7
-- Summarization model: Mistral Codestral 2508 or Qwen 3 32b
+- Summarization model: Ministral 3 14B Instruct 2512
 - Planning model: Kimi K2.5
 - Safety model: GPT OSS 20b

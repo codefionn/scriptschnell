@@ -335,7 +335,7 @@ The requested logic is found in internal/module/file.go function DoWork().
 			Messages:      llmMessages,
 			Tools:         registry.ToJSONSchema(),
 			Temperature:   0,
-			MaxTokens:     4096, // Reasonable limit for investigation steps
+			MaxTokens:     consts.DefaultMaxTokens, // Reasonable limit for investigation steps
 			SystemPrompt:  systemPrompt,
 			EnableCaching: true, // Enable caching for investigation to speed up repeated queries
 			CacheTTL:      "5m",

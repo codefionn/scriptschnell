@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/actor"
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
@@ -374,11 +375,14 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		logger.Debug("Planning iteration %d/%d", iteration+1, maxIterations)
 
 		// Create completion request
+		// Note: Temperature is set to 1.0 as some models (e.g., certain reasoning models)
+		// only support temperature=1 and will reject other values with:
+		// "invalid temperature: only 1 is allowed for this model"
 		completeReq := &llm.CompletionRequest{
 			Messages:      messages,
 			Tools:         p.toolRegistry.ToJSONSchema(),
-			Temperature:   0.3, // Lower temperature for more consistent planning
-			MaxTokens:     4096,
+			Temperature:   1.0,
+			MaxTokens:     consts.DefaultMaxTokens,
 			SystemPrompt:  systemPrompt,
 			EnableCaching: true, // Enable caching for planning to speed up multi-turn conversations
 			CacheTTL:      "5m",

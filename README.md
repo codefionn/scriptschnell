@@ -165,6 +165,7 @@ Supported providers:
 - OpenAI-compatible
 
 Recommended since 2025-12-10:
-- Orchestrator model: Google Gemini 3 Pro or zai-glm-4.6
-- Summarization model: Mistral Codestral 2508
-- Planning model: Claude Opus 4.5
+- Orchestrator model: Kimi K2.5 or ZAI GLM 4.7
+- Summarization model: Mistral Codestral 2508 or Qwen 3 32b
+- Planning model: Kimi K2.5
+- Safety model: GPT OSS 20b

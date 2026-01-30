@@ -1707,6 +1707,9 @@ func (o *Orchestrator) classifyPromptSimplicity(ctx context.Context, prompt stri
 }
 
 func parseSimplicityResponse(content string) (bool, string, bool) {
+	// Strip <think> tags from reasoning models
+	content = stripThinkTags(content)
+
 	type payload struct {
 		Simple interface{} `json:"simple"`
 		Reason string      `json:"reason"`
@@ -2379,7 +2382,7 @@ func (o *Orchestrator) runOrchestrationLoopCore(
 		if maxTokens == 0 {
 			maxTokens = o.config.MaxTokens
 			if maxTokens == 0 {
-				maxTokens = 4096
+				maxTokens = consts.DefaultMaxTokens
 			}
 		}
 

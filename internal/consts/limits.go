@@ -25,7 +25,7 @@ const (
 // LLM default configurations
 const (
 	// DefaultMaxTokens is the default maximum tokens for LLM responses
-	DefaultMaxTokens = 1024
+	DefaultMaxTokens = 16384
 )
 
 // Health monitoring intervals (in milliseconds)

@@ -120,6 +120,9 @@ Respond ONLY with a JSON object in the following format:
 	decision := &PlanningDecision{}
 	content := resp.Content
 
+	// Strip <think> tags (reasoning models like DeepSeek output these)
+	content = stripThinkTags(content)
+
 	// Try to extract JSON if wrapped in markdown code blocks
 	if start := strings.Index(content, "```json"); start != -1 {
 		content = content[start+7:]
@@ -135,6 +138,11 @@ Respond ONLY with a JSON object in the following format:
 
 	// Validate that we have clean JSON
 	content = strings.TrimSpace(content)
+
+	// Fix multiline JSON strings: LLMs sometimes output actual newlines inside string values
+	// instead of escaped \n. We need to escape newlines that appear inside JSON string values.
+	content = normalizeJSONStrings(content)
+
 	var jsonCheck interface{}
 	if err := json.Unmarshal([]byte(content), &jsonCheck); err != nil {
 		logger.Warn("Summary model decision does not equal exactly what was asked for: %q", content)
@@ -148,4 +156,70 @@ Respond ONLY with a JSON object in the following format:
 	}
 
 	return decision, nil
+}
+
+// normalizeJSONStrings escapes newlines that appear inside JSON string values.
+// LLMs sometimes output multiline strings with actual newlines instead of escaped \n.
+func normalizeJSONStrings(content string) string {
+	var result strings.Builder
+	result.Grow(len(content))
+
+	inString := false
+	escaped := false
+
+	for i, r := range content {
+		if escaped {
+			result.WriteRune(r)
+			escaped = false
+			continue
+		}
+
+		if r == '\\' {
+			result.WriteRune(r)
+			escaped = true
+			continue
+		}
+
+		if r == '"' {
+			inString = !inString
+			result.WriteRune(r)
+			continue
+		}
+
+		if inString && (r == '\n' || r == '\r') {
+			// Replace newline with escaped newline, but be careful not to
+			// add escapes inside already-valid JSON structure
+			if r == '\n' {
+				result.WriteString("\\n")
+			}
+			// Skip \r to normalize line endings
+			if r == '\r' && i+1 < len(content) && content[i+1] != '\n' {
+				result.WriteString("\\n")
+			}
+		} else {
+			result.WriteRune(r)
+		}
+	}
+
+	return result.String()
+}
+
+// stripThinkTags removes <think>...</think> blocks from content.
+// Reasoning models like DeepSeek wrap their internal reasoning in these tags.
+func stripThinkTags(content string) string {
+	for {
+		start := strings.Index(content, "<think>")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(content[start:], "</think>")
+		if end == -1 {
+			// Unclosed tag, just remove the opening tag and continue
+			content = strings.TrimSpace(content[:start] + content[start+len("<think>"):])
+			break
+		}
+		end += start + len("</think>")
+		content = strings.TrimSpace(content[:start] + content[end:])
+	}
+	return content
 }

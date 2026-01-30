@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
@@ -220,6 +221,9 @@ If ALL checks pass, you can provide a short success message. If any check fails,
 
 // extractVerificationResult parses the verification result from the LLM response.
 func extractVerificationResult(content string) *VerificationResult {
+	// Strip <think> tags from reasoning models
+	content = stripThinkTags(content)
+
 	// Look for verification_result tags
 	startTag := "<verification_result>"
 	endTag := "</verification_result>"
@@ -242,6 +246,9 @@ func extractVerificationResult(content string) *VerificationResult {
 	}
 
 	jsonContent := strings.TrimSpace(content[startIdx+len(startTag) : endIdx])
+
+	// Fix multiline JSON strings from LLM output
+	jsonContent = normalizeJSONStrings(jsonContent)
 
 	var result VerificationResult
 	if err := json.Unmarshal([]byte(jsonContent), &result); err != nil {
@@ -344,7 +351,7 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 			Messages:      llmMessages,
 			Tools:         registry.ToJSONSchema(),
 			Temperature:   0,
-			MaxTokens:     4096,
+			MaxTokens:     consts.DefaultMaxTokens,
 			SystemPrompt:  systemPrompt,
 			EnableCaching: true,
 			CacheTTL:      "5m",

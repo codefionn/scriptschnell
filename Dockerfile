@@ -91,13 +91,15 @@ RUN echo "Generating templ templates..." && \
 
 # Generate embedded TinyGo file for linux/amd64
 RUN echo "Generating embedded TinyGo for linux/amd64..." && \
-    GOOS=linux GOARCH=amd64 go run internal/tools/embed_tinygo_gen.go -goos=linux -goarch=amd64 internal/tools/embedded/tinygo_linux_amd64.tar.gz
+    go run internal/tools/embed_tinygo_gen.go -goos=linux -goarch=amd64 internal/tools/embedded/tinygo_linux_amd64.tar.gz
 
 # Build for linux/amd64 with static linking and embedded TinyGo
+# Use -p 2 to limit compilation parallelism (both arch stages run concurrently under BuildKit)
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     CC=x86_64-linux-gnu-gcc \
     CXX=x86_64-linux-gnu-g++ \
     go build \
+    -p 2 \
     -ldflags="-w -s -linkmode external -extldflags '-static'" \
     -tags="tinygo_embed,tinygo_has_embed_data" \
     -o scriptschnell-amd64 \
@@ -128,13 +130,15 @@ RUN echo "Generating templ templates..." && \
 
 # Generate embedded TinyGo file for linux/arm64
 RUN echo "Generating embedded TinyGo for linux/arm64..." && \
-    GOOS=linux GOARCH=arm64 go run internal/tools/embed_tinygo_gen.go -goos=linux -goarch=arm64 internal/tools/embedded/tinygo_linux_arm64.tar.gz
+    go run internal/tools/embed_tinygo_gen.go -goos=linux -goarch=arm64 internal/tools/embedded/tinygo_linux_arm64.tar.gz
 
 # Build for linux/arm64 with static linking and embedded TinyGo
+# Use -p 2 to limit compilation parallelism (both arch stages run concurrently under BuildKit)
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=arm64 \
     CC=aarch64-linux-gnu-gcc \
     CXX=aarch64-linux-gnu-g++ \
     go build \
+    -p 2 \
     -ldflags="-w -s -linkmode external -extldflags '-static'" \
     -tags="tinygo_embed,tinygo_has_embed_data" \
     -o scriptschnell-arm64 \

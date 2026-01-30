@@ -126,6 +126,7 @@ type Config struct {
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
 	secretsPassword string       `json:"-"` // Kept for backward compatibility
+	mu              sync.RWMutex `json:"-"` // Protects the entire config during save/load operations
 }
 
 // SecretsSettings keeps track of password-protection state.
@@ -399,10 +400,39 @@ func (c *Config) GetContextDirectories(workspace string) []string {
 	return result
 }
 
-// Save saves configuration to file using atomic writes, but only if something has changed
+// SetOpenTabState sets the tab state for a workspace in a thread-safe manner.
+// This method acquires a write lock to ensure safe concurrent access.
+func (c *Config) SetOpenTabState(workspace string, tabState *WorkspaceTabState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.OpenTabs == nil {
+		c.OpenTabs = make(map[string]*WorkspaceTabState)
+	}
+	c.OpenTabs[workspace] = tabState
+}
+
+// GetOpenTabState returns the tab state for a workspace in a thread-safe manner.
+// This method acquires a read lock to ensure safe concurrent access.
+func (c *Config) GetOpenTabState(workspace string) (*WorkspaceTabState, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.OpenTabs == nil {
+		return nil, false
+	}
+	state, ok := c.OpenTabs[workspace]
+	return state, ok
+}
+
+// Save saves configuration to file using atomic writes, but only if something has changed.
+// This method is thread-safe and can be called concurrently from multiple goroutines.
 func (c *Config) Save(path string) error {
+	// Acquire read lock while marshaling to ensure consistent snapshot of config state
+	c.mu.RLock()
 	// Check if the file already exists and if content is unchanged
 	data, err := c.marshalWithEncryptedSecrets()
+	c.mu.RUnlock()
 	if err != nil {
 		return err
 	}

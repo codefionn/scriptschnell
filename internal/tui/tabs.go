@@ -297,21 +297,20 @@ func (m *Model) saveTabState() error {
 		}
 	}
 
-	if m.config.OpenTabs == nil {
-		m.config.OpenTabs = make(map[string]*config.WorkspaceTabState)
-	}
-	m.config.OpenTabs[m.workingDir] = tabState
+	// Use thread-safe method to set tab state
+	m.config.SetOpenTabState(m.workingDir, tabState)
 
 	return m.config.Save(config.GetConfigPath())
 }
 
 // restoreTabs restores tabs from saved config
 func (m *Model) restoreTabs() error {
-	if m.config == nil || m.config.OpenTabs == nil {
+	if m.config == nil {
 		return m.createDefaultTab()
 	}
 
-	tabState, ok := m.config.OpenTabs[m.workingDir]
+	// Use thread-safe method to get tab state
+	tabState, ok := m.config.GetOpenTabState(m.workingDir)
 	if !ok || len(tabState.TabIDs) == 0 {
 		return m.createDefaultTab()
 	}

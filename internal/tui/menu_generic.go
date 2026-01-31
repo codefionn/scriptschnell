@@ -154,6 +154,14 @@ func NewGenericMenu(items []MenuItem, config MenuConfig) *GenericMenu {
 		listItems[i] = item
 	}
 
+	// Ensure minimum dimensions to prevent panics in bubbles list
+	if config.Width < 20 {
+		config.Width = 20
+	}
+	if config.Height < 10 {
+		config.Height = 10
+	}
+
 	// Create delegate with styles from config
 	delegate := genericItemDelegate{
 		itemStyle:         config.ItemStyle,
@@ -184,13 +192,20 @@ func NewGenericMenu(items []MenuItem, config MenuConfig) *GenericMenu {
 		key.WithHelp("ctrl+l", "clear filter"),
 	)
 
-	return &GenericMenu{
+	menu := &GenericMenu{
 		list:         l,
 		config:       config,
 		delegate:     delegate,
 		startFilter:  config.StartFiltering,
 		customKeyMap: make(map[string]func() tea.Msg),
 	}
+
+	// If items is empty, disable filtering to prevent panic in bubbles list
+	if len(items) == 0 {
+		menu.list.SetFilteringEnabled(false)
+	}
+
+	return menu
 }
 
 // SetCustomKeyHandler sets a custom handler for a specific key
@@ -301,6 +316,18 @@ func (m *GenericMenu) View() string {
 		return ""
 	}
 
+	// Guard against empty items to prevent panic in bubbles list
+	if len(m.list.Items()) == 0 {
+		emptyMsg := "No items available"
+		if m.config.Title != "" {
+			emptyMsg = m.config.TitleStyle.Render(m.config.Title) + "\n\n" + emptyMsg
+		}
+		if m.config.HelpText != "" {
+			emptyMsg += "\n\n" + m.config.HelpStyle.Render(m.config.HelpText)
+		}
+		return emptyMsg
+	}
+
 	view := m.list.View()
 	if m.config.HelpText != "" {
 		view += "\n" + m.config.HelpStyle.Render(m.config.HelpText)
@@ -320,6 +347,13 @@ func (m *GenericMenu) SetItems(items []MenuItem) {
 		listItems[i] = item
 	}
 	m.list.SetItems(listItems)
+
+	// Disable filtering if no items to prevent panic
+	if len(items) == 0 {
+		m.list.SetFilteringEnabled(false)
+	} else if m.config.EnableFiltering {
+		m.list.SetFilteringEnabled(true)
+	}
 }
 
 // SetSize updates the menu dimensions

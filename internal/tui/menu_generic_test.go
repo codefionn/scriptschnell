@@ -376,6 +376,52 @@ func TestMenuView(t *testing.T) {
 	}
 }
 
+// TestMenuViewEmptyItems tests view rendering with empty items doesn't panic
+func TestMenuViewEmptyItems(t *testing.T) {
+	config := DefaultMenuConfig()
+	config.Title = "Empty Menu"
+	config.HelpText = "Test help"
+
+	// Create menu with empty items - this should not panic
+	menu := NewGenericMenu([]MenuItem{}, config)
+
+	// View should show empty message instead of crashing
+	view := menu.View()
+	if view == "" {
+		t.Error("View should not be empty even with no items")
+	}
+	if !contains(view, "No items available") {
+		t.Error("View should show 'No items available' message")
+	}
+
+	// Update with window size should also not panic
+	resizeMsg := tea.WindowSizeMsg{Width: 80, Height: 24}
+	updatedModel, _ := menu.Update(resizeMsg)
+	menu = updatedModel.(*GenericMenu)
+
+	// View after resize should still work
+	view = menu.View()
+	if view == "" {
+		t.Error("View should not be empty after resize")
+	}
+}
+
+// TestMenuSetItemsEmpty tests setting empty items doesn't panic
+func TestMenuSetItemsEmpty(t *testing.T) {
+	config := DefaultMenuConfig()
+	items := createTestItems(3)
+	menu := NewGenericMenu(items, config)
+
+	// Set empty items - should not panic
+	menu.SetItems([]MenuItem{})
+
+	// View should show empty message
+	view := menu.View()
+	if !contains(view, "No items available") {
+		t.Error("View should show 'No items available' after SetItems with empty slice")
+	}
+}
+
 // TestDefaultMenuConfig tests default config values
 func TestDefaultMenuConfig(t *testing.T) {
 	config := DefaultMenuConfig()

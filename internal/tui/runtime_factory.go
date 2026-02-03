@@ -40,16 +40,22 @@ type TabRuntime struct {
 
 // RuntimeFactory creates per-tab runtime instances
 type RuntimeFactory struct {
-	shared     *SharedResources
-	runtimes   map[int]*TabRuntime // Map of tabID -> runtime
-	mu         sync.RWMutex
-	workingDir string
-	cliMode    bool
+	shared             *SharedResources
+	runtimes           map[int]*TabRuntime // Map of tabID -> runtime
+	mu                 sync.RWMutex
+	workingDir         string
+	cliMode            bool
+	requireSandboxAuth bool
 }
 
 // NewRuntimeFactory creates a new factory with shared resources
 func NewRuntimeFactory(cfg *config.Config, providerMgr *provider.Manager, workingDir string, cliMode bool) (*RuntimeFactory, error) {
-	logger.Info("Creating RuntimeFactory for workspace: %s", workingDir)
+	return NewRuntimeFactoryWithRequireSandboxAuth(cfg, providerMgr, workingDir, cliMode, false)
+}
+
+// NewRuntimeFactoryWithRequireSandboxAuth creates a factory with sandbox auth requirement
+func NewRuntimeFactoryWithRequireSandboxAuth(cfg *config.Config, providerMgr *provider.Manager, workingDir string, cliMode bool, requireSandboxAuth bool) (*RuntimeFactory, error) {
+	logger.Info("Creating RuntimeFactory for workspace: %s, requireSandboxAuth=%v", workingDir, requireSandboxAuth)
 
 	// Create shared filesystem
 	filesystem := fs.NewCachedFS(
@@ -113,10 +119,11 @@ func NewRuntimeFactory(cfg *config.Config, providerMgr *provider.Manager, workin
 	}
 
 	return &RuntimeFactory{
-		shared:     shared,
-		runtimes:   make(map[int]*TabRuntime),
-		workingDir: workingDir,
-		cliMode:    cliMode,
+		shared:             shared,
+		runtimes:           make(map[int]*TabRuntime),
+		workingDir:         workingDir,
+		cliMode:            cliMode,
+		requireSandboxAuth: requireSandboxAuth,
 	}, nil
 }
 
@@ -145,6 +152,7 @@ func (rf *RuntimeFactory) CreateTabRuntime(tabID int, sess *session.Session) (*T
 		sess,                        // Tab's session
 		rf.shared.sessionStorageRef, // Shared session storage
 		rf.shared.domainBlockerRef,  // Shared domain blocker
+		rf.requireSandboxAuth,       // requireSandboxAuth (passed from CLI flag)
 	)
 	if err != nil {
 		cancel()

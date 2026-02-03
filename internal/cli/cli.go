@@ -25,6 +25,7 @@ type Options struct {
 	AllowedDirs         []string
 	AllowedFiles        []string
 	AllowedDomains      []string
+	RequireSandboxAuth  bool // Require authorization for every go_sandbox and shell call
 	Model               string
 	Provider            string
 	JSONOutput          bool
@@ -79,7 +80,11 @@ func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI
 
 	// Create orchestrator which handles all the tool execution logic
 	// CLI mode is always unattended, so pass cliMode=true
-	orch, err := tui.NewOrchestrator(cfg, providerMgr, true)
+	requireSandboxAuth := false
+	if opts != nil {
+		requireSandboxAuth = opts.RequireSandboxAuth
+	}
+	orch, err := tui.NewOrchestratorWithRequireSandboxAuth(cfg, providerMgr, true, requireSandboxAuth)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
 	}
@@ -92,6 +97,7 @@ func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI
 		handlerOpts.AllowedDirs = opts.AllowedDirs
 		handlerOpts.AllowedFiles = opts.AllowedFiles
 		handlerOpts.AllowedDomains = opts.AllowedDomains
+		handlerOpts.RequireSandboxAuth = opts.RequireSandboxAuth
 	}
 	handler := actor.NewNonInteractiveHandler(handlerOpts)
 	if err := orch.SetUserInteractionHandler(handler); err != nil {

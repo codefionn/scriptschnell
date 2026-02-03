@@ -13,3 +13,4 @@ type (
 type Orchestrator = orchestratorpkg.Orchestrator
 
 var NewOrchestrator = orchestratorpkg.NewOrchestrator
+var NewOrchestratorWithRequireSandboxAuth = orchestratorpkg.NewOrchestratorWithRequireSandboxAuth

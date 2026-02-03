@@ -10,6 +10,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
@@ -35,6 +36,7 @@ type AuthorizationOptions struct {
 	AllowedFiles        []string
 	AllowedDomains      []string
 	AllowedCommands     []string // Command prefixes that are pre-authorized
+	RequireSandboxAuth  bool     // Require authorization for every go_sandbox and shell call
 }
 
 // AuthorizationActor handles policy decisions for tool calls in a centralized manner.
@@ -44,14 +46,15 @@ type AuthorizationActor struct {
 	session         *session.Session
 	summarizeClient llm.Client
 
-	options          AuthorizationOptions
-	allowedFiles     map[string]struct{}
-	allowedDirs      []string
-	allowedDomains   map[string]struct{}
-	allowedCommands  []string // Prefixes of commands that are pre-authorized
-	workingDir       string
-	lastLLMSuccesses []authorizationRecord
-	lastLLMDeclines  []authorizationRecord
+	options            AuthorizationOptions
+	allowedFiles       map[string]struct{}
+	allowedDirs        []string
+	allowedDomains     map[string]struct{}
+	allowedCommands    []string // Prefixes of commands that are pre-authorized
+	requireSandboxAuth bool
+	workingDir         string
+	lastLLMSuccesses   []authorizationRecord
+	lastLLMDeclines    []authorizationRecord
 }
 
 // NewAuthorizationActor constructs a new authorization actor instance.
@@ -70,6 +73,7 @@ func NewAuthorizationActor(id string, filesystem fs.FileSystem, sess *session.Se
 }
 
 func (a *AuthorizationActor) initPreauthorizations() {
+	logger.Debug("AuthorizationActor: initPreauthorizations called with RequireSandboxAuth=%v", a.requireSandboxAuth)
 	if a.session != nil && a.session.WorkingDir != "" {
 		if abs, err := filepath.Abs(a.session.WorkingDir); err == nil {
 			a.workingDir = abs
@@ -114,6 +118,8 @@ func (a *AuthorizationActor) initPreauthorizations() {
 			a.allowedCommands = append(a.allowedCommands, prefix)
 		}
 	}
+
+	a.requireSandboxAuth = a.options.RequireSandboxAuth
 }
 
 func (a *AuthorizationActor) normalizePath(path string) (string, error) {
@@ -353,8 +359,29 @@ func (c *AuthorizationActorClient) Authorize(ctx context.Context, toolName strin
 
 // authorize evaluates tool-specific authorization policies.
 func (a *AuthorizationActor) authorize(ctx context.Context, toolName string, params map[string]interface{}) (*AuthorizationDecision, error) {
+	logger.Debug("AuthorizationActor: authorize called for tool=%s, requireSandboxAuth=%v", toolName, a.requireSandboxAuth)
 	if a.options.DangerouslyAllowAll {
 		return &AuthorizationDecision{Allowed: true}, nil
+	}
+
+	// Handle go_sandbox - always require user authorization if RequireSandboxAuth is set
+	if toolName == ToolNameGoSandbox && a.requireSandboxAuth {
+		logger.Info("Authorization: go_sandbox requires authorization (RequireSandboxAuth=true)")
+		return &AuthorizationDecision{
+			Allowed:           false,
+			Reason:            "go_sandbox requires user authorization (--require-sandbox-auth flag is set)",
+			RequiresUserInput: true,
+		}, nil
+	}
+
+	// Handle shell and command - always require user authorization if RequireSandboxAuth is set
+	if (toolName == ToolNameShell || toolName == ToolNameCommand) && a.requireSandboxAuth {
+		logger.Info("Authorization: %s requires authorization (RequireSandboxAuth=true)", toolName)
+		return &AuthorizationDecision{
+			Allowed:           false,
+			Reason:            "shell command requires user authorization (--require-sandbox-auth flag is set)",
+			RequiresUserInput: true,
+		}, nil
 	}
 
 	switch toolName {

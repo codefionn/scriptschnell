@@ -22,6 +22,8 @@ type NonInteractiveOptions struct {
 	AllowedFiles []string
 	// AllowAllNetwork auto-approves all network operations
 	AllowAllNetwork bool
+	// RequireSandboxAuth requires authorization for every go_sandbox and shell call
+	RequireSandboxAuth bool
 }
 
 // NonInteractiveHandler handles user interactions in non-interactive mode (CLI).
@@ -170,11 +172,42 @@ func (h *NonInteractiveHandler) handleToolAuthorization(requestID string, payloa
 		}
 	}
 
+	// Check go_sandbox tool
+	if toolName == "go_sandbox" {
+		// If RequireSandboxAuth is set, deny go_sandbox in non-interactive mode
+		if h.opts.RequireSandboxAuth {
+			logger.Debug("NonInteractiveHandler: go_sandbox requires authorization but running in non-interactive mode")
+			return &UserInteractionResponse{
+				RequestID:    requestID,
+				Approved:     false,
+				Acknowledged: true,
+				Error:        fmt.Errorf("go_sandbox requires authorization (--require-sandbox-auth flag is set, but non-interactive mode cannot prompt for approval)"),
+			}, nil
+		}
+		// Otherwise, allow go_sandbox in non-interactive mode
+		return &UserInteractionResponse{
+			RequestID:    requestID,
+			Approved:     true,
+			Acknowledged: true,
+		}, nil
+	}
+
 	// Check shell commands
 	if toolName == "shell" || toolName == "command" {
 		var command string
 		if v, ok := payload.Parameters["command"].(string); ok {
 			command = v
+		}
+
+		// If RequireSandboxAuth is set, deny shell in non-interactive mode
+		if h.opts.RequireSandboxAuth && command != "" {
+			logger.Debug("NonInteractiveHandler: shell command '%s' requires authorization but running in non-interactive mode", command)
+			return &UserInteractionResponse{
+				RequestID:    requestID,
+				Approved:     false,
+				Acknowledged: true,
+				Error:        fmt.Errorf("shell command requires authorization (--require-sandbox-auth flag is set, but non-interactive mode cannot prompt for approval)"),
+			}, nil
 		}
 
 		if command != "" {

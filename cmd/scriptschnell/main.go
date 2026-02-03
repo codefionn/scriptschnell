@@ -191,7 +191,7 @@ func run() (err error) {
 	}
 
 	// Run TUI mode
-	return runTUI(cfg, providerMgr)
+	return runTUI(cfg, providerMgr, cliOptions)
 }
 
 func runCLI(cfg *config.Config, providerMgr *provider.Manager, prompt string, options *cli.Options) error {
@@ -421,20 +421,21 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	fs.SetOutput(os.Stderr)
 
 	var (
-		dangerous    bool
-		allowNetwork bool
-		allowDirs    stringSlice
-		allowFiles   stringSlice
-		allowDomains stringSlice
-		showHelp     bool
-		model        string
-		provider     string
-		acpMode      bool
-		webMode      bool
-		webDebug     bool
-		jsonOutput   bool
-		jsonExtended bool
-		jsonFull     bool
+		dangerous          bool
+		allowNetwork       bool
+		allowDirs          stringSlice
+		allowFiles         stringSlice
+		allowDomains       stringSlice
+		requireSandboxAuth bool
+		showHelp           bool
+		model              string
+		provider           string
+		acpMode            bool
+		webMode            bool
+		webDebug           bool
+		jsonOutput         bool
+		jsonExtended       bool
+		jsonFull           bool
 
 		// pprof flags
 		pprofAddr                 string
@@ -453,6 +454,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	fs.Var(&allowDirs, "allow-dir", "Pre-authorize a directory for write operations (repeatable)")
 	fs.Var(&allowFiles, "allow-file", "Pre-authorize a specific file for write operations (repeatable)")
 	fs.Var(&allowDomains, "allow-domain", "Pre-authorize network access to a domain (repeatable)")
+	fs.BoolVar(&requireSandboxAuth, "require-sandbox-auth", false, "Require authorization for every go_sandbox and shell call")
 	fs.StringVar(&model, "model", "", "Model to use (e.g., gpt-5, claude-sonnet-4.5, gemini-2.5-pro)")
 	fs.StringVar(&provider, "provider", "", "Provider name (e.g., openai, anthropic, google)")
 	fs.BoolVar(&acpMode, "acp", false, "Run in Agent Client Protocol (ACP) mode for integration with code editors")
@@ -492,7 +494,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	}
 
 	remaining := fs.Args()
-	optionsUsed := dangerous || allowNetwork || len(allowDirs) > 0 || len(allowFiles) > 0 || len(allowDomains) > 0
+	optionsUsed := dangerous || allowNetwork || requireSandboxAuth || len(allowDirs) > 0 || len(allowFiles) > 0 || len(allowDomains) > 0
 
 	// Handle ACP mode
 	if acpMode {
@@ -519,10 +521,11 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	}
 
 	if len(remaining) == 0 {
-		if optionsUsed {
-			return "", nil, false, nil, false, false, nil
+		// TUI mode - return options with RequireSandboxAuth if set
+		opts := &cli.Options{
+			RequireSandboxAuth: requireSandboxAuth,
 		}
-		return "", nil, false, nil, false, false, nil
+		return "", opts, false, nil, false, false, nil
 	}
 
 	prompt := strings.TrimSpace(strings.Join(remaining, " "))
@@ -536,6 +539,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 		AllowedDirs:         allowDirs.toStrings(),
 		AllowedFiles:        allowFiles.toStrings(),
 		AllowedDomains:      allowDomains.toStrings(),
+		RequireSandboxAuth:  requireSandboxAuth,
 		Model:               model,
 		Provider:            provider,
 		JSONOutput:          jsonOutput,
@@ -562,7 +566,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	return prompt, opts, true, pprofCfg, false, false, nil
 }
 
-func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
+func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.Options) error {
 	logger.Info("Running in TUI mode")
 
 	// Create cancellable context for application lifecycle
@@ -570,7 +574,11 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager) error {
 	defer cancel()
 
 	// Create RuntimeFactory for multi-tab concurrent generation
-	factory, err := tui.NewRuntimeFactory(cfg, providerMgr, cfg.WorkingDir, false)
+	requireSandboxAuth := false
+	if cliOptions != nil {
+		requireSandboxAuth = cliOptions.RequireSandboxAuth
+	}
+	factory, err := tui.NewRuntimeFactoryWithRequireSandboxAuth(cfg, providerMgr, cfg.WorkingDir, false, requireSandboxAuth)
 	if err != nil {
 		logger.Error("Failed to create RuntimeFactory: %v", err)
 		return fmt.Errorf("failed to create RuntimeFactory: %w", err)

@@ -54,8 +54,9 @@ func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *prov
 		false, // cliMode
 		filesystem,
 		sess,
-		nil, // sessionStorageRef
-		nil, // domainBlockerRef
+		nil,   // sessionStorageRef
+		nil,   // domainBlockerRef
+		false, // requireSandboxAuth (web mode doesn't use this flag)
 	)
 	if err != nil {
 		filesystem.Close()

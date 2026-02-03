@@ -210,6 +210,11 @@ func NewOrchestrator(cfg *config.Config, providerMgr *provider.Manager, cliMode 
 	return NewOrchestratorWithFS(cfg, providerMgr, cliMode, nil)
 }
 
+// NewOrchestratorWithRequireSandboxAuth creates an orchestrator with sandbox auth requirement
+func NewOrchestratorWithRequireSandboxAuth(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, requireSandboxAuth bool) (*Orchestrator, error) {
+	return NewOrchestratorWithFSAndRequireSandboxAuth(cfg, providerMgr, cliMode, nil, requireSandboxAuth)
+}
+
 // NewOrchestratorWithTodoActor creates a new orchestrator with a custom todo actor
 func NewOrchestratorWithTodoActor(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, customTodoActor tools.TodoActorInterface) (*Orchestrator, error) {
 	return NewOrchestratorWithFSAndTodoActor(cfg, providerMgr, cliMode, nil, customTodoActor)
@@ -219,9 +224,18 @@ func NewOrchestratorWithFS(cfg *config.Config, providerMgr *provider.Manager, cl
 	return NewOrchestratorWithFSAndTodoActor(cfg, providerMgr, cliMode, customFS, nil)
 }
 
+func NewOrchestratorWithFSAndRequireSandboxAuth(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, customFS fs.FileSystem, requireSandboxAuth bool) (*Orchestrator, error) {
+	return NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg, providerMgr, cliMode, customFS, nil, requireSandboxAuth)
+}
+
 // NewOrchestratorWithFSAndTodoActor creates a new orchestrator with custom filesystem and todo actor
 func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, customFS fs.FileSystem, customTodoActor tools.TodoActorInterface) (*Orchestrator, error) {
-	logger.Debug("Creating new orchestrator with working_dir=%s, cliMode=%v", cfg.WorkingDir, cliMode)
+	return NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg, providerMgr, cliMode, customFS, customTodoActor, false)
+}
+
+// NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth creates a new orchestrator with custom filesystem, todo actor, and sandbox auth requirement
+func NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg *config.Config, providerMgr *provider.Manager, cliMode bool, customFS fs.FileSystem, customTodoActor tools.TodoActorInterface, requireSandboxAuth bool) (*Orchestrator, error) {
+	logger.Debug("Creating new orchestrator with working_dir=%s, cliMode=%v, requireSandboxAuth=%v", cfg.WorkingDir, cliMode, requireSandboxAuth)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create filesystem (use custom if provided, otherwise create default)
@@ -287,8 +301,9 @@ func NewOrchestratorWithFSAndTodoActor(cfg *config.Config, providerMgr *provider
 	}
 
 	authOpts := &tools.AuthorizationOptions{
-		AllowedCommands: allowedCommandPrefixes,
-		AllowedDomains:  allowedDomainPatterns,
+		AllowedCommands:    allowedCommandPrefixes,
+		AllowedDomains:     allowedDomainPatterns,
+		RequireSandboxAuth: requireSandboxAuth,
 	}
 
 	authActor := tools.NewAuthorizationActor("authorization", filesystem, sess, orch.summarizeClient, authOpts)
@@ -507,8 +522,9 @@ func NewOrchestratorWithSharedResources(
 	sess *session.Session,
 	sharedSessionStorage *actor.ActorRef,
 	sharedDomainBlocker *actor.ActorRef,
+	requireSandboxAuth bool,
 ) (*Orchestrator, error) {
-	logger.Debug("Creating orchestrator with shared resources for session %s", sess.ID)
+	logger.Debug("Creating orchestrator with shared resources for session %s, requireSandboxAuth=%v", sess.ID, requireSandboxAuth)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Use provided shared filesystem
@@ -555,8 +571,9 @@ func NewOrchestratorWithSharedResources(
 	}
 
 	authOpts := &tools.AuthorizationOptions{
-		AllowedCommands: allowedCommandPrefixes,
-		AllowedDomains:  allowedDomainPatterns,
+		AllowedCommands:    allowedCommandPrefixes,
+		AllowedDomains:     allowedDomainPatterns,
+		RequireSandboxAuth: requireSandboxAuth,
 	}
 
 	authActor := tools.NewAuthorizationActor("authorization", filesystem, sess, orch.summarizeClient, authOpts)

@@ -5,6 +5,7 @@ import "sync"
 // Global feature flags map for quick access
 var Enabled = map[string]bool{
 	"secret_based_auth": true, // Enable secret-based authorization by default
+	"tool_call_rewrite": true, // Enable tool call rewriting by default
 }
 
 // FeatureFlags manages runtime feature flags for tools and capabilities.

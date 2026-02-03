@@ -115,6 +115,7 @@ type Orchestrator struct {
 	vcsRef                 *actor.ActorRef
 	vcsCancel              context.CancelFunc
 	vcsClient              *tools.VCSActorClient
+	toolCallRewriter       *ToolCallRewriter
 }
 
 const (
@@ -1163,6 +1164,14 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 
 	registry := tools.NewRegistryWithSecrets(o.authorizer, secretdetect.NewDetector())
 	o.toolRegistry = registry
+
+	// Initialize tool call rewriter with summarization model
+	o.toolCallRewriter = NewToolCallRewriter(o.summarizeClient, o.toolRegistry)
+	if o.toolCallRewriter.CanRewrite() {
+		logger.Debug("Tool call rewriter enabled")
+	} else {
+		logger.Debug("Tool call rewriter disabled (feature flag disabled or no summarize client)")
+	}
 
 	var activeMCPSanitized []string
 	seenMCP := make(map[string]struct{})
@@ -4029,6 +4038,35 @@ func (o *Orchestrator) ExecuteTool(ctx context.Context, toolCall *tools.ToolCall
 	var progressFn progress.Callback
 	if progressCallback != nil {
 		progressFn = progressCallback
+	}
+
+	// Check if tool exists in registry
+	if _, exists := o.toolRegistry.GetExecutor(toolName); !exists {
+		// Tool not found - try to rewrite using the rewriter
+		if o.toolCallRewriter != nil && o.toolCallRewriter.CanRewrite() {
+			rewrittenName, rewrittenParams, explanation, err := o.toolCallRewriter.RewriteToolCall(
+				ctx,
+				toolName,
+				toolCall.Parameters,
+				"tool not found in registry",
+			)
+			if err == nil {
+				logger.Info("Tool call rewritten: %s → %s (explanation: %s)", toolName, rewrittenName, explanation)
+				// Update tool call with rewritten values
+				toolCall.Name = rewrittenName
+				toolCall.Parameters = rewrittenParams
+				// Notify about rewrite via progress
+				if progressFn != nil {
+					dispatchProgress(progressFn, progress.Update{
+						Message:   fmt.Sprintf("Rewrote tool call: %s → %s (%s)", toolName, rewrittenName, explanation),
+						Mode:      progress.ReportNoStatus,
+						Ephemeral: true,
+					})
+				}
+				// Continue with rewritten tool
+				toolName = rewrittenName
+			}
+		}
 	}
 
 	if o.toolExecutor != nil {

@@ -1335,11 +1335,13 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			// Deny and close
 			logger.Debug("User denied authorization via ESC/Ctrl+C for authID %s", m.activeAuthorizationID)
-			m.safeSend(AuthorizationResponseMsg{
-				AuthID:   m.activeAuthorizationID,
-				Approved: false,
-			})
-			return m, nil
+			// Return as command to avoid deadlock from calling program.Send() within Update
+			return m, func() tea.Msg {
+				return AuthorizationResponseMsg{
+					AuthID:   m.activeAuthorizationID,
+					Approved: false,
+				}
+			}
 
 		case "enter":
 			// Check which option is selected
@@ -1347,47 +1349,57 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if item == nil {
 				// No item selected - deny by default and log error
 				logger.Error("Authorization dialog has no selected item for authID %s", m.activeAuthorizationID)
-				m.safeSend(AuthorizationResponseMsg{
-					AuthID:   m.activeAuthorizationID,
-					Approved: false,
-				})
-				return m, nil
+				return m, func() tea.Msg {
+					return AuthorizationResponseMsg{
+						AuthID:   m.activeAuthorizationID,
+						Approved: false,
+					}
+				}
 			}
 
 			if typedItem, ok := item.(authChoiceItem); ok {
 				approved := typedItem.value == "approve"
-				logger.Debug("User %s authorization via Enter for authID %s", map[bool]string{true: "approved", false: "denied"}[approved], m.activeAuthorizationID)
-				m.safeSend(AuthorizationResponseMsg{
-					AuthID:   m.activeAuthorizationID,
-					Approved: approved,
-				})
+				authID := m.activeAuthorizationID
+				logger.Debug("User %s authorization via Enter for authID %s", map[bool]string{true: "approved", false: "denied"}[approved], authID)
+				// Return as command to avoid deadlock from calling program.Send() within Update
+				return m, func() tea.Msg {
+					return AuthorizationResponseMsg{
+						AuthID:   authID,
+						Approved: approved,
+					}
+				}
 			} else {
 				// Type assertion failed - deny by default and log error
 				logger.Error("Type assertion failed for authChoiceItem in authID %s, item type: %T", m.activeAuthorizationID, item)
-				m.safeSend(AuthorizationResponseMsg{
-					AuthID:   m.activeAuthorizationID,
-					Approved: false,
-				})
+				return m, func() tea.Msg {
+					return AuthorizationResponseMsg{
+						AuthID:   m.activeAuthorizationID,
+						Approved: false,
+					}
+				}
 			}
-			return m, nil
 
 		case "y", "Y":
 			// Quick approve with 'y'
 			logger.Debug("User approved authorization via 'y' key for authID %s", m.activeAuthorizationID)
-			m.safeSend(AuthorizationResponseMsg{
-				AuthID:   m.activeAuthorizationID,
-				Approved: true,
-			})
-			return m, nil
+			// Return as command to avoid deadlock from calling program.Send() within Update
+			return m, func() tea.Msg {
+				return AuthorizationResponseMsg{
+					AuthID:   m.activeAuthorizationID,
+					Approved: true,
+				}
+			}
 
 		case "n", "N":
 			// Quick deny with 'n'
 			logger.Debug("User denied authorization via 'n' key for authID %s", m.activeAuthorizationID)
-			m.safeSend(AuthorizationResponseMsg{
-				AuthID:   m.activeAuthorizationID,
-				Approved: false,
-			})
-			return m, nil
+			// Return as command to avoid deadlock from calling program.Send() within Update
+			return m, func() tea.Msg {
+				return AuthorizationResponseMsg{
+					AuthID:   m.activeAuthorizationID,
+					Approved: false,
+				}
+			}
 		}
 
 		// Update dialog list for navigation

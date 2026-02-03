@@ -918,6 +918,290 @@ func TestAnimationsDisabledNoSpinnerRestartAfterDialog(t *testing.T) {
 
 // WaitingForAuth cleanup tests
 
+func TestHandleAuthorizationDialogReturnsCommandsNotNil(t *testing.T) {
+	// Test for deadlock fix: handleAuthorizationDialog should return commands
+	// instead of calling m.safeSend() directly to avoid deadlocks.
+	m := New("test-model", "", false)
+	m.ready = true
+
+	// Set up authorization dialog
+	responseChan := make(chan bool, 1)
+	req := &AuthorizationRequest{
+		AuthID:       "test-command-1",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test command return",
+		ResponseChan: responseChan,
+	}
+
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-command-1"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-command-1": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Test ESC key returns a command
+	_, cmd := m.handleAuthorizationDialog(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("handleAuthorizationDialog should return a command for ESC key, not nil")
+	}
+
+	// Execute the command to get the AuthorizationResponseMsg
+	var responseMsg tea.Msg
+	done := make(chan bool)
+	go func() {
+		responseMsg = cmd()
+		done <- true
+	}()
+	<-done
+
+	// Verify it's an AuthorizationResponseMsg with correct fields
+	resp, ok := responseMsg.(AuthorizationResponseMsg)
+	if !ok {
+		t.Fatalf("expected AuthorizationResponseMsg, got %T", responseMsg)
+	}
+	if resp.AuthID != "test-command-1" {
+		t.Fatalf("expected AuthID test-command-1, got %q", resp.AuthID)
+	}
+	if resp.Approved {
+		t.Fatal("ESC key should deny authorization")
+	}
+}
+
+func TestHandleAuthorizationDialogYNShortcutsReturnCommands(t *testing.T) {
+	// Test that 'y' and 'n' shortcuts return commands
+	m := New("test-model", "", false)
+	m.ready = true
+
+	// Set up authorization dialog
+	responseChan := make(chan bool, 1)
+	req := &AuthorizationRequest{
+		AuthID:       "test-yn-commands",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test Y/N commands",
+		ResponseChan: responseChan,
+	}
+
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-yn-commands"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-yn-commands": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Test 'y' key returns approve command
+	_, cmd := m.handleAuthorizationDialog(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune{'y'},
+		Alt:   false,
+	})
+	if cmd == nil {
+		t.Fatal("handleAuthorizationDialog should return a command for 'y' key")
+	}
+
+	// Execute the command
+	var responseMsg tea.Msg
+	done := make(chan bool)
+	go func() {
+		responseMsg = cmd()
+		done <- true
+	}()
+	<-done
+
+	resp, ok := responseMsg.(AuthorizationResponseMsg)
+	if !ok {
+		t.Fatalf("expected AuthorizationResponseMsg, got %T", responseMsg)
+	}
+	if !resp.Approved {
+		t.Fatal("'y' key should approve authorization")
+	}
+
+	// Test 'n' key returns deny command
+	_, cmd = m.handleAuthorizationDialog(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune{'n'},
+		Alt:   false,
+	})
+	if cmd == nil {
+		t.Fatal("handleAuthorizationDialog should return a command for 'n' key")
+	}
+
+	// Execute the command
+	done = make(chan bool)
+	go func() {
+		responseMsg = cmd()
+		done <- true
+	}()
+	<-done
+
+	resp, ok = responseMsg.(AuthorizationResponseMsg)
+	if !ok {
+		t.Fatalf("expected AuthorizationResponseMsg, got %T", responseMsg)
+	}
+	if resp.Approved {
+		t.Fatal("'n' key should deny authorization")
+	}
+}
+
+func TestHandleAuthorizationDialogEnterReturnsCommands(t *testing.T) {
+	// Test that Enter key returns commands with proper selection
+	m := New("test-model", "", false)
+	m.ready = true
+
+	// Set up authorization dialog
+	responseChan := make(chan bool, 1)
+	req := &AuthorizationRequest{
+		AuthID:       "test-enter-commands",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test Enter commands",
+		ResponseChan: responseChan,
+	}
+
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-enter-commands"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-enter-commands": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Test 1: Enter with Approve selected
+	m.authorizationDialog.list.Select(0) // Select Approve
+	_, cmd := m.handleAuthorizationDialog(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("handleAuthorizationDialog should return a command for Enter with Approve selected")
+	}
+
+	// Execute the command
+	var responseMsg tea.Msg
+	done := make(chan bool)
+	go func() {
+		responseMsg = cmd()
+		done <- true
+	}()
+	<-done
+
+	resp, ok := responseMsg.(AuthorizationResponseMsg)
+	if !ok {
+		t.Fatalf("expected AuthorizationResponseMsg, got %T", responseMsg)
+	}
+	if !resp.Approved {
+		t.Fatal("Enter with Approve selected should approve authorization")
+	}
+
+	// Test 2: Enter with Deny selected
+	m.authorizationDialog.list.Select(1) // Select Deny
+	_, cmd = m.handleAuthorizationDialog(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("handleAuthorizationDialog should return a command for Enter with Deny selected")
+	}
+
+	// Execute the command
+	done = make(chan bool)
+	go func() {
+		responseMsg = cmd()
+		done <- true
+	}()
+	<-done
+
+	resp, ok = responseMsg.(AuthorizationResponseMsg)
+	if !ok {
+		t.Fatalf("expected AuthorizationResponseMsg, got %T", responseMsg)
+	}
+	if resp.Approved {
+		t.Fatal("Enter with Deny selected should deny authorization")
+	}
+
+	// Test 3: Enter with no selection (should deny)
+	// Create new dialog to reset selection state
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	_, cmd = m.handleAuthorizationDialog(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("handleAuthorizationDialog should return a command for Enter with no selection")
+	}
+
+	// Execute the command
+	done = make(chan bool)
+	go func() {
+		responseMsg = cmd()
+		done <- true
+	}()
+	<-done
+
+	resp, ok = responseMsg.(AuthorizationResponseMsg)
+	if !ok {
+		t.Fatalf("expected AuthorizationResponseMsg, got %T", responseMsg)
+	}
+	if resp.Approved {
+		t.Fatal("Enter with no selection should deny authorization")
+	}
+}
+
+func TestHandleAuthorizationDialogCtrlCReturnsCommand(t *testing.T) {
+	// Test that Ctrl+C returns a denial command
+	m := New("test-model", "", false)
+	m.ready = true
+
+	// Set up authorization dialog
+	responseChan := make(chan bool, 1)
+	req := &AuthorizationRequest{
+		AuthID:       "test-ctrlc-command",
+		TabID:        1,
+		ToolName:     "shell",
+		Parameters:   map[string]interface{}{"command": "echo test"},
+		Reason:       "Test Ctrl+C command",
+		ResponseChan: responseChan,
+	}
+
+	m.authorizationDialog = NewAuthorizationDialog(req, "test-tab")
+	m.authorizationDialogOpen = true
+	m.activeAuthorizationID = "test-ctrlc-command"
+	m.pendingAuthorizations = map[string]*AuthorizationRequest{
+		"test-ctrlc-command": req,
+	}
+	m.sessions = []*TabSession{{ID: 1}}
+	m.activeSessionIdx = 0
+
+	// Test Ctrl+C key returns a command
+	_, cmd := m.handleAuthorizationDialog(tea.KeyMsg{
+		Type: tea.KeyCtrlC,
+	})
+	if cmd == nil {
+		t.Fatal("handleAuthorizationDialog should return a command for Ctrl+C key")
+	}
+
+	// Execute the command
+	var responseMsg tea.Msg
+	done := make(chan bool)
+	go func() {
+		responseMsg = cmd()
+		done <- true
+	}()
+	<-done
+
+	resp, ok := responseMsg.(AuthorizationResponseMsg)
+	if !ok {
+		t.Fatalf("expected AuthorizationResponseMsg, got %T", responseMsg)
+	}
+	if resp.Approved {
+		t.Fatal("Ctrl+C should deny authorization")
+	}
+}
+
+// WaitingForAuth cleanup tests
+
 func TestHandlerPathClearsWaitingForAuth(t *testing.T) {
 	// This test verifies that WaitingForAuth is cleared when using the
 	// handler-based authorization path (TUIAuthorizationRequestMsg).

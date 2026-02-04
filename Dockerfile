@@ -82,12 +82,13 @@ RUN echo "Generating templ templates..." && \
 
 # Build for linux/amd64 with static linking
 # TinyGo will be downloaded at runtime and cached in ~/.cache/scriptschnell/tinygo
-# Use -p 2 to limit compilation parallelism (both arch stages run concurrently under BuildKit)
+# Use -p 1 to limit compilation parallelism and GOGC=50 to reduce memory usage
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     CC=x86_64-linux-gnu-gcc \
     CXX=x86_64-linux-gnu-g++ \
+    GOGC=50 \
     go build \
-    -p 2 \
+    -p 1 \
     -ldflags="-w -s -linkmode external -extldflags '-static'" \
     -o scriptschnell-amd64 \
     ./cmd/scriptschnell
@@ -108,12 +109,13 @@ RUN echo "Generating templ templates..." && \
 
 # Build for linux/arm64 with static linking
 # TinyGo will be downloaded at runtime and cached in ~/.cache/scriptschnell/tinygo
-# Use -p 2 to limit compilation parallelism (both arch stages run concurrently under BuildKit)
+# Use -p 1 to limit compilation parallelism and GOGC=50 to reduce memory usage
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=arm64 \
     CC=aarch64-linux-gnu-gcc \
     CXX=aarch64-linux-gnu-g++ \
+    GOGC=50 \
     go build \
-    -p 2 \
+    -p 1 \
     -ldflags="-w -s -linkmode external -extldflags '-static'" \
     -o scriptschnell-arm64 \
     ./cmd/scriptschnell

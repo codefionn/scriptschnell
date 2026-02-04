@@ -528,13 +528,26 @@ func (c *Config) decryptSensitiveFields(password string) error {
 		}
 	}
 
+	// Track which fields were successfully decrypted
+	decryptedFields := make([]*string, 0, len(fields))
+	decryptedValues := make([]string, 0, len(fields))
+
 	for _, field := range fields {
 		if field == nil {
 			continue
 		}
+		// Save original value in case decryption fails
+		originalValue := *field
 		if err := decryptField(field, password); err != nil {
+			// Restore any fields that were already decrypted
+			for i, df := range decryptedFields {
+				*df = decryptedValues[i]
+			}
 			return err
 		}
+		// Track successfully decrypted field
+		decryptedFields = append(decryptedFields, field)
+		decryptedValues = append(decryptedValues, originalValue)
 	}
 	return nil
 }
@@ -671,6 +684,11 @@ func (c *Config) mcpServersInOrder() []*MCPServerConfig {
 func encryptField(value, password string) (string, error) {
 	if value == "" {
 		return "", nil
+	}
+	// If value is already encrypted and password is empty, keep it as-is
+	// This prevents double-encryption when password hasn't been set
+	if strings.HasPrefix(value, "enc:") && password == "" {
+		return value, nil
 	}
 	return secrets.EncryptString(value, password)
 }

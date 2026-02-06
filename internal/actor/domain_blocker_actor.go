@@ -90,7 +90,8 @@ type DomainBlockerActor struct {
 	health          *HealthCheckable
 	stopCh          chan struct{}
 	refreshTicker   *time.Ticker
-	initialized     bool // Tracks whether initial load is complete
+	initialized     bool           // Tracks whether initial load is complete
+	wg              sync.WaitGroup // Track goroutines for clean shutdown
 }
 
 // DomainBlockerConfig holds configuration for the domain blocker actor
@@ -284,9 +285,11 @@ func (a *DomainBlockerActor) Start(ctx context.Context) error {
 
 	// Start periodic refresh ticker (immediately, no waiting for cache)
 	a.refreshTicker = time.NewTicker(a.refreshInterval)
+	a.wg.Add(1)
 	go a.refreshLoop(ctx)
 
 	// Load cache and build matcher in the background to avoid blocking startup
+	a.wg.Add(1)
 	go a.initializeBlocklist()
 
 	logger.Info("domain blocker actor %s: started (initializing blocklist in background), refresh interval: %v, TTL: %v, cache: %s",
@@ -307,6 +310,9 @@ func (a *DomainBlockerActor) Stop(ctx context.Context) error {
 	if a.refreshTicker != nil {
 		a.refreshTicker.Stop()
 	}
+
+	// Wait for all goroutines to finish
+	a.wg.Wait()
 
 	logger.Info("domain blocker actor %s: stopped", a.id)
 	return nil
@@ -449,6 +455,7 @@ func (a *DomainBlockerActor) backgroundRefresh() {
 
 // refreshLoop periodically refreshes the blocklist
 func (a *DomainBlockerActor) refreshLoop(ctx context.Context) {
+	defer a.wg.Done()
 	for {
 		select {
 		case <-a.refreshTicker.C:
@@ -465,6 +472,7 @@ func (a *DomainBlockerActor) refreshLoop(ctx context.Context) {
 
 // initializeBlocklist loads the blocklist from cache in the background
 func (a *DomainBlockerActor) initializeBlocklist() {
+	defer a.wg.Done()
 	logger.Debug("domain blocker actor %s: starting background initialization", a.id)
 
 	// Try to load from cache first

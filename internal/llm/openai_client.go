@@ -45,7 +45,7 @@ func NewOpenAIClient(apiKey, modelName string) (Client, error) {
 		model:   model,
 		baseURL: openAIDefaultBaseURL,
 		httpClient: &http.Client{
-			Timeout: consts.Timeout60Seconds,
+			Timeout: consts.Timeout2Minutes,
 		},
 	}
 
@@ -387,7 +387,7 @@ func convertMessagesToOpenAIFromUnified(req *CompletionRequest, includeReasoning
 			oMsg.Reasoning = msg.Reasoning
 		}
 
-		if includeReasoning && role == "assistant" {
+		if includeReasoning && role == "assistant" && msg.Reasoning != "" {
 			reasoningContent := msg.Reasoning
 			oMsg.ReasoningContent = &reasoningContent
 		}

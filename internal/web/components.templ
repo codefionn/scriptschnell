@@ -2,93 +2,521 @@ package web
 
 import "time"
 
+// Settings modal - inline HTML to avoid escaping issues
+templ SettingsModal() {
+	<div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-lg">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="settingsModalLabel">Settings</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<div class="list-group">
+						<button class="list-group-item list-group-item-action" data-bs-toggle="modal" data-bs-target="#providersModal" data-bs-dismiss="modal">
+							<i class="bi bi-cloud me-2"></i>Configure Providers
+							<div class="small text-muted">Add, remove, or test LLM provider API keys</div>
+						</button>
+						<button class="list-group-item list-group-item-action" data-bs-toggle="modal" data-bs-target="#modelsModal" data-bs-dismiss="modal">
+							<i class="bi bi-cpu me-2"></i>Configure Models
+							<div class="small text-muted">Select orchestration and summarization models</div>
+						</button>
+						<button class="list-group-item list-group-item-action" data-bs-toggle="modal" data-bs-target="#searchModal" data-bs-dismiss="modal">
+							<i class="bi bi-search me-2"></i>Configure Search
+							<div class="small text-muted">Set up web search provider (Exa, Google PSE, Perplexity)</div>
+						</button>
+						<button class="list-group-item list-group-item-action" data-bs-toggle="modal" data-bs-target="#passwordModal" data-bs-dismiss="modal">
+							<i class="bi bi-lock me-2"></i>Set Encryption Password
+							<div class="small text-muted">Protect API keys with a custom password</div>
+						</button>
+						<button class="list-group-item list-group-item-action" data-bs-toggle="modal" data-bs-target="#mcpModal" data-bs-dismiss="modal">
+							<i class="bi bi-plugin me-2"></i>Configure MCP Servers
+							<div class="small text-muted">Manage custom Model Context Protocol servers</div>
+						</button>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// Providers modal
+templ ProvidersModal() {
+	<div class="modal fade" id="providersModal" tabindex="-1" aria-labelledby="providersModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-lg">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="providersModalLabel">Provider Management</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<div id="providers-list" class="mb-3">Loading...</div>
+					<hr/>
+					<h6>Add New Provider</h6>
+					<div class="row g-2">
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('openai')">OpenAI</button>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('anthropic')">Anthropic</button>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('google')">Google</button>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('openrouter')">OpenRouter</button>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('mistral')">Mistral</button>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('openai-compatible')">OpenAI-Compatible</button>
+						</div>
+					</div>
+					<div id="add-provider-form" class="mt-3" style="display: none;">
+						<form id="providerForm">
+							<input type="hidden" id="providerType"/>
+							<div class="mb-2">
+								<label class="form-label">Provider Type</label>
+								<input type="text" class="form-control" id="providerTypeDisplay" disabled/>
+							</div>
+							<div class="mb-2" id="baseUrlField" style="display: none;">
+								<label class="form-label">Base URL</label>
+								<input type="text" class="form-control" id="providerBaseUrl" placeholder="http://localhost:1234/v1"/>
+							</div>
+							<div class="mb-2">
+								<label class="form-label">API Key</label>
+								<input type="password" class="form-control" id="providerApiKey" placeholder="Leave empty to use env var"/>
+							</div>
+							<button type="submit" class="btn btn-primary">Add Provider</button>
+							<button type="button" class="btn btn-secondary" onclick="hideAddProvider()">Cancel</button>
+						</form>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// Edit Provider modal
+templ EditProviderModal() {
+	<div class="modal fade" id="editProviderModal" tabindex="-1" aria-labelledby="editProviderModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-lg">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="editProviderModalLabel">Edit Provider</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<form id="editProviderForm">
+						<input type="hidden" id="editProviderName"/>
+						<div class="mb-3">
+							<label class="form-label">Provider</label>
+							<input type="text" class="form-control" id="editProviderNameDisplay" disabled/>
+						</div>
+						<div class="mb-3" id="editBaseUrlField" style="display: none;">
+							<label class="form-label">Base URL</label>
+							<input type="text" class="form-control" id="editProviderBaseUrl" placeholder="http://localhost:1234/v1"/>
+						</div>
+						<div class="mb-3">
+							<label class="form-label">API Key</label>
+							<input type="password" class="form-control" id="editProviderApiKey" placeholder="Leave empty to keep current key"/>
+							<div class="form-text">Enter a new API key or leave empty to keep the current one.</div>
+						</div>
+						<hr/>
+						<h6 class="mb-3">Rate Limits</h6>
+						<div class="row">
+							<div class="col-md-4 mb-3">
+								<label class="form-label">Requests per minute</label>
+								<input type="number" class="form-control" id="editRequestsPerMinute" min="0" placeholder="0 = unlimited"/>
+							</div>
+							<div class="col-md-4 mb-3">
+								<label class="form-label">Min interval (ms)</label>
+								<input type="number" class="form-control" id="editMinIntervalMs" min="0" placeholder="0 = no minimum"/>
+							</div>
+							<div class="col-md-4 mb-3">
+								<label class="form-label">Tokens per minute</label>
+								<input type="number" class="form-control" id="editTokensPerMinute" min="0" placeholder="0 = unlimited"/>
+							</div>
+						</div>
+					</form>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-danger me-auto" id="deleteProviderBtn">Delete Provider</button>
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" id="saveProviderBtn">Save Changes</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// Models modal
+templ ModelsModal() {
+	<div class="modal fade" id="modelsModal" tabindex="-1" aria-labelledby="modelsModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-xl">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="modelsModalLabel">Model Selection</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<form id="modelsForm">
+						<input type="hidden" id="orchestrationModel" value=""/>
+						<input type="hidden" id="summarizationModel" value=""/>
+						<input type="hidden" id="planningModel" value=""/>
+						<input type="hidden" id="safetyModel" value=""/>
+						@ModelSelectorModalContent()
+						<button type="submit" class="btn btn-primary mt-3">Save Models</button>
+					</form>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+					<button type="button" class="btn btn-primary" onclick="document.getElementById('modelsForm').dispatchEvent(new Event('submit'))">Save</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// Search modal
+templ SearchModal() {
+	<div class="modal fade" id="searchModal" tabindex="-1" aria-labelledby="searchModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-lg">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="searchModalLabel">Search Configuration</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<form id="searchForm">
+						<div class="mb-3">
+							<label class="form-label">Search Provider</label>
+							<select class="form-select" id="searchProvider" required>
+								<option value="">Select a provider</option>
+								<option value="exa">Exa</option>
+								<option value="google">Google PSE</option>
+								<option value="perplexity">Perplexity</option>
+							</select>
+						</div>
+						<div class="mb-3">
+							<label class="form-label">API Key</label>
+							<input type="password" class="form-control" id="searchApiKey" placeholder="Enter your API key (optional)"/>
+							<div class="form-text">Leave empty to use environment variables</div>
+						</div>
+						<button type="submit" class="btn btn-primary">Save Configuration</button>
+					</form>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+					<button type="button" class="btn btn-primary" onclick="document.getElementById('searchForm').dispatchEvent(new Event('submit'))">Save</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// Password modal
+templ PasswordModal() {
+	<div class="modal fade" id="passwordModal" tabindex="-1" aria-labelledby="passwordModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-lg">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="passwordModalLabel">Set Encryption Password</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<form id="passwordForm">
+						<p class="text-muted">Password protects API keys at rest. Leave both fields blank to reset to the default (empty) password.</p>
+						<div class="mb-3">
+							<label class="form-label">New Password</label>
+							<input type="password" class="form-control" id="newPassword" placeholder="Leave blank to reset password"/>
+						</div>
+						<div class="mb-3">
+							<label class="form-label">Confirm Password</label>
+							<input type="password" class="form-control" id="confirmPassword" placeholder="Re-enter password (blank to reset)"/>
+						</div>
+						<div id="passwordError" class="alert alert-danger" style="display: none;"></div>
+						<button type="submit" class="btn btn-primary">Set Password</button>
+					</form>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+					<button type="button" class="btn btn-primary" onclick="document.getElementById('passwordForm').dispatchEvent(new Event('submit'))">Save</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// MCP modal
+templ MCPModal() {
+	<div class="modal fade" id="mcpModal" tabindex="-1" aria-labelledby="mcpModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-lg">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="mcpModalLabel">MCP Server Management</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<div id="mcp-servers-list" class="mb-3">Loading...</div>
+					<hr/>
+					<h6>Add New MCP Server</h6>
+					<div class="row g-2 mb-3">
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddMCP('openapi')">OpenAPI</button>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddMCP('command')">Command</button>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddMCP('openai')">OpenAI</button>
+						</div>
+					</div>
+					<div id="add-mcp-form" class="mt-3" style="display: none;">
+						<form id="mcpForm">
+							<input type="hidden" id="mcpType"/>
+							<div class="mb-2">
+								<label class="form-label">Server Type</label>
+								<input type="text" class="form-control" id="mcpTypeDisplay" disabled/>
+							</div>
+							<div class="mb-2">
+								<label class="form-label">Server Name</label>
+								<input type="text" class="form-control" id="mcpServerName" required/>
+							</div>
+							<div id="openapi-fields" style="display: none;">
+								<div class="mb-2">
+									<label class="form-label">OpenAPI Spec Path/URL</label>
+									<input type="text" class="form-control" id="mcpSpecPath"/>
+								</div>
+								<div class="mb-2">
+									<label class="form-label">Service URL</label>
+									<input type="text" class="form-control" id="mcpServiceURL"/>
+								</div>
+							</div>
+							<div id="command-fields" style="display: none;">
+								<div class="mb-2">
+									<label class="form-label">Command</label>
+									<input type="text" class="form-control" id="mcpCommand" placeholder="e.g., gofmt -w"/>
+								</div>
+								<div class="mb-2">
+									<label class="form-label">Working Directory</label>
+									<input type="text" class="form-control" id="mcpWorkingDir"/>
+								</div>
+								<div class="mb-2">
+									<label class="form-label">Timeout Seconds</label>
+									<input type="number" class="form-control" id="mcpTimeout" value="60"/>
+								</div>
+							</div>
+							<div id="openai-fields" style="display: none;">
+								<div class="mb-2">
+									<label class="form-label">Model ID</label>
+									<input type="text" class="form-control" id="mcpModel"/>
+								</div>
+								<div class="mb-2">
+									<label class="form-label">Base URL</label>
+									<input type="text" class="form-control" id="mcpBaseURL"/>
+								</div>
+							</div>
+							<button type="submit" class="btn btn-primary">Add Server</button>
+							<button type="button" class="btn btn-secondary" onclick="hideAddMCP()">Cancel</button>
+						</form>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
 templ Message(role string, content string, variant string) {
-	<div class={ "alert alert-" + variant + " mb-2 message-content" }>
-		<div class="d-flex justify-content-between align-items-start mb-1">
-			<strong>{ role }:</strong>
+	<div class={ "alert alert-" + variant + " mb-1 message-content py-2" }>
+		<div class="d-flex justify-content-between align-items-start">
+			<strong class="small">{ role }:</strong>
 			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
 		</div>
-		<div>{ content }</div>
+		<div class="mt-1 small">{ content }</div>
 	</div>
 }
 
 templ ToolCall(name string, id string) {
-	<div class="alert alert-secondary mb-2">
-		<strong>Tool Call:</strong> { name } <small class="text-muted">(ID: { id })</small>
+	<div class="tool-card mb-1">
+		<div class="tool-header">
+			<i class="bi bi-tools text-secondary"></i>
+			<span class="tool-name">{ name }</span>
+			<small class="tool-status text-muted">ID: { id }</small>
+		</div>
 	</div>
 }
 
 templ ToolResult(id string, result string, errorMsg string) {
 	if errorMsg != "" {
-		<div class="alert alert-danger mb-2">
-			<strong>Tool Error:</strong> { errorMsg }
+		<div class="tool-card border-danger mb-1">
+			<div class="tool-header">
+				<i class="bi bi-x-circle text-danger"></i>
+				<span class="tool-name text-danger">Error</span>
+				<small class="tool-status text-danger">Failed</small>
+			</div>
+			<div class="tool-body">
+				<div class="tool-section-content" style="color: #dc3545;">{ errorMsg }</div>
+			</div>
 		</div>
 	} else {
-		<div class="alert alert-light mb-2 border">
-			<strong>Tool Result:</strong>
-			<pre class="mb-0">{ result }</pre>
+		<div class="tool-card border-success mb-1">
+			<div class="tool-header">
+				<i class="bi bi-check-circle text-success"></i>
+				<span class="tool-name">Result</span>
+				<small class="tool-status text-success">Completed</small>
+			</div>
+			<div class="tool-body">
+				<pre class="tool-section-content mb-0">{ result }</pre>
+			</div>
 		</div>
 	}
 }
 
 templ SystemMessage(content string) {
-	<div class="alert alert-info mb-2">
-		<div class="d-flex justify-content-between align-items-start mb-1">
-			<strong>System:</strong>
+	<div class="alert alert-info mb-1 py-2">
+		<div class="d-flex justify-content-between align-items-start">
+			<strong class="small">System:</strong>
 			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
 		</div>
-		<div>{ content }</div>
+		<div class="mt-1 small">{ content }</div>
 	</div>
 }
 
 templ MarkdownMessage(role string, content string) {
-	<div class="alert alert-secondary mb-2 message-content">
-		<div class="d-flex justify-content-between align-items-start mb-1">
-			<strong>{ role }:</strong>
+	<div class="alert alert-secondary mb-1 message-content py-2">
+		<div class="d-flex justify-content-between align-items-start">
+			<strong class="small">{ role }:</strong>
 			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
 		</div>
-		<div class="markdown-content">{ content }</div>
+		<div class="markdown-content mt-1">{ content }</div>
 	</div>
 }
 
 templ ErrorMessage(content string) {
-	<div class="alert alert-danger mb-2">
-		<div class="d-flex justify-content-between align-items-start mb-1">
-			<strong>Error:</strong>
+	<div class="alert alert-danger mb-1 py-2">
+		<div class="d-flex justify-content-between align-items-start">
+			<strong class="small">Error:</strong>
 			<small class="text-muted timestamp">{ time.Now().Format("15:04:05") }</small>
 		</div>
-		<div>{ content }</div>
+		<div class="mt-1 small">{ content }</div>
 	</div>
 }
 
 templ ToolInteraction(name string, id string, status string, result string, errorMsg string) {
 	if status == "calling" {
-		<div class="alert alert-secondary mb-2 tool-interaction" id={ "tool-" + id }>
-			<div class="d-flex justify-content-between align-items-center">
-				<strong>Tool Call:</strong> { name }
-				<small class="text-muted">Calling...</small>
-			</div>
-			<div class="progress mt-2">
-				<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+		<div class="tool-card mb-1 tool-interaction" id={ "tool-" + id }>
+			<div class="tool-header">
+				<i class="bi bi-tools text-secondary"></i>
+				<span class="tool-name">{ name }</span>
+				<small class="tool-status text-muted">
+					<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+					Running...
+				</small>
 			</div>
 		</div>
 	} else if errorMsg != "" {
-		<div class="alert alert-danger mb-2 tool-interaction" id={ "tool-" + id }>
-			<div class="d-flex justify-content-between align-items-center">
-				<strong>Tool Error:</strong>
-				<small class="text-muted">Failed</small>
+		<div class="tool-card border-danger mb-1 tool-interaction" id={ "tool-" + id }>
+			<div class="tool-header">
+				<i class="bi bi-x-circle text-danger"></i>
+				<span class="tool-name text-danger">{ name }</span>
+				<small class="tool-status text-danger">Failed</small>
 			</div>
-			<div class="mt-2">{ errorMsg }</div>
+			<div class="tool-body">
+				<div class="tool-section-content" style="color: #dc3545;">{ errorMsg }</div>
+			</div>
 		</div>
 	} else {
-		<div class="alert alert-light mb-2 border tool-interaction" id={ "tool-" + id }>
-			<div class="d-flex justify-content-between align-items-center">
-				<strong>Tool Result:</strong>
-				<small class="text-muted">Completed</small>
+		<div class="tool-card border-success mb-1 tool-interaction" id={ "tool-" + id }>
+			<div class="tool-header">
+				<i class="bi bi-check-circle text-success"></i>
+				<span class="tool-name">{ name }</span>
+				<small class="tool-status text-success">Completed</small>
 			</div>
-			<div class="mt-2">
-				<pre class="mb-0 tool-result">{ result }</pre>
+			<div class="tool-body">
+				<pre class="tool-section-content mb-0">{ result }</pre>
 			</div>
 		</div>
 	}
+}
+
+// AuthorizationModal - modal for tool authorization requests
+templ AuthorizationModal() {
+	<div class="modal fade" id="authorizationModal" tabindex="-1" aria-labelledby="authorizationModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content border-warning">
+				<div class="modal-header bg-warning text-dark">
+					<h5 class="modal-title" id="authorizationModalLabel">
+						<i class="bi bi-shield-lock me-2"></i>Authorization Required
+					</h5>
+				</div>
+				<div class="modal-body">
+					<input type="hidden" id="authId"/>
+					<div class="mb-3">
+						<strong>Tool:</strong> <span id="authToolName" class="font-monospace"></span>
+					</div>
+					<div class="mb-3" id="authReasonSection">
+						<strong>Reason:</strong>
+						<p id="authReason" class="mb-0 mt-1 text-muted"></p>
+					</div>
+					<div class="mb-0" id="authParamsSection" style="display: none;">
+						<strong>Parameters:</strong>
+						<pre id="authParameters" class="bg-light p-2 rounded mt-1 mb-0" style="max-height: 200px; overflow-y: auto;"></pre>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-danger" id="authDenyBtn">
+						<i class="bi bi-x-lg me-1"></i>Deny
+					</button>
+					<button type="button" class="btn btn-success" id="authApproveBtn">
+						<i class="bi bi-check-lg me-1"></i>Approve
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// QuestionModal - modal for question dialogs from the assistant
+templ QuestionModal() {
+	<div class="modal fade" id="questionModal" tabindex="-1" aria-labelledby="questionModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+		<div class="modal-dialog modal-dialog-centered modal-lg">
+			<div class="modal-content border-primary">
+				<div class="modal-header bg-primary text-white">
+					<h5 class="modal-title" id="questionModalLabel">
+						<i class="bi bi-question-circle me-2"></i>Question
+					</h5>
+				</div>
+				<div class="modal-body">
+					<input type="hidden" id="questionId"/>
+					<input type="hidden" id="questionMultiMode"/>
+					<div class="mb-3" id="singleQuestionSection">
+						<label class="form-label fw-bold" id="questionText"></label>
+						<div id="questionOptions" class="mt-2"></div>
+						<div id="questionInputSection" class="mt-2">
+							<textarea class="form-control" id="questionAnswerInput" rows="3" placeholder="Enter your answer..."></textarea>
+						</div>
+					</div>
+					<div class="mb-0" id="multiQuestionSection" style="display: none;">
+						<div id="multiQuestionsContainer"></div>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-primary" id="questionSubmitBtn">
+						<i class="bi bi-send me-1"></i>Submit
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
 }

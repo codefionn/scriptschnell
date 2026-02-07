@@ -146,6 +146,79 @@ func TestUserMessageCount(t *testing.T) {
 	}
 }
 
+func TestCompactWithSummary_EmptyOriginal(t *testing.T) {
+	s := NewSession("test", ".")
+	s.AddMessage(&Message{Role: "user", Content: "hello"})
+
+	ok := s.CompactWithSummary([]*Message{}, "summary")
+	if ok {
+		t.Fatal("expected compaction to fail with empty original")
+	}
+}
+
+func TestCompactWithSummary_OriginalLongerThanSession(t *testing.T) {
+	s := NewSession("test", ".")
+	s.AddMessage(&Message{Role: "user", Content: "one"})
+
+	big := []*Message{
+		{Role: "user", Content: "one"},
+		{Role: "assistant", Content: "two"},
+		{Role: "user", Content: "three"},
+	}
+
+	ok := s.CompactWithSummary(big, "summary")
+	if ok {
+		t.Fatal("expected compaction to fail when original is longer than session")
+	}
+}
+
+func TestCompactWithSummary_CompactsAllMessages(t *testing.T) {
+	s := NewSession("test", ".")
+	msg1 := &Message{Role: "user", Content: "one"}
+	msg2 := &Message{Role: "assistant", Content: "two"}
+	s.AddMessage(msg1)
+	s.AddMessage(msg2)
+
+	all := s.GetMessages()
+	ok := s.CompactWithSummary(all, "Full summary")
+	if !ok {
+		t.Fatal("expected compaction to succeed")
+	}
+
+	messages := s.GetMessages()
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message after compacting all, got %d", len(messages))
+	}
+	if messages[0].Role != "system" {
+		t.Fatalf("expected system role, got %s", messages[0].Role)
+	}
+	if messages[0].Content != "Full summary" {
+		t.Fatalf("expected summary content, got %q", messages[0].Content)
+	}
+}
+
+func TestCompactWithSummary_SetsDirtyFlag(t *testing.T) {
+	s := NewSession("test", ".")
+	msg1 := &Message{Role: "user", Content: "one"}
+	msg2 := &Message{Role: "assistant", Content: "two"}
+	s.AddMessage(msg1)
+	s.AddMessage(msg2)
+
+	s.MarkSaved(s.UpdatedAt)
+	if s.IsDirty() {
+		t.Fatal("expected not dirty after MarkSaved")
+	}
+
+	head := s.GetMessages()
+	ok := s.CompactWithSummary(head[:1], "Summary")
+	if !ok {
+		t.Fatal("expected compaction to succeed")
+	}
+	if !s.IsDirty() {
+		t.Fatal("expected dirty after compaction")
+	}
+}
+
 func setSessionStorageEnv(t *testing.T, dir string) {
 	t.Helper()
 	switch runtime.GOOS {

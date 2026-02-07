@@ -50,6 +50,8 @@ const (
 	Timeout30Seconds = 30 * time.Second
 	// Timeout60Seconds is a 60 second timeout (1 minute)
 	Timeout60Seconds = 60 * time.Second
+	// Timeout90Seconds is a 90 second timeout
+	Timeout90Seconds = 90 * time.Second
 	// Timeout2Minutes is a 2 minute timeout
 	Timeout2Minutes = 2 * time.Minute
 	// Timeout5Minutes is a 5 minute timeout
@@ -71,7 +73,11 @@ const (
 // Retry and attempt limits
 const (
 	// DefaultMaxRetries is the default number of retries for operations
-	DefaultMaxRetries = 5
+	DefaultMaxRetries = 15
+	// PlanningMaxRetries is the maximum number of retries for planning agent completions
+	PlanningMaxRetries = 20
+	// VerificationMaxRetries is the maximum number of retries for verification LLM completions
+	VerificationMaxRetries = 5
 	// DefaultMaxAttempts is the default maximum attempts for auto-continue
 	DefaultMaxAttempts = 3
 	// ExtendedMaxAttempts is used for models requiring more attempts

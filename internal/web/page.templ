@@ -11,56 +11,217 @@ templ Page(token string, title string) {
 			<title>{ title }</title>
 			<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
 			<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet"/>
+			<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
 			<style>
 				.markdown-content {
-					line-height: 1.6;
-					font-size: 0.95rem;
+					line-height: 1.5;
+					font-size: 0.875rem;
 				}
 				.markdown-content h4, .markdown-content h5, .markdown-content h6 {
-					margin-top: 0.5rem;
-					margin-bottom: 0.5rem;
+					margin-top: 0.25rem;
+					margin-bottom: 0.25rem;
 					font-weight: 600;
 				}
 				.markdown-content code {
 					background-color: #f8f9fa;
-					padding: 0.2rem 0.4rem;
+					padding: 0.1rem 0.25rem;
 					border-radius: 0.25rem;
 					font-family: 'Courier New', monospace;
-					font-size: 0.85em;
+					font-size: 0.8em;
 				}
 				.markdown-content pre {
 					background-color: #f8f9fa;
-					padding: 1rem;
-					border-radius: 0.5rem;
+					padding: 0.5rem;
+					border-radius: 0.25rem;
 					overflow-x: auto;
-					margin: 0.5rem 0;
+					margin: 0.25rem 0;
 				}
 				.markdown-content pre code {
 					background-color: transparent;
 					padding: 0;
 				}
 				.markdown-content ul, .markdown-content ol {
-					padding-left: 1.5rem;
-					margin: 0.5rem 0;
-				}
-				.markdown-content li {
+					padding-left: 1.25rem;
 					margin: 0.25rem 0;
 				}
+				.markdown-content li {
+					margin: 0.125rem 0;
+				}
 				.markdown-content p {
-					margin: 0.5rem 0;
+					margin: 0.25rem 0;
 				}
 				.tool-interaction {
 					transition: all 0.3s ease;
 				}
+				/* Compact Tool Interaction Styles */
+				.tool-card {
+					border: 1px solid #dee2e6;
+					border-radius: 0.375rem;
+					margin-bottom: 0.5rem;
+					background: #f8f9fa;
+					font-size: 0.875rem;
+				}
+				.tool-header {
+					padding: 0.375rem 0.5rem;
+					cursor: pointer;
+					display: flex;
+					align-items: center;
+					gap: 0.5rem;
+				}
+				.tool-header:hover {
+					background: #e9ecef;
+				}
+				.tool-name {
+					font-weight: 600;
+					color: #495057;
+				}
+				.tool-status {
+					font-size: 0.75rem;
+					margin-left: auto;
+				}
+				.tool-body {
+					border-top: 1px solid #dee2e6;
+					padding: 0.5rem;
+					background: #fff;
+				}
+				.tool-section {
+					margin-bottom: 0.375rem;
+				}
+				.tool-section:last-child {
+					margin-bottom: 0;
+				}
+				.tool-section-header {
+					font-size: 0.7rem;
+					text-transform: uppercase;
+					color: #6c757d;
+					margin-bottom: 0.25rem;
+					cursor: pointer;
+					display: flex;
+					align-items: center;
+					gap: 0.25rem;
+				}
+				.tool-section-header:hover {
+					color: #495057;
+				}
+				.tool-section-content {
+					font-family: monospace;
+					font-size: 0.75rem;
+					background: #f8f9fa;
+					padding: 0.25rem 0.375rem;
+					border-radius: 0.25rem;
+					white-space: pre-wrap;
+					word-break: break-word;
+					max-height: 150px;
+					overflow-y: auto;
+				}
+				.tool-progress {
+					height: 2px;
+					margin-top: 0.25rem;
+				}
 				.tool-result {
 					white-space: pre-wrap;
 					word-break: break-word;
-					max-height: 300px;
+					max-height: 150px;
 					overflow-y: auto;
 				}
+				.message-content {
+					padding: 0.4rem 0.6rem;
+					margin-bottom: 0.25rem;
+				}
 				.timestamp {
+					font-size: 0.7rem;
+					opacity: 0.6;
+				}
+				/* Compact alert override */
+				.alert {
+					padding: 0.4rem 0.6rem;
+					margin-bottom: 0.25rem;
+				}
+				/* Status Bar Styles */
+				.status-bar {
+					background: #f8f9fa;
+					border-bottom: 1px solid #dee2e6;
+					padding: 0.25rem 0.75rem;
 					font-size: 0.8rem;
+					min-height: 1.5rem;
+					transition: all 0.2s ease;
+				}
+				.status-bar.connected {
+					background: #d1e7dd;
+				}
+				.status-bar.connecting {
+					background: #fff3cd;
+				}
+				.status-bar.error {
+					background: #f8d7da;
+				}
+				.status-indicator {
+					width: 8px;
+					height: 8px;
+					border-radius: 50%;
+					display: inline-block;
+					margin-right: 0.5rem;
+				}
+				.status-indicator.connected {
+					background: #198754;
+				}
+				.status-indicator.connecting {
+					background: #ffc107;
+					animation: pulse 1s infinite;
+				}
+				.status-indicator.error {
+					background: #dc3545;
+				}
+				@keyframes pulse {
+					0%, 100% { opacity: 1; }
+					50% { opacity: 0.5; }
+				}
+				/* Model Selector Styles */
+				.model-selector-modal {
+					max-height: 70vh;
+					overflow-y: auto;
+				}
+				.model-grid {
+					max-height: 400px;
+					overflow-y: auto;
+					padding: 0.5rem;
+				}
+				.model-card {
+					transition: all 0.2s ease;
+					border-width: 2px;
+				}
+				.model-card:hover {
+					border-color: #0d6efd;
+					transform: translateY(-2px);
+					box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+				}
+				.model-card:focus {
+					outline: none;
+					box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
+				}
+				.model-card-expanded .card-body {
+					padding: 1rem;
+				}
+				.model-card .card-title {
+					font-size: 0.95rem;
+				}
+				.model-grid::-webkit-scrollbar {
+					width: 8px;
+				}
+				.model-grid::-webkit-scrollbar-track {
+					background: #f1f1f1;
+					border-radius: 4px;
+				}
+				.model-grid::-webkit-scrollbar-thumb {
+					background: #888;
+					border-radius: 4px;
+				}
+				.model-grid::-webkit-scrollbar-thumb:hover {
+					background: #555;
+				}
+				.selected-model-display {
+					transition: all 0.3s ease;
 				}
 			</style>
 		</head>
@@ -73,6 +234,16 @@ templ Page(token string, title string) {
 				</div>
 				@Footer()
 			</div>
+			<!-- Modals -->
+			@SettingsModal()
+			@ProvidersModal()
+			@EditProviderModal()
+			@ModelsModal()
+			@SearchModal()
+			@PasswordModal()
+			@MCPModal()
+			@AuthorizationModal()
+			@QuestionModal()
 			@Scripts(token)
 		</body>
 	</html>
@@ -83,6 +254,9 @@ templ Header() {
 		<span class="navbar-brand mb-0 h1">
 			<i class="bi bi-terminal me-2"></i>scriptschnell Web UI
 		</span>
+		<button class="btn btn-outline-light" type="button" data-bs-toggle="modal" data-bs-target="#settingsModal">
+			<i class="bi bi-gear"></i> Settings
+		</button>
 	</header>
 }
 
@@ -93,22 +267,31 @@ templ Main() {
 }
 
 templ Footer() {
-	<footer class="bg-white border-top p-3">
-		<form id="chat-form" class="input-group">
-			<input
-				type="text"
-				class="form-control"
-				id="message-input"
-				placeholder="Type your message here..."
-				autocomplete="off"
-			/>
-			<button type="submit" class="btn btn-primary">
-				<i class="bi bi-send"></i> Send
-			</button>
-			<button type="button" class="btn btn-secondary" id="clear-btn">
-				<i class="bi bi-trash"></i> Clear
-			</button>
-		</form>
+	<footer class="bg-white border-top">
+		<div id="status-bar" class="status-bar connecting d-flex align-items-center">
+			<span class="status-indicator connecting"></span>
+			<span id="status-text">Connecting...</span>
+		</div>
+		<div class="p-3">
+			<form id="chat-form" class="input-group">
+				<input
+					type="text"
+					class="form-control"
+					id="message-input"
+					placeholder="Type your message here..."
+					autocomplete="off"
+				/>
+				<button type="submit" class="btn btn-primary" id="send-btn">
+					<i class="bi bi-send"></i> Send
+				</button>
+				<button type="button" class="btn btn-danger d-none" id="stop-btn">
+					<i class="bi bi-stop-circle"></i> Stop
+				</button>
+				<button type="button" class="btn btn-secondary" id="clear-btn">
+					<i class="bi bi-trash"></i> Clear
+				</button>
+			</form>
+		</div>
 	</footer>
 }
 

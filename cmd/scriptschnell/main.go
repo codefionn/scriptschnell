@@ -68,7 +68,7 @@ func main() {
 }
 
 func run() (err error) {
-	prompt, cliOptions, cliMode, pprofCfg, webMode, webDebug, parseErr := parseCLIArgs(os.Args[1:])
+	prompt, cliOptions, cliMode, pprofCfg, webMode, webDebug, requireSandboxAuth, parseErr := parseCLIArgs(os.Args[1:])
 	if parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			return nil
@@ -183,7 +183,7 @@ func run() (err error) {
 
 	// Check for web mode flag after config is loaded
 	if webMode {
-		return runWeb(cfg, providerMgr, secretsPassword, webDebug)
+		return runWeb(cfg, providerMgr, secretsPassword, webDebug, requireSandboxAuth)
 	}
 
 	if cliMode {
@@ -341,7 +341,7 @@ func runACPMode() error {
 	return acp.RunACPAgent(ctx, cfg, providerMgr)
 }
 
-func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, webDebug bool) error {
+func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, webDebug bool, requireSandboxAuth bool) error {
 	fmt.Fprintf(os.Stderr, "Starting scriptschnell in web mode...\n")
 
 	// Initialize logger if not already initialized
@@ -369,7 +369,7 @@ func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *
 	providerMgr.RefreshAllModels(ctx)
 
 	// Create and start web server
-	srv, err := web.NewServer(ctx, cfg, providerMgr, secretsPassword, webDebug)
+	srv, err := web.NewServer(ctx, cfg, providerMgr, secretsPassword, webDebug, requireSandboxAuth)
 	if err != nil {
 		return fmt.Errorf("failed to create web server: %w", err)
 	}
@@ -416,7 +416,7 @@ func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *
 	return nil
 }
 
-func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, bool, bool, error) {
+func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, bool, bool, bool, error) {
 	fs := flag.NewFlagSet("scriptschnell", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -483,41 +483,41 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return "", nil, false, nil, false, false, flag.ErrHelp
+			return "", nil, false, nil, false, false, false, flag.ErrHelp
 		}
-		return "", nil, false, nil, false, false, err
+		return "", nil, false, nil, false, false, false, err
 	}
 
 	if showHelp {
 		fs.Usage()
-		return "", nil, false, nil, false, false, flag.ErrHelp
+		return "", nil, false, nil, false, false, false, flag.ErrHelp
 	}
 
 	remaining := fs.Args()
-	optionsUsed := dangerous || allowNetwork || requireSandboxAuth || len(allowDirs) > 0 || len(allowFiles) > 0 || len(allowDomains) > 0
+	optionsUsed := dangerous || allowNetwork || len(allowDirs) > 0 || len(allowFiles) > 0 || len(allowDomains) > 0
 
 	// Handle ACP mode
 	if acpMode {
 		if len(remaining) > 0 {
-			return "", nil, false, nil, false, false, nil
+			return "", nil, false, nil, false, false, false, nil
 		}
 		if optionsUsed {
-			return "", nil, false, nil, false, false, nil
+			return "", nil, false, nil, false, false, false, nil
 		}
 		// Return special values to indicate ACP mode
-		return "", nil, false, nil, false, false, errACPMode
+		return "", nil, false, nil, false, false, false, errACPMode
 	}
 
 	// Handle web mode
 	if webMode {
 		if len(remaining) > 0 {
-			return "", nil, false, nil, false, false, flag.ErrHelp
+			return "", nil, false, nil, false, false, false, flag.ErrHelp
 		}
 		if optionsUsed {
-			return "", nil, false, nil, false, false, flag.ErrHelp
+			return "", nil, false, nil, false, false, false, flag.ErrHelp
 		}
-		// Return special values to indicate web mode
-		return "", nil, false, nil, true, webDebug, nil
+		// Return special values to indicate web mode (pass requireSandboxAuth)
+		return "", nil, false, nil, true, webDebug, requireSandboxAuth, nil
 	}
 
 	if len(remaining) == 0 {
@@ -525,12 +525,12 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 		opts := &cli.Options{
 			RequireSandboxAuth: requireSandboxAuth,
 		}
-		return "", opts, false, nil, false, false, nil
+		return "", opts, false, nil, false, false, false, nil
 	}
 
 	prompt := strings.TrimSpace(strings.Join(remaining, " "))
 	if prompt == "" {
-		return "", nil, false, nil, false, false, fmt.Errorf("prompt must not be empty")
+		return "", nil, false, nil, false, false, false, fmt.Errorf("prompt must not be empty")
 	}
 
 	opts := &cli.Options{
@@ -563,7 +563,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 		MutexProfileFraction: pprofMutexProfileFraction,
 	}
 
-	return prompt, opts, true, pprofCfg, false, false, nil
+	return prompt, opts, true, pprofCfg, false, false, false, nil
 }
 
 func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.Options) error {

@@ -263,6 +263,7 @@ func (m *Manager) save() error {
 		OrchestrationModel: m.config.OrchestrationModel,
 		SummarizeModel:     m.config.SummarizeModel,
 		PlanningModel:      m.config.PlanningModel,
+		SafetyModel:        m.config.SafetyModel,
 	}
 	for name, provider := range m.config.Providers {
 		if provider == nil {
@@ -791,6 +792,16 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 	var provider *Provider
 
 	for _, p := range m.config.Providers {
+		// Ensure models are lazy-loaded from cache if not yet available
+		if len(p.Models) == 0 {
+			m.mu.RUnlock()
+			_ = m.ensureModelsLoaded(p.Name)
+			m.mu.RLock()
+			// Re-fetch provider since it may have been reloaded
+			if reloaded, ok := m.config.Providers[p.Name]; ok {
+				p = reloaded
+			}
+		}
 		for _, mod := range p.Models {
 			if mod.ID == modelID {
 				model = mod

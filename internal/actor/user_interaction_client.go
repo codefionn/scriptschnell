@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
@@ -51,7 +52,7 @@ func (c *UserInteractionClient) RequestAuthorization(
 		},
 		RequestCtx:   ctx,
 		ResponseChan: responseChan,
-		Timeout:      c.defaultTimeout,
+		Timeout:      consts.Timeout10Minutes,
 		TabID:        tabID,
 	}
 
@@ -95,7 +96,7 @@ func (c *UserInteractionClient) RequestDomainAuthorization(
 		},
 		RequestCtx:   ctx,
 		ResponseChan: responseChan,
-		Timeout:      c.defaultTimeout,
+		Timeout:      consts.Timeout10Minutes,
 		TabID:        tabID,
 	}
 

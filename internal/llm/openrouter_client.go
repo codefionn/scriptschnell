@@ -47,7 +47,7 @@ func NewOpenRouterClient(apiKey, modelID string) (Client, error) {
 		model:   model,
 		baseURL: openRouterAPIBaseURL,
 		httpClient: &http.Client{
-			Timeout: consts.Timeout60Seconds,
+			Timeout: consts.Timeout2Minutes,
 		},
 	}, nil
 }
@@ -88,6 +88,17 @@ func (c *OpenRouterClient) CompleteWithRequest(ctx context.Context, req *Complet
 		return nil, fmt.Errorf("openrouter completion request cannot be nil")
 	}
 
+	response, err := c.doCompletion(ctx, req)
+	if err != nil && isOpenRouterNoToolUseError(err) && len(req.Tools) > 0 {
+		logger.Warn("OpenRouter: model %s does not support tool use, retrying without tools", c.model)
+		reqWithoutTools := *req
+		reqWithoutTools.Tools = nil
+		return c.doCompletion(ctx, &reqWithoutTools)
+	}
+	return response, err
+}
+
+func (c *OpenRouterClient) doCompletion(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
 	payload, err := c.buildChatRequest(req, false)
 	if err != nil {
 		return nil, err
@@ -151,6 +162,17 @@ func (c *OpenRouterClient) Stream(ctx context.Context, req *CompletionRequest, c
 		return fmt.Errorf("openrouter completion request cannot be nil")
 	}
 
+	err := c.doStream(ctx, req, callback)
+	if err != nil && isOpenRouterNoToolUseError(err) && len(req.Tools) > 0 {
+		logger.Warn("OpenRouter: model %s does not support tool use, retrying stream without tools", c.model)
+		reqWithoutTools := *req
+		reqWithoutTools.Tools = nil
+		return c.doStream(ctx, &reqWithoutTools, callback)
+	}
+	return err
+}
+
+func (c *OpenRouterClient) doStream(ctx context.Context, req *CompletionRequest, callback func(chunk string) error) error {
 	payload, err := c.buildChatRequest(req, true)
 	if err != nil {
 		return err
@@ -236,6 +258,16 @@ func (c *OpenRouterClient) Stream(ctx context.Context, req *CompletionRequest, c
 	}
 
 	return nil
+}
+
+// isOpenRouterNoToolUseError detects the OpenRouter-specific error when a model
+// doesn't support tool use: "No endpoints found that support tool use"
+func isOpenRouterNoToolUseError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "no endpoints found") && strings.Contains(errMsg, "tool use")
 }
 
 func (c *OpenRouterClient) buildChatRequest(req *CompletionRequest, stream bool) (*openRouterChatRequest, error) {

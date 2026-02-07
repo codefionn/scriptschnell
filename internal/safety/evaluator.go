@@ -54,7 +54,7 @@ func (e *Evaluator) EvaluateUserPrompt(ctx context.Context, prompt string) (*Saf
 			},
 		},
 		Temperature: 0.1,
-		MaxTokens:   200,
+		MaxTokens:   4096,
 	}
 
 	resp, err := e.client.CompleteWithRequest(ctx, req)
@@ -96,7 +96,7 @@ func (e *Evaluator) EvaluateWebContent(ctx context.Context, content string, url 
 			},
 		},
 		Temperature: 0.1,
-		MaxTokens:   200,
+		MaxTokens:   4096,
 	}
 
 	resp, err := e.client.CompleteWithRequest(ctx, req)
@@ -158,7 +158,7 @@ func (e *Evaluator) EvaluateSearchResults(ctx context.Context, results []map[str
 			},
 		},
 		Temperature: 0.1,
-		MaxTokens:   200,
+		MaxTokens:   4096,
 	}
 
 	resp, err := e.client.CompleteWithRequest(ctx, req)

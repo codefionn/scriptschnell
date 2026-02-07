@@ -12,6 +12,9 @@ import (
 	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
+// MIN_SLEEP_SECONDS is the minimum sleep duration for retries
+const MIN_SLEEP_SECONDS = 1
+
 // ErrorJudgeDecision represents the error judge's decision
 type ErrorJudgeDecision struct {
 	ShouldRetry       bool
@@ -132,7 +135,7 @@ func (a *ErrorJudgeActor) buildErrorJudgePrompt(msg *ErrorJudgeMessage) string {
 
 	sb.WriteString("Guidelines:\n")
 	sb.WriteString("- Rate limit errors: RETRY with exponential backoff (5s, 15s, 30s, 60s)\n")
-	sb.WriteString("- Temporary service errors (500, 503, timeout): RETRY with moderate delays (2s, 5s, 10s)\n")
+	sb.WriteString("- Temporary service errors (500, 503, timeout): RETRY with moderate delays (2s, 5s, 10s, 20s, 30s)\n")
 	sb.WriteString("- Network errors: RETRY with short delays (1s, 3s, 5s)\n")
 	sb.WriteString("- Token/context limit errors (context_length_exceeded, max tokens, prompt too long, input too long): RETRY with TRIGGER_COMPACTION=YES\n")
 	sb.WriteString("- Authentication errors: HALT (invalid credentials)\n")
@@ -179,6 +182,11 @@ func (a *ErrorJudgeActor) parseDecision(response string, msg *ErrorJudgeMessage)
 		decision.SleepSeconds = 120 // Max 2 minutes
 	}
 
+	// Enforce minimum sleep for retries
+	if decision.ShouldRetry && decision.SleepSeconds < MIN_SLEEP_SECONDS {
+		decision.SleepSeconds = MIN_SLEEP_SECONDS
+	}
+
 	// Don't retry if we've exceeded max attempts
 	if msg.AttemptNumber >= msg.MaxAttempts {
 		decision.ShouldRetry = false
@@ -220,7 +228,7 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 		strings.Contains(errMsg, "service unavailable") ||
 		strings.Contains(errMsg, "internal server error") ||
 		strings.Contains(errMsg, "timeout") {
-		sleepSeconds := calculateLinearBackoff(msg.AttemptNumber, 2, 10)
+		sleepSeconds := calculateLinearBackoff(msg.AttemptNumber, 2, 30)
 		return ErrorJudgeDecision{
 			ShouldRetry:  true,
 			SleepSeconds: sleepSeconds,
@@ -253,7 +261,7 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 		strings.Contains(errMsg, "exceeds the model") {
 		return ErrorJudgeDecision{
 			ShouldRetry:       true,
-			SleepSeconds:      0,
+			SleepSeconds:      MIN_SLEEP_SECONDS,
 			Reason:            "Context size exceeded, triggering compaction",
 			TriggerCompaction: true,
 		}
@@ -282,11 +290,21 @@ func (a *ErrorJudgeActor) heuristicJudge(msg *ErrorJudgeMessage) ErrorJudgeDecis
 		}
 	}
 
+	// OpenRouter: model does not support tool use
+	if strings.Contains(errMsg, "no endpoints found") && strings.Contains(errMsg, "tool use") {
+		return ErrorJudgeDecision{
+			ShouldRetry:  false,
+			SleepSeconds: 0,
+			Reason:       "Model does not support tool use via OpenRouter",
+		}
+	}
+
 	// Unknown error - retry a few times with moderate delay
 	if msg.AttemptNumber < 3 {
+		sleepSeconds := msg.AttemptNumber*3 + MIN_SLEEP_SECONDS
 		return ErrorJudgeDecision{
 			ShouldRetry:  true,
-			SleepSeconds: msg.AttemptNumber * 3,
+			SleepSeconds: sleepSeconds,
 			Reason:       "Unknown error, retrying with caution",
 		}
 	}

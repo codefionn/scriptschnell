@@ -11,8 +11,10 @@ import (
 	. "github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/htmlconv"
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // registerFetchHostFunction registers the fetch host function
@@ -30,17 +32,31 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 	// shell(command_json_ptr, command_json_len, stdin_ptr, stdin_len, stdout_ptr, stdout_cap, stderr_ptr, stderr_cap) -> exit_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, cmdPtr, cmdLen, stdinPtr, stdinLen, stdoutPtr, stdoutCap, stderrPtr, stderrCap uint32) int32 {
+			// writeStderr writes an error message to the stderr WASM buffer
+			writeStderr := func(memory api.Memory, msg string) {
+				msgBytes := []byte(msg)
+				if uint32(len(msgBytes)) > stderrCap {
+					msgBytes = msgBytes[:stderrCap]
+				}
+				if stderrCap > 0 {
+					memory.Write(stderrPtr, msgBytes)
+				}
+			}
+
 			// Read command from WASM memory
 			memory := m.Memory()
 			cmdBytes, ok := memory.Read(cmdPtr, cmdLen)
 			if !ok {
+				writeStderr(memory, "Error: failed to read command from memory")
 				return -1
 			}
 			var commandArgs []string
 			if err := json.Unmarshal(cmdBytes, &commandArgs); err != nil {
+				writeStderr(memory, fmt.Sprintf("Error: failed to parse command JSON: %v", err))
 				return -1
 			}
 			if len(commandArgs) == 0 {
+				writeStderr(memory, "Error: command must include at least one argument")
 				return -1
 			}
 			commandDisplay := strings.Join(commandArgs, " ")
@@ -50,6 +66,7 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 			if stdinLen > 0 {
 				stdinData, ok = memory.Read(stdinPtr, stdinLen)
 				if !ok {
+					writeStderr(memory, "Error: failed to read stdin from memory")
 					return -1
 				}
 			}
@@ -60,8 +77,83 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 					"command":      commandDisplay,
 					"command_args": commandArgs,
 				})
-				if err != nil || decision == nil || !decision.Allowed {
-					return -1 // Not authorized
+				if err != nil {
+					writeStderr(memory, fmt.Sprintf("Error: command authorization failed: %v", err))
+					return -1
+				}
+				if decision != nil && decision.RequiresUserInput {
+					// Prompt user for approval via the user interaction client
+					var uiClient *actor.UserInteractionClient
+					if t.userInteractionFunc != nil {
+						uiClient = t.userInteractionFunc()
+					}
+					if uiClient != nil {
+						tabID := 0
+						if t.tabIDFunc != nil {
+							tabID = t.tabIDFunc()
+						}
+						// Pause execution deadline while waiting for user input
+						if t.deadline != nil {
+							t.deadline.Pause()
+						}
+						resp, err := uiClient.RequestAuthorization(
+							t.interactionCtx(ctx),
+							ToolNameCommand,
+							map[string]interface{}{
+								"command":      commandDisplay,
+								"command_args": commandArgs,
+							},
+							decision.Reason,
+							decision.SuggestedCommandPrefix,
+							tabID,
+						)
+						// Resume execution deadline after user responds
+						if t.deadline != nil {
+							t.deadline.Resume()
+						}
+						if err != nil || resp == nil || resp.TimedOut || resp.Cancelled || !resp.Approved {
+							reason := "not authorized"
+							if decision.Reason != "" {
+								reason = decision.Reason
+							}
+							if err != nil {
+								reason = fmt.Sprintf("authorization error: %v", err)
+							} else if resp != nil && resp.TimedOut {
+								reason = "authorization timed out"
+							} else if resp != nil && resp.Cancelled {
+								reason = "authorization cancelled by user"
+							}
+							writeStderr(memory, fmt.Sprintf("Error: command '%s' was denied: %s", commandDisplay, reason))
+							return -1
+						}
+						// User approved — persist the authorization
+						prefix := decision.SuggestedCommandPrefix
+						if prefix != "" {
+							if t.session != nil {
+								t.session.AuthorizeCommand(prefix)
+							}
+							if t.authConfig.Config != nil && !t.authConfig.Config.IsCommandAuthorized(prefix) {
+								t.authConfig.Config.AuthorizeCommand(prefix)
+								if err := t.authConfig.Config.Save(t.authConfig.ConfigPath); err != nil {
+									logger.Warn("Failed to persist authorized command prefix %q: %v", prefix, err)
+								}
+							}
+						}
+					} else {
+						reason := "not authorized"
+						if decision.Reason != "" {
+							reason = decision.Reason
+						}
+						writeStderr(memory, fmt.Sprintf("Error: command '%s' was denied: %s (no approval mechanism available)", commandDisplay, reason))
+						return -1
+					}
+				} else if decision == nil || !decision.Allowed {
+					reason := "not authorized"
+					if decision != nil && decision.Reason != "" {
+						reason = decision.Reason
+					}
+					writeStderr(memory, fmt.Sprintf("Error: command '%s' was denied: %s", commandDisplay, reason))
+					return -1
 				}
 			}
 
@@ -75,7 +167,11 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 				// Use the shell executor (actor-based) with direct argv execution
 				var err error
 				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandArgs, "", consts.Timeout30Seconds, string(stdinData))
-				_ = err // Error information is captured in exitCode and stderr
+				// When the executor returns an error (e.g. command not found, timeout)
+				// and stderr is empty, include the error message so the caller gets context
+				if err != nil && stderrStr == "" {
+					stderrStr = fmt.Sprintf("Error: %v", err)
+				}
 			} else {
 				// Fallback to direct execution if no executor is set
 				stdoutStr, stderrStr, exitCode = t.executeDirectCommand(ctx, commandArgs, stdinData)

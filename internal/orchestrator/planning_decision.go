@@ -87,38 +87,63 @@ Respond ONLY with a JSON object in the following format:
 }
 `, mcpContext.String())
 
-	req := &llm.CompletionRequest{
-		Messages: []*llm.Message{
-			{
-				Role:    "system",
-				Content: systemPrompt,
-			},
-			{
-				Role:    "user",
-				Content: prompt,
-			},
+	messages := []*llm.Message{
+		{
+			Role:    "system",
+			Content: systemPrompt,
 		},
-		Temperature: 0,
-		MaxTokens:   256,
+		{
+			Role:    "user",
+			Content: prompt,
+		},
 	}
 
-	resp, err := o.summarizeClient.CompleteWithRequest(ctx, req)
-	if err != nil {
-		logger.Warn("Planning decision LLM failed: %v", err)
-		// Fallback: run planning (since heuristic said it's complex) but maybe be careful with MCPs?
-		// Let's default to running planning with NO extra MCPs to be safe/fast, or ALL?
-		// Original logic enabled all read-only MCPs. Let's stick to that for fallback if we can't decide.
-		// But here we return nil allowedMCPs which might mean "all" or "none" depending on implementation.
-		// Let's say nil means "all available read-only" in the caller, or we handle it here.
-		// Actually, let's just return true for run, and empty list for MCPs (safer).
-		defaultDecision.ShouldRun = true
-		defaultDecision.Reason = fmt.Sprintf("LLM error (%v), fallback to heuristic complex", err)
-		return defaultDecision, nil
+	// Use higher MaxTokens to accommodate thinking/reasoning models (e.g., Qwen 3, DeepSeek)
+	// that consume tokens for internal reasoning before producing the actual JSON response.
+	const maxTokens = 16384
+	const maxContinuations = 3
+
+	var contentBuilder strings.Builder
+
+	for turn := 0; turn <= maxContinuations; turn++ {
+		req := &llm.CompletionRequest{
+			Messages:    messages,
+			Temperature: 0,
+			MaxTokens:   maxTokens,
+		}
+
+		resp, err := o.summarizeClient.CompleteWithRequest(ctx, req)
+		if err != nil {
+			logger.Warn("Planning decision LLM failed: %v", err)
+			defaultDecision.ShouldRun = true
+			defaultDecision.Reason = fmt.Sprintf("LLM error (%v), fallback to heuristic complex", err)
+			return defaultDecision, nil
+		}
+
+		contentBuilder.WriteString(resp.Content)
+
+		// If the response wasn't truncated, we're done
+		if resp.StopReason != "length" {
+			break
+		}
+
+		// Response was truncated — continue the conversation
+		logger.Debug("Planning decision response truncated (turn %d), continuing", turn+1)
+		messages = append(messages,
+			&llm.Message{
+				Role:    "assistant",
+				Content: resp.Content,
+			},
+			&llm.Message{
+				Role:    "user",
+				Content: "Continue your response from where you left off. Output only the remaining content.",
+			},
+		)
 	}
 
-	// Parse response
+	// Parse the accumulated response
 	decision := &PlanningDecision{}
-	content := resp.Content
+	content := contentBuilder.String()
 
 	// Strip <think> tags (reasoning models like DeepSeek output these)
 	content = stripThinkTags(content)
@@ -149,7 +174,7 @@ Respond ONLY with a JSON object in the following format:
 	}
 
 	if err := json.Unmarshal([]byte(content), decision); err != nil {
-		logger.Warn("Failed to parse planning decision JSON: %v. Content: %s", err, resp.Content)
+		logger.Warn("Failed to parse planning decision JSON: %v. Content: %s", err, content)
 		defaultDecision.ShouldRun = true
 		defaultDecision.Reason = "JSON parse error, fallback to heuristic complex"
 		return defaultDecision, nil

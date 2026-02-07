@@ -287,6 +287,50 @@ func TestHeuristicJudge_NetworkErrors(t *testing.T) {
 	}
 }
 
+func TestHeuristicJudge_MinSleepFloor(t *testing.T) {
+	actor := NewErrorJudgeActor("test", nil)
+
+	tests := []struct {
+		name          string
+		error         error
+		attemptNumber int
+	}{
+		{
+			name:          "context size error uses MIN_SLEEP_SECONDS",
+			error:         errors.New("context length exceeded"),
+			attemptNumber: 1,
+		},
+		{
+			name:          "unknown error with attempt 0 should have min sleep",
+			error:         errors.New("some unknown error"),
+			attemptNumber: 0,
+		},
+		{
+			name:          "unknown error with attempt 1 should have positive sleep",
+			error:         errors.New("some unknown error"),
+			attemptNumber: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &ErrorJudgeMessage{
+				Error:         tt.error,
+				AttemptNumber: tt.attemptNumber,
+				MaxAttempts:   5,
+				ModelID:       "gpt-4",
+			}
+
+			decision := actor.heuristicJudge(msg)
+
+			if decision.ShouldRetry && decision.SleepSeconds < MIN_SLEEP_SECONDS {
+				t.Errorf("Expected at least %d sleep seconds for retryable error, got %d",
+					MIN_SLEEP_SECONDS, decision.SleepSeconds)
+			}
+		})
+	}
+}
+
 func TestHeuristicJudge_UnknownError(t *testing.T) {
 	actor := NewErrorJudgeActor("test", nil)
 
@@ -334,6 +378,87 @@ func TestExponentialBackoff(t *testing.T) {
 			t.Errorf("calculateExponentialBackoff(%d, %d, %d) = %d, want %d",
 				tt.attempt, tt.base, tt.max, result, tt.wantResult)
 		}
+	}
+}
+
+func TestParseDecision_MinSleepFloor(t *testing.T) {
+	actor := NewErrorJudgeActor("test", nil)
+
+	tests := []struct {
+		name           string
+		response       string
+		wantRetry      bool
+		wantMinSleep   int
+		wantCompaction bool
+	}{
+		{
+			name: "RETRY with 0 sleep should be floored to MIN_SLEEP_SECONDS",
+			response: `DECISION: RETRY
+SLEEP_SECONDS: 0
+TRIGGER_COMPACTION: NO
+REASON: Testing zero sleep`,
+			wantRetry:      true,
+			wantMinSleep:   MIN_SLEEP_SECONDS,
+			wantCompaction: false,
+		},
+		{
+			name: "RETRY with negative sleep should be floored to MIN_SLEEP_SECONDS",
+			response: `DECISION: RETRY
+SLEEP_SECONDS: -5
+TRIGGER_COMPACTION: NO
+REASON: Testing negative sleep`,
+			wantRetry:      true,
+			wantMinSleep:   MIN_SLEEP_SECONDS,
+			wantCompaction: false,
+		},
+		{
+			name: "HALT with 0 sleep should remain 0",
+			response: `DECISION: HALT
+SLEEP_SECONDS: 0
+TRIGGER_COMPACTION: NO
+REASON: Authentication error`,
+			wantRetry:      false,
+			wantMinSleep:   0,
+			wantCompaction: false,
+		},
+		{
+			name: "RETRY with positive sleep should be preserved",
+			response: `DECISION: RETRY
+SLEEP_SECONDS: 10
+TRIGGER_COMPACTION: NO
+REASON: Rate limit`,
+			wantRetry:      true,
+			wantMinSleep:   10,
+			wantCompaction: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &ErrorJudgeMessage{
+				Error:         errors.New("test error"),
+				AttemptNumber: 1,
+				MaxAttempts:   5,
+				ModelID:       "test-model",
+			}
+
+			decision, err := actor.parseDecision(tt.response, msg)
+			if err != nil {
+				t.Fatalf("parseDecision failed: %v", err)
+			}
+
+			if decision.ShouldRetry != tt.wantRetry {
+				t.Errorf("ShouldRetry = %v, want %v", decision.ShouldRetry, tt.wantRetry)
+			}
+
+			if decision.SleepSeconds < tt.wantMinSleep {
+				t.Errorf("SleepSeconds = %d, want at least %d", decision.SleepSeconds, tt.wantMinSleep)
+			}
+
+			if decision.TriggerCompaction != tt.wantCompaction {
+				t.Errorf("TriggerCompaction = %v, want %v", decision.TriggerCompaction, tt.wantCompaction)
+			}
+		})
 	}
 }
 

@@ -3,6 +3,7 @@ package planning
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -388,8 +389,8 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 			CacheTTL:      "5m",
 		}
 
-		// Get response from planning model
-		response, err := p.client.CompleteWithRequest(ctx, completeReq)
+		// Get response from planning model with retry logic
+		response, err := p.completeWithRetry(ctx, completeReq, updateStatus, streamPlanning)
 		if err != nil {
 			return nil, fmt.Errorf("planning completion failed: %w", err)
 		}
@@ -434,6 +435,7 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		messages = append(messages, &llm.Message{
 			Role:      "assistant",
 			Content:   response.Content,
+			Reasoning: response.Reasoning,
 			ToolCalls: response.ToolCalls,
 		})
 
@@ -1167,6 +1169,72 @@ func (p *PlanningAgent) extractPartialPlan(messages []*llm.Message) *PlanningRes
 		NeedsInput: true,
 		Complete:   false,
 	}
+}
+
+// completeWithRetry wraps LLM completion with retry logic for timeout and transient errors.
+// Uses up to PlanningMaxRetries attempts with exponential backoff.
+func (p *PlanningAgent) completeWithRetry(ctx context.Context, req *llm.CompletionRequest, statusCb func(string), streamCb func(string)) (*llm.CompletionResponse, error) {
+	maxAttempts := consts.PlanningMaxRetries
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		response, err := p.client.CompleteWithRequest(ctx, req)
+		if err == nil {
+			return response, nil
+		}
+
+		logger.Warn("Planning completion error (attempt %d/%d): %v", attempt, maxAttempts, err)
+
+		// Last attempt - return the error
+		if attempt >= maxAttempts {
+			return nil, err
+		}
+
+		// Check for context cancellation (either via ctx.Err() or if the error itself is a context error)
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+
+		// Determine sleep duration with exponential backoff
+		errStr := strings.ToLower(err.Error())
+		var sleepSeconds int
+		switch {
+		case strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "429"):
+			sleepSeconds = 5 * (1 << uint(attempt-1)) // 5, 10, 20, 40...
+			if sleepSeconds > 120 {
+				sleepSeconds = 120
+			}
+		case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline"):
+			sleepSeconds = attempt * 3
+		case strings.Contains(errStr, "500") || strings.Contains(errStr, "502") ||
+			strings.Contains(errStr, "503") || strings.Contains(errStr, "overloaded"):
+			sleepSeconds = attempt * 3
+		default:
+			sleepSeconds = attempt * 2
+		}
+
+		// Notify user about retry
+		retryMsg := fmt.Sprintf("\n⏳ Planning: retrying in %d seconds... (attempt %d/%d)\n", sleepSeconds, attempt, maxAttempts)
+		if streamCb != nil {
+			streamCb(retryMsg)
+		}
+		if statusCb != nil {
+			statusCb(fmt.Sprintf("Planning: retrying in %ds...", sleepSeconds))
+		}
+
+		// Sleep before retry
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(sleepSeconds) * time.Second):
+			// Continue to retry
+		}
+
+		if statusCb != nil {
+			statusCb(fmt.Sprintf("Planning: retrying (attempt %d/%d)...", attempt+1, maxAttempts))
+		}
+	}
+
+	return nil, fmt.Errorf("planning: max retry attempts (%d) exceeded", maxAttempts)
 }
 
 // Close cleans up the planning agent

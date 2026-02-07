@@ -296,6 +296,12 @@ func IsMistralModel(modelID string) bool {
 	}
 }
 
+// IsQwen3Model checks if the given model ID belongs to the Qwen 3 family
+func IsQwen3Model(modelID string) bool {
+	id := normalizeModelID(modelID)
+	return containsAny(id, "qwen3", "qwen-3", "qwen/qwen3")
+}
+
 // containsAny checks if the string contains any of the given substrings
 func containsAny(s string, substrings ...string) bool {
 	for _, substr := range substrings {
@@ -458,7 +464,11 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 
 	// Other families
 	case FamilyQwen:
-		if strings.Contains(normalizeModelID(modelID), "70b") {
+		id := normalizeModelID(modelID)
+		if strings.Contains(id, "2.5-coder-32b") {
+			return 131072
+		}
+		if strings.Contains(id, "70b") {
 			return 32768
 		}
 		return 8192

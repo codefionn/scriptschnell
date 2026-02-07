@@ -3,8 +3,10 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/llm"
@@ -79,7 +81,7 @@ Respond with ONLY one word: "QUESTION" or "IMPLEMENTATION"`
 		Messages:     messages,
 		SystemPrompt: systemPrompt,
 		Temperature:  0,
-		MaxTokens:    10,
+		MaxTokens:    4096,
 	}
 
 	resp, err := client.CompleteWithRequest(ctx, req)
@@ -330,7 +332,7 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 	// Initialize loop detector
 	loopDetector := NewLoopDetector(12, 3)
 
-	maxTurns := 64 // Less than investigator since tasks are specific
+	maxTurns := 96
 
 	for i := 0; i < maxTurns; i++ {
 		// Prepare messages
@@ -357,7 +359,8 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 			CacheTTL:      "5m",
 		}
 
-		resp, err := client.CompleteWithRequest(ctx, req)
+		// Execute LLM completion with retry logic for transient errors
+		resp, err := a.completeWithRetry(ctx, client, req, sendStatus, sendStream)
 		if err != nil {
 			return nil, fmt.Errorf("verification LLM error: %w", err)
 		}
@@ -434,6 +437,73 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 		Summary: "Verification timed out after maximum turns",
 		Errors:  []string{"Verification incomplete - timed out"},
 	}, nil
+}
+
+// completeWithRetry wraps LLM completion with retry logic for transient errors.
+// Uses up to consts.VerificationMaxRetries attempts with exponential backoff.
+// This is similar to PlanningAgent's completeWithRetry but adapted for verification context.
+func (a *VerificationAgent) completeWithRetry(ctx context.Context, client llm.Client, req *llm.CompletionRequest, statusCb func(string), streamCb func(string)) (*llm.CompletionResponse, error) {
+	maxAttempts := consts.VerificationMaxRetries
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		response, err := client.CompleteWithRequest(ctx, req)
+		if err == nil {
+			return response, nil
+		}
+
+		logger.Warn("Verification completion error (attempt %d/%d): %v", attempt, maxAttempts, err)
+
+		// Last attempt - return the error
+		if attempt >= maxAttempts {
+			return nil, err
+		}
+
+		// Check for context cancellation (either via ctx.Err() or if the error itself is a context error)
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+
+		// Determine sleep duration based on error type
+		errStr := strings.ToLower(err.Error())
+		var sleepSeconds int
+		switch {
+		case strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "429"):
+			sleepSeconds = 5 * (1 << uint(attempt-1)) // 5, 10, 20, 40...
+			if sleepSeconds > 120 {
+				sleepSeconds = 120
+			}
+		case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline"):
+			sleepSeconds = attempt * 3
+		case strings.Contains(errStr, "500") || strings.Contains(errStr, "502") ||
+			strings.Contains(errStr, "503") || strings.Contains(errStr, "overloaded"):
+			sleepSeconds = attempt * 3
+		default:
+			sleepSeconds = attempt * 2
+		}
+
+		// Notify user about retry
+		retryMsg := fmt.Sprintf("\n⏳ Verification: retrying in %d seconds... (attempt %d/%d)\n", sleepSeconds, attempt, maxAttempts)
+		if streamCb != nil {
+			streamCb(retryMsg)
+		}
+		if statusCb != nil {
+			statusCb(fmt.Sprintf("Verification: retrying in %ds...", sleepSeconds))
+		}
+
+		// Sleep before retry
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(sleepSeconds) * time.Second):
+			// Continue to retry
+		}
+
+		if statusCb != nil {
+			statusCb(fmt.Sprintf("Verification: retrying (attempt %d/%d)...", attempt+1, maxAttempts))
+		}
+	}
+
+	return nil, fmt.Errorf("verification: max retry attempts (%d) exceeded", maxAttempts)
 }
 
 // formatVerificationToolCall formats a tool call for display.

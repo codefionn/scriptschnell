@@ -16,6 +16,11 @@ import (
 // executeInternal performs the actual WASM compilation and execution
 // This method is used by the builder to maintain access to TinyGoManager
 func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuilder) (interface{}, error) {
+	// Store the parent context (without sandbox timeout) so that user interaction
+	// calls (authorization prompts) are not limited by the sandbox execution timeout.
+	t.parentCtx = ctx
+	defer func() { t.parentCtx = nil }()
+
 	// Validate builder
 	if err := builder.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid builder configuration: %w", err)
@@ -64,9 +69,18 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 		return nil, fmt.Errorf("failed to get TinyGo binary (required for WASI P2 compilation): %w", err)
 	}
 
-	// Create context with timeout for actual compilation and execution
-	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer cancel()
+	// Create cancellable context for compilation and execution.
+	// Instead of context.WithTimeout we use a pausable deadline so that time
+	// spent waiting for user authorization prompts does not count against the
+	// sandbox timeout budget.
+	execCtx, execCancel := context.WithCancel(ctx)
+	defer execCancel()
+
+	t.deadline = newExecDeadline(time.Duration(timeout)*time.Second, execCancel)
+	defer func() {
+		t.deadline.Stop()
+		t.deadline = nil
+	}()
 
 	// WASM execution (maximum isolation, controlled network access)
 	// Using WASI P1 target because wazero currently exposes mature Preview1 support.

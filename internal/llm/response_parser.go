@@ -72,7 +72,10 @@ func extractFromXMLTags(content string) string {
 // Returns an error if parsing fails.
 func ParseLLMJSONResponse(response string, target interface{}) error {
 	cleaned := CleanLLMJSONResponse(response)
-	return json.Unmarshal([]byte(cleaned), target)
+	if err := json.Unmarshal([]byte(cleaned), target); err == nil {
+		return nil
+	}
+	return ExtractJSON(response, target)
 }
 
 // ExtractJSONArray attempts to extract and parse a JSON array from a response.

@@ -82,6 +82,20 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 		logger.Warn("Summary model decision does not equal exactly what was asked for: %q", decision)
 	}
 
+	// For Qwen 3 models, be conservative - only continue on clear cases
+	if llm.IsQwen3Model(modelID) {
+		upper := strings.ToUpper(decision)
+		normalized := strings.TrimSpace(upper)
+
+		if normalized == "CONTINUE" && len(normalized) == 8 {
+			logger.Debug("Auto-continue judge decided: CONTINUE (Qwen 3 model - pristine match only, full response: %q)", decision)
+			return true, decision
+		}
+
+		logger.Debug("Auto-continue judge decided: STOP (Qwen 3 model - conservative approach, normalized: %q, full response: %q)", normalized, decision)
+		return false, decision
+	}
+
 	// For Mistral models, be extremely conservative - only continue on crystal clear cases
 	if llm.IsMistralModel(modelID) {
 		upper := strings.ToUpper(decision)
@@ -220,6 +234,19 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 	sb.WriteString("- The assistant is repeating the same text or patterns\n")
 	sb.WriteString("- The conversation appears to be stuck in a loop\n")
 	sb.WriteString("- The assistant is generating repetitive tool calls without making progress\n\n")
+
+	if llm.IsQwen3Model(modelID) {
+		sb.WriteString("IMPORTANT: Be conservative in your decision.\n")
+		sb.WriteString("Prefer STOP over CONTINUE. Only choose CONTINUE if:\n")
+		sb.WriteString("1. The response is visibly cut off mid-sentence or mid-code block\n")
+		sb.WriteString("2. There is a clear task that was started but not completed\n")
+		sb.WriteString("3. The response ends with obvious truncation indicators\n\n")
+		sb.WriteString("Choose STOP for everything else, including:\n")
+		sb.WriteString("- Complete responses\n")
+		sb.WriteString("- Natural stopping points\n")
+		sb.WriteString("- Responses that could continue but don't need to\n\n")
+		sb.WriteString("When in doubt, choose STOP.\n\n")
+	}
 
 	if llm.IsMistralModel(modelID) {
 		sb.WriteString("IMPORTANT: Be extremely conservative in your decision.\n")

@@ -6,6 +6,12 @@
 
 On first run, it will download tinygo (if not in PATH).
 
+Frontends:
+- TUI
+- CLI
+- Web (local)
+- ACP
+
 ## Features
 
 - Multiple providers supported
@@ -16,7 +22,7 @@ On first run, it will download tinygo (if not in PATH).
 - Separate LLM models (all must support tool calls via API):
     - Orchestrator: writes the actual code
     - Summarization: summarizes and makes *small* choices
-    - Planning: Plans the next steps
+    - Planning: Plans implementation (single shot or planning steps with one-by-one loops)
     - Safety: Used for safety-critical tasks, falls back to summarize model if not configured
 - Read only contexts like external documentation, library sources, etc.
 - Experimental agent client protocol support
@@ -37,12 +43,12 @@ On first run, it will download tinygo (if not in PATH).
 - [ ] Encourage LLMs to use the `parallel_tools` call (only gemini seems to do this)
 - [x] Limit the auto-continue judge so it doesn't get stuck in a loop
 - [x] Unify the model/provider detection (context window size/model specific workarounds)
-- [ ] Fix auto compaction
-- [ ] Get rid of magic literals in the codebase
+- [x] Fix auto compaction
+- [x] Get rid of magic literals in the codebase
 - [ ] General UI improvements around tool calls
 - [x] Todo task are not showing up in the UI
 - [x] On configured web search, add text to the system prompt for more up-to-date results
-- [ ] Speed up startup time
+- [x] Speed up startup time
 - [x] Support user configured mcp's with auto-selecting only relevant ones
 - [ ] Only cache directory listings in working directory
 - [ ] Implement persistent authorization on a per-project basis
@@ -72,6 +78,7 @@ On first run, it will download tinygo (if not in PATH).
 - Universal codebase LLM editing experience (cli, tui, code editor, web browser)
 - Compatible with many LLM providers
 - Promoting usage of open weight models
+- Improved reliability of results
 
 ### Maybes
 
@@ -168,4 +175,4 @@ Recommended since 2025-12-10:
 - Orchestrator model: Kimi K2.5 or ZAI GLM 4.7
 - Summarization model: Ministral 3 14B Instruct 2512
 - Planning model: Kimi K2.5
-- Safety model: GPT OSS 20b
+- Safety model: gpt-oss-safeguard-20b

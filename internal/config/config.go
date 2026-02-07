@@ -192,7 +192,7 @@ func DefaultConfig() *Config {
 		DefaultTimeout:     30,
 		TempDir:            filepath.Join(os.TempDir(), "scriptschnell"),
 		Temperature:        1.0,
-		MaxTokens:          8192,
+		MaxTokens:          16384,
 		ProviderConfigPath: filepath.Join(configDir, "providers.json"),
 		LogLevel:           "info",
 		LogPath:            filepath.Join(stateDir, "scriptschnell.log"),

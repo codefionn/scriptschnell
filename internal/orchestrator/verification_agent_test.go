@@ -170,7 +170,7 @@ func TestDecideVerificationNeeded_ClassifiedAsQuestion(t *testing.T) {
 	// Verify LLM was called
 	assert.Len(t, mockClient.calls, 1)
 	assert.Equal(t, 0.0, mockClient.calls[0].Temperature)
-	assert.Equal(t, 10, mockClient.calls[0].MaxTokens)
+	assert.Equal(t, 4096, mockClient.calls[0].MaxTokens)
 }
 
 // Test decideVerificationNeeded with LLM client classifying as implementation

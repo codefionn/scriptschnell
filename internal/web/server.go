@@ -31,20 +31,21 @@ const (
 
 // Server represents the web server
 type Server struct {
-	addr            string
-	authToken       string
-	httpServer      *http.Server
-	cfg             *config.Config
-	providerMgr     *provider.Manager
-	secretsPassword *securemem.String
-	broker          *MessageBroker
-	hub             *Hub
-	quitChan        chan struct{}
-	debug           bool
+	addr               string
+	authToken          string
+	httpServer         *http.Server
+	cfg                *config.Config
+	providerMgr        *provider.Manager
+	secretsPassword    *securemem.String
+	broker             *MessageBroker
+	hub                *Hub
+	quitChan           chan struct{}
+	debug              bool
+	requireSandboxAuth bool
 }
 
 // NewServer creates a new web server
-func NewServer(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, debug bool) (*Server, error) {
+func NewServer(ctx context.Context, cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, debug bool, requireSandboxAuth bool) (*Server, error) {
 	// Ensure .js files are served with correct MIME type
 	if err := mime.AddExtensionType(".js", "application/javascript"); err != nil {
 		logger.Warn("Failed to register .js MIME type: %v", err)
@@ -63,15 +64,16 @@ func NewServer(ctx context.Context, cfg *config.Config, providerMgr *provider.Ma
 	hub := NewHub()
 
 	srv := &Server{
-		addr:            fmt.Sprintf("localhost:%d", defaultPort),
-		authToken:       token,
-		cfg:             cfg,
-		providerMgr:     providerMgr,
-		secretsPassword: secretsPassword,
-		broker:          broker,
-		hub:             hub,
-		quitChan:        make(chan struct{}),
-		debug:           debug,
+		addr:               fmt.Sprintf("localhost:%d", defaultPort),
+		authToken:          token,
+		cfg:                cfg,
+		providerMgr:        providerMgr,
+		secretsPassword:    secretsPassword,
+		broker:             broker,
+		hub:                hub,
+		quitChan:           make(chan struct{}),
+		debug:              debug,
+		requireSandboxAuth: requireSandboxAuth,
 	}
 
 	return srv, nil
@@ -201,7 +203,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create client
-	client := NewClient(s.hub, conn, s.broker, s.cfg, s.providerMgr, s.secretsPassword, s.debug)
+	client := NewClient(s.hub, conn, s.broker, s.cfg, s.providerMgr, s.secretsPassword, s.debug, s.requireSandboxAuth)
 
 	// Register client
 	s.hub.Register(client)

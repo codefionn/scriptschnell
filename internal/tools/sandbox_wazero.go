@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
@@ -275,7 +276,56 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 		decision, err := adapter.Authorize(ctx, ToolNameGoSandboxDomain, map[string]interface{}{
 			"domain": parsedURL.Host,
 		})
-		if err != nil || decision == nil || !decision.Allowed {
+		if err != nil {
+			return 403 // Forbidden - authorization error
+		}
+		if decision != nil && decision.RequiresUserInput {
+			// Prompt user for approval via the user interaction client
+			var uiClient *actor.UserInteractionClient
+			if t.userInteractionFunc != nil {
+				uiClient = t.userInteractionFunc()
+			}
+			if uiClient != nil {
+				tabID := 0
+				if t.tabIDFunc != nil {
+					tabID = t.tabIDFunc()
+				}
+				suggestedDomain := parsedURL.Host
+				if decision.SuggestedCommandPrefix != "" {
+					suggestedDomain = decision.SuggestedCommandPrefix
+				}
+				// Pause execution deadline while waiting for user input
+				if t.deadline != nil {
+					t.deadline.Pause()
+				}
+				resp, respErr := uiClient.RequestDomainAuthorization(
+					t.interactionCtx(ctx),
+					parsedURL.Host,
+					decision.Reason,
+					suggestedDomain,
+					tabID,
+				)
+				// Resume execution deadline after user responds
+				if t.deadline != nil {
+					t.deadline.Resume()
+				}
+				if respErr != nil || resp == nil || resp.TimedOut || resp.Cancelled || !resp.Approved {
+					return 403 // Forbidden - user denied or error
+				}
+				// User approved — persist the authorization
+				if t.session != nil {
+					t.session.AuthorizeDomain(parsedURL.Host)
+				}
+				if t.authConfig.Config != nil && !t.authConfig.Config.IsDomainAuthorized(parsedURL.Host) {
+					t.authConfig.Config.AuthorizeDomain(parsedURL.Host)
+					if saveErr := t.authConfig.Config.Save(t.authConfig.ConfigPath); saveErr != nil {
+						logger.Warn("Failed to persist authorized domain %q: %v", parsedURL.Host, saveErr)
+					}
+				}
+			} else {
+				return 403 // Forbidden - no approval mechanism available
+			}
+		} else if decision == nil || !decision.Allowed {
 			return 403 // Forbidden - not authorized
 		}
 	}

@@ -1339,6 +1339,15 @@ func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
 	} else if o.config.MaxTokens > 0 {
 		sandboxTool.SetContextWindow(o.config.MaxTokens)
 	}
+	// Set user interaction client accessor for inline authorization prompts during WASM execution.
+	// A closure is used because the client may not be set yet at tool construction time.
+	sandboxTool.SetUserInteractionClient(func() *actor.UserInteractionClient {
+		return o.userInteractionClient
+	}, o.GetUserInteractionTabID)
+	// Set authorization persistence config so sandbox can persist approved commands/domains
+	if o.config != nil {
+		sandboxTool.SetAuthorizationPersistence(o.config, config.GetConfigPath())
+	}
 	// Set secret detector and feature flags for fetch requests
 	sandboxTool.SetSecretDetector(secretdetect.NewDetector())
 	sandboxTool.SetFeatureFlags(o.featureFlags)
@@ -1716,7 +1725,7 @@ func (o *Orchestrator) classifyPromptSimplicity(ctx context.Context, prompt stri
 				},
 			},
 			Temperature: 0,
-			MaxTokens:   128,
+			MaxTokens:   16384,
 		}
 
 		resp, err := o.summarizeClient.CompleteWithRequest(ctx, req)
@@ -2558,6 +2567,7 @@ func (o *Orchestrator) runOrchestrationLoopCore(
 }
 
 const maxVerificationRetries = 3
+const maxVerificationBackoff = 10 // Maximum backoff in seconds between verification attempts
 
 // ProcessPromptWithVerification wraps ProcessPrompt with automatic verification retry.
 // If verification fails, it feeds the failures back to the LLM and retries up to 3 times.
@@ -2631,6 +2641,27 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 			Message: fmt.Sprintf("\n🔄 Verification attempt %d/%d failed. Requesting fixes from LLM...\n\n", attempt, maxVerificationRetries),
 			Mode:    progress.ReportNoStatus,
 		})
+
+		// Add exponential backoff between verification attempts to avoid rapid retries
+		// First retry: 2s, second: 4s, third: 6s (capped at maxVerificationBackoff)
+		backoffSeconds := attempt * 2
+		if backoffSeconds > maxVerificationBackoff {
+			backoffSeconds = maxVerificationBackoff
+		}
+
+		dispatchProgress(progressCallback, progress.Update{
+			Message:   fmt.Sprintf("⏳ Waiting %d seconds before retry...", backoffSeconds),
+			Mode:      progress.ReportJustStatus,
+			Ephemeral: true,
+		})
+
+		select {
+		case <-ctx.Done():
+			o.session.ResetVerification()
+			return ctx.Err()
+		case <-time.After(time.Duration(backoffSeconds) * time.Second):
+			// Continue to retry
+		}
 
 		// Loop will call ProcessPrompt again with feedback as the next user prompt
 		prompt = feedbackMsg
@@ -3185,27 +3216,39 @@ func (o *Orchestrator) heuristicErrorDecision(err error, attemptNumber int) tool
 	// Temporary service errors - retry with moderate delay
 	if strings.Contains(errMsg, "500") || strings.Contains(errMsg, "503") ||
 		strings.Contains(errMsg, "timeout") {
+		sleepSeconds := attemptNumber*3 + tools.MIN_SLEEP_SECONDS
 		return tools.ErrorJudgeDecision{
 			ShouldRetry:  true,
-			SleepSeconds: attemptNumber * 3,
+			SleepSeconds: sleepSeconds,
 			Reason:       "Temporary service error",
 		}
 	}
 
 	// Network errors - retry with short delay
 	if strings.Contains(errMsg, "connection") || strings.Contains(errMsg, "network") {
+		sleepSeconds := attemptNumber*2 + tools.MIN_SLEEP_SECONDS
 		return tools.ErrorJudgeDecision{
 			ShouldRetry:  true,
-			SleepSeconds: attemptNumber * 2,
+			SleepSeconds: sleepSeconds,
 			Reason:       "Network error",
+		}
+	}
+
+	// OpenRouter: model does not support tool use
+	if strings.Contains(errMsg, "no endpoints found") && strings.Contains(errMsg, "tool use") {
+		return tools.ErrorJudgeDecision{
+			ShouldRetry:  false,
+			SleepSeconds: 0,
+			Reason:       "Model does not support tool use via OpenRouter",
 		}
 	}
 
 	// Unknown error - try a couple times
 	if attemptNumber < 3 {
+		sleepSeconds := attemptNumber*2 + tools.MIN_SLEEP_SECONDS
 		return tools.ErrorJudgeDecision{
 			ShouldRetry:  true,
-			SleepSeconds: attemptNumber * 2,
+			SleepSeconds: sleepSeconds,
 			Reason:       "Unknown error, retrying cautiously",
 		}
 	}
@@ -3348,7 +3391,7 @@ func (o *Orchestrator) compactContextWithAttempt(modelID, systemPrompt string, c
 		})
 
 		if err != nil {
-			logger.Warn("compaction[%d]: summary failed: %v", attemptNumber, err)
+			logger.Error("compaction[%d]: summarization failed: %v", attemptNumber, err)
 			summary = fallbackConversationSummary(messages)
 		} else {
 			summary = strings.TrimSpace(result.Summary)
@@ -3356,14 +3399,17 @@ func (o *Orchestrator) compactContextWithAttempt(modelID, systemPrompt string, c
 				attemptNumber, len(messages), result.ChunksUsed, result.TotalTokens, len(summary))
 		}
 	} else {
+		logger.Error("compaction[%d]: no summarization client available, using fallback", attemptNumber)
 		summary = fallbackConversationSummary(messages)
 	}
 
 	if summary == "" {
+		logger.Error("compaction[%d]: summarization produced empty summary, using fallback", attemptNumber)
 		summary = fallbackConversationSummary(messages)
 	}
 
 	if summary == "" {
+		logger.Error("compaction[%d]: fallback summary also empty, aborting compaction", attemptNumber)
 		return
 	}
 
@@ -3382,7 +3428,7 @@ func (o *Orchestrator) compactContextWithAttempt(modelID, systemPrompt string, c
 	}
 
 	if !o.session.CompactWithSummary(messages, summaryContent) {
-		// Session head changed before compaction could apply
+		logger.Error("compaction[%d]: session head changed before compaction could apply", attemptNumber)
 		return
 	}
 
@@ -3523,21 +3569,24 @@ func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, session
 		})
 
 		if err != nil {
-			logger.Warn("forceCompactContext[%d]: summary failed: %v", attemptNum, err)
+			logger.Error("forceCompactContext[%d]: summarization failed: %v", attemptNum, err)
 			summary = fallbackConversationSummary(messagesCopy)
 		} else {
 			summary = strings.TrimSpace(result.Summary)
 			logger.Info("forceCompactContext[%d]: summarized %d messages using %d chunks, %d total tokens, %d chars output",
 				attemptNum, len(messagesCopy), result.ChunksUsed, result.TotalTokens, len(summary))
 		}
+	} else {
+		logger.Error("forceCompactContext[%d]: no summarization client available, using fallback", attemptNum)
 	}
 
 	if summary == "" {
+		logger.Error("forceCompactContext[%d]: summarization produced empty summary, using fallback", attemptNum)
 		summary = fallbackConversationSummary(messagesCopy)
 	}
 
 	if summary == "" {
-		logger.Debug("forceCompactContext: no summary generated")
+		logger.Error("forceCompactContext[%d]: fallback summary also empty, aborting compaction", attemptNum)
 		return
 	}
 
@@ -3561,7 +3610,7 @@ func (o *Orchestrator) forceCompactContext(modelID, systemPrompt string, session
 	}
 
 	if !o.session.CompactWithSummary(messagesCopy, summaryContent) {
-		logger.Debug("forceCompactContext: session head changed, compaction not applied")
+		logger.Error("forceCompactContext[%d]: session head changed, compaction not applied", attemptNum)
 		return
 	}
 

@@ -14,7 +14,7 @@ func TestStaticFileContentType(t *testing.T) {
 	// Create server
 	secrets := securemem.NewString("")
 	defer secrets.Destroy()
-	srv, err := NewServer(context.TODO(), nil, nil, secrets, false)
+	srv, err := NewServer(context.TODO(), nil, nil, secrets, false, false)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}

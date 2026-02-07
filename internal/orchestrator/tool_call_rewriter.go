@@ -123,8 +123,8 @@ Return ONLY valid JSON in the following format:
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		MaxTokens:   1000,
-		Temperature: 0.3,
+		MaxTokens:   4096,
+		Temperature: 1.0,
 	})
 	if err != nil {
 		return "", nil, "", fmt.Errorf("summarization model request failed: %w", err)

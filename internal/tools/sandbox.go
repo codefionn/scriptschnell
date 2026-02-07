@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
@@ -29,19 +30,24 @@ type ShellExecutor interface {
 
 // SandboxTool executes Go code in a sandboxed WebAssembly environment
 type SandboxTool struct {
-	workingDir      string
-	tempDir         string
-	filesystem      fs.FileSystem
-	session         *session.Session
-	authorizer      Authorizer
-	tinygoManager   *TinyGoManager
-	summarizeClient llm.Client
-	shellExecutor   ShellExecutor
-	progressCb      progress.Callback
-	detector        secretdetect.Detector
-	featureFlags    FeatureFlagsProvider // Interface to check feature flags
-	compactor       *OutputCompactor     // Output compaction handler
-	contextWindow   int                  // Model's context window in tokens
+	workingDir          string
+	tempDir             string
+	filesystem          fs.FileSystem
+	session             *session.Session
+	authorizer          Authorizer
+	tinygoManager       *TinyGoManager
+	summarizeClient     llm.Client
+	shellExecutor       ShellExecutor
+	progressCb          progress.Callback
+	detector            secretdetect.Detector
+	featureFlags        FeatureFlagsProvider                // Interface to check feature flags
+	compactor           *OutputCompactor                    // Output compaction handler
+	contextWindow       int                                 // Model's context window in tokens
+	userInteractionFunc func() *actor.UserInteractionClient // Lazy accessor for user interaction client
+	tabIDFunc           func() int                          // Returns current tab ID for user interaction
+	authConfig          AuthorizationPersistenceConfig      // Config for persisting authorized commands/domains
+	parentCtx           context.Context                     // Parent context without sandbox timeout, used for user interaction
+	deadline            *execDeadline                       // Pausable execution deadline, paused during user interaction
 }
 
 func NewSandboxTool(workingDir, tempDir string) *SandboxTool {
@@ -134,6 +140,36 @@ func (t *SandboxTool) SetContextWindow(contextWindow int) {
 			t.compactor.SetSummarizeClient(t.summarizeClient)
 		}
 	}
+}
+
+// AuthorizationPersistenceConfig holds references needed to persist authorization decisions
+type AuthorizationPersistenceConfig struct {
+	Config     *config.Config
+	ConfigPath string
+}
+
+// SetUserInteractionClient sets a lazy accessor for the user interaction client and tab ID function
+// for prompting the user during WASM execution (e.g., for sandbox command/domain authorization).
+// A function is used instead of a direct reference because the client may be set on the orchestrator
+// after the sandbox tool is constructed.
+func (t *SandboxTool) SetUserInteractionClient(clientFunc func() *actor.UserInteractionClient, tabIDFunc func() int) {
+	t.userInteractionFunc = clientFunc
+	t.tabIDFunc = tabIDFunc
+}
+
+// SetAuthorizationPersistence sets the config used to persist authorized commands/domains
+func (t *SandboxTool) SetAuthorizationPersistence(cfg *config.Config, configPath string) {
+	t.authConfig = AuthorizationPersistenceConfig{Config: cfg, ConfigPath: configPath}
+}
+
+// interactionCtx returns the parent context (without sandbox timeout) for user
+// interaction calls. If parentCtx was not set (e.g. during tests), it falls
+// back to the provided context.
+func (t *SandboxTool) interactionCtx(fallback context.Context) context.Context {
+	if t.parentCtx != nil {
+		return t.parentCtx
+	}
+	return fallback
 }
 
 // ListFilesInDir returns the entries inside the provided directory.

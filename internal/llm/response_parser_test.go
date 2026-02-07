@@ -101,6 +101,11 @@ func TestParseLLMJSONResponse(t *testing.T) {
 			want:  &Result{Key: "test", Value: 42},
 		},
 		{
+			name:  "valid JSON with text before and after",
+			input: "OK: {\"key\": \"test\", \"value\": 42} thanks",
+			want:  &Result{Key: "test", Value: 42},
+		},
+		{
 			name:    "invalid JSON",
 			input:   "not json at all",
 			wantErr: true,

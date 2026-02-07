@@ -1,0 +1,263 @@
+package web
+
+func getModelCardClasses(isSelected bool, showDetails bool) string {
+	classes := "model-card card mb-2 cursor-pointer "
+	if isSelected {
+		classes += "border-primary bg-light "
+	} else {
+		classes += "border "
+	}
+	if showDetails {
+		classes += "model-card-expanded"
+	}
+	return classes
+}
+
+func getAriaPressed(isSelected bool) string {
+	if isSelected {
+		return "true"
+	}
+	return "false"
+}
+
+// ModelSelector - A searchable component for selecting models from a large list
+// Suitable for 100+ models with search and provider filtering
+templ ModelSelector(modelType string, providers []string, searchPlaceholder string) {
+	<div class="model-selector" id={ "model-selector-" + modelType }>
+		<!-- Search Input -->
+		<div class="mb-3">
+			<div class="input-group">
+				<span class="input-group-text">
+					<i class="bi bi-search"></i>
+				</span>
+				<input
+					type="text"
+					class="form-control"
+					id={ "model-search-" + modelType }
+					placeholder={ searchPlaceholder }
+					autocomplete="off"
+					data-model-type={ modelType }
+				/>
+			</div>
+			<div class="form-text">
+				Type to search models by name or ID
+			</div>
+		</div>
+		<!-- Provider Filter -->
+		<div class="mb-3" id={ "provider-filter-container-" + modelType }>
+			<label class="form-label fw-semibold">Filter by Provider</label>
+			<div class="btn-group flex-wrap" role="group" id={ "provider-filters-" + modelType }>
+				<button
+					type="button"
+					class="btn btn-outline-secondary active"
+					data-provider="all"
+					data-model-type={ modelType }
+				>
+					All Providers
+				</button>
+				<!-- Provider buttons will be dynamically added here -->
+			</div>
+		</div>
+		<!-- Model Count -->
+		<div class="d-flex justify-content-between align-items-center mb-2">
+			<span class="text-muted small" id={ "model-count-" + modelType }>
+				Loading models...
+			</span>
+			<div class="form-check form-switch">
+				<input
+					class="form-check-input"
+					type="checkbox"
+					id={ "show-details-" + modelType }
+					data-model-type={ modelType }
+				/>
+				<label class="form-check-label small" for={ "show-details-" + modelType }>
+					Show Details
+				</label>
+			</div>
+		</div>
+		<!-- Models Grid -->
+		<div class="model-grid" id={ "model-grid-" + modelType }>
+			<!-- Model cards will be dynamically rendered here -->
+			<div class="text-center text-muted py-5">
+				<div class="spinner-border text-primary" role="status">
+					<span class="visually-hidden">Loading...</span>
+				</div>
+				<p class="mt-2">Loading models...</p>
+			</div>
+		</div>
+		<!-- Selected Model Display -->
+		<div class="selected-model-display mt-3 p-2 bg-light rounded border" id={ "selected-model-display-" + modelType } style="display: none;">
+			<strong>Selected:</strong> <span id={ "selected-model-name-" + modelType }></span>
+		</div>
+	</div>
+}
+
+// ModelCard - A card component for displaying a single model
+templ ModelCard(modelType string, modelID string, modelName string, provider string, isSelected bool, showDetails bool) {
+	<div class={ getModelCardClasses(isSelected, showDetails) } data-model-id={ modelID } data-model-name={ modelName } data-provider={ provider } data-model-type={ modelType } tabindex="0" role="button" aria-pressed={ getAriaPressed(isSelected) }>
+		<div class="card-body py-2 px-3">
+			<div class="d-flex justify-content-between align-items-start">
+				<div class="flex-grow-1">
+					<!-- Model Name -->
+					<div class="d-flex align-items-center gap-2">
+						<h6 class="card-title mb-0 fw-semibold">{ modelName }</h6>
+						if isSelected {
+							<span class="badge bg-primary">Selected</span>
+						}
+					</div>
+					<!-- Provider Badge -->
+					<div class="small text-muted mt-1">
+						<span class="badge bg-secondary bg-opacity-10 text-secondary border">
+							{ provider }
+						</span>
+						<span class="ms-2 font-monospace text-muted" style="font-size: 0.8em;">
+							{ modelID }
+						</span>
+					</div>
+					<!-- Model Details (shown when expanded) -->
+					if showDetails {
+						<div class="mt-2 pt-2 border-top small">
+							<div class="row">
+								<div class="col-6">
+									<strong class="text-muted">Provider:</strong> { provider }
+								</div>
+								<div class="col-6">
+									<strong class="text-muted">Model ID:</strong>
+									<code class="text-muted">{ modelID }</code>
+								</div>
+							</div>
+						</div>
+					}
+				</div>
+				<!-- Selection Indicator -->
+				<div class="ms-2">
+					if isSelected {
+						<i class="bi bi-check-circle-fill text-primary fs-5"></i>
+					} else {
+						<i class="bi bi-circle text-muted fs-5"></i>
+					}
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// ModelSelectorModalContent - Full modal content for model selection
+templ ModelSelectorModalContent() {
+	<div class="model-selector-modal">
+		<!-- Navigation Tabs -->
+		<ul class="nav nav-tabs mb-4" id="modelTypeTabs" role="tablist">
+			<li class="nav-item" role="presentation">
+				<button
+					class="nav-link active"
+					id="orchestration-tab"
+					data-bs-toggle="tab"
+					data-bs-target="#orchestration-tab-pane"
+					type="button"
+					role="tab"
+					aria-controls="orchestration-tab-pane"
+					aria-selected="true"
+				>
+					<i class="bi bi-cpu me-2"></i>Orchestration
+				</button>
+			</li>
+			<li class="nav-item" role="presentation">
+				<button
+					class="nav-link"
+					id="summarization-tab"
+					data-bs-toggle="tab"
+					data-bs-target="#summarization-tab-pane"
+					type="button"
+					role="tab"
+					aria-controls="summarization-tab-pane"
+					aria-selected="false"
+				>
+					<i class="bi bi-lightning me-2"></i>Summarization
+				</button>
+			</li>
+			<li class="nav-item" role="presentation">
+				<button
+					class="nav-link"
+					id="planning-tab"
+					data-bs-toggle="tab"
+					data-bs-target="#planning-tab-pane"
+					type="button"
+					role="tab"
+					aria-controls="planning-tab-pane"
+					aria-selected="false"
+				>
+					<i class="bi bi-diagram-3 me-2"></i>Planning
+				</button>
+			</li>
+			<li class="nav-item" role="presentation">
+				<button
+					class="nav-link"
+					id="safety-tab"
+					data-bs-toggle="tab"
+					data-bs-target="#safety-tab-pane"
+					type="button"
+					role="tab"
+					aria-controls="safety-tab-pane"
+					aria-selected="false"
+				>
+					<i class="bi bi-shield-check me-2"></i>Safety
+				</button>
+			</li>
+		</ul>
+		<!-- Tab Content -->
+		<div class="tab-content" id="modelTypeTabContent">
+			<!-- Orchestration Model Selector -->
+			<div
+				class="tab-pane fade show active"
+				id="orchestration-tab-pane"
+				role="tabpanel"
+				aria-labelledby="orchestration-tab"
+				tabindex="0"
+			>
+				<p class="text-muted small mb-3">
+					Main conversation and tool calls model. Recommended: Claude 3.5 Sonnet, GPT-4
+				</p>
+				@ModelSelector("orchestration", []string{}, "Search orchestration models...")
+			</div>
+			<!-- Summarization Model Selector -->
+			<div
+				class="tab-pane fade"
+				id="summarization-tab-pane"
+				role="tabpanel"
+				aria-labelledby="summarization-tab"
+				tabindex="0"
+			>
+				<p class="text-muted small mb-3">
+					Fast summarization model for large files. Recommended: Claude 3 Haiku, GPT-3.5
+				</p>
+				@ModelSelector("summarization", []string{}, "Search summarization models...")
+			</div>
+			<!-- Planning Model Selector -->
+			<div
+				class="tab-pane fade"
+				id="planning-tab-pane"
+				role="tabpanel"
+				aria-labelledby="planning-tab"
+				tabindex="0"
+			>
+				<p class="text-muted small mb-3">
+					Planning model for complex tasks. Falls back to orchestration model if not set.
+				</p>
+				@ModelSelector("planning", []string{}, "Search planning models...")
+			</div>
+			<!-- Safety Model Selector -->
+			<div
+				class="tab-pane fade"
+				id="safety-tab-pane"
+				role="tabpanel"
+				aria-labelledby="safety-tab"
+				tabindex="0"
+			>
+				<p class="text-muted small mb-3">
+					Optional safety-critical model. Falls back to summarization model if not set.
+				</p>
+				@ModelSelector("safety", []string{}, "Search safety models...")
+			</div>
+		</div>
+	</div>
+}

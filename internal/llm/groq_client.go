@@ -44,7 +44,7 @@ func NewGroqClient(apiKey, modelID string) (Client, error) {
 		model:   model,
 		baseURL: "https://api.groq.com/openai/v1",
 		httpClient: &http.Client{
-			Timeout: consts.Timeout60Seconds,
+			Timeout: consts.Timeout2Minutes,
 		},
 		useResponsesAPI: groqRequiresResponsesAPI(model),
 	}

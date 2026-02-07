@@ -618,6 +618,7 @@ If "allowed" is false, the user will be prompted for approval.`, toolName, param
 
 	response, err := a.summarizeClient.Complete(ctx, prompt)
 	if err != nil {
+		logger.Warn("Authorization LLM secret judge failed for tool=%s (secrets=%d): %v", toolName, len(secrets), err)
 		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Tool %s contains secrets and requires user approval (LLM analysis failed)", toolName),
@@ -632,6 +633,7 @@ If "allowed" is false, the user will be prompted for approval.`, toolName, param
 	}
 
 	if err := llm.ParseLLMJSONResponse(response, &result); err != nil {
+		logger.Warn("Authorization LLM secret judge returned invalid JSON for tool=%s (secrets=%d): %v", toolName, len(secrets), err)
 		decision := &AuthorizationDecision{
 			Allowed:           false,
 			Reason:            fmt.Sprintf("Tool %s contains secrets and requires user approval (failed to parse LLM response)", toolName),

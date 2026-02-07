@@ -237,10 +237,20 @@ Keyboard Shortcuts:
 Ctrl+X            - Enter command mode
 Ctrl+B            - Background current shell job
 Ctrl+C (×2)       - Quit application
+Ctrl+E            - Toggle tool mode (navigate tool calls)
 ESC               - Stop current generation
 Shift+Enter       - Insert newline in prompt
 Alt+Enter         - Alternate newline shortcut
 Enter             - Submit prompt or command
+
+Tool Mode Shortcuts (Ctrl+E to enable):
+  j/k             - Next/previous tool message
+  g/G             - First/last tool message
+  e               - Expand/collapse tool result
+  E/C             - Expand/collapse all results
+  y               - Copy output to clipboard
+  Y               - Copy full result to clipboard
+  ESC             - Exit tool mode
 
 Quick Start:
 1. Configure settings: /settings

@@ -278,11 +278,36 @@ function setProcessing(processing) {
         sendBtn.classList.add('d-none');
         stopBtn.classList.remove('d-none');
         messageInput.disabled = true;
+        showThinkingIndicator();
     } else {
         stopBtn.classList.add('d-none');
         sendBtn.classList.remove('d-none');
         messageInput.disabled = false;
         messageInput.focus();
+        removeThinkingIndicator();
+    }
+}
+
+function showThinkingIndicator() {
+    if (!messages || document.getElementById('thinking-indicator')) return;
+    const div = document.createElement('div');
+    div.id = 'thinking-indicator';
+    div.className = 'thinking-indicator';
+    div.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div><span>Thinking...</span>';
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function removeThinkingIndicator() {
+    const el = document.getElementById('thinking-indicator');
+    if (el) el.remove();
+}
+
+// Keep the thinking indicator pinned to the bottom of messages
+function repositionThinkingIndicator() {
+    const el = document.getElementById('thinking-indicator');
+    if (el && messages) {
+        messages.appendChild(el);
     }
 }
 
@@ -470,8 +495,9 @@ function handleToolInteraction(msg) {
         `;
         
         messages.appendChild(div);
+        repositionThinkingIndicator();
         messages.scrollTop = messages.scrollHeight;
-        
+
         // Store reference for updates
         activeToolInteractions.set(toolId, div);
     } else if (msg.status === "completed" || msg.status === "error") {
@@ -566,6 +592,7 @@ function addMessage(role, content, variant, isMarkdown = false) {
     }
     
     messages.appendChild(div);
+    repositionThinkingIndicator();
     messages.scrollTop = messages.scrollHeight;
 }
 

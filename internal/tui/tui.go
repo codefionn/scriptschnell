@@ -110,10 +110,6 @@ var (
 
 	todoErrorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196"))
-
-	toolCallStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")). // Greyer color for tool calls
-			Bold(true)
 )
 
 const (
@@ -133,6 +129,23 @@ type message struct {
 	toolID     string // for tool result messages
 	fullResult string // stores the full tool result for potential summary replacement
 	summarized bool   // indicates if this tool result has been summarized
+
+	// Enhanced tool call metadata for better UI
+	toolState     ToolState     // pending, running, completed, failed
+	toolType      ToolType      // category of tool
+	executionTime time.Duration // how long the tool took to execute
+	isCollapsible bool          // can the result be collapsed
+	isCollapsed   bool          // current collapsed state
+
+	// Grouping support for parallel tool calls
+	groupID    string // ID of the group this message belongs to (empty if not grouped)
+	groupIdx   int    // Index within the group
+	groupTotal int    // Total items in the group
+
+	// Progress tracking for long-running tools
+	progress    float64 // 0.0 to 1.0, -1 for indeterminate
+	status      string  // Current status message (e.g., "reading file...")
+	outputLines int     // Number of output lines (for streaming display)
 }
 
 type Model struct {
@@ -189,8 +202,21 @@ type Model struct {
 	viewportDirty        bool
 	viewportRefreshToken int
 	config               *config.Config
-	activeMCPProvider    func() []string
-	vcs                  vcs.VCS // VCS interface for git operations
+
+	// Tool group management for parallel tool calls
+	toolGroupManager *ToolGroupManager
+	activeGroupID    string // Currently active group for parallel tool calls
+
+	// Tool progress tracking for streaming updates
+	toolProgressTracker *ToolProgressTracker
+	showProgressPanel   bool // Show active tool progress sidebar
+
+	// Tool keyboard shortcuts
+	toolShortcutHandler *ToolShortcutHandler
+	toolMode            bool // When true, keyboard shortcuts control tool navigation
+
+	activeMCPProvider func() []string
+	vcs               vcs.VCS // VCS interface for git operations
 
 	// Multi-session tab state
 	sessions         []*TabSession
@@ -397,6 +423,9 @@ type NewTabMsg struct {
 }
 
 func New(currentModel, contextFile string, disableAnimations bool) *Model {
+	// Initialize tool styles first
+	InitializeToolStyles()
+
 	ta := textarea.New()
 	ta.Placeholder = defaultInputPlaceholder
 	ta.Focus()
@@ -447,6 +476,12 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		pendingAuthorizations:   make(map[string]*AuthorizationRequest),
 		pendingUserInteractions: make(map[string]pendingUserInteraction),
 		authorizationCounter:    0,
+		toolGroupManager:        NewToolGroupManager(),
+		activeGroupID:           "",
+		toolProgressTracker:     NewToolProgressTracker(),
+		showProgressPanel:       false,
+		toolShortcutHandler:     NewToolShortcutHandler(),
+		toolMode:                false,
 	}
 
 	if width, height, ok := detectTerminalSize(); ok {
@@ -515,24 +550,6 @@ func detectTerminalSize() (int, int, bool) {
 		}
 	}
 	return 0, 0, false
-}
-
-func (m *Model) addToolMessageForTab(tabIdx int, toolName, toolID, content, fullResult string, summarized bool) {
-	if !m.validTabIndex(tabIdx) {
-		return
-	}
-
-	msg := message{
-		role:       "Tool",
-		content:    content,
-		timestamp:  time.Now().Format("15:04:05"),
-		toolName:   toolName,
-		toolID:     toolID,
-		fullResult: fullResult,
-		summarized: summarized,
-	}
-	msgs := append(m.sessions[tabIdx].Messages, msg)
-	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
 }
 
 // SetFilesystem sets the filesystem and working directory for filepath autocomplete
@@ -1661,6 +1678,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateSuggestions()
 			return m, baseCmd
 
+		case "ctrl+e":
+			// Toggle tool mode for keyboard navigation
+			m.toolMode = !m.toolMode
+			if m.toolMode {
+				// Count tool messages and initialize selection
+				toolCount := CountToolMessages(m.messages)
+				m.toolShortcutHandler.GetShortcuts().SetToolCount(toolCount)
+				if toolCount > 0 {
+					m.AddSystemMessage("Tool mode enabled. Use j/k to navigate, e to expand/collapse, y to copy. Press Ctrl+E to exit.")
+				} else {
+					m.AddSystemMessage("Tool mode enabled (no tool messages in current view). Press Ctrl+E to exit.")
+				}
+			} else {
+				m.toolShortcutHandler.GetShortcuts().ClearSelection()
+				m.AddSystemMessage("Tool mode disabled.")
+			}
+			m.viewportDirty = true
+			return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+
 		case "ctrl+b":
 			if m.onBackground != nil {
 				if err := m.onBackground(); err != nil {
@@ -1780,6 +1816,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
 				m.todoViewport.GotoBottom()
 				return m, baseCmd
+			}
+
+		default:
+			// Handle tool mode shortcuts
+			if m.toolMode {
+				if shortcutMsg, handled := m.toolShortcutHandler.GetShortcuts().HandleKey(msg.String(), true); handled {
+					// Execute the shortcut
+					cmd := m.toolShortcutHandler.Handle(shortcutMsg, m.messages)
+
+					// Update selection display
+					if shortcutMsg.Shortcut == "select" {
+						toolIdx := shortcutMsg.ToolIdx
+						if toolIdx >= 0 && toolIdx < CountToolMessages(m.messages) {
+							// Find the actual message index
+							msgIdx := GetToolMessageIndex(m.messages, toolIdx)
+							if msgIdx >= 0 {
+								m.AddSystemMessage(fmt.Sprintf("Selected tool: %s", m.messages[msgIdx].toolName))
+							}
+						}
+					}
+
+					m.viewportDirty = true
+					return m, tea.Batch(baseCmd, cmd, m.scheduleViewportRefresh())
+				}
 			}
 
 		case "enter":
@@ -2234,6 +2294,81 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tabIdx := m.findTabIndexByID(msg.TabID)
 		if tabIdx >= 0 {
 			m.addToolResultMessageForTab(tabIdx, msg.ToolName, msg.ToolID, msg.Result, msg.Error)
+		}
+		return m, baseCmd
+
+	case ToolProgressMsg:
+		// Update the progress tracker
+		if m.toolProgressTracker != nil {
+			state, ok := m.toolProgressTracker.GetTool(msg.ToolID)
+			if !ok {
+				// First time seeing this tool, start tracking
+				state = m.toolProgressTracker.StartTool(msg.ToolID, msg.ToolName)
+			}
+
+			// Update state
+			if msg.Status != "" {
+				state.Status = msg.Status
+			}
+			if msg.Progress >= 0 {
+				state.Progress = msg.Progress
+			}
+			if msg.Output != "" {
+				state.Output.WriteString(msg.Output)
+				state.IsStreaming = true
+			}
+
+			// Show progress panel if we have active tools
+			activeTools := m.toolProgressTracker.GetActiveTools()
+			m.showProgressPanel = len(activeTools) > 0
+		}
+
+		// Refresh the viewport to show progress
+		m.viewportDirty = true
+		return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+
+	case ToolProgressCompleteMsg:
+		// Mark tool as complete in tracker
+		if m.toolProgressTracker != nil {
+			var err error
+			if msg.Error != "" {
+				err = fmt.Errorf("%s", msg.Error)
+			}
+			m.toolProgressTracker.CompleteTool(msg.ToolID, err)
+
+			// Clean up after a delay
+			go func(toolID string) {
+				time.Sleep(5 * time.Second)
+				m.toolProgressTracker.RemoveTool(toolID)
+			}(msg.ToolID)
+
+			// Update progress panel visibility
+			activeTools := m.toolProgressTracker.GetActiveTools()
+			m.showProgressPanel = len(activeTools) > 0
+		}
+
+		// Refresh the viewport
+		m.viewportDirty = true
+		return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+
+	case ToolShortcutMsg:
+		// Handle tool shortcuts
+		if msg.Shortcut == "refresh" {
+			m.viewportDirty = true
+			return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+		}
+		return m, baseCmd
+
+	case ClipboardCopyMsg:
+		// Show feedback for clipboard copy
+		if msg.Success {
+			if msg.Content != "" {
+				m.AddSystemMessage(fmt.Sprintf("Copied to clipboard: %s", msg.Content))
+			} else {
+				m.AddSystemMessage("Copied to clipboard")
+			}
+		} else {
+			m.AddSystemMessage(fmt.Sprintf("Copy failed: %s", msg.Error))
 		}
 		return m, baseCmd
 	}
@@ -2756,17 +2891,32 @@ func (m *Model) View() string {
 		return overlay
 	}
 
-	if !m.showTodoPanel {
+	// Collect panels to display on the right side
+	var panels []string
+
+	if m.showProgressPanel {
+		progressPanel := m.renderProgressPanel()
+		if progressPanel != "" {
+			panels = append(panels, progressPanel)
+		}
+	}
+
+	if m.showTodoPanel {
+		todoPanel := m.renderTodoPanel()
+		if todoPanel != "" {
+			panels = append(panels, todoPanel)
+		}
+	}
+
+	if len(panels) == 0 {
 		return mainContent
 	}
 
-	todoPanel := m.renderTodoPanel()
-	if todoPanel == "" {
-		return mainContent
-	}
+	// Join all panels vertically
+	allPanels := lipgloss.JoinVertical(lipgloss.Top, panels...)
 
 	spacing := lipgloss.NewStyle().Width(todoPanelSpacing).Render("")
-	return lipgloss.JoinHorizontal(lipgloss.Top, mainContent, spacing, todoPanel)
+	return lipgloss.JoinHorizontal(lipgloss.Top, mainContent, spacing, allPanels)
 }
 
 func (m *Model) renderFooter(left, right string) string {
@@ -3166,6 +3316,72 @@ func (m *Model) updateTodoClientForTab(tabIdx int) {
 	}
 }
 
+// renderProgressPanel renders the active tool progress panel
+func (m *Model) renderProgressPanel() string {
+	if m.toolProgressTracker == nil {
+		return ""
+	}
+
+	activeTools := m.toolProgressTracker.GetActiveTools()
+	if len(activeTools) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Header
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorStateRunning)).
+		Bold(true).
+		MarginBottom(1)
+	sb.WriteString(headerStyle.Render("⚡ Active Tools"))
+	sb.WriteString("\n\n")
+
+	// Format each active tool
+	pf := NewProgressFormatter()
+	for _, state := range activeTools {
+		progressLine := pf.FormatToolProgress(state, false)
+		sb.WriteString(progressLine)
+		sb.WriteString("\n")
+
+		// Show truncated output if streaming
+		state.mu.RLock()
+		output := state.Output.String()
+		isStreaming := state.IsStreaming
+		state.mu.RUnlock()
+
+		if isStreaming && output != "" {
+			// Show last few lines of output
+			lines := strings.Split(output, "\n")
+			start := len(lines) - 3
+			if start < 0 {
+				start = 0
+			}
+			recentLines := lines[start:]
+
+			outputStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#666666")).
+				MarginLeft(2)
+
+			for _, line := range recentLines {
+				if line != "" {
+					sb.WriteString(outputStyle.Render("│ " + truncateString(line, 30)))
+					sb.WriteString("\n")
+				}
+			}
+		}
+	}
+
+	// Create panel style
+	panelStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorStateRunning)).
+		Padding(1).
+		Width(40)
+
+	return panelStyle.Render(sb.String())
+}
+
 func (m *Model) validTabIndex(tabIdx int) bool {
 	return tabIdx >= 0 && tabIdx < len(m.sessions)
 }
@@ -3290,66 +3506,138 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID string, pa
 		realToolName = strings.TrimPrefix(toolName, "Planning: ")
 	}
 
-	// Create more descriptive content based on tool type
+	// Check if this is a parallel tool call
+	if IsParallelToolCall(realToolName) {
+		m.handleParallelToolCall(tabIdx, toolID, parameters)
+		return
+	}
+
+	// Get tool type and icon for display
+	toolType := GetToolTypeFromName(realToolName)
+	icon := GetIconForToolType(toolType)
+
+	// Get primary parameter for display
+	primaryParam := extractPrimaryParameter(realToolName, parameters)
+
+	// Build content with markdown formatting (plain text, no ANSI sequences)
 	var content string
-	switch realToolName {
-	case tools.ToolNameReadFile:
-		if path, ok := parameters["path"].(string); ok {
-			content = fmt.Sprintf("📖 **Reading file:** `%s`", path)
-		} else {
-			content = "📖 **Reading file**"
-		}
-	case tools.ToolNameCreateFile:
-		if path, ok := parameters["path"].(string); ok {
-			content = fmt.Sprintf("📝 **Creating file:** `%s`", path)
-		} else {
-			content = "📝 **Creating file**"
-		}
-	case tools.ToolNameEditFile:
-		if path, ok := parameters["path"].(string); ok {
-			content = fmt.Sprintf("✏️  **Updating file:** `%s`", path)
-		} else {
-			content = "✏️  **Updating file**"
-		}
-	case tools.ToolNameShell:
-		if command, ok := parameters["command"].(string); ok {
-			content = fmt.Sprintf("💻 **Executing command:** `%s`", command)
-		} else {
-			content = "💻 **Executing command**"
-		}
-	case tools.ToolNameGoSandbox:
-		content = "🔧 **Running Go sandbox**"
-		if code, ok := parameters["code"].(string); ok {
-			// Show the code in a code block
-			content = "🔧 **Running Go sandbox:**\n```go\n" + code + "\n```"
-		}
-		// Add timeout info if specified
-		if timeout, ok := parameters["timeout"]; ok {
-			if timeoutInt, ok := timeout.(float64); ok && timeoutInt != 30 {
-				content += fmt.Sprintf("\n**Timeout:** %d seconds", int(timeoutInt))
-			}
-		}
-		// Add libraries info if specified
-		if libs, ok := parameters["libraries"].([]interface{}); ok && len(libs) > 0 {
-			libStrs := make([]string, len(libs))
-			for i, lib := range libs {
-				if libStr, ok := lib.(string); ok {
-					libStrs[i] = libStr
-				}
-			}
-			if len(libStrs) > 0 {
-				content += fmt.Sprintf("\n**Libraries:** %s", strings.Join(libStrs, ", "))
-			}
-		}
-	default:
-		content = fmt.Sprintf("🔧 **Calling tool:** `%s`", realToolName)
+
+	if primaryParam != "" {
+		content = fmt.Sprintf("%s %s `%s` `%s`", GetStateIndicator(ToolStateRunning), icon, realToolName, primaryParam)
+	} else {
+		content = fmt.Sprintf("%s %s `%s`", GetStateIndicator(ToolStateRunning), icon, realToolName)
 	}
 
 	if isPlanning {
-		content = "📋 **Planning:** " + content
+		content = fmt.Sprintf("📋 %s", content)
 	}
 
-	m.addMessageForTab(tabIdx, "Tool", content)
+	// Check if this message belongs to an active group
+	var groupID string
+	if m.activeGroupID != "" {
+		groupID = m.activeGroupID
+	}
+
+	// Create message with enhanced metadata
+	msg := message{
+		role:          "Tool",
+		content:       content,
+		timestamp:     time.Now().Format("15:04:05"),
+		toolName:      realToolName,
+		toolID:        toolID,
+		toolState:     ToolStateRunning,
+		toolType:      toolType,
+		isCollapsible: true,
+		isCollapsed:   false, // Start expanded for visibility
+		groupID:       groupID,
+		progress:      -1, // Indeterminate progress initially
+		status:        "starting...",
+	}
+
+	if !m.validTabIndex(tabIdx) {
+		return
+	}
+	msgs := append(m.sessions[tabIdx].Messages, msg)
+	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
+
+	// If this message is part of a group, add it to the group manager
+	if groupID != "" && m.toolGroupManager != nil {
+		toolMsg := &ToolCallMessage{
+			ToolName:   realToolName,
+			ToolID:     toolID,
+			ToolType:   toolType,
+			State:      ToolStateRunning,
+			Parameters: parameters,
+			Timestamp:  time.Now(),
+		}
+		m.toolGroupManager.AddMessageToGroup(groupID, toolMsg)
+	}
+}
+
+// handleParallelToolCall handles parallel tool execution by creating a group
+func (m *Model) handleParallelToolCall(tabIdx int, toolID string, parameters map[string]interface{}) {
+	// Extract the individual tool calls from the parallel tool
+	parallelCalls := ExtractParallelToolCalls(parameters)
+
+	// Create a group for this parallel execution
+	groupName := fmt.Sprintf("Parallel Execution (%d tools)", len(parallelCalls))
+	group := m.toolGroupManager.CreateGroup(GroupConfig{
+		Name:     groupName,
+		ToolType: ToolTypeParallel,
+		TabIdx:   tabIdx,
+	})
+
+	// Set this as the active group so subsequent tool calls are added to it
+	m.activeGroupID = group.ID
+
+	// Format the group header
+	gf := NewGroupFormatter()
+	header := gf.FormatGroupHeader(group)
+
+	// Create a message for the group container
+	msg := message{
+		role:          "Tool",
+		content:       header,
+		timestamp:     time.Now().Format("15:04:05"),
+		toolName:      "parallel_tool_execution",
+		toolID:        toolID,
+		toolState:     ToolStateRunning,
+		toolType:      ToolTypeParallel,
+		isCollapsible: true,
+		isCollapsed:   false, // Start expanded
+		groupID:       group.ID,
+		groupIdx:      0,
+		groupTotal:    len(parallelCalls),
+	}
+
+	if !m.validTabIndex(tabIdx) {
+		return
+	}
+	msgs := append(m.sessions[tabIdx].Messages, msg)
+	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
+
+	// Now create individual messages for each parallel tool call
+	for i, call := range parallelCalls {
+		// Temporarily set the active group ID
+		prevGroupID := m.activeGroupID
+		m.activeGroupID = group.ID
+
+		// Add the individual tool call
+		m.addToolCallMessageForTab(tabIdx, call.Name, fmt.Sprintf("%s-%d", toolID, i), call.Parameters)
+
+		// Update the last message to include group indexing
+		if m.validTabIndex(tabIdx) && len(m.sessions[tabIdx].Messages) > 0 {
+			lastIdx := len(m.sessions[tabIdx].Messages) - 1
+			m.sessions[tabIdx].Messages[lastIdx].groupIdx = i + 1
+			m.sessions[tabIdx].Messages[lastIdx].groupTotal = len(parallelCalls)
+		}
+
+		// Restore previous group ID (should be empty or same)
+		m.activeGroupID = prevGroupID
+	}
+
+	// Clear the active group ID after all parallel tools are added
+	m.activeGroupID = ""
 }
 
 func (m *Model) addToolResultMessage(toolName, toolID, result, errorMsg string) {
@@ -3363,48 +3651,114 @@ func (m *Model) addToolResultMessageForTab(tabIdx int, toolName, toolID, result,
 		realToolName = strings.TrimPrefix(toolName, "Planning: ")
 	}
 
-	var content string
+	// Determine state based on error
+	state := ToolStateCompleted
 	if errorMsg != "" {
-		content = fmt.Sprintf("❌ **Error:** %s", errorMsg)
-		if isPlanning {
-			content = "📋 **Planning Error:** " + errorMsg
-		}
-		m.addToolMessageForTab(tabIdx, realToolName, toolID, content, "", false)
-	} else if result == "" {
-		content = m.generateToolSummary(realToolName, result, true)
-		if isPlanning {
-			content = "📋 **Planning:** " + content
-		}
-		m.addToolMessageForTab(tabIdx, realToolName, toolID, content, "", true)
-	} else {
-		// Check if this is a pre-formatted UIResult (already has markdown formatting)
-		if isAlreadyFormatted(result) {
-			// Tool already formatted UIResult - use as-is
-			if isPlanning {
-				content = "📋 **Planning:** " + result
-			} else {
-				content = result
+		state = ToolStateFailed
+	}
+
+	// Extract metadata for enhanced formatting
+	metadata := m.extractExecutionMetadata(result)
+
+	// Use the enhanced ResultFormatter
+	rf := NewResultFormatter()
+	formattedResult := rf.FormatToolResult(realToolName, result, errorMsg, metadata, state)
+
+	// Add planning indicator if needed (plain markdown, no ANSI sequences)
+	if isPlanning {
+		formattedResult = fmt.Sprintf("📋 %s", formattedResult)
+	}
+
+	// Check if this result belongs to a group
+	var groupID string
+	if m.validTabIndex(tabIdx) {
+		// Look for a matching group by finding the message with the same toolID prefix
+		for i := len(m.sessions[tabIdx].Messages) - 1; i >= 0; i-- {
+			msg := m.sessions[tabIdx].Messages[i]
+			if msg.toolID == toolID && msg.groupID != "" {
+				groupID = msg.groupID
+				break
 			}
-			m.addToolMessageForTab(tabIdx, realToolName, toolID, content, result, false)
-		} else if strings.HasPrefix(result, "---") || strings.HasPrefix(result, "diff --git") {
-			// Git diff format - wrap in diff code block
-			summary := m.generateToolSummary(realToolName, result, false)
-			if isPlanning {
-				summary = "📋 **Planning:** " + summary
-			}
-			displayResult := m.truncateToolResult(result)
-			fullContent := fmt.Sprintf("%s\n```diff\n%s\n```", summary, displayResult)
-			m.addToolMessageForTab(tabIdx, realToolName, toolID, fullContent, result, false)
-		} else {
-			// Raw output - wrap in code block
-			displayResult := m.truncateToolResult(result)
-			fullContent := fmt.Sprintf("✓ **Result:**\n```\n%s\n```", displayResult)
-			if isPlanning {
-				fullContent = "📋 **Planning Result:**\n```\n" + displayResult + "\n```"
-			}
-			m.addToolMessageForTab(tabIdx, realToolName, toolID, fullContent, result, false)
 		}
 	}
+
+	// Calculate execution time if metadata available
+	var execTime int64
+	if metadata != nil {
+		execTime = metadata.DurationMs
+	}
+
+	// Count output lines
+	outputLines := strings.Count(result, "\n")
+
+	// Create message with enhanced metadata
+	msg := message{
+		role:          "Tool",
+		content:       formattedResult,
+		timestamp:     time.Now().Format("15:04:05"),
+		toolName:      realToolName,
+		toolID:        toolID,
+		toolState:     state,
+		toolType:      GetToolTypeFromName(realToolName),
+		fullResult:    result,
+		summarized:    true,
+		isCollapsible: shouldBeCollapsible(result),
+		isCollapsed:   shouldBeCollapsible(result),
+		groupID:       groupID,
+		progress:      1.0, // Complete
+		status:        "complete",
+		outputLines:   outputLines,
+		executionTime: time.Duration(execTime) * time.Millisecond,
+	}
+
+	if !m.validTabIndex(tabIdx) {
+		return
+	}
+	msgs := append(m.sessions[tabIdx].Messages, msg)
+	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
+
+	// Update group state if this message belongs to a group
+	if groupID != "" && m.toolGroupManager != nil {
+		m.toolGroupManager.UpdateGroupState(groupID)
+	}
+}
+
+// shouldBeCollapsible determines if a tool result should be collapsible based on size
+func shouldBeCollapsible(result string) bool {
+	if len(result) == 0 {
+		return false
+	}
+	// Collapse if content is large
+	if len(result) > 500 {
+		return true
+	}
+	// Collapse if many lines
+	if strings.Count(result, "\n") > 15 {
+		return true
+	}
+	return false
+}
+
+// formatBytes formats byte sizes to human readable format
+func formatBytes(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
+}
+
+// formatDuration formats milliseconds to human readable duration
+func formatDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	if ms < 60000 {
+		return fmt.Sprintf("%.1fs", float64(ms)/1000)
+	}
+	return fmt.Sprintf("%.1fm", float64(ms)/60000)
 }
 
 // isAlreadyFormatted checks if a tool result is already formatted with markdown
@@ -3856,66 +4210,26 @@ func (m *Model) generateGenericSummary(metadata *tools.ExecutionMetadata) string
 	return "✓ **Completed successfully**"
 }
 
-func (m *Model) truncateToolResult(result string) string {
-	// First, try to split by double newlines (paragraphs)
-	paragraphs := strings.Split(result, "\n\n")
-	if len(paragraphs) > 1 {
-		firstParagraph := strings.TrimSpace(paragraphs[0])
-		if len(firstParagraph) > 300 {
-			// If first paragraph is too long, truncate it
-			return firstParagraph[:297] + "..."
-		}
-		return firstParagraph
-	}
-
-	// If no paragraphs, split by single newlines and take first few lines
-	lines := strings.Split(result, "\n")
-	if len(lines) > 10 {
-		// Take first 10 lines
-		firstLines := strings.Join(lines[:10], "\n")
-		if len(firstLines) > 300 {
-			return firstLines[:297] + "..."
-		}
-		return firstLines
-	}
-
-	// If result is short, return as-is
-	if len(result) <= 300 {
-		return strings.TrimSpace(result)
-	}
-
-	// Otherwise truncate to ~300 characters
-	return result[:297] + "..."
-}
-
 func (m *Model) updateViewport() {
+	// Create message renderer with current dimensions
+	renderer := NewMessageRenderer(m.contentWidth, m.renderWrapWidth)
+
 	var rendered strings.Builder
 
 	for i, msg := range m.messages {
-		if i > 0 {
+		// Skip header for Assistant messages for more compact display
+		if msg.role != "Assistant" {
+			// Render message header
+			header := renderer.RenderHeader(msg)
+			if i > 0 {
+				rendered.WriteString("\n\n")
+			}
+			rendered.WriteString(header)
+			rendered.WriteString("\n")
+		} else if i > 0 {
+			// Assistant messages still need spacing between them
 			rendered.WriteString("\n\n")
 		}
-
-		// Render header with timestamp and role
-		var headerStyle lipgloss.Style
-		if msg.role == "You" {
-			headerStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("86")).
-				Bold(true)
-		} else if msg.role == "Assistant" {
-			headerStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("205")).
-				Bold(true)
-		} else if msg.role == "Tool" {
-			headerStyle = toolCallStyle
-		} else {
-			headerStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("241"))
-		}
-
-		header := headerStyle.Render(fmt.Sprintf("[%s] %s:", msg.timestamp, msg.role))
-		rendered.WriteString(header)
-		rendered.WriteString("\n")
 
 		// Render reasoning content if present (for extended thinking models)
 		if msg.reasoning != "" {

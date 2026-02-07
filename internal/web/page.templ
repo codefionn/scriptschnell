@@ -223,6 +223,34 @@ templ Page(token string, title string) {
 				.selected-model-display {
 					transition: all 0.3s ease;
 				}
+				/* Thinking / loading animation */
+				.thinking-indicator {
+					display: flex;
+					align-items: center;
+					gap: 0.5rem;
+					padding: 0.5rem 0.75rem;
+					margin-bottom: 0.25rem;
+					color: #6c757d;
+					font-size: 0.85rem;
+				}
+				.thinking-dots {
+					display: inline-flex;
+					gap: 4px;
+				}
+				.thinking-dots span {
+					width: 6px;
+					height: 6px;
+					border-radius: 50%;
+					background: #6c757d;
+					animation: thinking-bounce 1.4s infinite ease-in-out both;
+				}
+				.thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+				.thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+				.thinking-dots span:nth-child(3) { animation-delay: 0s; }
+				@keyframes thinking-bounce {
+					0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+					40% { transform: scale(1); opacity: 1; }
+				}
 			</style>
 		</head>
 		<body class="bg-light">

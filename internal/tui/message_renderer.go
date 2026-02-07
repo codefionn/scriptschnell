@@ -1,0 +1,328 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// MessageRenderer handles rendering of messages with consistent styling
+type MessageRenderer struct {
+	ts              *ToolStyles
+	contentWidth    int
+	renderWrapWidth int
+}
+
+// NewMessageRenderer creates a new message renderer
+func NewMessageRenderer(contentWidth, renderWrapWidth int) *MessageRenderer {
+	return &MessageRenderer{
+		ts:              GetToolStyles(),
+		contentWidth:    contentWidth,
+		renderWrapWidth: renderWrapWidth,
+	}
+}
+
+// SetWidth updates the renderer width
+func (mr *MessageRenderer) SetWidth(contentWidth, renderWrapWidth int) {
+	mr.contentWidth = contentWidth
+	mr.renderWrapWidth = renderWrapWidth
+}
+
+// RenderMessage renders a complete message with header and content
+func (mr *MessageRenderer) RenderMessage(msg message, index int) string {
+	var sb strings.Builder
+
+	// Add spacing between messages
+	if index > 0 {
+		sb.WriteString("\n\n")
+	}
+
+	// Render header
+	header := mr.RenderHeader(msg)
+	sb.WriteString(header)
+	sb.WriteString("\n")
+
+	// Render reasoning if present
+	if msg.reasoning != "" {
+		reasoning := mr.RenderReasoning(msg.reasoning)
+		sb.WriteString(reasoning)
+		sb.WriteString("\n\n")
+	}
+
+	// Render content based on role and type
+	content := mr.RenderContent(msg)
+	sb.WriteString(content)
+
+	return sb.String()
+}
+
+// RenderHeader creates a styled header for a message
+func (mr *MessageRenderer) RenderHeader(msg message) string {
+	timestampStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	timestampText := timestampStyle.Render(msg.timestamp)
+
+	var roleText string
+
+	switch msg.role {
+	case "You":
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("86")).
+			Bold(true)
+		roleText = style.Render(msg.role)
+
+	case "Assistant":
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("205")).
+			Bold(true)
+		roleText = style.Render(msg.role)
+
+	case "Tool":
+		// Use tool-specific styling
+		roleText = mr.renderToolHeader(msg)
+
+	default:
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
+		roleText = style.Render(msg.role)
+	}
+
+	// Calculate padding for right-aligned timestamp
+	availableWidth := mr.contentWidth - 4
+	if availableWidth < 20 {
+		availableWidth = 20
+	}
+
+	roleWidth := lipgloss.Width(roleText)
+	timestampWidth := lipgloss.Width(timestampText)
+
+	padding := availableWidth - roleWidth - timestampWidth
+	if padding < 1 {
+		padding = 1
+	}
+
+	return roleText + strings.Repeat(" ", padding) + timestampText
+}
+
+// renderToolHeader creates a styled header for tool messages
+func (mr *MessageRenderer) renderToolHeader(msg message) string {
+	// If it's a grouped message, show group info
+	if msg.groupID != "" && msg.groupTotal > 0 {
+		return mr.renderGroupedToolHeader(msg)
+	}
+
+	// Regular tool header
+	toolType := msg.toolType
+	if toolType == ToolTypeUnknown {
+		toolType = GetToolTypeFromName(msg.toolName)
+	}
+
+	toolStyle := mr.ts.GetToolTypeStyle(toolType)
+	stateStyle := mr.ts.GetStateStyle(msg.toolState)
+
+	icon := GetIconForToolType(toolType)
+	indicator := GetStateIndicator(msg.toolState)
+
+	// Build the role text
+	var parts []string
+	parts = append(parts, stateStyle.Render(indicator))
+	parts = append(parts, toolStyle.Render(fmt.Sprintf("%s %s", icon, msg.toolName)))
+
+	// Add progress if available
+	if msg.progress >= 0 && msg.progress < 1.0 {
+		progressStr := fmt.Sprintf("[%3d%%]", int(msg.progress*100))
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorStateRunning)).
+			Render(progressStr))
+	}
+
+	// Add status if present
+	if msg.status != "" {
+		statusStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			Italic(true)
+		parts = append(parts, statusStyle.Render(msg.status))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// renderGroupedToolHeader creates a header for grouped tool messages
+func (mr *MessageRenderer) renderGroupedToolHeader(msg message) string {
+	// For grouped messages, show a more compact header
+	toolType := msg.toolType
+	if toolType == ToolTypeUnknown {
+		toolType = GetToolTypeFromName(msg.toolName)
+	}
+
+	toolStyle := mr.ts.GetToolTypeStyle(toolType)
+	stateStyle := mr.ts.GetStateStyle(msg.toolState)
+
+	icon := GetIconForToolType(toolType)
+	indicator := GetStateIndicator(msg.toolState)
+
+	// Show index in group if applicable
+	var groupInfo string
+	if msg.groupTotal > 1 {
+		groupInfo = fmt.Sprintf("(%d/%d)", msg.groupIdx+1, msg.groupTotal)
+	}
+
+	parts := []string{
+		stateStyle.Render(indicator),
+		toolStyle.Render(fmt.Sprintf("%s %s", icon, msg.toolName)),
+	}
+
+	if groupInfo != "" {
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666666")).
+			Render(groupInfo))
+	}
+
+	return "  " + strings.Join(parts, " ")
+}
+
+// RenderReasoning renders reasoning/thinking content
+func (mr *MessageRenderer) RenderReasoning(reasoning string) string {
+	var sb strings.Builder
+
+	// Reasoning header
+	reasoningHeader := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("243")).
+		Bold(true).
+		Render("Thinking:")
+	sb.WriteString(reasoningHeader)
+	sb.WriteString("\n")
+
+	// Separator
+	sb.WriteString(lipgloss.NewStyle().
+		Foreground(lipgloss.Color("243")).
+		Render("---"))
+	sb.WriteString("\n")
+
+	// Content (will be rendered via markdown in main pipeline)
+	sb.WriteString(reasoning)
+
+	return sb.String()
+}
+
+// RenderContent renders message content based on role
+func (mr *MessageRenderer) RenderContent(msg message) string {
+	switch msg.role {
+	case "You":
+		return mr.renderUserContent(msg.content)
+
+	case "Tool":
+		return mr.renderToolContent(msg)
+
+	case "Assistant":
+		// Assistant content goes through markdown rendering
+		return msg.content
+
+	default:
+		return msg.content
+	}
+}
+
+// renderUserContent renders user message content
+func (mr *MessageRenderer) renderUserContent(content string) string {
+	// User content is wrapped for readability
+	if mr.renderWrapWidth > 0 {
+		// Note: Actual word wrapping happens in the main rendering pipeline
+		return content
+	}
+	return content
+}
+
+// renderToolContent renders tool message content with special handling
+func (mr *MessageRenderer) renderToolContent(msg message) string {
+	// If content is collapsed, show collapsed indicator
+	if msg.isCollapsed && msg.isCollapsible {
+		collapseStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666666")).
+			Italic(true)
+		return collapseStyle.Render("[output collapsed - press Enter to expand]")
+	}
+
+	content := msg.content
+
+	// If there's a full result and we're showing summary, handle accordingly
+	if msg.summarized && msg.fullResult != "" && !msg.isCollapsed {
+		// Show summary with option to expand
+		summaryStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888"))
+		expandHint := summaryStyle.Render("\n[Full output available - press Enter to toggle]")
+		content = content + expandHint
+	}
+
+	return content
+}
+
+// RenderCompactToolCall creates a compact one-line representation
+func (mr *MessageRenderer) RenderCompactToolCall(msg message) string {
+	toolType := msg.toolType
+	if toolType == ToolTypeUnknown {
+		toolType = GetToolTypeFromName(msg.toolName)
+	}
+
+	icon := GetIconForToolType(toolType)
+	indicator := GetStateIndicator(msg.toolState)
+
+	toolStyle := mr.ts.GetToolTypeStyle(toolType)
+	stateStyle := mr.ts.GetStateStyle(msg.toolState)
+
+	indicatorStr := stateStyle.Render(indicator)
+	toolIconStr := toolStyle.Render(icon)
+	toolNameStr := toolStyle.Render(msg.toolName)
+
+	return fmt.Sprintf("%s %s %s", indicatorStr, toolIconStr, toolNameStr)
+}
+
+// UpdateMessageProgress updates a message with progress information
+func (mr *MessageRenderer) UpdateMessageProgress(msg *message, progress float64, status string) {
+	msg.progress = progress
+	if status != "" {
+		msg.status = status
+	}
+	// Update state based on progress
+	if progress >= 1.0 {
+		msg.toolState = ToolStateCompleted
+	} else if progress >= 0 {
+		msg.toolState = ToolStateRunning
+	}
+}
+
+// ToggleCollapse toggles the collapsed state of a message
+func (mr *MessageRenderer) ToggleCollapse(msg *message) bool {
+	if !msg.isCollapsible {
+		return false
+	}
+	msg.isCollapsed = !msg.isCollapsed
+	return msg.isCollapsed
+}
+
+// Helper function to create a summary of a tool result
+func CreateToolSummary(toolName string, lines int, bytes int, duration int64) string {
+	var parts []string
+
+	if lines > 0 {
+		if lines == 1 {
+			parts = append(parts, "1 line")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d lines", lines))
+		}
+	}
+
+	if bytes > 0 {
+		parts = append(parts, formatBytes(bytes))
+	}
+
+	if duration > 0 {
+		parts = append(parts, formatDuration(duration))
+	}
+
+	if len(parts) == 0 {
+		return "done"
+	}
+
+	return strings.Join(parts, " • ")
+}

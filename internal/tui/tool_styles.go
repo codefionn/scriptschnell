@@ -189,6 +189,7 @@ type ToolCallMessage struct {
 	Error         string
 	ExecutionTime time.Duration
 	Timestamp     time.Time
+	Description   string // Human-readable description of what the tool is doing
 
 	// UI state
 	IsCollapsible bool
@@ -527,7 +528,7 @@ func (ts *ToolStyles) FormatToolStats(lines int, bytes int, duration time.Durati
 }
 
 // FormatCompactToolCall creates a compact one-line representation with enhanced styling
-func (ts *ToolStyles) FormatCompactToolCall(toolName string, parameters map[string]interface{}, state ToolState) string {
+func (ts *ToolStyles) FormatCompactToolCall(toolName string, parameters map[string]interface{}, state ToolState, description string) string {
 	toolType := GetToolTypeFromName(toolName)
 	icon := GetIconForToolType(toolType)
 	indicator := GetStateIndicator(state)
@@ -540,10 +541,20 @@ func (ts *ToolStyles) FormatCompactToolCall(toolName string, parameters map[stri
 	indicatorStr := stateStyle.Render(indicator)
 	toolIconStr := toolStyle.Render(icon)
 
+	var result string
 	if primaryParam != "" {
-		return fmt.Sprintf("%s %s %s `%s`", indicatorStr, toolIconStr, toolName, primaryParam)
+		result = fmt.Sprintf("%s %s %s `%s`", indicatorStr, toolIconStr, toolName, primaryParam)
+	} else {
+		result = fmt.Sprintf("%s %s %s", indicatorStr, toolIconStr, toolName)
 	}
-	return fmt.Sprintf("%s %s %s", indicatorStr, toolIconStr, toolName)
+
+	// Append description if provided (useful for go_sandbox)
+	if description != "" {
+		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
+		result += " " + descStyle.Render(fmt.Sprintf("(%s)", description))
+	}
+
+	return result
 }
 
 // FormatGroupHeader creates a header for a group of parallel tool calls

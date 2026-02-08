@@ -38,8 +38,11 @@ func newExecDeadline(timeout time.Duration, cancel context.CancelFunc) *execDead
 }
 
 // Pause stops the countdown and preserves the remaining budget.
-// Safe to call multiple times; subsequent calls are no-ops.
+// Safe to call on a nil receiver or multiple times; subsequent calls are no-ops.
 func (d *execDeadline) Pause() {
+	if d == nil {
+		return
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.paused || d.fired {
@@ -56,8 +59,11 @@ func (d *execDeadline) Pause() {
 }
 
 // Resume restarts the countdown with the remaining budget.
-// Safe to call multiple times; subsequent calls are no-ops.
+// Safe to call on a nil receiver or multiple times; subsequent calls are no-ops.
 func (d *execDeadline) Resume() {
+	if d == nil {
+		return
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.paused || d.fired {
@@ -74,7 +80,11 @@ func (d *execDeadline) Resume() {
 }
 
 // Stop permanently disables the deadline. The cancel function is NOT called.
+// Safe to call on a nil receiver.
 func (d *execDeadline) Stop() {
+	if d == nil {
+		return
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.timer.Stop()

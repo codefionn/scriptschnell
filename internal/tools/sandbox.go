@@ -244,8 +244,9 @@ func (t *SandboxTool) Name() string {
 func (t *SandboxTool) Description() string {
 	var b strings.Builder
 	b.WriteString("Execute Go code in a strongly sandboxed WebAssembly environment. ")
-	b.WriteString("Basic standard library packages available (don't use the `os`, `ioutil, `net`, `exec` package instead use methods provided below). Timeout enforced.\n")
+	b.WriteString("Basic standard library packages available (don't use the `os`, `ioutil, `net`, `exec` package instead use methods provided below). Timeout enforced.\n\n")
 	b.WriteString("Every program **must** declare `package main`, define `func main()`, and print results (e.g., via `fmt.Println`) so the orchestrator receives the output.\n\n")
+	b.WriteString("**Description Field**: Use the `description` parameter to provide a human-readable explanation of what your sandbox code does. This description will be displayed in the TUI and Web UI to explain what you're doing to the user.\n\n")
 	b.WriteString("Try to reduce the output of shell programs by e.g. only searching and outputting errors.\n\n")
 	b.WriteString("Output is limited to 4096 lines. When truncated, consider parsing specific parts with Go (e.g., only output lines around error messages).\n\n")
 	b.WriteString("Don't use this tool calls for just outputing the summary text at the end.\n\n")
@@ -645,6 +646,10 @@ func (t *SandboxTool) Parameters() map[string]interface{} {
 				"type":        "boolean",
 				"description": "Run the sandbox in the background and stream output via the status tool.",
 			},
+			"description": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional human-readable description of what the sandbox code does. This will be displayed in the TUI and Web UI to explain what the LLM is doing.",
+			},
 		},
 		"required": []string{"code"},
 	}
@@ -729,10 +734,13 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 		workingDir = absWorkingDir
 	}
 
+	// Extract optional description parameter
+	description := GetStringParam(params, "description", "")
+
 	background := GetBoolParam(params, "background", false)
 
 	if background {
-		result, err := t.executeBackground(ctx, code, timeout, libraries, workingDir)
+		result, err := t.executeBackground(ctx, code, timeout, libraries, workingDir, description)
 		if err != nil {
 			return &ToolResult{Error: err.Error()}
 		}
@@ -760,7 +768,7 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 	sendStatus("→ Compiling sandbox program with TinyGo")
 
 	// Use builder to execute
-	result, err := t.executeWithBuilder(ctx, code, timeout, libraries, workingDir)
+	result, err := t.executeWithBuilderWithDescription(ctx, code, timeout, libraries, workingDir, description)
 	if err != nil {
 		sendStatus(fmt.Sprintf("✗ Sandbox failed: %v", err))
 		return &ToolResult{Error: err.Error()}
@@ -834,10 +842,25 @@ func (t *SandboxTool) Execute(ctx context.Context, params map[string]interface{}
 			uiResult = formatted
 		}
 
-		// Propagate execution metadata if present
+		// Propagate execution metadata if present, or create new one if description is provided
 		if metaVal, ok := resMap["_execution_metadata"]; ok {
 			if metaObj, ok := metaVal.(*ExecutionMetadata); ok {
 				metadata = metaObj
+				// Add description to metadata if provided
+				if description != "" {
+					if metadata.Details == nil {
+						metadata.Details = make(map[string]interface{})
+					}
+					metadata.Details["description"] = description
+				}
+			}
+		} else if description != "" {
+			// Create metadata with description if not already present
+			metadata = &ExecutionMetadata{
+				ToolType: "sandbox",
+				Details: map[string]interface{}{
+					"description": description,
+				},
 			}
 		}
 
@@ -871,6 +894,39 @@ func (t *SandboxTool) executeWithBuilder(ctx context.Context, code string, timeo
 		SetTimeout(timeout).
 		SetWorkingDir(workingDir).
 		SetTempDir(t.tempDir)
+
+	// Add libraries if any
+	if len(libraries) > 0 {
+		builder = builder.AddLibraries(libraries...)
+	}
+
+	// Set filesystem and session if available
+	if t.filesystem != nil {
+		builder = builder.SetFilesystem(t.filesystem)
+	}
+	if t.session != nil {
+		builder = builder.SetSession(t.session)
+	}
+
+	// Set authorization if available
+	if t.authorizer != nil {
+		builder = builder.SetAuthorization(t.authorizer)
+	}
+
+	// Build and execute using internal compilation method
+	// We need to use the internal method to preserve TinyGo manager connection
+	return t.executeInternal(ctx, builder)
+}
+
+// executeWithBuilderWithDescription uses the SandboxBuilder to execute code with description
+func (t *SandboxTool) executeWithBuilderWithDescription(ctx context.Context, code string, timeout int, libraries []string, workingDir string, description string) (interface{}, error) {
+	// Create builder with current tool configuration
+	builder := NewSandboxBuilder().
+		SetCode(code).
+		SetTimeout(timeout).
+		SetWorkingDir(workingDir).
+		SetTempDir(t.tempDir).
+		SetDescription(description)
 
 	// Add libraries if any
 	if len(libraries) > 0 {

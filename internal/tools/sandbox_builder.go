@@ -76,6 +76,7 @@ type SandboxBuilder struct {
 	allowDomains  []string         // Pre-authorized domains (bypass LLM checks)
 	allowAll      bool             // Allow all network access (dangerous)
 	shellExecutor ShellExecutor    // Shell executor for command execution
+	description   string           // Human-readable description of what the sandbox code does
 	err           error            // Accumulated validation errors
 }
 
@@ -362,6 +363,28 @@ func (b *SandboxBuilder) SetWorkingDir(dir string) *SandboxBuilder {
 		return b
 	}
 	b.workingDir = dir
+	return b
+}
+
+// SetDescription sets a human-readable description of what the sandbox code does.
+//
+// The description is optional and will be displayed in the TUI and Web UI
+// to explain what the LLM is doing. This helps users understand the purpose
+// of sandbox executions without needing to read the code.
+//
+// Example:
+//
+//	builder.
+//	    SetCode("package main\nfunc main() { fmt.Println(\"Hello\") }").
+//	    SetDescription("Print a greeting message")
+//
+// Returns:
+//	The builder instance for method chaining
+func (b *SandboxBuilder) SetDescription(desc string) *SandboxBuilder {
+	if b.err != nil {
+		return b
+	}
+	b.description = desc
 	return b
 }
 
@@ -731,6 +754,7 @@ func (b *SandboxBuilder) Clone() *SandboxBuilder {
 		authorizer:    b.authorizer,
 		shellExecutor: b.shellExecutor,
 		allowAll:      b.allowAll,
+		description:   b.description,
 		err:           b.err,
 	}
 

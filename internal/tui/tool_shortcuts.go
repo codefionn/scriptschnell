@@ -28,7 +28,6 @@ func NewToolShortcuts() *ToolShortcuts {
 // ShortcutKey definitions for tool interactions
 const (
 	ShortcutExpandCollapse = "e"   // Toggle expand/collapse
-	ShortcutExpandAll      = "E"   // Expand all tool results
 	ShortcutCollapseAll    = "C"   // Collapse all tool results
 	ShortcutCopyOutput     = "y"   // Yank (copy) output to clipboard
 	ShortcutCopyFullResult = "Y"   // Copy full result to clipboard
@@ -153,7 +152,7 @@ func (ts *ToolShortcuts) HandleKey(key string, toolMode bool) (ToolShortcutMsg, 
 		switch key {
 		case ShortcutExpandCollapse:
 			return ToolShortcutMsg{Shortcut: "expand_collapse", ToolIdx: ts.GetSelectedIndex()}, true
-		case ShortcutExpandAll:
+		case "ctrl+o", "alt+o":
 			return ToolShortcutMsg{Shortcut: "expand_all", ToolIdx: -1}, true
 		case ShortcutCollapseAll:
 			return ToolShortcutMsg{Shortcut: "collapse_all", ToolIdx: -1}, true
@@ -366,7 +365,7 @@ func RenderHelp() string {
 		desc string
 	}{
 		{"e", "Expand/collapse selected tool result"},
-		{"E", "Expand all tool results"},
+		{"ctrl+o / alt+o", "Expand all tool results"},
 		{"C", "Collapse all tool results"},
 		{"y", "Copy tool output to clipboard"},
 		{"Y", "Copy full result to clipboard"},

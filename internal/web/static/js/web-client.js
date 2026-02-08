@@ -397,6 +397,8 @@ function handleMessage(msg) {
                 type: "tool_interaction",
                 tool_name: msg.tool_name,
                 tool_id: msg.tool_id,
+                description: msg.description,
+                parameters: msg.parameters,
                 status: "calling",
                 compact: false
             });
@@ -467,10 +469,17 @@ function handleToolInteraction(msg) {
         // Build the compact tool card HTML
         const paramsStr = formatParameters(msg.parameters);
         
+        // Build description HTML if available
+        let descriptionHtml = '';
+        if (msg.description) {
+            descriptionHtml = `<span class="tool-description text-muted ms-2"><em>(${escapeHtml(msg.description)})</em></span>`;
+        }
+        
         div.innerHTML = `
             <div class="tool-header" onclick="toggleToolSection('${toolId}', 'body')">
                 <i class="bi bi-tools text-secondary"></i>
                 <span class="tool-name">${escapeHtml(msg.tool_name)}</span>
+                ${descriptionHtml}
                 <span class="tool-status text-muted">
                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                     Running...

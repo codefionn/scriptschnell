@@ -19,6 +19,7 @@ import (
 	"context"
 	"flag"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -459,6 +460,144 @@ func main() {
 	}
 }
 
+func TestSandboxTool_DescriptionParameter(t *testing.T) {
+	tool := NewSandboxTool("/tmp", "/tmp")
+	// Verify description parameter exists in schema
+	params := tool.Parameters()
+	props, ok := params["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("properties should be a map")
+	}
+
+	// Verify description field exists
+	descParam, ok := props["description"]
+	if !ok {
+		t.Error("description parameter should exist in schema")
+	}
+
+	// Verify description field has correct type
+	if descMap, ok := descParam.(map[string]interface{}); ok {
+		// Check description field type
+	if descType, ok := descMap["type"].(string); !ok || descType != "string" {
+			t.Error("description should be a string type")
+		}
+
+		// Check description field has a description
+		if _, ok := descMap["description"].(string); !ok {
+			t.Error("description field should have a description explaining its purpose")
+		}
+	}
+}
+
+func TestSandboxTool_Execute_WithDescription(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run with: go test -run Integration ./internal/tools -integration")
+	}
+
+	tempDir := t.TempDir()
+	tool := NewSandboxTool("/tmp", tempDir)
+
+	code := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Testing with description")
+}
+`
+
+	params := map[string]interface{}{
+		"code":        code,
+		"description": "Testing sandbox with description parameter",
+	}
+
+	ctx := context.Background()
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatal("result should be a map")
+	}
+
+	exitCode, _ := resultMap["exit_code"].(int)
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode)
+	}
+}
+
+func TestSandboxTool_Execute_DescriptionWithSpecialCharacters(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run: go test -run Integration ./internal/tools -integration")
+	}
+
+	tempDir := t.TempDir()
+	tool := NewSandboxTool("/tmp", tempDir)
+
+	code := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Special chars test")
+}
+`
+
+	// Test with special characters that should be handled properly
+	params := map[string]interface{}{
+		"code":        code,
+		"description": "Building & testing with: {special} chars 🚀",
+	}
+
+	ctx := context.Background()
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
+	}
+}
+
+func TestSandboxTool_Execute_DescriptionVeryLong(t *testing.T) {
+	if !*runIntegrationTests {
+		t.Skip("Skipping WASM integration test - run: go test -run Integration ./internal/tools -integration")
+	}
+
+	tempDir := t.TempDir()
+	tool := NewSandboxTool("/tmp", tempDir)
+
+	code := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Test")
+}
+`
+
+	// Test with a very long description (to ensure it's handled properly)
+	veryLongDesc := strings.Repeat("This is a test of a very long description. ", 100)
+
+	params := map[string]interface{}{
+		"code":        code,
+		"description": veryLongDesc,
+	}
+
+	ctx := context.Background()
+	result := tool.Execute(ctx, params)
+	if result.Error != "" {
+		t.Fatalf("execution failed: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]interface{})
+	if !ok {
+		t.Fatal("result should be a map")
+	}
+	if resultMap["exit_code"].(int) != 0 {
+		t.Errorf("expected exit code 0, got %d", resultMap["exit_code"].(int))
+	}
+}
+
 func TestContainsDangerousOps(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -651,4 +790,52 @@ func main() {
 	if !strings.Contains(stdout, "PWD exit code: 0") {
 		t.Errorf("Expected 'PWD exit code: 0' in stdout, got: %s", stdout)
 	}
+}
+
+// TestExecDeadline_NilReceiverSafety verifies that Stop, Pause, and Resume
+// do not panic when called on a nil *execDeadline. This is the defense-in-depth
+// guard for the crash where concurrent sandbox executions raced on
+// SandboxTool.deadline: one goroutine set t.deadline = nil in deferred cleanup
+// while another called t.deadline.Stop(), causing a nil pointer dereference.
+func TestExecDeadline_NilReceiverSafety(t *testing.T) {
+	var d *execDeadline // nil
+
+	// These must not panic.
+	d.Stop()
+	d.Pause()
+	d.Resume()
+}
+
+// TestExecDeadline_ConcurrentStopNoPanic verifies that many goroutines can
+// independently create, use, and stop their own deadlines concurrently without
+// any panic. This mirrors the fixed pattern in executeInternal where each
+// invocation captures the deadline in a local variable for cleanup.
+func TestExecDeadline_ConcurrentStopNoPanic(t *testing.T) {
+	const goroutines = 50
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+
+			_, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			deadline := newExecDeadline(10*time.Second, cancel)
+
+			// Simulate interleaving with other goroutines.
+			time.Sleep(time.Millisecond)
+
+			// Pause/resume cycle (as the wazero host functions do).
+			deadline.Pause()
+			deadline.Resume()
+
+			// Cleanup via local variable — the key fix that prevents
+			// the nil dereference when a shared field is concurrently cleared.
+			deadline.Stop()
+		}()
+	}
+
+	wg.Wait()
 }

@@ -144,6 +144,14 @@ func (mr *MessageRenderer) renderToolHeader(msg message) string {
 		parts = append(parts, statusStyle.Render(msg.status))
 	}
 
+	// Add description if present
+	if msg.description != "" {
+		descStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#AAAAAA")).
+			Italic(true)
+		parts = append(parts, descStyle.Render(msg.description))
+	}
+
 	return strings.Join(parts, " ")
 }
 

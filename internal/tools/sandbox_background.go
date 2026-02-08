@@ -11,13 +11,13 @@ import (
 )
 
 // executeBackground executes the sandbox code in the background
-func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeout int, libraries []string, workingDir string) (interface{}, error) {
+func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeout int, libraries []string, workingDir string, description string) (interface{}, error) {
 	if t.session == nil {
 		return nil, fmt.Errorf("background execution requires session support for %s", ToolNameGoSandbox)
 	}
 
 	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
-	commandSummary := summarizeSandboxCommand(code)
+	commandSummary := summarizeSandboxCommand(code, description)
 
 	job := &session.BackgroundJob{
 		ID:         jobID,
@@ -86,7 +86,12 @@ func (t *SandboxTool) executeBackground(ctx context.Context, code string, timeou
 }
 
 // summarizeSandboxCommand creates a short summary of the sandbox command for display
-func summarizeSandboxCommand(code string) string {
+func summarizeSandboxCommand(code string, description string) string {
+	// If a description is provided, use it as the summary
+	if description != "" {
+		return fmt.Sprintf("%s: %s", ToolNameGoSandbox, description)
+	}
+
 	trimmed := strings.TrimSpace(code)
 	if trimmed == "" {
 		return ToolNameGoSandbox

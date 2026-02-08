@@ -188,7 +188,7 @@ func (rf *ResultFormatter) formatReadFileResult(result string, metadata *tools.E
 		rf.formatDuration(duration),
 	})
 
-	return rf.formatResultWithContent("read_file", ToolTypeReadFile, metrics, result, state, lines > 20)
+	return rf.formatResultWithContent("read_file", ToolTypeReadFile, metrics, result, "", state, lines > 20)
 }
 
 // formatCreateFileResult formats create_file tool results
@@ -205,7 +205,7 @@ func (rf *ResultFormatter) formatCreateFileResult(result string, metadata *tools
 		rf.formatDuration(duration),
 	})
 
-	return rf.formatResultWithContent("create_file", ToolTypeCreateFile, metrics, result, state, lines > 10)
+	return rf.formatResultWithContent("create_file", ToolTypeCreateFile, metrics, result, "", state, lines > 10)
 }
 
 // formatEditFileResult formats edit/replace file results with enhanced diff display
@@ -243,7 +243,7 @@ func (rf *ResultFormatter) formatEditFileResult(result string, metadata *tools.E
 	// Format the diff with syntax highlighting
 	formattedDiff := rf.formatDiffWithHighlighting(result)
 
-	return rf.formatResultWithContent("edit_file", ToolTypeEditFile, metrics, formattedDiff, state, shouldCollapse)
+	return rf.formatResultWithContent("edit_file", ToolTypeEditFile, metrics, formattedDiff, "", state, shouldCollapse)
 }
 
 // formatShellResult formats shell command results with special handling for output
@@ -280,7 +280,7 @@ func (rf *ResultFormatter) formatShellResult(result string, metadata *tools.Exec
 	// Format shell output with special handling
 	formattedOutput := rf.formatShellOutput(result)
 
-	return rf.formatResultWithContent("shell", ToolTypeShell, metrics, formattedOutput, state, shouldCollapse)
+	return rf.formatResultWithContent("shell", ToolTypeShell, metrics, formattedOutput, "", state, shouldCollapse)
 }
 
 // formatSandboxResult formats go_sandbox results with execution details
@@ -319,6 +319,17 @@ func (rf *ResultFormatter) formatSandboxResult(result string, metadata *tools.Ex
 
 	metrics := rf.buildMetrics(metricParts)
 
+	// Add description if available
+	var headerExtra string
+	if metadata != nil && metadata.Details != nil {
+		if desc, hasDesc := metadata.Details["description"]; hasDesc && desc.(string) != "" {
+			descStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#AAAAAA")).
+				Italic(true)
+			headerExtra = descStyle.Render(fmt.Sprintf(" – %s", desc.(string)))
+		}
+	}
+
 	// Sandbox output is typically verbose, always offer collapse
 	shouldCollapse := len(result) > 200
 
@@ -328,7 +339,7 @@ func (rf *ResultFormatter) formatSandboxResult(result string, metadata *tools.Ex
 	// Format with code block styling
 	formattedOutput := fmt.Sprintf("```\n%s\n```", rf.truncateIfNeeded(sanitizedResult, 1000))
 
-	return rf.formatResultWithContent("go_sandbox", ToolTypeGoSandbox, metrics, formattedOutput, state, shouldCollapse)
+	return rf.formatResultWithContent("go_sandbox", ToolTypeGoSandbox, metrics, formattedOutput, headerExtra, state, shouldCollapse)
 }
 
 // formatWebResult formats web_search and web_fetch results
@@ -347,7 +358,7 @@ func (rf *ResultFormatter) formatWebResult(result string, metadata *tools.Execut
 
 	shouldCollapse := len(result) > 400
 
-	return rf.formatResultWithContent("web", toolType, metrics, result, state, shouldCollapse)
+	return rf.formatResultWithContent("web", toolType, metrics, result, "", state, shouldCollapse)
 }
 
 // formatGenericResult formats any other tool result
@@ -366,11 +377,11 @@ func (rf *ResultFormatter) formatGenericResult(result string, metadata *tools.Ex
 
 	shouldCollapse := len(result) > 300
 
-	return rf.formatResultWithContent("tool", ToolTypeUnknown, metrics, result, state, shouldCollapse)
+	return rf.formatResultWithContent("tool", ToolTypeUnknown, metrics, result, "", state, shouldCollapse)
 }
 
 // formatResultWithContent creates the final formatted result with header and optional collapse
-func (rf *ResultFormatter) formatResultWithContent(toolName string, toolType ToolType, metrics string, content string, state ToolState, collapsible bool) string {
+func (rf *ResultFormatter) formatResultWithContent(toolName string, toolType ToolType, metrics string, content string, headerExtra string, state ToolState, collapsible bool) string {
 	icon := GetIconForToolType(toolType)
 	toolStyle := rf.ts.GetToolTypeStyle(toolType)
 	stateStyle := rf.ts.GetStateStyle(state)
@@ -383,6 +394,9 @@ func (rf *ResultFormatter) formatResultWithContent(toolName string, toolType Too
 	// Build header line and strip ANSI codes from it
 	header := fmt.Sprintf("%s %s %s %s - %s",
 		indicator, toolIcon, toolNameStyled, stateLabel, metrics)
+	if headerExtra != "" {
+		header += headerExtra
+	}
 	header = stripANSISequences(header)
 
 	// If content is empty or already formatted, just return header

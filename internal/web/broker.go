@@ -145,6 +145,13 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 
 	// Create tool call callback - now sends compact interactions
 	toolCallCallback := func(toolName, toolID string, parameters map[string]interface{}) error {
+		// Extract description from parameters if present
+		var description string
+		if desc, ok := parameters["description"]; ok {
+			if descStr, ok := desc.(string); ok {
+				description = descStr
+			}
+		}
 		// Send compact tool interaction message
 		callback(
 			&WebMessage{
@@ -154,6 +161,7 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 				Parameters: parameters,
 				Status:     "calling",
 				Compact:    true,
+				Description: description,
 			})
 		return nil
 	}
@@ -566,9 +574,10 @@ func (mb *MessageBroker) HandleQuestionResponse(questionID string, answer string
 
 // ToolCallMsg represents a tool call message
 type ToolCallMsg struct {
-	Name   string
-	ID     string
-	Params map[string]interface{}
+	Name        string
+	ID          string
+	Params      map[string]interface{}
+	Description string // Human-readable description of what the tool is doing
 }
 
 // ToolResultMsg represents a tool result message

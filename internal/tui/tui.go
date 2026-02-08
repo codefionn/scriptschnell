@@ -146,6 +146,7 @@ type message struct {
 	progress    float64 // 0.0 to 1.0, -1 for indeterminate
 	status      string  // Current status message (e.g., "reading file...")
 	outputLines int     // Number of output lines (for streaming display)
+	description string  // Human-readable description of what the tool is doing
 }
 
 type Model struct {
@@ -270,9 +271,10 @@ type CompleteMsg struct{}
 
 // ToolCallMsg is sent when a tool is being called
 type ToolCallMsg struct {
-	ToolName   string
-	ToolID     string
-	Parameters map[string]interface{}
+	ToolName     string
+	ToolID       string
+	Parameters   map[string]interface{}
+	Description  string // Human-readable description of the tool
 }
 
 // ToolResultMsg is sent when a tool execution completes
@@ -371,6 +373,7 @@ type TabToolCallMsg struct {
 	ToolName   string
 	ToolID     string
 	Parameters map[string]interface{}
+	Description  string // Human-readable description of the tool
 }
 
 // TabToolResultMsg is sent when a tool execution completes in a specific tab
@@ -1969,7 +1972,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(baseCmd, extra)
 
 	case ToolCallMsg:
-		m.addToolCallMessage(msg.ToolName, msg.ToolID, msg.Parameters)
+		m.addToolCallMessage(msg.ToolName, msg.ToolID, msg.Description, msg.Parameters)
 		return m, baseCmd
 
 	case ToolResultMsg:
@@ -2286,7 +2289,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TabToolCallMsg:
 		tabIdx := m.findTabIndexByID(msg.TabID)
 		if tabIdx >= 0 {
-			m.addToolCallMessageForTab(tabIdx, msg.ToolName, msg.ToolID, msg.Parameters)
+			m.addToolCallMessageForTab(tabIdx, msg.ToolName, msg.ToolID, msg.Description, msg.Parameters)
 		}
 		return m, baseCmd
 
@@ -2303,7 +2306,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			state, ok := m.toolProgressTracker.GetTool(msg.ToolID)
 			if !ok {
 				// First time seeing this tool, start tracking
-				state = m.toolProgressTracker.StartTool(msg.ToolID, msg.ToolName)
+				state = m.toolProgressTracker.StartTool(msg.ToolID, msg.ToolName, msg.Description)
 			}
 
 			// Update state
@@ -2540,11 +2543,19 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 	// Create tool call callback for this tab
 	toolCallCallback := func(toolName, toolID string, parameters map[string]interface{}) error {
 		logger.Debug("Tab %d: tool call %s (ID: %s)", tab.ID, toolName, toolID)
+		// Extract description from parameters if present
+		var description string
+		if desc, ok := parameters["description"]; ok {
+			if descStr, ok := desc.(string); ok {
+				description = descStr
+			}
+		}
 		m.program.Send(TabToolCallMsg{
-			TabID:      tab.ID,
-			ToolName:   toolName,
-			ToolID:     toolID,
-			Parameters: parameters,
+			TabID:       tab.ID,
+			ToolName:    toolName,
+			ToolID:      toolID,
+			Parameters:  parameters,
+			Description: description,
 		})
 		return nil
 	}
@@ -3495,11 +3506,11 @@ func (m *Model) appendAssistantChunkForTab(tabIdx int, content string) {
 	m.appendToLastMessageForTab(tabIdx, content)
 }
 
-func (m *Model) addToolCallMessage(toolName, toolID string, parameters map[string]interface{}) {
-	m.addToolCallMessageForTab(m.targetGenerationTab(), toolName, toolID, parameters)
+func (m *Model) addToolCallMessage(toolName, toolID, description string, parameters map[string]interface{}) {
+	m.addToolCallMessageForTab(m.targetGenerationTab(), toolName, toolID, description, parameters)
 }
 
-func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID string, parameters map[string]interface{}) {
+func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID, description string, parameters map[string]interface{}) {
 	isPlanning := strings.HasPrefix(toolName, "Planning: ")
 	realToolName := toolName
 	if isPlanning {
@@ -3528,6 +3539,11 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID string, pa
 		content = fmt.Sprintf("%s %s `%s`", GetStateIndicator(ToolStateRunning), icon, realToolName)
 	}
 
+	// Add description if provided (useful for go_sandbox)
+	if description != "" {
+		content += fmt.Sprintf(" *(%s)*", description)
+	}
+
 	if isPlanning {
 		content = fmt.Sprintf("📋 %s", content)
 	}
@@ -3552,6 +3568,7 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID string, pa
 		groupID:       groupID,
 		progress:      -1, // Indeterminate progress initially
 		status:        "starting...",
+		description:   description,
 	}
 
 	if !m.validTabIndex(tabIdx) {
@@ -3563,12 +3580,13 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID string, pa
 	// If this message is part of a group, add it to the group manager
 	if groupID != "" && m.toolGroupManager != nil {
 		toolMsg := &ToolCallMessage{
-			ToolName:   realToolName,
-			ToolID:     toolID,
-			ToolType:   toolType,
-			State:      ToolStateRunning,
-			Parameters: parameters,
-			Timestamp:  time.Now(),
+			ToolName:    realToolName,
+			ToolID:      toolID,
+			ToolType:    toolType,
+			State:       ToolStateRunning,
+			Parameters:  parameters,
+			Timestamp:   time.Now(),
+			Description: description,
 		}
 		m.toolGroupManager.AddMessageToGroup(groupID, toolMsg)
 	}
@@ -3623,7 +3641,7 @@ func (m *Model) handleParallelToolCall(tabIdx int, toolID string, parameters map
 		m.activeGroupID = group.ID
 
 		// Add the individual tool call
-		m.addToolCallMessageForTab(tabIdx, call.Name, fmt.Sprintf("%s-%d", toolID, i), call.Parameters)
+		m.addToolCallMessageForTab(tabIdx, call.Name, fmt.Sprintf("%s-%d", toolID, i), "", call.Parameters)
 
 		// Update the last message to include group indexing
 		if m.validTabIndex(tabIdx) && len(m.sessions[tabIdx].Messages) > 0 {
@@ -4519,12 +4537,13 @@ func sessionMessagesToTuiMessages(stored []*session.Message) []message {
 		}
 
 		messages = append(messages, message{
-			role:      role,
-			content:   msg.Content,
-			reasoning: msg.Reasoning,
-			timestamp: timestamp,
-			toolName:  msg.ToolName,
-			toolID:    msg.ToolID,
+			role:        role,
+			content:     msg.Content,
+			reasoning:   msg.Reasoning,
+			timestamp:   timestamp,
+			toolName:    msg.ToolName,
+			toolID:      msg.ToolID,
+			description: msg.ToolDescription,
 		})
 	}
 	return messages

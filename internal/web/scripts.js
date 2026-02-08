@@ -114,8 +114,12 @@ function connect() {
             case "chat":
                 addMessage(msg.role, msg.content, msg.role === "user" ? "primary" : "secondary");
                 break;
+            case "tool_interaction":
+                addToolInteraction(msg.tool_name, msg.tool_id, msg.description, msg.status, msg.result, msg.error);
+                break;
             case "tool_call":
-                addToolCall(msg.tool_name, msg.tool_id);
+                // Legacy format - convert to tool_interaction
+                addToolInteraction(msg.tool_name, msg.tool_id, msg.description, "calling", "", "");
                 break;
             case "tool_result":
                 addToolResult(msg.tool_id, msg.result, msg.error);
@@ -141,8 +145,39 @@ function connect() {
         const div = document.createElement("div");
         div.className = "alert alert-secondary mb-2";
         div.innerHTML = "<strong>Tool Call:</strong> " + escapeHtml(name) + " <small class='text-muted'>(ID: " + escapeHtml(id) + ")</small>";
+        div.id = "tool-" + id;
         messages.appendChild(div);
         messages.scrollTop = messages.scrollHeight;
+    }
+
+    function addToolInteraction(name, id, description, status, result, error) {
+        // Find existing tool div or create new one
+        let div = document.getElementById("tool-" + id);
+        
+        if (!div && status === "calling") {
+            // Create new tool interaction display
+            div = document.createElement("div");
+            div.className = "alert alert-secondary mb-2";
+            div.id = "tool-" + id;
+            
+            let html = "<strong>Tool Call:</strong> " + escapeHtml(name);
+            if (description) {
+                html += " <em class='text-muted'>(" + escapeHtml(description) + ")</em>";
+            }
+            html += " <small class='text-muted'>(ID: " + escapeHtml(id) + ")</small>";
+            div.innerHTML = html;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        } else if (div && (status === "completed" || status === "error")) {
+            // Update existing tool with result
+            if (error) {
+                div.className = "alert alert-danger mb-2";
+                div.innerHTML += "<br><strong>Error:</strong> " + escapeHtml(error);
+            } else {
+                div.className = "alert alert-success mb-2";
+                div.innerHTML += " <span class='badge bg-success'>Completed</span>";
+            }
+        }
     }
 
     function addToolResult(id, result, error) {

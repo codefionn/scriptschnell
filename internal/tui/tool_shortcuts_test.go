@@ -84,7 +84,8 @@ func TestToolShortcutsHandleKey(t *testing.T) {
 		setupFn      func(*ToolShortcuts) // Optional setup function
 	}{
 		{"expand in tool mode", "e", true, true, "expand_collapse", nil},
-		{"expand all", "E", true, true, "expand_all", nil},
+		{"expand all (ctrl+o)", "ctrl+o", true, true, "expand_all", nil},
+		{"expand all (alt+o)", "alt+o", true, true, "expand_all", nil},
 		{"collapse all", "C", true, true, "collapse_all", nil},
 		{"copy output", "y", true, true, "copy_output", nil},
 		{"copy full", "Y", true, true, "copy_full", nil},

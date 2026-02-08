@@ -1601,27 +1601,35 @@ func (a *ScriptschnellAIAgent) handleToolCallStart(session *statcodeSession, too
 
 	// Create a more descriptive title
 	title := fmt.Sprintf("Executing %s", toolName)
-	switch toolKind {
-	case acp.ToolKindRead:
-		if path, ok := parameters["path"].(string); ok {
-			title = fmt.Sprintf("Reading %s", path)
-		}
-	case acp.ToolKindEdit:
-		if path, ok := parameters["path"].(string); ok {
-			title = fmt.Sprintf("Writing %s", path)
-		}
-	case acp.ToolKindExecute:
-		if cmd, ok := parameters["command"].(string); ok {
-			title = fmt.Sprintf("Running: %s", cmd)
-			if len(title) > 50 {
-				title = "Running command"
+	
+	// Check for description parameter (used by go_sandbox and other tools)
+	if description, ok := parameters["description"].(string); ok && description != "" {
+		// Use description if provided
+		title = description
+	} else {
+		// Fall back to tool kind-based titles
+		switch toolKind {
+		case acp.ToolKindRead:
+			if path, ok := parameters["path"].(string); ok {
+				title = fmt.Sprintf("Reading %s", path)
 			}
-		}
-	case acp.ToolKindSearch:
-		if pattern, ok := parameters["pattern"].(string); ok {
-			title = fmt.Sprintf("Searching for %s", pattern)
-			if len(title) > 50 {
-				title = "Searching files"
+		case acp.ToolKindEdit:
+			if path, ok := parameters["path"].(string); ok {
+				title = fmt.Sprintf("Writing %s", path)
+			}
+		case acp.ToolKindExecute:
+			if cmd, ok := parameters["command"].(string); ok {
+				title = fmt.Sprintf("Running: %s", cmd)
+				if len(title) > 50 {
+					title = "Running command"
+				}
+			}
+		case acp.ToolKindSearch:
+			if pattern, ok := parameters["pattern"].(string); ok {
+				title = fmt.Sprintf("Searching for %s", pattern)
+				if len(title) > 50 {
+					title = "Searching files"
+				}
 			}
 		}
 	}

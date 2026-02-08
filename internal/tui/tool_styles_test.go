@@ -170,7 +170,7 @@ func TestFormatCompactToolCall(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ts.FormatCompactToolCall(tt.toolName, tt.parameters, tt.state)
+			got := ts.FormatCompactToolCall(tt.toolName, tt.parameters, tt.state, "")
 			if got == "" && !tt.wantEmpty {
 				t.Errorf("FormatCompactToolCall() returned empty string, want non-empty")
 			}

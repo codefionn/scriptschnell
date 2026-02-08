@@ -15,6 +15,7 @@ import (
 type ToolProgressState struct {
 	ToolID      string
 	ToolName    string
+	Description string // Human-readable description of what the tool is doing
 	StartTime   time.Time
 	LastUpdate  time.Time
 	Progress    float64 // 0.0 to 1.0, -1 for indeterminate
@@ -29,12 +30,13 @@ type ToolProgressState struct {
 
 // ToolProgressMsg is sent when a tool's progress updates
 type ToolProgressMsg struct {
-	TabID    int
-	ToolID   string
-	ToolName string
-	Progress float64 // -1 for indeterminate
-	Status   string
-	Output   string // New output chunk (if streaming)
+	TabID       int
+	ToolID      string
+	ToolName    string
+	Description string // Human-readable description of what the tool is doing
+	Progress    float64 // -1 for indeterminate
+	Status      string
+	Output      string // New output chunk (if streaming)
 }
 
 // ToolProgressCompleteMsg is sent when a tool completes
@@ -59,7 +61,7 @@ func NewToolProgressTracker() *ToolProgressTracker {
 }
 
 // StartTool begins tracking a new tool
-func (tpt *ToolProgressTracker) StartTool(toolID, toolName string) *ToolProgressState {
+func (tpt *ToolProgressTracker) StartTool(toolID, toolName, description string) *ToolProgressState {
 	tpt.mu.Lock()
 	defer tpt.mu.Unlock()
 
@@ -67,6 +69,7 @@ func (tpt *ToolProgressTracker) StartTool(toolID, toolName string) *ToolProgress
 	state := &ToolProgressState{
 		ToolID:      toolID,
 		ToolName:    toolName,
+		Description: description,
 		StartTime:   now,
 		LastUpdate:  now,
 		Progress:    -1, // Indeterminate by default
@@ -250,6 +253,12 @@ func (pf *ProgressFormatter) FormatToolProgress(state *ToolProgressState, compac
 	// Icon and tool name
 	parts = append(parts, toolStyle.Render(fmt.Sprintf("%s %s", icon, state.ToolName)))
 
+	// Description (if available, for tools like go_sandbox)
+	if state.Description != "" {
+		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
+		parts = append(parts, descStyle.Render(fmt.Sprintf("(%s)", state.Description)))
+	}
+
 	// Status
 	if state.Status != "" {
 		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
@@ -307,9 +316,9 @@ func (pf *ProgressFormatter) FormatActiveToolsList(states []*ToolProgressState, 
 }
 
 // CreateProgressCallback creates a progress callback for tool execution
-func (tpt *ToolProgressTracker) CreateProgressCallback(tabID int, toolID, toolName string, program *tea.Program) progress.Callback {
+func (tpt *ToolProgressTracker) CreateProgressCallback(tabID int, toolID, toolName, description string, program *tea.Program) progress.Callback {
 	// Start tracking this tool
-	tpt.StartTool(toolID, toolName)
+	tpt.StartTool(toolID, toolName, description)
 
 	return func(update progress.Update) error {
 		if program == nil {

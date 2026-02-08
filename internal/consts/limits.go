@@ -77,7 +77,7 @@ const (
 	// PlanningMaxRetries is the maximum number of retries for planning agent completions
 	PlanningMaxRetries = 20
 	// VerificationMaxRetries is the maximum number of retries for verification LLM completions
-	VerificationMaxRetries = 5
+	VerificationMaxRetries = 10
 	// DefaultMaxAttempts is the default maximum attempts for auto-continue
 	DefaultMaxAttempts = 3
 	// ExtendedMaxAttempts is used for models requiring more attempts

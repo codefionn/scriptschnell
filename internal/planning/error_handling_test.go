@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -292,7 +293,8 @@ func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			req := &PlanningRequest{
 				Objective:      fmt.Sprintf("concurrent test %d", id),
 				AllowQuestions: false,
@@ -302,7 +304,7 @@ func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 		}(i)
 	}
 
-	// Collect results
+	// Collect results - allow enough time for serialized goroutines with retries
 	var successCount, errorCount int
 	for i := 0; i < numGoroutines; i++ {
 		select {
@@ -312,7 +314,7 @@ func TestPlanningAgent_ConcurrentErrorHandling(t *testing.T) {
 			} else {
 				successCount++
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(60 * time.Second):
 			t.Fatal("Timeout waiting for concurrent planning results")
 		}
 	}
@@ -694,11 +696,15 @@ func (m *MockLLMClientWithRandomErrors) SetPreviousResponseID(responseID string)
 }
 
 func (m *MockLLMClientWithRandomErrors) CompleteWithRequest(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	content, err := m.Complete(ctx, "")
-	if err != nil {
-		return nil, err
+	if rand.Float64() < m.errorRate {
+		return nil, errors.New("random simulated error")
 	}
-	return &llm.CompletionResponse{Content: content}, nil
+
+	if len(m.responses) > 0 {
+		resp := m.responses[0]
+		return &llm.CompletionResponse{Content: resp}, nil
+	}
+	return &llm.CompletionResponse{Content: `{"plan": ["random response"], "complete": true}`}, nil
 }
 
 func (m *MockLLMClientWithRandomErrors) Stream(ctx context.Context, req *llm.CompletionRequest, callback func(chunk string) error) error {

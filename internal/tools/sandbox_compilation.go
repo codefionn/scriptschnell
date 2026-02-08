@@ -39,7 +39,7 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 
 	// Wrap code with authorization layer
 	wrappedCode, detectedDomains := wasi.GenerateWASMStub(code)
-	commandSummary := summarizeSandboxCommand(code)
+	commandSummary := summarizeSandboxCommand(code, "")
 
 	// Log detected domains for potential authorization decisions
 	// TODO: Could pre-authorize or warn about these domains
@@ -76,9 +76,10 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 	execCtx, execCancel := context.WithCancel(ctx)
 	defer execCancel()
 
-	t.deadline = newExecDeadline(time.Duration(timeout)*time.Second, execCancel)
+	deadline := newExecDeadline(time.Duration(timeout)*time.Second, execCancel)
+	t.deadline = deadline
 	defer func() {
-		t.deadline.Stop()
+		deadline.Stop()
 		t.deadline = nil
 	}()
 

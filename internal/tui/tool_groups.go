@@ -330,20 +330,20 @@ func (gf *GroupFormatter) formatToolCallSummary(msg *ToolCallMessage) string {
 
 	// Extract primary parameter
 	primaryParam := extractPrimaryParameter(msg.ToolName, msg.Parameters)
-	
+
 	var result string
 	if primaryParam != "" {
 		result = fmt.Sprintf("  %s %s `%s` `%s`", GetStateIndicator(msg.State), icon, msg.ToolName, primaryParam)
 	} else {
 		result = fmt.Sprintf("  %s %s `%s`", GetStateIndicator(msg.State), icon, msg.ToolName)
 	}
-	
+
 	// Append description if available
 	if msg.Description != "" {
 		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
 		result += " " + descStyle.Render(fmt.Sprintf("(%s)", msg.Description))
 	}
-	
+
 	return result
 }
 

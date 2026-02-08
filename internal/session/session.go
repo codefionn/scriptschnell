@@ -15,14 +15,14 @@ import (
 
 // Message represents a conversation message
 type Message struct {
-	Role             string                   `json:"role"` // "user", "assistant", "tool"
-	Content          string                   `json:"content"`
-	Reasoning        string                   `json:"reasoning,omitempty"` // Reasoning/thinking content (e.g., from extended thinking models)
-	ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
-	ToolID           string                   `json:"tool_id,omitempty"`
-	ToolName         string                   `json:"tool_name,omitempty"` // Name of the tool for tool responses
-	ToolDescription  string                   `json:"tool_description,omitempty"` // Description of the tool for tool responses
-	Timestamp        time.Time                `json:"timestamp"`
+	Role            string                   `json:"role"` // "user", "assistant", "tool"
+	Content         string                   `json:"content"`
+	Reasoning       string                   `json:"reasoning,omitempty"` // Reasoning/thinking content (e.g., from extended thinking models)
+	ToolCalls       []map[string]interface{} `json:"tool_calls,omitempty"`
+	ToolID          string                   `json:"tool_id,omitempty"`
+	ToolName        string                   `json:"tool_name,omitempty"`        // Name of the tool for tool responses
+	ToolDescription string                   `json:"tool_description,omitempty"` // Description of the tool for tool responses
+	Timestamp       time.Time                `json:"timestamp"`
 
 	// Native format storage (for prompt caching)
 	NativeFormat      interface{} `json:"native_format,omitempty"`       // Provider-specific message format

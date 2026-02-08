@@ -71,7 +71,7 @@ func TestRenderReasoning(t *testing.T) {
 
 	if !strings.Contains(result, "Thinking:") {
 		t.Error("expected 'Thinking:'")
-	
+
 	}
 	if !strings.Contains(result, "---") {
 		t.Error("expected '---'")

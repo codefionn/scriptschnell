@@ -286,7 +286,7 @@ func truncateForPrompt(value string, limit int) string {
 }
 
 func parseToolSelectionResponse(text string) ([]string, error) {
-	trimmed := strings.TrimSpace(text)
+	trimmed := strings.TrimSpace(stripThinkTags(text))
 	var names []string
 	if err := json.Unmarshal([]byte(trimmed), &names); err == nil {
 		return names, nil

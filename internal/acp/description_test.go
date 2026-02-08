@@ -22,10 +22,10 @@ func TestHandleToolCallStart_WithDescription(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		toolName     string
-		toolID       string
-		parameters   map[string]interface{}
+		name       string
+		toolName   string
+		toolID     string
+		parameters map[string]interface{}
 	}{
 		{
 			name:     "go_sandbox with description",
@@ -79,9 +79,9 @@ func TestHandleToolCallStart_WithDescription(t *testing.T) {
 func TestToolProgressStateDescription(t *testing.T) {
 	// Test that description is properly extracted from tool parameters
 	tests := []struct {
-		name           string
-		parameters     map[string]interface{}
-		expectedDesc   string
+		name         string
+		parameters   map[string]interface{}
+		expectedDesc string
 	}{
 		{
 			name: "with description",

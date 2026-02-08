@@ -161,6 +161,741 @@ function formatResult(result, maxLength = 300) {
     return resultStr;
 }
 
+// ==================== Compact Parameter Formatting ====================
+
+// Parameter type detection and icon mapping
+const PARAM_TYPE_INFO = {
+    path: { icon: 'bi-file-earmark', badge: 'param-badge-path', cssClass: 'param-type-path' },
+    command: { icon: 'bi-terminal', badge: 'param-badge-command', cssClass: 'param-type-command' },
+    url: { icon: 'bi-link-45deg', badge: 'param-badge-url', cssClass: 'param-type-url' },
+    query: { icon: 'bi-search', badge: 'param-badge-query', cssClass: 'param-type-query' },
+    code: { icon: 'bi-code-slash', badge: 'param-badge-code', cssClass: 'param-type-code' },
+    number: { icon: 'bi-hash', cssClass: 'param-type-number' },
+    boolean: { icon: 'bi-toggle2', cssClass: 'param-type-boolean' },
+    array: { icon: 'bi-list-ul', cssClass: 'param-type-array' },
+    object: { icon: 'bi-braces', cssClass: 'param-type-object' },
+    string: { icon: 'bi-type', cssClass: '' },
+    description: { icon: 'bi-chat-left-text', cssClass: '' }
+};
+
+// Detect parameter type based on key name and value
+function detectParamType(key, value) {
+    const keyLower = key.toLowerCase();
+    
+    // Key-based detection
+    if (keyLower === 'path' || keyLower === 'file' || keyLower.endsWith('path') || keyLower.endsWith('_path') || 
+        keyLower === 'working_dir' || keyLower === 'workingdir') {
+        return 'path';
+    }
+    if (keyLower === 'command' || keyLower === 'cmd' || keyLower === 'shell') {
+        return 'command';
+    }
+    if (keyLower === 'url' || keyLower.endsWith('_url') || keyLower.startsWith('http')) {
+        return 'url';
+    }
+    if (keyLower === 'query' || keyLower === 'queries' || keyLower === 'search' || keyLower.endsWith('_query')) {
+        return 'query';
+    }
+    if (keyLower === 'code' || keyLower === 'source' || keyLower === 'script' || keyLower.endsWith('_code')) {
+        return 'code';
+    }
+    if (keyLower === 'description' || keyLower === 'desc') {
+        return 'description';
+    }
+    
+    // Value-based detection
+    if (typeof value === 'boolean') return 'boolean';
+    if (typeof value === 'number') return 'number';
+    if (Array.isArray(value)) return 'array';
+    if (typeof value === 'object' && value !== null) return 'object';
+    if (typeof value === 'string') {
+        // Check if it looks like a URL
+        if (value.match(/^https?:\/\//i)) return 'url';
+        // Check if it looks like a file path
+        if (value.match(/^[.\/\\]/) || value.match(/^[a-zA-Z]:\\/) || value.includes('/')) {
+            return 'path';
+        }
+        // Check if it looks like code (contains newlines or common code patterns)
+        if (value.includes('\n') || value.match(/^[\s]*\{|^[\s]*\[|^[\s]*function|^[\s]*func|^[\s]*def|^[\s]*class|^[\s]*import/)) {
+            return 'code';
+        }
+    }
+    
+    return 'string';
+}
+
+// Format a single value based on its type
+function formatParamValue(value, type, maxLength = 50) {
+    if (value === null || value === undefined) {
+        return { text: String(value), isTruncated: false };
+    }
+    
+    let text;
+    let isTruncated = false;
+    
+    if (Array.isArray(value)) {
+        text = `[${value.length} items]`;
+        if (value.length <= 3 && value.every(v => typeof v !== 'object')) {
+            text = `[${value.map(v => formatParamValue(v, detectParamType('', v), 30).text).join(', ')}]`;
+        }
+    } else if (typeof value === 'object') {
+        const keys = Object.keys(value);
+        text = `{${keys.length} keys}`;
+        if (keys.length <= 2) {
+            const preview = keys.map(k => `${k}: ${formatParamValue(value[k], detectParamType(k, value[k]), 20).text}`).join(', ');
+            text = `{${preview}}`;
+        }
+    } else {
+        text = String(value);
+        if (text.length > maxLength) {
+            text = text.substring(0, maxLength) + '...';
+            isTruncated = true;
+        }
+    }
+    
+    return { text, isTruncated };
+}
+
+// Create a compact parameter item element
+function createParamItem(key, value, paramId) {
+    const type = detectParamType(key, value);
+    const typeInfo = PARAM_TYPE_INFO[type] || PARAM_TYPE_INFO.string;
+    const { text, isTruncated } = formatParamValue(value, type);
+    const fullValue = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+    const isExpandable = isTruncated || fullValue.length > 50 || typeof value === 'object';
+    
+    const itemDiv = document.createElement('div');
+    itemDiv.className = `param-item ${typeInfo.cssClass}`;
+    itemDiv.dataset.fullValue = fullValue;
+    itemDiv.dataset.key = key;
+    
+    let expandBtn = '';
+    if (isExpandable) {
+        expandBtn = `<button class="param-expand-btn" onclick="toggleParamExpand(this, '${paramId}')" title="Expand/Collapse">
+            <i class="bi bi-arrows-expand"></i>
+        </button>`;
+    }
+    
+    itemDiv.innerHTML = `
+        <i class="bi ${typeInfo.icon} param-icon" title="${type}"></i>
+        <span class="param-key">${escapeHtml(key)}</span>
+        <span class="param-separator">:</span>
+        <span class="param-value" data-expanded="false">${escapeHtml(text)}</span>
+        ${expandBtn}
+        <button class="param-copy-btn" onclick="copyParamValue(this)" title="Copy value">
+            <i class="bi bi-clipboard"></i>
+        </button>
+    `;
+    
+    return itemDiv;
+}
+
+// Toggle expand/collapse for a parameter value
+function toggleParamExpand(btn, paramId) {
+    const item = btn.closest('.param-item');
+    const valueSpan = item.querySelector('.param-value');
+    const isExpanded = valueSpan.dataset.expanded === 'true';
+    
+    if (isExpanded) {
+        // Collapse - restore truncated value
+        const type = detectParamType(item.dataset.key, null);
+        const fullValue = item.dataset.fullValue;
+        let parsedValue;
+        try {
+            parsedValue = JSON.parse(fullValue);
+        } catch (e) {
+            parsedValue = fullValue;
+        }
+        const { text } = formatParamValue(parsedValue, type);
+        valueSpan.textContent = text;
+        valueSpan.classList.remove('expanded');
+        valueSpan.dataset.expanded = 'false';
+        btn.innerHTML = '<i class="bi bi-arrows-expand"></i>';
+    } else {
+        // Expand - show full value
+        const fullValue = item.dataset.fullValue;
+        valueSpan.textContent = fullValue;
+        valueSpan.classList.add('expanded');
+        valueSpan.dataset.expanded = 'true';
+        btn.innerHTML = '<i class="bi bi-arrows-collapse"></i>';
+    }
+}
+
+// Copy parameter value to clipboard
+function copyParamValue(btn) {
+    const item = btn.closest('.param-item');
+    const fullValue = item.dataset.fullValue;
+    
+    navigator.clipboard.writeText(fullValue).then(() => {
+        const originalIcon = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check2"></i>';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.innerHTML = originalIcon;
+            btn.classList.remove('copied');
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+    });
+}
+
+// Format tool parameters as compact key-value display
+function formatToolParams(params, toolName = '') {
+    if (!params || Object.keys(params).length === 0) {
+        return '<div class="text-muted small">No parameters</div>';
+    }
+    
+    // Filter out 'description' if it's the tool's built-in description
+    const filteredParams = { ...params };
+    if (toolName && filteredParams.description) {
+        // Keep description but mark it specially
+    }
+    
+    const container = document.createElement('div');
+    container.className = 'param-container';
+    container.id = `param-container-${Date.now()}`;
+    
+    // Sort parameters by importance
+    const priorityKeys = ['path', 'file', 'command', 'url', 'query', 'code'];
+    const keys = Object.keys(filteredParams).sort((a, b) => {
+        const aPriority = priorityKeys.findIndex(k => a.toLowerCase().includes(k));
+        const bPriority = priorityKeys.findIndex(k => b.toLowerCase().includes(k));
+        if (aPriority !== -1 && bPriority !== -1) return aPriority - bPriority;
+        if (aPriority !== -1) return -1;
+        if (bPriority !== -1) return 1;
+        return a.localeCompare(b);
+    });
+    
+    keys.forEach((key, index) => {
+        const value = filteredParams[key];
+        const paramId = `param-${Date.now()}-${index}`;
+        const item = createParamItem(key, value, paramId);
+        container.appendChild(item);
+    });
+    
+    // Add JSON view toggle button
+    const jsonRaw = JSON.stringify(params, null, 2);
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = `
+        ${container.outerHTML}
+        <div class="mt-1 d-flex justify-content-end">
+            <button class="btn btn-link btn-sm p-0 param-view-toggle" onclick="toggleParamsView(this)" data-json-raw="${escapeHtml(jsonRaw.replace(/"/g, '&quot;'))}">
+                <small><i class="bi bi-code-square me-1"></i>View as JSON</small>
+            </button>
+        </div>
+    `;
+    
+    return wrapper.innerHTML;
+}
+
+// Toggle between compact view and raw JSON view
+function toggleParamsView(btn) {
+    const container = btn.parentElement.previousElementSibling;
+    const isJsonView = btn.dataset.viewMode === 'json';
+    const jsonRaw = btn.dataset.jsonRaw;
+    
+    if (isJsonView) {
+        // Switch back to compact view
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = jsonRaw;
+        const originalJson = tempDiv.textContent;
+        try {
+            const params = JSON.parse(originalJson);
+            const newContainer = document.createElement('div');
+            newContainer.className = 'param-container';
+            
+            Object.keys(params).forEach((key, index) => {
+                const value = params[key];
+                const paramId = `param-${Date.now()}-${index}`;
+                const item = createParamItem(key, value, paramId);
+                newContainer.appendChild(item);
+            });
+            
+            container.replaceWith(newContainer);
+            btn.innerHTML = '<small><i class="bi bi-code-square me-1"></i>View as JSON</small>';
+            btn.dataset.viewMode = 'compact';
+        } catch (e) {
+            console.error('Failed to parse JSON for compact view:', e);
+        }
+    } else {
+        // Switch to JSON view
+        const jsonContent = document.createElement('div');
+        jsonContent.className = 'tool-section-content';
+        jsonContent.style.maxHeight = '200px';
+        jsonContent.style.overflow = 'auto';
+        
+        const pre = document.createElement('pre');
+        pre.className = 'mb-0';
+        pre.style.fontSize = '0.7rem';
+        pre.textContent = jsonRaw;
+        
+        jsonContent.appendChild(pre);
+        container.replaceWith(jsonContent);
+        btn.innerHTML = '<small><i class="bi bi-list-ul me-1"></i>View as Compact</small>';
+        btn.dataset.viewMode = 'json';
+    }
+}
+
+// ==================== Tool Result Formatting ====================
+
+// Detect the type of result content
+function detectResultType(result, toolName = '') {
+    if (!result) return 'text';
+
+    const resultStr = typeof result === 'object' ? JSON.stringify(result) : String(result);
+
+    // Check for todo results (before generic JSON detection)
+    if (toolName === 'todo' || isTodoResult(result, resultStr)) {
+        return 'todo';
+    }
+
+    // Check for diff patterns
+    if (resultStr.match(/^---\s/m) || resultStr.match(/^\+\+\+\s/m) ||
+        resultStr.match(/^@@\s.*@@/m) || resultStr.match(/^[+-][^+-]/m)) {
+        return 'diff';
+    }
+
+    // Check for JSON
+    if (typeof result === 'object') {
+        return 'json';
+    }
+    if (resultStr.trim().startsWith('{') || resultStr.trim().startsWith('[')) {
+        try {
+            JSON.parse(resultStr);
+            return 'json';
+        } catch (e) {}
+    }
+    
+    // Check for table-like data (arrays of objects with same keys)
+    if (typeof result === 'object' && Array.isArray(result) && result.length > 0 && 
+        result.every(item => typeof item === 'object' && !Array.isArray(item))) {
+        const keys = Object.keys(result[0]);
+        if (keys.length > 0 && result.every(item => 
+            keys.every(k => k in item))) {
+            return 'table';
+        }
+    }
+    
+    // Check for code based on tool name and content
+    const codeTools = ['shell', 'execute', 'run', 'bash', 'command'];
+    if (codeTools.some(t => toolName.toLowerCase().includes(t))) {
+        return 'code';
+    }
+    
+    // Check for common code patterns
+    if (resultStr.match(/^(function|func|def|class|import|package|var|let|const|public|private)\s/m)) {
+        return 'code';
+    }
+    if (resultStr.match(/\{[\s\S]*\}|\([\s\S]*\)|\[[\s\S]*\]/) && resultStr.includes('\n')) {
+        return 'code';
+    }
+    
+    return 'text';
+}
+
+// Detect language for syntax highlighting
+function detectLanguage(content, toolName = '') {
+    const toolLower = toolName.toLowerCase();
+    
+    // Tool name hints
+    if (toolLower.includes('go') || toolLower.includes('golang')) return 'go';
+    if (toolLower.includes('python') || toolLower.includes('py')) return 'python';
+    if (toolLower.includes('javascript') || toolLower.includes('js') || toolLower.includes('node')) return 'javascript';
+    if (toolLower.includes('typescript') || toolLower.includes('ts')) return 'typescript';
+    if (toolLower.includes('shell') || toolLower.includes('bash')) return 'bash';
+    if (toolLower.includes('sql')) return 'sql';
+    
+    // Content patterns
+    if (content.match(/^package\s+\w+/m)) return 'go';
+    if (content.match(/^(func|type|var|const|import)\s/m)) return 'go';
+    if (content.match(/^(def|class|import|from)\s/m)) return 'python';
+    if (content.match(/^(function|const|let|var|import|export)\s/m)) return 'javascript';
+    if (content.match(/:\s*(string|number|boolean|any)\b/)) return 'typescript';
+    if (content.match(/^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER)\s/mi)) return 'sql';
+    if (content.match(/^(#!\/|echo\s|export\s|source\s)/m)) return 'bash';
+    
+    return 'plaintext';
+}
+
+// Format result as diff with colored additions/removals
+function formatDiffResult(result) {
+    const lines = String(result).split('\n');
+    let html = '<div class="diff-block">';
+    let lineNum = 0;
+    let oldLine = 0;
+    let newLine = 0;
+    
+    lines.forEach((line, idx) => {
+        lineNum++;
+        let lineClass = '';
+        let lineNumDisplay = lineNum;
+        
+        if (line.startsWith('@@')) {
+            // Parse hunk header to reset line numbers
+            const match = line.match(/@@\s*-\d+(?:,\d+)?\s+\+(\d+)/);
+            if (match) {
+                newLine = parseInt(match[1]) - 1;
+            }
+            lineClass = 'diff-hunk';
+            lineNumDisplay = '';
+        } else if (line.startsWith('---') || line.startsWith('+++')) {
+            lineClass = 'diff-header';
+            lineNumDisplay = '';
+        } else if (line.startsWith('+') && !line.startsWith('+++')) {
+            lineClass = 'diff-add';
+            newLine++;
+            lineNumDisplay = newLine;
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+            lineClass = 'diff-remove';
+            lineNumDisplay = '';
+        } else if (!line.startsWith('\\')) {
+            newLine++;
+            lineNumDisplay = newLine;
+        } else {
+            lineNumDisplay = '';
+        }
+        
+        html += `<div class="diff-line ${lineClass}">
+            <span class="diff-line-num">${lineNumDisplay}</span>
+            <span class="diff-line-content">${escapeHtml(line)}</span>
+        </div>`;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+// Format result as JSON with syntax highlighting
+function formatJsonResult(result) {
+    let jsonStr;
+    let jsonObj;
+    
+    if (typeof result === 'object') {
+        jsonObj = result;
+        jsonStr = JSON.stringify(result, null, 2);
+    } else {
+        jsonStr = String(result);
+        try {
+            jsonObj = JSON.parse(jsonStr);
+            jsonStr = JSON.stringify(jsonObj, null, 2);
+        } catch (e) {}
+    }
+    
+    // Apply syntax highlighting if available
+    if (typeof hljs !== 'undefined') {
+        try {
+            const highlighted = hljs.highlight(jsonStr, { language: 'json' }).value;
+            return formatCodeWithLineNumbers(highlighted, 'json');
+        } catch (e) {}
+    }
+    
+    return formatCodeWithLineNumbers(escapeHtml(jsonStr), 'plaintext');
+}
+
+// Format code with line numbers
+function formatCodeWithLineNumbers(code, language = 'plaintext') {
+    const lines = code.split('\n');
+    const lineCount = lines.length;
+    const lineNumWidth = String(lineCount).length;
+    
+    let lineNumbersHtml = '';
+    for (let i = 1; i <= lineCount; i++) {
+        lineNumbersHtml += `<div>${String(i).padStart(lineNumWidth, ' ')}</div>`;
+    }
+    
+    return `<div class="code-block" data-language="${language}">
+        <div class="code-line-numbers">${lineNumbersHtml}</div>
+        <div class="code-content"><pre>${code}</pre></div>
+    </div>`;
+}
+
+// Format result as table
+function formatTableResult(result) {
+    if (!Array.isArray(result) || result.length === 0) {
+        return '<div class="text-muted">Empty result</div>';
+    }
+    
+    const keys = Object.keys(result[0]);
+    let html = '<div class="table-responsive"><table class="result-table">';
+    
+    // Header
+    html += '<thead><tr>';
+    keys.forEach(key => {
+        html += `<th>${escapeHtml(key)}</th>`;
+    });
+    html += '</tr></thead>';
+    
+    // Body
+    html += '<tbody>';
+    result.forEach(row => {
+        html += '<tr>';
+        keys.forEach(key => {
+            let value = row[key];
+            if (typeof value === 'object') {
+                value = JSON.stringify(value);
+            }
+            html += `<td>${escapeHtml(String(value))}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    
+    return html;
+}
+
+// Detect if a result looks like a todo tool response
+function isTodoResult(result, resultStr) {
+    if (typeof result === 'object' && result !== null) {
+        // List result: has "todos" array and "count"
+        if (Array.isArray(result.todos) && 'count' in result) return true;
+        // Action result: has "message" with todo-related text
+        if (typeof result.message === 'string' &&
+            (result.message.includes('Todo') || result.message.includes('todo') ||
+             result.message.includes('Sub-todo'))) return true;
+    }
+    // Check parsed JSON string
+    if (typeof resultStr === 'string' && (resultStr.startsWith('{') || resultStr.startsWith('['))) {
+        try {
+            const parsed = JSON.parse(resultStr);
+            return isTodoResult(parsed, '');
+        } catch (e) {}
+    }
+    return false;
+}
+
+// Format todo result with a compact, human-readable display
+function formatTodoResult(result) {
+    let data;
+    if (typeof result === 'string') {
+        try { data = JSON.parse(result); } catch (e) { return `<div class="result-content">${escapeHtml(result)}</div>`; }
+    } else {
+        data = result;
+    }
+
+    // List action - show todo items
+    if (Array.isArray(data.todos)) {
+        const isAddMany = typeof data.message === 'string' && data.message.startsWith('Successfully added');
+        const count = data.count || data.todos.length;
+        let html = '<div class="todo-result">';
+
+        if (isAddMany) {
+            html += `<div class="todo-summary text-muted small mb-1">${escapeHtml(data.message)}</div>`;
+        } else {
+            html += `<div class="todo-summary text-muted small mb-1">${count} item${count !== 1 ? 's' : ''}</div>`;
+        }
+
+        if (count === 0) {
+            html += '<div class="text-muted fst-italic">No todos yet</div>';
+        } else {
+            // Build parent-children map
+            const childrenMap = {};
+            data.todos.forEach((t, i) => {
+                if (t.parent_id) {
+                    if (!childrenMap[t.parent_id]) childrenMap[t.parent_id] = [];
+                    childrenMap[t.parent_id].push(i);
+                }
+            });
+
+            html += '<div class="todo-list">';
+            data.todos.forEach((t, i) => {
+                if (t.parent_id) return; // rendered as child
+                html += formatTodoItemHtml(t);
+                // Render children
+                if (childrenMap[t.id]) {
+                    childrenMap[t.id].forEach(ci => {
+                        html += formatTodoItemHtml(data.todos[ci], true);
+                    });
+                }
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    // Single action result (add, check, delete, etc.)
+    if (data.message) {
+        let html = '<div class="todo-result">';
+        html += `<div class="todo-action-msg">${escapeHtml(data.message)}`;
+        if (data.id) {
+            html += ` <span class="text-muted small">${escapeHtml(data.id)}</span>`;
+        }
+        if (data.status) {
+            html += ` <span class="badge ${todoBadgeClass(data.status)}">${escapeHtml(data.status)}</span>`;
+        }
+        if (data.priority && data.priority !== 'medium') {
+            html += ` <span class="badge ${todoPrioBadgeClass(data.priority)}">${escapeHtml(data.priority)}</span>`;
+        }
+        html += '</div></div>';
+        return html;
+    }
+
+    // Fallback
+    return `<div class="result-content">${escapeHtml(JSON.stringify(data, null, 2))}</div>`;
+}
+
+// Format a single todo item as HTML
+function formatTodoItemHtml(todo, isChild = false) {
+    const indent = isChild ? 'ms-3' : '';
+    const statusIcon = todo.status === 'completed' ? 'bi-check-square text-success'
+        : todo.status === 'in_progress' ? 'bi-dash-square text-warning'
+        : 'bi-square text-secondary';
+    const textClass = todo.status === 'completed' ? 'text-decoration-line-through text-muted' : '';
+
+    let prioHtml = '';
+    if (todo.priority === 'high') {
+        prioHtml = '<span class="badge bg-danger-subtle text-danger ms-1">high</span>';
+    } else if (todo.priority === 'low') {
+        prioHtml = '<span class="badge bg-secondary-subtle text-secondary ms-1">low</span>';
+    }
+
+    return `<div class="todo-item d-flex align-items-start gap-1 ${indent}" style="padding: 2px 0;">
+        <i class="bi ${statusIcon}" style="font-size: 0.85em; margin-top: 2px;"></i>
+        <span class="${textClass}" style="flex: 1;">${escapeHtml(todo.text || '')}</span>
+        ${prioHtml}
+        <span class="text-muted small" style="white-space: nowrap;">${escapeHtml(todo.id || '')}</span>
+    </div>`;
+}
+
+// CSS class for todo status badge
+function todoBadgeClass(status) {
+    switch (status) {
+        case 'completed': return 'bg-success-subtle text-success';
+        case 'in_progress': return 'bg-warning-subtle text-warning';
+        default: return 'bg-secondary-subtle text-secondary';
+    }
+}
+
+// CSS class for todo priority badge
+function todoPrioBadgeClass(priority) {
+    switch (priority) {
+        case 'high': return 'bg-danger-subtle text-danger';
+        case 'low': return 'bg-secondary-subtle text-secondary';
+        default: return 'bg-secondary-subtle text-secondary';
+    }
+}
+
+// Format code result with syntax highlighting
+function formatCodeResult(result, toolName = '') {
+    const code = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+    const language = detectLanguage(code, toolName);
+    
+    let highlightedCode;
+    if (typeof hljs !== 'undefined' && language !== 'plaintext') {
+        try {
+            highlightedCode = hljs.highlight(code, { language }).value;
+        } catch (e) {
+            highlightedCode = escapeHtml(code);
+        }
+    } else {
+        highlightedCode = escapeHtml(code);
+    }
+    
+    return formatCodeWithLineNumbers(highlightedCode, language);
+}
+
+// Main result formatter - creates a complete result display
+function formatToolResult(result, toolName = '', isError = false) {
+    const resultType = isError ? 'error' : detectResultType(result, toolName);
+    const resultStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+    
+    // Result type badge
+    const typeBadgeClass = `result-type-${resultType}`;
+    const typeBadge = `<span class="result-type-badge ${typeBadgeClass}">${resultType.toUpperCase()}</span>`;
+    
+    // Actions (copy, expand)
+    const actions = `
+        <div class="result-actions">
+            <button class="btn btn-outline-secondary btn-sm" onclick="copyResultToClipboard(this)" title="Copy to clipboard">
+                <i class="bi bi-clipboard"></i>
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="toggleResultExpand(this)" title="Expand/Collapse">
+                <i class="bi bi-arrows-expand"></i>
+            </button>
+        </div>
+    `;
+    
+    // Format content based on type
+    let contentHtml;
+    switch (resultType) {
+        case 'todo':
+            contentHtml = formatTodoResult(result);
+            break;
+        case 'diff':
+            contentHtml = formatDiffResult(result);
+            break;
+        case 'json':
+            contentHtml = formatJsonResult(result);
+            break;
+        case 'table':
+            contentHtml = formatTableResult(result);
+            break;
+        case 'code':
+            contentHtml = formatCodeResult(result, toolName);
+            break;
+        case 'error':
+            contentHtml = `<div class="result-content" style="color: #dc3545;">${escapeHtml(resultStr)}</div>`;
+            break;
+        default:
+            contentHtml = `<div class="result-content">${escapeHtml(resultStr)}</div>`;
+    }
+    
+    // Build wrapper with hidden raw content for copying
+    const wrapper = `
+        <div class="result-container" data-raw-result="${escapeHtml(resultStr.replace(/"/g, '&quot;'))}">
+            <div class="result-header">
+                <span>${typeBadge}</span>
+                ${actions}
+            </div>
+            <div class="result-body">${contentHtml}</div>
+        </div>
+    `;
+    
+    return wrapper;
+}
+
+// Copy result to clipboard
+function copyResultToClipboard(btn) {
+    const container = btn.closest('.result-container');
+    const rawResult = container.dataset.rawResult;
+    
+    // Decode HTML entities
+    const text = rawResult.replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+    
+    navigator.clipboard.writeText(text).then(() => {
+        const icon = btn.querySelector('i');
+        icon.className = 'bi bi-check2';
+        btn.classList.add('btn-success');
+        btn.classList.remove('btn-outline-secondary');
+        setTimeout(() => {
+            icon.className = 'bi bi-clipboard';
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-secondary');
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+    });
+}
+
+// Toggle result expand/collapse
+function toggleResultExpand(btn) {
+    const container = btn.closest('.result-container');
+    const body = container.querySelector('.result-body');
+    const icon = btn.querySelector('i');
+    
+    if (body.style.maxHeight) {
+        body.style.maxHeight = '';
+        icon.className = 'bi bi-arrows-expand';
+    } else {
+        body.style.maxHeight = 'none';
+        icon.className = 'bi bi-arrows-collapse';
+    }
+}
+
 // Status bar management
 function updateStatusBar(status, text) {
     const statusBar = document.getElementById('status-bar');
@@ -466,8 +1201,8 @@ function handleToolInteraction(msg) {
         div.dataset.toolName = msg.tool_name;
         div.dataset.parameters = JSON.stringify(msg.parameters || {});
         
-        // Build the compact tool card HTML
-        const paramsStr = formatParameters(msg.parameters);
+        // Build the compact parameter display using new formatter
+        const paramsHtml = formatToolParams(msg.parameters, msg.tool_name);
         
         // Build description HTML if available
         let descriptionHtml = '';
@@ -491,7 +1226,7 @@ function handleToolInteraction(msg) {
                         <i class="bi bi-chevron-down" id="tool-${toolId}-input-icon"></i>
                         Input
                     </div>
-                    <div class="tool-section-content" id="tool-${toolId}-input">${escapeHtml(paramsStr)}</div>
+                    <div class="tool-section-content" id="tool-${toolId}-input">${paramsHtml}</div>
                 </div>
                 <div class="tool-section" id="tool-${toolId}-output-section" style="display: none;">
                     <div class="tool-section-header">
@@ -519,6 +1254,7 @@ function updateToolResult(toolId, result, error) {
     const div = activeToolInteractions.get(toolId);
     if (!div) return;
     
+    const toolName = div.dataset.toolName || 'unknown';
     const outputSection = document.getElementById(`tool-${toolId}-output-section`);
     const outputContent = document.getElementById(`tool-${toolId}-output`);
     const statusSpan = div.querySelector('.tool-status');
@@ -544,8 +1280,7 @@ function updateToolResult(toolId, result, error) {
             statusSpan.classList.add('text-danger');
         }
         if (outputContent) {
-            outputContent.textContent = error;
-            outputContent.style.color = '#dc3545';
+            outputContent.innerHTML = formatToolResult(error, toolName, true);
         }
         if (outputSection) {
             outputSection.style.display = 'block';
@@ -561,7 +1296,7 @@ function updateToolResult(toolId, result, error) {
             statusSpan.classList.add('text-success');
         }
         if (outputContent) {
-            outputContent.textContent = formatResult(result);
+            outputContent.innerHTML = formatToolResult(result, toolName, false);
         }
         if (outputSection) {
             outputSection.style.display = 'block';

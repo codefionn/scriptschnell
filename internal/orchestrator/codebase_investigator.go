@@ -594,6 +594,8 @@ func (a *CodebaseInvestigatorAgent) buildFileTree(ctx context.Context, maxDepth 
 }
 
 func extractAnswer(content string) string {
+	// Strip <think> tags from reasoning models (e.g., DeepSeek, Qwen 3)
+	content = stripThinkTags(content)
 	startTag := "<answer>"
 	endTag := "</answer>"
 	start := strings.Index(content, startTag)

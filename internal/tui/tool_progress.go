@@ -33,7 +33,7 @@ type ToolProgressMsg struct {
 	TabID       int
 	ToolID      string
 	ToolName    string
-	Description string // Human-readable description of what the tool is doing
+	Description string  // Human-readable description of what the tool is doing
 	Progress    float64 // -1 for indeterminate
 	Status      string
 	Output      string // New output chunk (if streaming)

@@ -574,54 +574,451 @@ func (ts *ToolStyles) RenderRunningIndicator() string {
 }
 
 // extractPrimaryParameter extracts the most relevant parameter for display
+// This function returns the single most important parameter for each tool type
 func extractPrimaryParameter(toolName string, parameters map[string]interface{}) string {
 	// Handle "Planning: " prefix
 	toolName = strings.TrimPrefix(toolName, "Planning: ")
 
 	switch toolName {
-	case tools.ToolNameReadFile, tools.ToolNameCreateFile, tools.ToolNameEditFile, tools.ToolNameReplaceFile:
+	// File operations - path is primary
+	case tools.ToolNameReadFile, tools.ToolNameReadFileSummarized:
 		if path, ok := parameters["path"].(string); ok {
-			return truncatePath(path, 40)
+			return truncatePathSmart(path, 50)
 		}
+	case tools.ToolNameCreateFile, tools.ToolNameEditFile, tools.ToolNameReplaceFile:
+		if path, ok := parameters["path"].(string); ok {
+			return truncatePathSmart(path, 50)
+		}
+
+	// Shell/Command operations - command is primary
 	case tools.ToolNameShell:
 		if command, ok := parameters["command"].(string); ok {
-			return truncateCommand(command, 50)
+			return truncateCommandSmart(command, 60)
 		}
 		if command, ok := parameters["command"].([]interface{}); ok && len(command) > 0 {
-			if cmdStr, ok := command[0].(string); ok {
-				return truncateCommand(cmdStr, 50)
+			// Join array elements into a command string
+			cmdParts := make([]string, 0, len(command))
+			for _, part := range command {
+				if str, ok := part.(string); ok {
+					cmdParts = append(cmdParts, str)
+				}
+			}
+			if len(cmdParts) > 0 {
+				return truncateCommandSmart(strings.Join(cmdParts, " "), 60)
 			}
 		}
+
+	// Web operations - query/URL is primary
 	case tools.ToolNameWebSearch:
+		if queries, ok := parameters["queries"].([]interface{}); ok && len(queries) > 0 {
+			if first, ok := queries[0].(string); ok {
+				return truncateStringSmart(first, 40)
+			}
+		}
 		if query, ok := parameters["query"].(string); ok {
-			return truncateString(query, 40)
+			return truncateStringSmart(query, 40)
 		}
 	case tools.ToolNameWebFetch:
 		if url, ok := parameters["url"].(string); ok {
-			return truncateString(url, 50)
+			return truncateURLSmart(url, 50)
 		}
+
+	// Sandbox - description or summary
 	case tools.ToolNameGoSandbox:
+		if desc, ok := parameters["description"].(string); ok && desc != "" {
+			return truncateStringSmart(desc, 40)
+		}
 		return "Go code execution"
+
+	// Todo operations - action is primary
 	case tools.ToolNameTodo:
 		if action, ok := parameters["action"].(string); ok {
 			return action
+		}
+
+	// Program control - job_id is primary
+	case tools.ToolNameStatusProgram:
+		if jobID, ok := parameters["job_id"].(string); ok {
+			return truncateStringSmart(jobID, 20)
+		}
+	case tools.ToolNameStopProgram:
+		if jobID, ok := parameters["job_id"].(string); ok {
+			return truncateStringSmart(jobID, 20)
+		}
+	case tools.ToolNameWaitProgram:
+		if jobID, ok := parameters["job_id"].(string); ok {
+			return truncateStringSmart(jobID, 20)
+		}
+
+	// Search operations - pattern is primary
+	case tools.ToolNameSearchFiles:
+		if pattern, ok := parameters["pattern"].(string); ok {
+			return truncateStringSmart(pattern, 40)
+		}
+	case tools.ToolNameSearchFileContent:
+		if pattern, ok := parameters["pattern"].(string); ok {
+			return truncateStringSmart(pattern, 40)
+		}
+
+	// Summarize - target tool is primary
+	case tools.ToolNameToolSummarize:
+		if toolName, ok := parameters["tool_name"].(string); ok {
+			return toolName
+		}
+
+	// Codebase investigator - objectives are primary
+	case tools.ToolNameCodebaseInvestigator:
+		if objectives, ok := parameters["objectives"].([]interface{}); ok && len(objectives) > 0 {
+			if first, ok := objectives[0].(string); ok {
+				return truncateStringSmart(first, 40)
+			}
+		}
+
+	// Directory listing - path is primary
+	case tools.ToolNameLs:
+		if path, ok := parameters["path"].(string); ok {
+			return truncatePathSmart(path, 40)
+		}
+
+	// Context files - pattern is primary
+	case tools.ToolNameSearchContextFiles, tools.ToolNameGrepContextFiles:
+		if pattern, ok := parameters["pattern"].(string); ok {
+			return truncateStringSmart(pattern, 40)
+		}
+	case tools.ToolNameReadContextFile:
+		if path, ok := parameters["path"].(string); ok {
+			return truncatePathSmart(path, 50)
+		}
+
+	// Parallel execution - count
+	case tools.ToolNameParallel:
+		if toolCalls, ok := parameters["tool_calls"].([]interface{}); ok {
+			return fmt.Sprintf("%d tools", len(toolCalls))
 		}
 	}
 
 	return ""
 }
 
-// truncatePath truncates a path for display
+// extractSecondaryParameters extracts additional context parameters for display
+// Returns a map of parameter names to their truncated values
+func extractSecondaryParameters(toolName string, parameters map[string]interface{}) map[string]string {
+	// Handle "Planning: " prefix
+	toolName = strings.TrimPrefix(toolName, "Planning: ")
+
+	secondary := make(map[string]string)
+
+	switch toolName {
+	// File operations - show line ranges, search patterns
+	case tools.ToolNameReadFile, tools.ToolNameReadFileSummarized:
+		if from, ok := parameters["from_line"].(float64); ok {
+			if to, ok := parameters["to_line"].(float64); ok {
+				secondary["lines"] = fmt.Sprintf("%.0f-%.0f", from, to)
+			} else {
+				secondary["from"] = fmt.Sprintf("%.0f", from)
+			}
+		}
+		if sections, ok := parameters["sections"].([]interface{}); ok && len(sections) > 0 {
+			secondary["sections"] = fmt.Sprintf("%d", len(sections))
+		}
+		if prompt, ok := parameters["summarize_prompt"].(string); ok && prompt != "" {
+			secondary["summarize"] = truncateStringSmart(prompt, 30)
+		}
+
+	case tools.ToolNameEditFile:
+		if edits, ok := parameters["edits"].([]interface{}); ok {
+			secondary["edits"] = fmt.Sprintf("%d", len(edits))
+		}
+
+	case tools.ToolNameCreateFile, tools.ToolNameReplaceFile:
+		if content, ok := parameters["content"].(string); ok {
+			lines := strings.Count(content, "\n") + 1
+			secondary["size"] = fmt.Sprintf("%d lines", lines)
+		}
+
+	// Shell - show timeout, background status
+	case tools.ToolNameShell:
+		if timeout, ok := parameters["timeout"].(float64); ok && timeout > 0 {
+			secondary["timeout"] = fmt.Sprintf("%.0fs", timeout)
+		}
+		if bg, ok := parameters["background"].(bool); ok && bg {
+			secondary["mode"] = "background"
+		}
+		if stdin, ok := parameters["stdin"].(string); ok && stdin != "" {
+			secondary["stdin"] = truncateStringSmart(stdin, 20)
+		}
+
+	// Web search - show number of results
+	case tools.ToolNameWebSearch:
+		if numResults, ok := parameters["num_results"].(float64); ok {
+			secondary["limit"] = fmt.Sprintf("%.0f", numResults)
+		}
+		if queries, ok := parameters["queries"].([]interface{}); ok && len(queries) > 1 {
+			secondary["queries"] = fmt.Sprintf("%d", len(queries))
+		}
+
+	// Web fetch - show summarize prompt
+	case tools.ToolNameWebFetch:
+		if prompt, ok := parameters["summarize_prompt"].(string); ok && prompt != "" {
+			secondary["summarize"] = truncateStringSmart(prompt, 30)
+		}
+
+	// Sandbox - show libraries, timeout
+	case tools.ToolNameGoSandbox:
+		if libs, ok := parameters["libraries"].([]interface{}); ok && len(libs) > 0 {
+			secondary["libs"] = fmt.Sprintf("%d", len(libs))
+		}
+		if timeout, ok := parameters["timeout"].(float64); ok && timeout > 0 {
+			secondary["timeout"] = fmt.Sprintf("%.0fs", timeout)
+		}
+		if bg, ok := parameters["background"].(bool); ok && bg {
+			secondary["mode"] = "background"
+		}
+		if workingDir, ok := parameters["working_dir"].(string); ok && workingDir != "" {
+			secondary["dir"] = truncatePathSmart(workingDir, 20)
+		}
+
+	// Todo - show item details
+	case tools.ToolNameTodo:
+		if text, ok := parameters["text"].(string); ok && text != "" {
+			secondary["text"] = truncateStringSmart(text, 30)
+		}
+		if status, ok := parameters["status"].(string); ok {
+			secondary["status"] = status
+		}
+		if priority, ok := parameters["priority"].(string); ok {
+			secondary["priority"] = priority
+		}
+
+	// Search - show context, glob patterns
+	case tools.ToolNameSearchFiles:
+		if contentRegex, ok := parameters["content_regex"].(string); ok {
+			secondary["content"] = truncateStringSmart(contentRegex, 25)
+		}
+		if path, ok := parameters["path"].(string); ok && path != "" {
+			secondary["path"] = truncatePathSmart(path, 25)
+		}
+
+	case tools.ToolNameSearchFileContent:
+		if glob, ok := parameters["glob"].(string); ok {
+			secondary["glob"] = glob
+		}
+		if path, ok := parameters["path"].(string); ok && path != "." {
+			secondary["path"] = truncatePathSmart(path, 25)
+		}
+		if context, ok := parameters["context"].(float64); ok && context > 0 {
+			secondary["context"] = fmt.Sprintf("%.0f", context)
+		}
+
+	// Tool summarize - show goal
+	case tools.ToolNameToolSummarize:
+		if goal, ok := parameters["summary_goal"].(string); ok {
+			secondary["goal"] = truncateStringSmart(goal, 40)
+		}
+
+	// Parallel tools - show tool count
+	case tools.ToolNameParallel:
+		if toolCalls, ok := parameters["tool_calls"].([]interface{}); ok {
+			secondary["total"] = fmt.Sprintf("%d", len(toolCalls))
+		}
+
+	// Context files
+	case tools.ToolNameSearchContextFiles:
+		if contentRegex, ok := parameters["content_regex"].(string); ok {
+			secondary["content"] = truncateStringSmart(contentRegex, 25)
+		}
+	case tools.ToolNameGrepContextFiles:
+		if filePattern, ok := parameters["file_pattern"].(string); ok {
+			secondary["glob"] = filePattern
+		}
+		if context, ok := parameters["context_lines"].(float64); ok && context > 0 {
+			secondary["context"] = fmt.Sprintf("%.0f", context)
+		}
+	}
+
+	return secondary
+}
+
+// truncatePathSmart truncates a file path with intelligent placement
+// Preserves the filename and important directory structure
+func truncatePathSmart(path string, maxLen int) string {
+	if len(path) <= maxLen {
+		return path
+	}
+
+	// If maxLen is too small, just do simple truncation
+	if maxLen < 10 {
+		return truncateString(path, maxLen)
+	}
+
+	// Try to preserve the filename
+	parts := strings.Split(path, "/")
+	filename := parts[len(parts)-1]
+
+	// If filename alone fits, show ".../filename"
+	if len(filename) <= maxLen-4 {
+		return ".../" + filename
+	}
+
+	// If filename is too long, truncate it with ellipsis
+	if len(filename) > maxLen-3 {
+		return filename[:maxLen-3] + "..."
+	}
+
+	// Try to show some directory context
+	if len(parts) > 2 {
+		// Show ".../parent/filename"
+		parent := parts[len(parts)-2]
+		shortPath := ".../" + parent + "/" + filename
+		if len(shortPath) <= maxLen {
+			return shortPath
+		}
+	}
+
+	// Fallback: truncate middle with ellipsis
+	return path[:maxLen-3] + "..."
+}
+
+// truncateCommandSmart truncates a shell command intelligently
+// Preserves the command name and first few arguments
+func truncateCommandSmart(cmd string, maxLen int) string {
+	if len(cmd) <= maxLen {
+		return cmd
+	}
+
+	if maxLen < 10 {
+		return truncateString(cmd, maxLen)
+	}
+
+	// Split into parts
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return truncateString(cmd, maxLen)
+	}
+
+	// Always show the command itself
+	command := parts[0]
+
+	// If command alone is too long
+	if len(command) > maxLen-3 {
+		return command[:maxLen-3] + "..."
+	}
+
+	// Try to fit as many arguments as possible
+	result := command
+	for i, part := range parts[1:] {
+		testResult := result + " " + part
+		if len(testResult) > maxLen-3 {
+			// Can't fit this argument
+			remaining := len(parts) - i - 1
+			if remaining > 0 {
+				return result + fmt.Sprintf(" ... +%d more", remaining)
+			}
+			return result + " ..."
+		}
+		result = testResult
+	}
+
+	return result
+}
+
+// truncateURLSmart truncates a URL intelligently
+// Preserves the domain and path structure
+func truncateURLSmart(url string, maxLen int) string {
+	if len(url) <= maxLen {
+		return url
+	}
+
+	if maxLen < 15 {
+		return truncateString(url, maxLen)
+	}
+
+	// Find the protocol separator
+	protoEnd := strings.Index(url, "://")
+	if protoEnd == -1 {
+		// No protocol, just truncate
+		return truncateString(url, maxLen)
+	}
+
+	protocol := url[:protoEnd+3] // Include ://
+	remainder := url[protoEnd+3:]
+
+	// Find the path start
+	pathStart := strings.Index(remainder, "/")
+	if pathStart == -1 {
+		// No path, just domain
+		if len(url) > maxLen {
+			return url[:maxLen-3] + "..."
+		}
+		return url
+	}
+
+	domain := remainder[:pathStart]
+	path := remainder[pathStart:]
+
+	// Try: protocol + domain + "/..." + end of path
+	if len(path) > 10 {
+		// Get last segment of path
+		lastSlash := strings.LastIndex(path, "/")
+		if lastSlash > 0 {
+			endPart := path[lastSlash:]
+			shortURL := protocol + domain + "/..." + endPart
+			if len(shortURL) <= maxLen {
+				return shortURL
+			}
+		}
+	}
+
+	// Fallback: protocol + truncated domain/path
+	available := maxLen - len(protocol) - 3 // Reserve space for "..."
+	if available > 0 && len(remainder) > available {
+		return protocol + remainder[:available] + "..."
+	}
+
+	return truncateString(url, maxLen)
+}
+
+// truncateStringSmart truncates a string with ellipsis at word boundary when possible
+func truncateStringSmart(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+
+	if maxLen < 5 {
+		return s[:maxLen]
+	}
+
+	// Look for a word boundary near the truncation point
+	truncAt := maxLen - 3
+
+	// Check for space near truncation point (within last 10 chars)
+	start := truncAt - 10
+	if start < 0 {
+		start = 0
+	}
+
+	// Find last space before truncation point
+	lastSpace := strings.LastIndex(s[start:truncAt], " ")
+	if lastSpace > 0 {
+		// Truncate at word boundary
+		return s[:start+lastSpace] + "..."
+	}
+
+	// No good word boundary, just truncate
+	return s[:truncAt] + "..."
+}
+
+// truncatePath truncates a path for display (legacy, uses smart truncation now)
 func truncatePath(path string, maxLen int) string {
-	return truncateString(path, maxLen)
+	return truncatePathSmart(path, maxLen)
 }
 
-// truncateCommand truncates a command for display
+// truncateCommand truncates a command for display (legacy, uses smart truncation now)
 func truncateCommand(cmd string, maxLen int) string {
-	return truncateString(cmd, maxLen)
+	return truncateCommandSmart(cmd, maxLen)
 }
 
-// truncateString truncates a string with ellipsis
+// truncateString truncates a string with ellipsis (legacy, simple version)
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

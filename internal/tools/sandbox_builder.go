@@ -379,6 +379,7 @@ func (b *SandboxBuilder) SetWorkingDir(dir string) *SandboxBuilder {
 //	    SetDescription("Print a greeting message")
 //
 // Returns:
+//
 //	The builder instance for method chaining
 func (b *SandboxBuilder) SetDescription(desc string) *SandboxBuilder {
 	if b.err != nil {

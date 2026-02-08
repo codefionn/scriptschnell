@@ -147,6 +147,16 @@ type message struct {
 	status      string  // Current status message (e.g., "reading file...")
 	outputLines int     // Number of output lines (for streaming display)
 	description string  // Human-readable description of what the tool is doing
+
+	// Tool parameters for display
+	parameters map[string]interface{} // tool call parameters
+
+	// Parameter collapse state
+	paramsCollapsed bool // Whether parameters are collapsed in display
+	paramsExpanded  bool // Whether user explicitly expanded parameters
+
+	// Execution metadata for enhanced statistics display
+	executionMetadata *tools.ExecutionMetadata // execution statistics
 }
 
 type Model struct {
@@ -271,10 +281,10 @@ type CompleteMsg struct{}
 
 // ToolCallMsg is sent when a tool is being called
 type ToolCallMsg struct {
-	ToolName     string
-	ToolID       string
-	Parameters   map[string]interface{}
-	Description  string // Human-readable description of the tool
+	ToolName    string
+	ToolID      string
+	Parameters  map[string]interface{}
+	Description string // Human-readable description of the tool
 }
 
 // ToolResultMsg is sent when a tool execution completes
@@ -369,11 +379,11 @@ type TabAuthorizationRequiredMsg struct {
 
 // TabToolCallMsg is sent when a tool is called in a specific tab
 type TabToolCallMsg struct {
-	TabID      int
-	ToolName   string
-	ToolID     string
-	Parameters map[string]interface{}
-	Description  string // Human-readable description of the tool
+	TabID       int
+	ToolName    string
+	ToolID      string
+	Parameters  map[string]interface{}
+	Description string // Human-readable description of the tool
 }
 
 // TabToolResultMsg is sent when a tool execution completes in a specific tab
@@ -3554,21 +3564,28 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID, descripti
 		groupID = m.activeGroupID
 	}
 
+	// Determine if parameters should be auto-collapsed
+	config := DefaultParamCollapseConfig()
+	shouldCollapse := shouldAutoCollapseParams(parameters, config)
+
 	// Create message with enhanced metadata
 	msg := message{
-		role:          "Tool",
-		content:       content,
-		timestamp:     time.Now().Format("15:04:05"),
-		toolName:      realToolName,
-		toolID:        toolID,
-		toolState:     ToolStateRunning,
-		toolType:      toolType,
-		isCollapsible: true,
-		isCollapsed:   false, // Start expanded for visibility
-		groupID:       groupID,
-		progress:      -1, // Indeterminate progress initially
-		status:        "starting...",
-		description:   description,
+		role:            "Tool",
+		content:         content,
+		timestamp:       time.Now().Format("15:04:05"),
+		toolName:        realToolName,
+		toolID:          toolID,
+		toolState:       ToolStateRunning,
+		toolType:        toolType,
+		isCollapsible:   true,
+		isCollapsed:     false, // Start expanded for visibility
+		groupID:         groupID,
+		progress:        -1, // Indeterminate progress initially
+		status:          "starting...",
+		description:     description,
+		parameters:      parameters,
+		paramsCollapsed: shouldCollapse,
+		paramsExpanded:  false,
 	}
 
 	if !m.validTabIndex(tabIdx) {
@@ -3711,22 +3728,23 @@ func (m *Model) addToolResultMessageForTab(tabIdx int, toolName, toolID, result,
 
 	// Create message with enhanced metadata
 	msg := message{
-		role:          "Tool",
-		content:       formattedResult,
-		timestamp:     time.Now().Format("15:04:05"),
-		toolName:      realToolName,
-		toolID:        toolID,
-		toolState:     state,
-		toolType:      GetToolTypeFromName(realToolName),
-		fullResult:    result,
-		summarized:    true,
-		isCollapsible: shouldBeCollapsible(result),
-		isCollapsed:   shouldBeCollapsible(result),
-		groupID:       groupID,
-		progress:      1.0, // Complete
-		status:        "complete",
-		outputLines:   outputLines,
-		executionTime: time.Duration(execTime) * time.Millisecond,
+		role:              "Tool",
+		content:           formattedResult,
+		timestamp:         time.Now().Format("15:04:05"),
+		toolName:          realToolName,
+		toolID:            toolID,
+		toolState:         state,
+		toolType:          GetToolTypeFromName(realToolName),
+		fullResult:        result,
+		summarized:        true,
+		isCollapsible:     shouldBeCollapsible(result),
+		isCollapsed:       shouldBeCollapsible(result),
+		groupID:           groupID,
+		progress:          1.0, // Complete
+		status:            "complete",
+		outputLines:       outputLines,
+		executionTime:     time.Duration(execTime) * time.Millisecond,
+		executionMetadata: metadata,
 	}
 
 	if !m.validTabIndex(tabIdx) {
@@ -4808,4 +4826,28 @@ func (m *Model) parseFormattedAnswers(formatted string) map[string]string {
 		}
 	}
 	return answers
+}
+
+// shouldAutoCollapseParams determines if tool parameters should be automatically collapsed
+func shouldAutoCollapseParams(params map[string]interface{}, config *ParamCollapseConfig) bool {
+	if len(params) == 0 {
+		return false
+	}
+
+	// Check parameter count
+	if len(params) > config.MaxVisibleParams+2 { // Allow a bit of buffer
+		return true
+	}
+
+	// Check total content size
+	totalChars := 0
+	for key, value := range params {
+		totalChars += len(key)
+		totalChars += len(formatParamValueSimple(value))
+	}
+	if totalChars > config.MaxTotalContentChars {
+		return true
+	}
+
+	return false
 }

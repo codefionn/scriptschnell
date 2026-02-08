@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/codefionn/scriptschnell/internal/tools"
 )
 
 // MessageRenderer handles rendering of messages with consistent styling
@@ -12,6 +13,7 @@ type MessageRenderer struct {
 	ts              *ToolStyles
 	contentWidth    int
 	renderWrapWidth int
+	paramsRenderer  *ParamsRenderer
 }
 
 // NewMessageRenderer creates a new message renderer
@@ -20,6 +22,7 @@ func NewMessageRenderer(contentWidth, renderWrapWidth int) *MessageRenderer {
 		ts:              GetToolStyles(),
 		contentWidth:    contentWidth,
 		renderWrapWidth: renderWrapWidth,
+		paramsRenderer:  NewParamsRenderer(),
 	}
 }
 
@@ -123,10 +126,19 @@ func (mr *MessageRenderer) renderToolHeader(msg message) string {
 	icon := GetIconForToolType(toolType)
 	indicator := GetStateIndicator(msg.toolState)
 
-	// Build the role text
+	// Build the role text with summary generator
 	var parts []string
 	parts = append(parts, stateStyle.Render(indicator))
 	parts = append(parts, toolStyle.Render(fmt.Sprintf("%s %s", icon, msg.toolName)))
+
+	// Add one-line tool summary
+	summaryGen := NewToolSummaryGenerator()
+	compactSummary := summaryGen.GenerateCompactSummary(msg.toolName, msg.parameters)
+	if compactSummary != "" {
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			Render(compactSummary))
+	}
 
 	// Add progress if available
 	if msg.progress >= 0 && msg.progress < 1.0 {
@@ -150,6 +162,17 @@ func (mr *MessageRenderer) renderToolHeader(msg message) string {
 			Foreground(lipgloss.Color("#AAAAAA")).
 			Italic(true)
 		parts = append(parts, descStyle.Render(msg.description))
+	}
+
+	// Add statistics for completed tools
+	if msg.toolState == ToolStateCompleted || msg.toolState == ToolStateFailed {
+		stats := CreateStatisticsDisplay(msg.executionMetadata)
+		if stats != "" {
+			statsStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#666666")).
+				Faint(true)
+			parts = append(parts, statsStyle.Render(fmt.Sprintf("[%s]", stats)))
+		}
 	}
 
 	return strings.Join(parts, " ")
@@ -330,6 +353,45 @@ func CreateToolSummary(toolName string, lines int, bytes int, duration int64) st
 
 	if len(parts) == 0 {
 		return "done"
+	}
+
+	return strings.Join(parts, " • ")
+}
+
+// CreateStatisticsDisplay creates a formatted statistics display from execution metadata
+func CreateStatisticsDisplay(metadata *tools.ExecutionMetadata) string {
+	if metadata == nil {
+		return ""
+	}
+
+	var parts []string
+
+	// Duration (always show if > 0)
+	if metadata.DurationMs > 0 {
+		parts = append(parts, formatDuration(metadata.DurationMs))
+	}
+
+	// Lines (from metadata or output_line_count)
+	if metadata.OutputLineCount > 0 {
+		if metadata.OutputLineCount == 1 {
+			parts = append(parts, "1 line")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d lines", metadata.OutputLineCount))
+		}
+	}
+
+	// Bytes (from metadata or output_size_bytes)
+	if metadata.OutputSizeBytes > 0 {
+		parts = append(parts, formatBytes(metadata.OutputSizeBytes))
+	}
+
+	// Exit code (only show for failures)
+	if metadata.ExitCode > 0 {
+		parts = append(parts, fmt.Sprintf("exit %d", metadata.ExitCode))
+	}
+
+	if len(parts) == 0 {
+		return ""
 	}
 
 	return strings.Join(parts, " • ")

@@ -236,7 +236,7 @@ func TestReadFileTool_InvalidSections(t *testing.T) {
 					"to_line":   2,
 				},
 			},
-			errMsg: "from_line (5) cannot be greater than to_line (2)",
+			errMsg: "from_line (5) exceeds file length (2 lines)",
 		},
 		{
 			name: "invalid from_line",
@@ -266,6 +266,116 @@ func TestReadFileTool_InvalidSections(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReadFileTool_ToLineExceedsFileLength(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test-session", ".")
+	tool := NewReadFileTool(mockFS, sess)
+
+	content := "line 1\nline 2\nline 3\nline 4\nline 5"
+	_ = mockFS.WriteFile(context.Background(), "test.txt", []byte(content))
+
+	t.Run("single section to_line beyond EOF", func(t *testing.T) {
+		result := tool.Execute(context.Background(), map[string]interface{}{
+			"path": "test.txt",
+			"sections": []interface{}{
+				map[string]interface{}{
+					"from_line": 3,
+					"to_line":   9999,
+				},
+			},
+		})
+
+		if result.Error != "" {
+			t.Fatalf("unexpected error: %s", result.Error)
+		}
+
+		resultContent := result.Result.(map[string]interface{})["content"].(string)
+		expected := "line 3\nline 4\nline 5"
+		if resultContent != expected {
+			t.Errorf("expected content %q, got %q", expected, resultContent)
+		}
+
+		lines := result.Result.(map[string]interface{})["lines"].(int)
+		if lines != 3 {
+			t.Errorf("expected 3 lines, got %d", lines)
+		}
+	})
+
+	t.Run("to_line exactly at EOF", func(t *testing.T) {
+		result := tool.Execute(context.Background(), map[string]interface{}{
+			"path": "test.txt",
+			"sections": []interface{}{
+				map[string]interface{}{
+					"from_line": 1,
+					"to_line":   5,
+				},
+			},
+		})
+
+		if result.Error != "" {
+			t.Fatalf("unexpected error: %s", result.Error)
+		}
+
+		resultContent := result.Result.(map[string]interface{})["content"].(string)
+		if resultContent != content {
+			t.Errorf("expected content %q, got %q", content, resultContent)
+		}
+	})
+
+	t.Run("multiple sections with to_line beyond EOF", func(t *testing.T) {
+		result := tool.Execute(context.Background(), map[string]interface{}{
+			"path": "test.txt",
+			"sections": []interface{}{
+				map[string]interface{}{
+					"from_line": 1,
+					"to_line":   2,
+				},
+				map[string]interface{}{
+					"from_line": 4,
+					"to_line":   50000,
+				},
+			},
+		})
+
+		if result.Error != "" {
+			t.Fatalf("unexpected error: %s", result.Error)
+		}
+
+		resultContent := result.Result.(map[string]interface{})["content"].(string)
+		if !strings.Contains(resultContent, "line 1") {
+			t.Error("expected content to contain line 1")
+		}
+		if !strings.Contains(resultContent, "line 5") {
+			t.Error("expected content to contain line 5")
+		}
+
+		lines := result.Result.(map[string]interface{})["lines"].(int)
+		if lines != 4 {
+			t.Errorf("expected 4 lines (2 + 2 clamped), got %d", lines)
+		}
+	})
+
+	t.Run("from_line beyond EOF errors", func(t *testing.T) {
+		result := tool.Execute(context.Background(), map[string]interface{}{
+			"path": "test.txt",
+			"sections": []interface{}{
+				map[string]interface{}{
+					"from_line": 100,
+					"to_line":   200,
+				},
+			},
+		})
+
+		if result.Error == "" {
+			t.Fatal("expected error when from_line exceeds file length")
+		}
+
+		if !strings.Contains(result.Error, "exceeds file length") {
+			t.Errorf("expected 'exceeds file length' error, got: %s", result.Error)
+		}
+	})
 }
 
 func TestReadFileTool_FileNotFound(t *testing.T) {

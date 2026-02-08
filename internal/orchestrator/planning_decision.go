@@ -232,19 +232,5 @@ func normalizeJSONStrings(content string) string {
 // stripThinkTags removes <think>...</think> blocks from content.
 // Reasoning models like DeepSeek wrap their internal reasoning in these tags.
 func stripThinkTags(content string) string {
-	for {
-		start := strings.Index(content, "<think>")
-		if start == -1 {
-			break
-		}
-		end := strings.Index(content[start:], "</think>")
-		if end == -1 {
-			// Unclosed tag, just remove the opening tag and continue
-			content = strings.TrimSpace(content[:start] + content[start+len("<think>"):])
-			break
-		}
-		end += start + len("</think>")
-		content = strings.TrimSpace(content[:start] + content[end:])
-	}
-	return content
+	return llm.StripThinkTags(content)
 }

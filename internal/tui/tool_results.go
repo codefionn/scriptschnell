@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -140,6 +141,8 @@ func (rf *ResultFormatter) FormatToolResult(toolName string, result string, erro
 		return rf.formatSandboxResult(result, metadata, state)
 	case ToolTypeWebSearch, ToolTypeWebFetch:
 		return rf.formatWebResult(result, metadata, state, toolType)
+	case ToolTypeTodo:
+		return rf.formatTodoResult(result, metadata, state)
 	default:
 		return rf.formatGenericResult(result, metadata, state)
 	}
@@ -359,6 +362,196 @@ func (rf *ResultFormatter) formatWebResult(result string, metadata *tools.Execut
 	shouldCollapse := len(result) > 400
 
 	return rf.formatResultWithContent("web", toolType, metrics, result, "", state, shouldCollapse)
+}
+
+// formatTodoResult formats todo tool results with a compact, human-readable display
+func (rf *ResultFormatter) formatTodoResult(result string, metadata *tools.ExecutionMetadata, state ToolState) string {
+	var duration time.Duration
+	if metadata != nil && metadata.DurationMs > 0 {
+		duration = time.Duration(metadata.DurationMs) * time.Millisecond
+	}
+
+	// Try to parse the JSON result
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &data); err != nil {
+		// Fallback to generic formatting
+		return rf.formatGenericResult(result, metadata, state)
+	}
+
+	// Determine which action produced this result
+	if todos, ok := data["todos"]; ok {
+		// "list" or "add_many" action
+		if todosSlice, ok := todos.([]interface{}); ok {
+			if msg, ok := data["message"].(string); ok && strings.HasPrefix(msg, "Successfully added") {
+				// add_many result
+				return rf.formatTodoAddManyResult(todosSlice, msg, duration, state)
+			}
+			// list result
+			count := 0
+			if c, ok := data["count"].(float64); ok {
+				count = int(c)
+			}
+			return rf.formatTodoListResult(todosSlice, count, duration, state)
+		}
+	}
+
+	// Single-item actions (add, check, uncheck, delete, set_status, clear)
+	if msg, ok := data["message"].(string); ok {
+		return rf.formatTodoActionResult(data, msg, duration, state)
+	}
+
+	return rf.formatGenericResult(result, metadata, state)
+}
+
+// formatTodoListResult formats a todo list display
+func (rf *ResultFormatter) formatTodoListResult(todos []interface{}, count int, duration time.Duration, state ToolState) string {
+	metrics := rf.buildMetrics([]string{
+		fmt.Sprintf("%d items", count),
+		rf.formatDuration(duration),
+	})
+
+	if count == 0 {
+		return rf.formatResultWithContent("todo", ToolTypeTodo, metrics, "*No todos yet*", "", state, false)
+	}
+
+	// Build parent-children map for hierarchical display
+	type todoInfo struct {
+		id       string
+		text     string
+		status   string
+		priority string
+		parentID string
+	}
+	var allTodos []todoInfo
+	childrenMap := make(map[string][]int) // parentID -> indices in allTodos
+
+	for _, t := range todos {
+		m, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		info := todoInfo{
+			id:       stringVal(m, "id"),
+			text:     stringVal(m, "text"),
+			status:   stringVal(m, "status"),
+			priority: stringVal(m, "priority"),
+			parentID: stringVal(m, "parent_id"),
+		}
+		idx := len(allTodos)
+		allTodos = append(allTodos, info)
+		if info.parentID != "" {
+			childrenMap[info.parentID] = append(childrenMap[info.parentID], idx)
+		}
+	}
+
+	var lines []string
+	for i, t := range allTodos {
+		if t.parentID != "" {
+			continue // rendered as child
+		}
+		lines = append(lines, rf.formatTodoLine(t.id, t.text, t.status, t.priority, ""))
+		// Render children
+		if children, ok := childrenMap[t.id]; ok {
+			for _, ci := range children {
+				c := allTodos[ci]
+				lines = append(lines, rf.formatTodoLine(c.id, c.text, c.status, c.priority, "  "))
+			}
+		}
+		_ = i
+	}
+
+	content := strings.Join(lines, "\n")
+	shouldCollapse := len(allTodos) > 15
+	return rf.formatResultWithContent("todo", ToolTypeTodo, metrics, content, "", state, shouldCollapse)
+}
+
+// formatTodoLine formats a single todo item line (plain text, no ANSI - goes through markdown)
+func (rf *ResultFormatter) formatTodoLine(id, text, status, priority, indent string) string {
+	// Status checkbox (plain text)
+	var checkbox string
+	switch status {
+	case "completed":
+		checkbox = "[x]"
+	case "in_progress":
+		checkbox = "[~]"
+	default:
+		checkbox = "[ ]"
+	}
+
+	// Priority indicator
+	var prioStr string
+	switch priority {
+	case "high":
+		prioStr = "!!!"
+	case "low":
+		prioStr = " . "
+	default:
+		prioStr = "   "
+	}
+
+	// Text styling based on status
+	var textStyled string
+	if status == "completed" {
+		textStyled = fmt.Sprintf("~~%s~~", text)
+	} else {
+		textStyled = text
+	}
+
+	return fmt.Sprintf("%s%s %s %s  `%s`", indent, checkbox, prioStr, textStyled, id)
+}
+
+// formatTodoAddManyResult formats the result of adding multiple todos
+func (rf *ResultFormatter) formatTodoAddManyResult(todos []interface{}, msg string, duration time.Duration, state ToolState) string {
+	metrics := rf.buildMetrics([]string{
+		fmt.Sprintf("%d added", len(todos)),
+		rf.formatDuration(duration),
+	})
+
+	var lines []string
+	for _, t := range todos {
+		m, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id := stringVal(m, "id")
+		text := stringVal(m, "text")
+		priority := stringVal(m, "priority")
+		status := stringVal(m, "status")
+		lines = append(lines, rf.formatTodoLine(id, text, status, priority, ""))
+	}
+
+	content := strings.Join(lines, "\n")
+	return rf.formatResultWithContent("todo", ToolTypeTodo, metrics, content, "", state, false)
+}
+
+// formatTodoActionResult formats single-item todo action results (add, check, delete, etc.)
+func (rf *ResultFormatter) formatTodoActionResult(data map[string]interface{}, msg string, duration time.Duration, state ToolState) string {
+	metrics := rf.buildMetrics([]string{
+		rf.formatDuration(duration),
+	})
+
+	// Build a compact one-line summary (plain text, no ANSI)
+	id := stringVal(data, "id")
+	status := stringVal(data, "status")
+
+	var detail string
+	if id != "" && status != "" {
+		detail = fmt.Sprintf("%s  `%s` → %s", msg, id, status)
+	} else if id != "" {
+		detail = fmt.Sprintf("%s  `%s`", msg, id)
+	} else {
+		detail = msg
+	}
+
+	return rf.formatResultWithContent("todo", ToolTypeTodo, metrics, detail, "", state, false)
+}
+
+// stringVal safely extracts a string from a map
+func stringVal(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // formatGenericResult formats any other tool result

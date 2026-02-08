@@ -1601,7 +1601,7 @@ func (a *ScriptschnellAIAgent) handleToolCallStart(session *statcodeSession, too
 
 	// Create a more descriptive title
 	title := fmt.Sprintf("Executing %s", toolName)
-	
+
 	// Check for description parameter (used by go_sandbox and other tools)
 	if description, ok := parameters["description"].(string); ok && description != "" {
 		// Use description if provided

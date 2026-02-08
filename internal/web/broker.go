@@ -155,12 +155,12 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 		// Send compact tool interaction message
 		callback(
 			&WebMessage{
-				Type:       MessageTypeToolInteraction,
-				ToolName:   toolName,
-				ToolID:     toolID,
-				Parameters: parameters,
-				Status:     "calling",
-				Compact:    true,
+				Type:        MessageTypeToolInteraction,
+				ToolName:    toolName,
+				ToolID:      toolID,
+				Parameters:  parameters,
+				Status:      "calling",
+				Compact:     true,
 				Description: description,
 			})
 		return nil

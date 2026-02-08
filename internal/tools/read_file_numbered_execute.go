@@ -118,6 +118,16 @@ func (e *ReadFileNumberedExecutor) executeMultiSection(ctx context.Context, path
 
 	logger.Debug("read_file (numbered): path=%s, sections=%d", path, len(sections))
 
+	// Read file first to get total line count for clamping
+	fileData, err := e.fs.ReadFile(ctx, path)
+	if err != nil {
+		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
+	}
+	if isLikelyBinaryFile(path, fileData) {
+		return &ToolResult{Error: fmt.Sprintf("cannot read binary file: %s", path)}
+	}
+	totalFileLines := strings.Count(string(fileData), "\n") + 1
+
 	// Parse and validate sections
 	type lineRange struct {
 		fromLine int
@@ -139,8 +149,13 @@ func (e *ReadFileNumberedExecutor) executeMultiSection(ctx context.Context, path
 			return &ToolResult{Error: fmt.Sprintf("section %d: from_line and to_line must be positive integers", i)}
 		}
 
+		// Clamp to_line to actual file length
+		if toLine > totalFileLines {
+			toLine = totalFileLines
+		}
+
 		if fromLine > toLine {
-			return &ToolResult{Error: fmt.Sprintf("section %d: from_line (%d) cannot be greater than to_line (%d)", i, fromLine, toLine)}
+			return &ToolResult{Error: fmt.Sprintf("section %d: from_line (%d) exceeds file length (%d lines)", i, fromLine, totalFileLines)}
 		}
 
 		sectionLines := toLine - fromLine + 1
@@ -155,15 +170,6 @@ func (e *ReadFileNumberedExecutor) executeMultiSection(ctx context.Context, path
 
 	// Read all sections
 	var contentParts []string
-	var err error
-
-	fileData, err := e.fs.ReadFile(ctx, path)
-	if err != nil {
-		return &ToolResult{Error: fmt.Sprintf("error reading file: %v", err)}
-	}
-	if isLikelyBinaryFile(path, fileData) {
-		return &ToolResult{Error: fmt.Sprintf("cannot read binary file: %s", path)}
-	}
 
 	for i, r := range ranges {
 		var lines []string

@@ -890,3 +890,228 @@ func TestEdgeCase_VerifyDialogClosedCleanup(t *testing.T) {
 		t.Error("Expected response in channel")
 	}
 }
+
+// TestJSONFallback tests that unknown parameters are handled gracefully
+func TestJSONFallback(t *testing.T) {
+	gen := NewToolSummaryGenerator()
+
+	tests := []struct {
+		name     string
+		toolName string
+		params   map[string]interface{}
+		wantLen  bool // Whether we expect non-empty output
+	}{
+		{
+			name:     "unknown tool with generic params",
+			toolName: "unknown_tool",
+			params: map[string]interface{}{
+				"path": "test.txt",
+				"mode": "read",
+			},
+			wantLen: true,
+		},
+		{
+			name:     "unknown tool with nested params",
+			toolName: "custom_tool",
+			params: map[string]interface{}{
+				"config": map[string]interface{}{
+					"key": "value",
+				},
+				"enabled": true,
+			},
+			wantLen: true,
+		},
+		{
+			name:     "empty params",
+			toolName: "some_tool",
+			params:   map[string]interface{}{},
+			wantLen:  false,
+		},
+		{
+			name:     "nil params",
+			toolName: "nil_tool",
+			params:   nil,
+			wantLen:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test compact summary
+			compact := gen.GenerateCompactSummary(tt.toolName, tt.params)
+			if tt.wantLen && compact == "" {
+				t.Error("GenerateCompactSummary should return non-empty for unknown params")
+			}
+
+			// Test full summary
+			summary := gen.GenerateSummary(tt.toolName, tt.params, ToolStateRunning)
+			if summary == "" {
+				t.Error("GenerateSummary should always return non-empty")
+			}
+		})
+	}
+}
+
+// TestParamCollapseWithUnknownParams tests collapse behavior with unusual params
+func TestParamCollapseWithUnknownParams(t *testing.T) {
+	manager := NewParamCollapseManager(DefaultParamCollapseConfig())
+
+	tests := []struct {
+		name   string
+		params map[string]interface{}
+	}{
+		{
+			name: "nested objects",
+			params: map[string]interface{}{
+				"config": map[string]interface{}{
+					"nested": map[string]interface{}{
+						"deep": "value",
+					},
+				},
+			},
+		},
+		{
+			name: "mixed types",
+			params: map[string]interface{}{
+				"string": "text",
+				"int":    float64(42),
+				"bool":   true,
+				"array":  []interface{}{1, 2, 3},
+				"object": map[string]interface{}{"a": 1},
+				"nil":    nil,
+			},
+		},
+		{
+			name: "empty strings",
+			params: map[string]interface{}{
+				"empty":    "",
+				"nonempty": "value",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Should not panic
+			state := manager.GetInitialState("test-"+tt.name, tt.params)
+			if state == nil {
+				t.Error("GetInitialState should not return nil")
+				return
+			}
+
+			// Get visible params should work
+			visible := manager.GetVisibleParams("test-"+tt.name, tt.params)
+			if visible == nil {
+				t.Error("GetVisibleParams should not return nil")
+			}
+		})
+	}
+}
+
+// TestResultFormatterWithMetadata tests result formatting with various metadata
+func TestResultFormatterWithMetadata(t *testing.T) {
+	rf := NewResultFormatter()
+
+	tests := []struct {
+		name     string
+		toolName string
+		result   string
+		errorMsg string
+		wantLen  bool
+	}{
+		{
+			name:     "empty result",
+			toolName: "read_file",
+			result:   "",
+			errorMsg: "",
+			wantLen:  true,
+		},
+		{
+			name:     "with error",
+			toolName: "shell",
+			result:   "",
+			errorMsg: "command not found",
+			wantLen:  true,
+		},
+		{
+			name:     "multiline result",
+			toolName: "read_file",
+			result:   "line1\nline2\nline3\nline4\nline5",
+			errorMsg: "",
+			wantLen:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := ToolStateCompleted
+			if tt.errorMsg != "" {
+				state = ToolStateFailed
+			}
+
+			formatted := rf.FormatToolResult(tt.toolName, tt.result, tt.errorMsg, nil, state)
+			if tt.wantLen && formatted == "" {
+				t.Error("FormatToolResult should return non-empty")
+			}
+		})
+	}
+}
+
+// TestMessageRendererWithEdgeCases tests message rendering edge cases
+func TestMessageRendererWithEdgeCases(t *testing.T) {
+	mr := NewMessageRenderer(80, 80)
+
+	tests := []struct {
+		name string
+		msg  message
+	}{
+		{
+			name: "empty parameters",
+			msg: message{
+				role:      "Tool",
+				toolName:  "read_file",
+				toolState: ToolStateRunning,
+				timestamp: "12:00:00",
+			},
+		},
+		{
+			name: "nil parameters",
+			msg: message{
+				role:       "Tool",
+				toolName:   "shell",
+				toolState:  ToolStateCompleted,
+				timestamp:  "12:00:00",
+				parameters: nil,
+			},
+		},
+		{
+			name: "very long tool name",
+			msg: message{
+				role:      "Tool",
+				toolName:  "very_long_tool_name_that_might_overflow_the_display_width",
+				toolState: ToolStateRunning,
+				timestamp: "12:00:00",
+			},
+		},
+		{
+			name: "unicode in content",
+			msg: message{
+				role:      "Tool",
+				toolName:  "read_file",
+				toolState: ToolStateCompleted,
+				timestamp: "12:00:00",
+				content:   "Unicode: 你好世界 🎉 🚀",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Should not panic
+			rendered := mr.RenderHeader(tt.msg)
+			if rendered == "" {
+				t.Error("RenderHeader should return non-empty")
+			}
+		})
+	}
+}

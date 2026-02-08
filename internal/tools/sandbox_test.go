@@ -478,7 +478,7 @@ func TestSandboxTool_DescriptionParameter(t *testing.T) {
 	// Verify description field has correct type
 	if descMap, ok := descParam.(map[string]interface{}); ok {
 		// Check description field type
-	if descType, ok := descMap["type"].(string); !ok || descType != "string" {
+		if descType, ok := descMap["type"].(string); !ok || descType != "string" {
 			t.Error("description should be a string type")
 		}
 

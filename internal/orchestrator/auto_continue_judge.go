@@ -73,6 +73,9 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 	}
 
 	decision := strings.TrimSpace(result)
+	// Strip <think> tags from reasoning models (e.g., DeepSeek, Qwen 3)
+	decision = stripThinkTags(decision)
+	decision = strings.TrimSpace(decision)
 	if decision == "" {
 		logger.Warn("Auto-continue judge returned empty decision")
 		return false, ""

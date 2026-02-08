@@ -13,6 +13,10 @@ import (
 func CleanLLMJSONResponse(response string) string {
 	response = strings.TrimSpace(response)
 
+	// Strip <think>...</think> blocks from reasoning models (e.g., DeepSeek, Qwen 3)
+	response = StripThinkTags(response)
+	response = strings.TrimSpace(response)
+
 	// Remove markdown code blocks
 	response = strings.TrimPrefix(response, "```json")
 	response = strings.TrimPrefix(response, "```")
@@ -131,6 +135,26 @@ func ExtractJSON[T any](response string, target T) error {
 	}
 
 	return &JSONParseError{Response: response, Message: "could not parse JSON object"}
+}
+
+// StripThinkTags removes <think>...</think> blocks from content.
+// Reasoning models like DeepSeek and Qwen 3 wrap their internal reasoning in these tags.
+func StripThinkTags(content string) string {
+	for {
+		start := strings.Index(content, "<think>")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(content[start:], "</think>")
+		if end == -1 {
+			// Unclosed tag, just remove the opening tag and continue
+			content = strings.TrimSpace(content[:start] + content[start+len("<think>"):])
+			break
+		}
+		end += start + len("</think>")
+		content = strings.TrimSpace(content[:start] + content[end:])
+	}
+	return content
 }
 
 // JSONParseError represents an error that occurred while parsing LLM JSON response.

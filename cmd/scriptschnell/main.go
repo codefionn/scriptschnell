@@ -1139,7 +1139,21 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.O
 	// Set program reference for self-messaging (critical for per-tab message routing)
 	model.SetProgram(program)
 
-	if _, err := program.Run(); err != nil {
+	// Run program in goroutine to catch and log panics
+	errChan := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("TUI panic: %v", r)
+				errChan <- fmt.Errorf("TUI panic: %v", r)
+			}
+		}()
+
+		_, err := program.Run()
+		errChan <- err
+	}()
+
+	if err := <-errChan; err != nil {
 		return fmt.Errorf("TUI error: %w", err)
 	}
 

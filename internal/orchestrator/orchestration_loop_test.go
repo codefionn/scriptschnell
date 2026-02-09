@@ -434,14 +434,14 @@ func TestOrchestrationLoop_ToolCallCallback(t *testing.T) {
 
 	mockClient := newSequentialMockClient(
 		&llm.CompletionResponse{
-			Content: "Checking status.",
+			Content: "Listing todos.",
 			ToolCalls: []map[string]interface{}{
 				{
 					"id":   "call_1",
 					"type": "function",
 					"function": map[string]interface{}{
-						"name":      "status",
-						"arguments": "{}",
+						"name":      "todo",
+						"arguments": `{"action":"list"}`,
 					},
 				},
 			},
@@ -464,7 +464,7 @@ func TestOrchestrationLoop_ToolCallCallback(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := orch.ProcessPrompt(ctx, "check status", nil, nil, nil, toolCallCb, nil, nil)
+	err := orch.ProcessPrompt(ctx, "list todos", nil, nil, nil, toolCallCb, nil, nil)
 
 	if err != nil {
 		t.Fatalf("ProcessPrompt failed: %v", err)
@@ -623,28 +623,28 @@ func TestOrchestrationLoop_ToolResultsInMessages(t *testing.T) {
 
 	mockClient := newSequentialMockClient(
 		&llm.CompletionResponse{
-			Content: "Checking status.",
+			Content: "Listing todos.",
 			ToolCalls: []map[string]interface{}{
 				{
 					"id":   "call_1",
 					"type": "function",
 					"function": map[string]interface{}{
-						"name":      "status",
-						"arguments": "{}",
+						"name":      "todo",
+						"arguments": `{"action":"list"}`,
 					},
 				},
 			},
 			StopReason: "tool_use",
 		},
 		&llm.CompletionResponse{
-			Content:    "Status received.",
+			Content:    "Todos received.",
 			StopReason: "stop",
 		},
 	)
 	orch.orchestrationClient = mockClient
 
 	ctx := context.Background()
-	err := orch.ProcessPrompt(ctx, "check status", nil, nil, nil, nil, nil, nil)
+	err := orch.ProcessPrompt(ctx, "list todos", nil, nil, nil, nil, nil, nil)
 
 	if err != nil {
 		t.Fatalf("ProcessPrompt failed: %v", err)
@@ -934,14 +934,14 @@ func TestOrchestrationLoop_ToolResultCallback(t *testing.T) {
 
 	mockClient := newSequentialMockClient(
 		&llm.CompletionResponse{
-			Content: "Checking status.",
+			Content: "Listing todos.",
 			ToolCalls: []map[string]interface{}{
 				{
 					"id":   "call_1",
 					"type": "function",
 					"function": map[string]interface{}{
-						"name":      "status",
-						"arguments": "{}",
+						"name":      "todo",
+						"arguments": `{"action":"list"}`,
 					},
 				},
 			},
@@ -964,7 +964,7 @@ func TestOrchestrationLoop_ToolResultCallback(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := orch.ProcessPrompt(ctx, "check status", nil, nil, nil, nil, toolResultCb, nil)
+	err := orch.ProcessPrompt(ctx, "list todos", nil, nil, nil, nil, toolResultCb, nil)
 
 	if err != nil {
 		t.Fatalf("ProcessPrompt failed: %v", err)

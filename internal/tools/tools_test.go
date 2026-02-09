@@ -211,11 +211,11 @@ func TestFormatToolNotFoundError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errorMsg := registry.formatToolNotFoundError(tt.typo)
+			errorMsg := registry.FormatToolNotFoundError(tt.typo)
 
 			for _, substr := range tt.shouldContain {
 				if !contains(errorMsg, substr) {
-					t.Errorf("formatToolNotFoundError(%q) = %q; should contain %q",
+					t.Errorf("FormatToolNotFoundError(%q) = %q; should contain %q",
 						tt.typo, errorMsg, substr)
 				}
 			}
@@ -358,11 +358,11 @@ func TestManualSuggestions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errorMsg := registry.formatToolNotFoundError(tt.toolName)
+			errorMsg := registry.FormatToolNotFoundError(tt.toolName)
 
 			for _, substr := range tt.shouldContain {
 				if !contains(errorMsg, substr) {
-					t.Errorf("formatToolNotFoundError(%q) = %q; should contain %q",
+					t.Errorf("FormatToolNotFoundError(%q) = %q; should contain %q",
 						tt.toolName, errorMsg, substr)
 				}
 			}
@@ -381,7 +381,7 @@ func TestManualSuggestionsPriority(t *testing.T) {
 
 	// Try "bash" which should get manual suggestion to shell/go_sandbox
 	// not similarity match to "shelly"
-	errorMsg := registry.formatToolNotFoundError("bash")
+	errorMsg := registry.FormatToolNotFoundError("bash")
 
 	// Should suggest shell and go_sandbox (manual)
 	if !contains(errorMsg, "shell") {
@@ -412,7 +412,7 @@ func TestAddCustomManualSuggestion(t *testing.T) {
 		MatchPattern:   "exact",
 	})
 
-	errorMsg := registry.formatToolNotFoundError("custom_pattern")
+	errorMsg := registry.FormatToolNotFoundError("custom_pattern")
 
 	// Should contain custom suggestion
 	if !contains(errorMsg, "my_custom_tool") {
@@ -433,7 +433,7 @@ func TestManualSuggestionFiltersNonExistentTools(t *testing.T) {
 
 	// Try "bash" which suggests both shell and go_sandbox
 	// but only shell exists
-	errorMsg := registry.formatToolNotFoundError("bash")
+	errorMsg := registry.FormatToolNotFoundError("bash")
 
 	// Should suggest shell (exists)
 	if !contains(errorMsg, "shell") {

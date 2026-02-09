@@ -2980,6 +2980,57 @@ func (o *Orchestrator) processToolCalls(
 			}
 		}
 
+		// Fallback: AST-based trivial code detection
+		// Catches cases the regex-based rewriter misses (e.g. non-string literals, empty main)
+		if toolName == "go_sandbox" {
+			if code, ok := args["code"].(string); ok && tools.IsTrivialCode(code) {
+				text := tools.ExtractTrivialText(code)
+				if text == "" {
+					text = "(skipped trivial code)"
+				}
+				o.convertToolCallToAssistantText(sess, toolID, text)
+				dispatchProgress(progressCb, progress.Update{
+					Message: text,
+					Mode:    progress.ReportNoStatus,
+				})
+				logger.Info("Fallback: converted trivial sandbox code to text for tool call %s", toolID)
+				continue
+			}
+		}
+
+		// Handle tool-not-found: rewrite or convert to assistant text
+		if o.toolRegistry != nil {
+			if _, exists := o.toolRegistry.GetExecutor(toolName); !exists {
+				logger.Debug("Tool not found in registry: %s (tool call %s), attempting rewrite", toolName, toolID)
+				rewritten := false
+				if o.toolCallRewriter != nil && o.toolCallRewriter.CanRewrite() {
+					rewrittenName, rewrittenParams, explanation, err := o.toolCallRewriter.RewriteToolCall(
+						ctx, toolName, args, "tool not found in registry",
+					)
+					if err == nil && rewrittenName != "" {
+						logger.Debug("Tool call rewritten: %s → %s (explanation: %s, tool call %s)", toolName, rewrittenName, explanation, toolID)
+						o.rewriteToolCallInHistory(sess, toolID, rewrittenName, rewrittenParams)
+						toolName = rewrittenName
+						args = rewrittenParams
+						rewritten = true
+					} else if err != nil {
+						logger.Debug("Tool call rewrite failed for %s: %v (tool call %s)", toolName, err, toolID)
+					}
+				}
+				if !rewritten {
+					// Cannot rewrite — convert to assistant text with the error
+					errorText := o.toolRegistry.FormatToolNotFoundError(toolName)
+					o.convertToolCallToAssistantText(sess, toolID, errorText)
+					dispatchProgress(progressCb, progress.Update{
+						Message: errorText,
+						Mode:    progress.ReportNoStatus,
+					})
+					logger.Debug("Converted tool-not-found to assistant text for tool call %s (%s)", toolID, toolName)
+					continue
+				}
+			}
+		}
+
 		toolCallObj := &tools.ToolCall{
 			ID:         toolID,
 			Name:       toolName,
@@ -3209,6 +3260,42 @@ func (o *Orchestrator) rewriteSandboxToolCallInHistory(sess *session.Session, to
 				return false
 			}
 			fn["arguments"] = string(newArgsJSON)
+			msg.ToolCalls[i] = tc
+			msg.NativeFormat = nil // stale after modification
+			return true
+		}
+		return false
+	})
+}
+
+// rewriteToolCallInHistory modifies the last assistant message in the session
+// to replace a tool call's name and parameters. This is used when the LLM
+// generates an invalid tool name that gets rewritten to a valid one.
+func (o *Orchestrator) rewriteToolCallInHistory(sess *session.Session, toolID, newName string, newParams map[string]interface{}) {
+	sess.ModifyLastAssistantMessage(func(msg *session.Message) bool {
+		for i, tc := range msg.ToolCalls {
+			tcID, _ := tc["id"].(string)
+			if tcID != toolID {
+				continue
+			}
+			fn, ok := tc["function"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Update tool name
+			fn["name"] = newName
+
+			// Update arguments
+			if newParams != nil {
+				newArgsJSON, err := json.Marshal(newParams)
+				if err != nil {
+					logger.Warn("rewriteToolCallInHistory: failed to marshal args: %v", err)
+					return false
+				}
+				fn["arguments"] = string(newArgsJSON)
+			}
+
 			msg.ToolCalls[i] = tc
 			msg.NativeFormat = nil // stale after modification
 			return true

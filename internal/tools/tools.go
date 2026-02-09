@@ -485,7 +485,7 @@ func (r *Registry) ExecuteWithApproval(ctx context.Context, call *ToolCall) *Too
 	if !ok {
 		return &ToolResult{
 			ID:    call.ID,
-			Error: r.formatToolNotFoundError(call.Name),
+			Error: r.FormatToolNotFoundError(call.Name),
 		}
 	}
 
@@ -615,7 +615,7 @@ func (r *Registry) Execute(ctx context.Context, call *ToolCall) *ToolResult {
 	if !ok {
 		return &ToolResult{
 			ID:    call.ID,
-			Error: r.formatToolNotFoundError(call.Name),
+			Error: r.FormatToolNotFoundError(call.Name),
 		}
 	}
 
@@ -708,7 +708,7 @@ func (r *Registry) ExecuteWithCallbacks(ctx context.Context, call *ToolCall, too
 	if !ok {
 		return &ToolResult{
 			ID:    call.ID,
-			Error: r.formatToolNotFoundError(call.Name),
+			Error: r.FormatToolNotFoundError(call.Name),
 		}
 	}
 
@@ -948,9 +948,9 @@ func (r *Registry) findSimilarTools(targetName string, maxSuggestions int, maxDi
 	return result
 }
 
-// formatToolNotFoundError creates a detailed error message when a tool is not found,
+// FormatToolNotFoundError creates a detailed error message when a tool is not found,
 // including suggestions for similar tool names if available.
-func (r *Registry) formatToolNotFoundError(toolName string) string {
+func (r *Registry) FormatToolNotFoundError(toolName string) string {
 	baseError := "tool not found: " + toolName
 
 	// First, check for manual suggestions (these take priority over automatic similarity matching)

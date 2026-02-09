@@ -84,13 +84,13 @@ func (t *ToolSummarizeTool) Execute(ctx context.Context, args map[string]interfa
 	}
 
 	// Get the tool from registry
-	tool, ok := t.registry.Get(toolName)
+	executor, ok := t.registry.GetExecutor(toolName)
 	if !ok {
-		return &ToolResult{Error: fmt.Sprintf("tool not found: %s", toolName)}
+		return &ToolResult{Error: t.registry.FormatToolNotFoundError(toolName)}
 	}
 
 	// Execute the tool
-	result := tool.Execute(ctx, toolArgs)
+	result := executor.Execute(ctx, toolArgs)
 	if result == nil {
 		return &ToolResult{Error: "tool returned nil result"}
 	}

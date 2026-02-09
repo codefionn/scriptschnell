@@ -724,7 +724,7 @@ func (b *SandboxBuilder) Validate() error {
 	if execCommandPattern.MatchString(b.code) {
 		return fmt.Errorf("direct exec.Command usage is blocked; use ExecuteCommand instead")
 	}
-	if isTrivialCode(b.code) {
+	if IsTrivialCode(b.code) {
 		return fmt.Errorf("code that only contains imports, comments, and fmt print statements is not allowed")
 	}
 	return nil
@@ -924,9 +924,9 @@ func containsDangerousOps(code string) bool {
 	return false
 }
 
-// isTrivialCode checks if the code only contains imports, comments, and fmt print statements
+// IsTrivialCode checks if the code only contains imports, comments, and fmt print statements
 // without any substantial logic or operations using AST parsing for accurate results
-func isTrivialCode(code string) bool {
+func IsTrivialCode(code string) bool {
 	if code == "" {
 		return true
 	}
@@ -949,6 +949,108 @@ func isTrivialCode(code string) bool {
 	}
 
 	return !checker.hasSubstantialContent
+}
+
+// ExtractTrivialText extracts the text output from trivial code that only
+// contains fmt.Print*/println calls with literal arguments. Returns the
+// concatenated text, or "" if extraction fails.
+func ExtractTrivialText(code string) string {
+	if code == "" {
+		return ""
+	}
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", code, parser.ParseComments)
+	if err != nil {
+		return ""
+	}
+
+	var parts []string
+	for _, decl := range file.Decls {
+		funcDecl, ok := decl.(*ast.FuncDecl)
+		if !ok || funcDecl.Name.Name != "main" || funcDecl.Body == nil {
+			continue
+		}
+		for _, stmt := range funcDecl.Body.List {
+			exprStmt, ok := stmt.(*ast.ExprStmt)
+			if !ok {
+				continue
+			}
+			call, ok := exprStmt.X.(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			if !isTrivialPrintCall(call) {
+				continue
+			}
+			for _, arg := range call.Args {
+				lit, ok := arg.(*ast.BasicLit)
+				if !ok {
+					continue
+				}
+				switch lit.Kind {
+				case token.STRING:
+					// Unquote the string literal
+					s := lit.Value
+					if strings.HasPrefix(s, "`") && strings.HasSuffix(s, "`") {
+						parts = append(parts, s[1:len(s)-1])
+					} else if strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
+						inner := s[1 : len(s)-1]
+						inner = strings.ReplaceAll(inner, `\\`, "\x00")
+						inner = strings.ReplaceAll(inner, `\"`, `"`)
+						inner = strings.ReplaceAll(inner, `\n`, "\n")
+						inner = strings.ReplaceAll(inner, `\t`, "\t")
+						inner = strings.ReplaceAll(inner, "\x00", `\`)
+						parts = append(parts, inner)
+					}
+				case token.INT, token.FLOAT:
+					parts = append(parts, lit.Value)
+				}
+			}
+			// Add newline for Println calls
+			if isPrintlnCall(call) {
+				parts = append(parts, "\n")
+			}
+		}
+	}
+
+	return strings.Join(parts, "")
+}
+
+// isTrivialPrintCall checks if a call expression is a fmt.Print/Println/Printf
+// or builtin println/print with only literal arguments.
+func isTrivialPrintCall(call *ast.CallExpr) bool {
+	// Check fmt.Print* style
+	if fun, ok := call.Fun.(*ast.SelectorExpr); ok {
+		if x, ok := fun.X.(*ast.Ident); ok && x.Name == "fmt" {
+			switch fun.Sel.Name {
+			case "Print", "Println", "Printf":
+				return true
+			}
+		}
+		return false
+	}
+	// Check builtin println/print
+	if ident, ok := call.Fun.(*ast.Ident); ok {
+		switch ident.Name {
+		case "println", "print":
+			return true
+		}
+	}
+	return false
+}
+
+// isPrintlnCall checks if a call is fmt.Println or builtin println.
+func isPrintlnCall(call *ast.CallExpr) bool {
+	if fun, ok := call.Fun.(*ast.SelectorExpr); ok {
+		if x, ok := fun.X.(*ast.Ident); ok && x.Name == "fmt" {
+			return fun.Sel.Name == "Println"
+		}
+	}
+	if ident, ok := call.Fun.(*ast.Ident); ok {
+		return ident.Name == "println"
+	}
+	return false
 }
 
 // trivialCodeChecker walks the AST to detect substantial content

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -92,6 +93,9 @@ type Session struct {
 	TotalCacheCreationTokens int     // Total cache creation tokens
 	TotalCacheReadTokens     int     // Total cache read tokens
 
+	// Shell temp directory - a random subdirectory in temp for shell command execution
+	ShellTempDir string
+
 	mu          sync.RWMutex
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -122,6 +126,9 @@ type BackgroundJob struct {
 
 // NewSession creates a new session
 func NewSession(id, workingDir string) *Session {
+	// Create a random temp subdirectory for shell commands
+	shellTempDir := createShellTempDir()
+
 	return &Session{
 		ID:                        id,
 		WorkingDir:                workingDir,
@@ -135,7 +142,37 @@ func NewSession(id, workingDir string) *Session {
 		CreatedAt:                 time.Now(),
 		UpdatedAt:                 time.Now(),
 		Dirty:                     true, // new session needs an initial save
+		ShellTempDir:              shellTempDir,
 	}
+}
+
+// createShellTempDir creates a random subdirectory in the system temp directory
+// for shell command execution. This directory is accessible via SCRIPTSCHNELL_SHELL_TEMP
+// environment variable when commands are executed.
+func createShellTempDir() string {
+	var randBuf [8]byte
+	if _, err := rand.Read(randBuf[:]); err != nil {
+		// Fallback to timestamp if random fails
+		randBuf = [8]byte{}
+		ts := time.Now().UnixNano()
+		for i := 0; i < 8 && ts > 0; i++ {
+			randBuf[i] = byte(ts & 0xff)
+			ts >>= 8
+		}
+	}
+	randName := hex.EncodeToString(randBuf[:])
+	dirPath := filepath.Join(os.TempDir(), "scriptschnell-shell-"+randName)
+
+	// Create the directory with full permissions
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		logger.Warn("Failed to create shell temp directory: %v", err)
+		// Return the path anyway - it may be created later or commands may still work
+		// with whatever temp access they have
+		return dirPath
+	}
+
+	logger.Debug("Created shell temp directory: %s", dirPath)
+	return dirPath
 }
 
 // GenerateID creates a random session ID (base32-ish hex, 12 chars).
@@ -216,6 +253,30 @@ func (s *Session) GetModifiedFiles() []string {
 		files = append(files, path)
 	}
 	return files
+}
+
+// GetShellTempDir returns the shell temp directory path
+func (s *Session) GetShellTempDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ShellTempDir
+}
+
+// CleanupShellTempDir removes the shell temp directory if it exists
+func (s *Session) CleanupShellTempDir() {
+	s.mu.RLock()
+	shellTempDir := s.ShellTempDir
+	s.mu.RUnlock()
+
+	if shellTempDir == "" {
+		return
+	}
+
+	if err := os.RemoveAll(shellTempDir); err != nil {
+		logger.Debug("Failed to cleanup shell temp directory: %v", err)
+	} else {
+		logger.Debug("Cleaned up shell temp directory: %s", shellTempDir)
+	}
 }
 
 // AddBackgroundJob adds a background job
@@ -774,6 +835,26 @@ func (s *Session) userMessageCountLocked() int {
 		}
 	}
 	return count
+}
+
+// ModifyLastAssistantMessage walks messages backwards, finds the last assistant
+// message, and applies the modifier function to it. Returns true if a message
+// was found and modified.
+func (s *Session) ModifyLastAssistantMessage(modifier func(msg *Message) bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := len(s.Messages) - 1; i >= 0; i-- {
+		if s.Messages[i] != nil && s.Messages[i].Role == "assistant" {
+			if modifier(s.Messages[i]) {
+				s.UpdatedAt = time.Now()
+				s.Dirty = true
+				return true
+			}
+			return false
+		}
+	}
+	return false
 }
 
 // AddPlanningQuestionAnswer adds a question and answer pair from the planning phase

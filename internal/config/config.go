@@ -2,6 +2,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -98,31 +100,53 @@ type SandboxOutputCompactionConfig struct {
 	ChunkSize            int     `json:"chunk_size"`             // Size of each chunk in characters
 }
 
+// SandboxConfig holds configuration for shell command sandboxing
+// This allows custom paths to be added to the landlock sandbox
+// Default package manager paths are handled automatically
+type SandboxConfig struct {
+	// AdditionalReadOnlyPaths are extra directories to allow read-only access
+	AdditionalReadOnlyPaths []string `json:"additional_read_only_paths,omitempty"`
+
+	// AdditionalReadWritePaths are extra directories to allow full access
+	AdditionalReadWritePaths []string `json:"additional_read_write_paths,omitempty"`
+
+	// DisableSandbox disables landlock sandboxing entirely (not recommended)
+	DisableSandbox bool `json:"disable_sandbox,omitempty"`
+
+	// BestEffort enables best-effort mode for landlock restrictions.
+	// When true (default), landlock will apply restrictions even if some
+	// rules cannot be enforced (e.g., due to insufficient kernel support).
+	// When false, landlock will fail if it cannot fully enforce all restrictions.
+	BestEffort bool `json:"best_effort,omitempty"`
+}
+
 // Config represents application configuration
 type Config struct {
-	WorkingDir              string                        `json:"working_dir"`
-	CacheTTL                int                           `json:"cache_ttl_seconds"`
-	MaxCacheEntries         int                           `json:"max_cache_entries"`
-	DefaultTimeout          int                           `json:"default_timeout_seconds"`
-	TempDir                 string                        `json:"-"`
-	Temperature             float64                       `json:"temperature"`
-	MaxTokens               int                           `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
-	ProviderConfigPath      string                        `json:"-"`
-	DisableAnimations       bool                          `json:"disable_animations"`
-	LogLevel                string                        `json:"log_level"` // debug, info, warn, error, none
-	LogPath                 string                        `json:"-"`
-	AuthorizedDomains       map[string]bool               `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
-	AuthorizedCommands      map[string]bool               `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
-	Search                  SearchConfig                  `json:"search"`                        // Web search provider configuration
-	MCP                     MCPConfig                     `json:"mcp,omitempty"`                 // Custom MCP server configuration
-	Secrets                 SecretsSettings               `json:"secrets,omitempty"`             // Encryption settings
-	EnablePromptCache       bool                          `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI). Disabled by default as some providers like Mistral don't support cache_control ephemeral
-	PromptCacheTTL          string                        `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
-	ContextDirectories      map[string][]string           `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
-	OpenTabs                map[string]*WorkspaceTabState `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
-	AutoSave                AutoSaveConfig                `json:"auto_save,omitempty"`           // Session auto-save configuration
-	AutoResume              bool                          `json:"auto_resume"`                   // Automatically resume last session on startup
-	SandboxOutputCompaction SandboxOutputCompactionConfig `json:"sandbox_output_compaction"`     // Sandbox output compaction configuration
+	WorkingDir              string                                 `json:"working_dir"`
+	CacheTTL                int                                    `json:"cache_ttl_seconds"`
+	MaxCacheEntries         int                                    `json:"max_cache_entries"`
+	DefaultTimeout          int                                    `json:"default_timeout_seconds"`
+	TempDir                 string                                 `json:"-"`
+	Temperature             float64                                `json:"temperature"`
+	MaxTokens               int                                    `json:"max_tokens,omitempty"` // DEPRECATED: Only used as fallback when model doesn't specify context window
+	ProviderConfigPath      string                                 `json:"-"`
+	DisableAnimations       bool                                   `json:"disable_animations"`
+	LogLevel                string                                 `json:"log_level"` // debug, info, warn, error, none
+	LogPath                 string                                 `json:"-"`
+	AuthorizedDomains       map[string]bool                        `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
+	AuthorizedCommands      map[string]bool                        `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
+	Search                  SearchConfig                           `json:"search"`                        // Web search provider configuration
+	MCP                     MCPConfig                              `json:"mcp,omitempty"`                 // Custom MCP server configuration
+	Secrets                 SecretsSettings                        `json:"secrets,omitempty"`             // Encryption settings
+	EnablePromptCache       bool                                   `json:"enable_prompt_cache"`           // Enable prompt caching for compatible providers (Anthropic, OpenAI). Disabled by default as some providers like Mistral don't support cache_control ephemeral
+	PromptCacheTTL          string                                 `json:"prompt_cache_ttl,omitempty"`    // Cache TTL: "5m" or "1h" (default: "1h", Anthropic only)
+	ContextDirectories      map[string][]string                    `json:"context_directories,omitempty"` // Workspace-specific context directories (map of workspace path -> directories)
+	OpenTabs                map[string]*WorkspaceTabState          `json:"open_tabs,omitempty"`           // Workspace-specific open tabs state (map of workspace path -> tab state)
+	LandlockApprovals       map[string]*LandlockWorkspaceApprovals `json:"landlock_approvals,omitempty"`  // Workspace-specific landlock approvals (map of workspace hash -> approvals)
+	Sandbox                 SandboxConfig                          `json:"sandbox,omitempty"`             // Sandbox configuration for shell commands
+	AutoSave                AutoSaveConfig                         `json:"auto_save,omitempty"`           // Session auto-save configuration
+	AutoResume              bool                                   `json:"auto_resume"`                   // Automatically resume last session on startup
+	SandboxOutputCompaction SandboxOutputCompactionConfig          `json:"sandbox_output_compaction"`     // Sandbox output compaction configuration
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
 	secretsPassword string       `json:"-"` // Kept for backward compatibility
@@ -141,6 +165,17 @@ type WorkspaceTabState struct {
 	TabIDs        []int          `json:"tab_ids"`                  // Ordered list of tab IDs
 	TabNames      map[int]string `json:"tab_names,omitempty"`      // Tab ID -> name mapping
 	WorktreePaths map[int]string `json:"worktree_paths,omitempty"` // Tab ID -> worktree path
+}
+
+// LandlockApproval represents an approved directory path for sandboxed shell execution
+type LandlockApproval struct {
+	Path        string `json:"path"`
+	AccessLevel string `json:"access_level"` // "read" or "readwrite"
+}
+
+// LandlockWorkspaceApprovals stores landlock approvals for a specific workspace
+type LandlockWorkspaceApprovals struct {
+	Directories []LandlockApproval `json:"directories,omitempty"`
 }
 
 func defaultConfigDir() string {
@@ -222,6 +257,13 @@ func DefaultConfig() *Config {
 			ContextWindowPercent: 0.1, // 10% of context window
 			ChunkSize:            50000,
 		},
+		LandlockApprovals: make(map[string]*LandlockWorkspaceApprovals),
+		Sandbox: SandboxConfig{
+			AdditionalReadOnlyPaths:  []string{},
+			AdditionalReadWritePaths: []string{},
+			DisableSandbox:           false,
+			BestEffort:               true, // Best-effort mode for better compatibility
+		},
 	}
 }
 
@@ -273,6 +315,9 @@ func Load(path string) (*Config, error) {
 	}
 	if config.ContextDirectories == nil {
 		config.ContextDirectories = make(map[string][]string)
+	}
+	if config.LandlockApprovals == nil {
+		config.LandlockApprovals = make(map[string]*LandlockWorkspaceApprovals)
 	}
 
 	return config, nil
@@ -423,6 +468,123 @@ func (c *Config) GetOpenTabState(workspace string) (*WorkspaceTabState, bool) {
 	}
 	state, ok := c.OpenTabs[workspace]
 	return state, ok
+}
+
+// GetWorkspaceHash generates a SHA256 hash for a workspace path to use as a unique identifier.
+func GetWorkspaceHash(workspace string) string {
+	absWorkspace := workspace
+	if !filepath.IsAbs(workspace) {
+		if abs, err := filepath.Abs(workspace); err == nil {
+			absWorkspace = abs
+		}
+	}
+	absWorkspace = filepath.Clean(absWorkspace)
+
+	hash := sha256.Sum256([]byte(absWorkspace))
+	return hex.EncodeToString(hash[:])[:16] // Use first 16 chars for shorter filenames
+}
+
+// AddLandlockApproval adds an approved directory for a specific workspace.
+func (c *Config) AddLandlockApproval(workspace, path, accessLevel string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.LandlockApprovals == nil {
+		c.LandlockApprovals = make(map[string]*LandlockWorkspaceApprovals)
+	}
+
+	workspaceHash := GetWorkspaceHash(workspace)
+	approvals := c.LandlockApprovals[workspaceHash]
+	if approvals == nil {
+		approvals = &LandlockWorkspaceApprovals{Directories: []LandlockApproval{}}
+		c.LandlockApprovals[workspaceHash] = approvals
+	}
+
+	// Check if path already exists
+	for i, dir := range approvals.Directories {
+		if dir.Path == path {
+			// Update access level if path exists
+			approvals.Directories[i].AccessLevel = accessLevel
+			return
+		}
+	}
+
+	// Add new approval
+	approvals.Directories = append(approvals.Directories, LandlockApproval{
+		Path:        path,
+		AccessLevel: accessLevel,
+	})
+}
+
+// RemoveLandlockApproval removes an approved directory for a specific workspace.
+func (c *Config) RemoveLandlockApproval(workspace, path string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.LandlockApprovals == nil {
+		return false
+	}
+
+	workspaceHash := GetWorkspaceHash(workspace)
+	approvals := c.LandlockApprovals[workspaceHash]
+	if approvals == nil {
+		return false
+	}
+
+	for i, dir := range approvals.Directories {
+		if dir.Path == path {
+			approvals.Directories = append(approvals.Directories[:i], approvals.Directories[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// GetLandlockApprovals returns the landlock approvals for a specific workspace.
+func (c *Config) GetLandlockApprovals(workspace string) []LandlockApproval {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.LandlockApprovals == nil {
+		return []LandlockApproval{}
+	}
+
+	workspaceHash := GetWorkspaceHash(workspace)
+	approvals := c.LandlockApprovals[workspaceHash]
+	if approvals == nil {
+		return []LandlockApproval{}
+	}
+
+	result := make([]LandlockApproval, len(approvals.Directories))
+	copy(result, approvals.Directories)
+	return result
+}
+
+// IsLandlockApproved checks if a path is approved for a specific workspace.
+func (c *Config) IsLandlockApproved(workspace, path string, accessLevel string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.LandlockApprovals == nil {
+		return false
+	}
+
+	workspaceHash := GetWorkspaceHash(workspace)
+	approvals := c.LandlockApprovals[workspaceHash]
+	if approvals == nil {
+		return false
+	}
+
+	for _, dir := range approvals.Directories {
+		if dir.Path == path {
+			// If we need readwrite but only have read, it's not approved
+			if accessLevel == "readwrite" && dir.AccessLevel == "read" {
+				return false
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // Save saves configuration to file using atomic writes, but only if something has changed.
@@ -577,6 +739,7 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 		OpenTabs:                c.OpenTabs,
 		AutoResume:              c.AutoResume,
 		SandboxOutputCompaction: c.SandboxOutputCompaction,
+		LandlockApprovals:       c.LandlockApprovals,
 		secretsPassword:         c.secretsPassword,
 	}
 

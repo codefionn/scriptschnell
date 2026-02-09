@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -333,16 +332,7 @@ func (t *LsTool) formatLongEntry(file os.FileInfo, fullPath string) map[string]i
 		info = file // Fallback to provided file info
 	}
 
-	var permissions string
-	if sys := info.Sys(); sys != nil {
-		if stat, ok := sys.(*syscall.Stat_t); ok {
-			permissions = fmt.Sprintf("%03o", stat.Mode&0777)
-		} else {
-			permissions = info.Mode().String()
-		}
-	} else {
-		permissions = info.Mode().String()
-	}
+	permissions := info.Mode().String()
 
 	return map[string]interface{}{
 		"name":        file.Name(),

@@ -25,6 +25,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/safety"
+	"github.com/codefionn/scriptschnell/internal/sandbox"
 	"github.com/codefionn/scriptschnell/internal/secretdetect"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/summarizer"
@@ -116,6 +117,9 @@ type Orchestrator struct {
 	vcsCancel              context.CancelFunc
 	vcsClient              *tools.VCSActorClient
 	toolCallRewriter       *ToolCallRewriter
+	sandboxCodeRewriter    *SandboxCodeRewriter
+	sandbox                *sandbox.LandlockSandbox
+	sandboxManager         *sandbox.Manager
 }
 
 const (
@@ -353,9 +357,48 @@ func NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg *config.Config, 
 	}
 	orch.todoActorCancel = todoCancel
 
+	// Initialize landlock sandbox for shell command execution
+	var sandboxCfg *sandbox.SandboxConfig
+	if cfg != nil {
+		// Check if Linux sandbox is enabled via feature flags
+		disableSandbox := cfg.Sandbox.DisableSandbox || !orch.featureFlags.IsToolEnabled("linux_sandbox")
+		sandboxCfg = &sandbox.SandboxConfig{
+			AdditionalReadOnlyPaths:  cfg.Sandbox.AdditionalReadOnlyPaths,
+			AdditionalReadWritePaths: cfg.Sandbox.AdditionalReadWritePaths,
+			DisableSandbox:           disableSandbox,
+			BestEffort:               cfg.Sandbox.BestEffort,
+		}
+	}
+	orch.sandbox = sandbox.NewLandlockSandbox(cfg.WorkingDir, sandboxCfg)
+	if orch.sandbox.IsEnabled() {
+		logger.Info("Landlock sandbox enabled for workspace: %s", cfg.WorkingDir)
+	} else {
+		logger.Debug("Landlock sandbox not available on this system")
+	}
+
+	// Create sandbox manager for directory access requests
+	orch.sandboxManager = sandbox.NewManager(cfg, cfg.WorkingDir)
+	orch.sandboxManager.SetAuthorizationCallback(func(req sandbox.RequestedDirectory) sandbox.AuthorizationDecision {
+		// Default to session-only approval for CLI mode
+		// The TUI can override this callback to show a proper authorization dialog
+		logger.Info("Directory access request: %s (access: %v, reason: %s)", req.Path, req.Access, req.Description)
+		return sandbox.DecisionApprovedSession
+	})
+	// Load any previously approved paths from workspace config
+	orch.sandboxManager.LoadWorkspaceApprovals()
+
 	// Set up shell actor for shell execution
 	shellCtx, shellCancel := context.WithCancel(context.Background())
 	shellActor := actor.NewShellActor("shell", sess)
+	// Wire up sandbox to shell actor if available
+	if sandboxActor, ok := shellActor.(actor.ShellActorWithSandbox); ok && orch.sandbox.IsEnabled() {
+		sandboxActor.SetSandbox(orch.sandbox)
+		logger.Debug("Landlock sandbox attached to shell actor")
+	}
+	if shellTempActor, ok := shellActor.(actor.ShellActorWithShellTemp); ok {
+		shellTempActor.SetShellTempDir(sess.GetShellTempDir())
+		logger.Debug("Shell temp directory set: %s", sess.GetShellTempDir())
+	}
 	shellRef, err := orch.actorSystem.Spawn(shellCtx, "shell", shellActor, 64)
 	if err != nil {
 		shellCancel()
@@ -612,9 +655,50 @@ func NewOrchestratorWithSharedResources(
 	orch.todoActor = todoActor.(tools.TodoActorInterface)
 	orch.todoActorCancel = todoCancel
 
+	// Initialize landlock sandbox for shell command execution
+	var sandboxCfg *sandbox.SandboxConfig
+	if cfg != nil {
+		// Check if Linux sandbox is enabled via feature flags
+		disableSandbox := cfg.Sandbox.DisableSandbox || !orch.featureFlags.IsToolEnabled("linux_sandbox")
+		sandboxCfg = &sandbox.SandboxConfig{
+			AdditionalReadOnlyPaths:  cfg.Sandbox.AdditionalReadOnlyPaths,
+			AdditionalReadWritePaths: cfg.Sandbox.AdditionalReadWritePaths,
+			DisableSandbox:           disableSandbox,
+			BestEffort:               cfg.Sandbox.BestEffort,
+		}
+	}
+	orch.sandbox = sandbox.NewLandlockSandbox(cfg.WorkingDir, sandboxCfg)
+	if orch.sandbox.IsEnabled() {
+		logger.Info("Landlock sandbox enabled for workspace: %s", cfg.WorkingDir)
+	} else {
+		logger.Debug("Landlock sandbox not available on this system")
+	}
+
+	// Create sandbox manager for directory access requests
+	orch.sandboxManager = sandbox.NewManager(cfg, cfg.WorkingDir)
+	orch.sandboxManager.SetAuthorizationCallback(func(req sandbox.RequestedDirectory) sandbox.AuthorizationDecision {
+		// Default to session-only approval for now
+		// The TUI can override this callback to show a proper authorization dialog
+		logger.Info("Directory access request: %s (access: %v, reason: %s)", req.Path, req.Access, req.Description)
+		// Return DecisionApprovedSession to auto-approve for this session
+		// This can be changed to prompt the user via the TUI
+		return sandbox.DecisionApprovedSession
+	})
+	// Load any previously approved paths from workspace config
+	orch.sandboxManager.LoadWorkspaceApprovals()
+
 	// Set up shell actor for shell execution
 	shellCtx, shellCancel := context.WithCancel(context.Background())
 	shellActor := actor.NewShellActor("shell", sess)
+	// Wire up sandbox to shell actor if available
+	if sandboxActor, ok := shellActor.(actor.ShellActorWithSandbox); ok && orch.sandbox.IsEnabled() {
+		sandboxActor.SetSandbox(orch.sandbox)
+		logger.Debug("Landlock sandbox attached to shell actor")
+	}
+	if shellTempActor, ok := shellActor.(actor.ShellActorWithShellTemp); ok {
+		shellTempActor.SetShellTempDir(sess.GetShellTempDir())
+		logger.Debug("Shell temp directory set: %s", sess.GetShellTempDir())
+	}
 	shellRef, err := orch.actorSystem.Spawn(shellCtx, "shell", shellActor, 64)
 	if err != nil {
 		shellCancel()
@@ -1098,6 +1182,11 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	}
 	addSpec(sandboxSpec, true, sandboxFactory, false, "")
 
+	// Directory access request tool - allows LLM to request additional sandbox permissions
+	if o.sandboxManager != nil && o.sandbox.IsEnabled() {
+		addSpec(&tools.RequestDirectoryAccessToolSpec{}, false, tools.RequestDirectoryAccessToolFactory(o.sandboxManager), false, "")
+	}
+
 	// Parallel execution - needs registry access
 	// Disabled for certain models (e.g., zai-glm) that don't handle parallel tools well
 	if o.shouldUseParallelTool(modelFamily) {
@@ -1188,6 +1277,14 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 		logger.Debug("Tool call rewriter enabled")
 	} else {
 		logger.Debug("Tool call rewriter disabled (feature flag disabled or no summarize client)")
+	}
+
+	// Initialize sandbox code rewriter
+	o.sandboxCodeRewriter = NewSandboxCodeRewriter(o.summarizeClient)
+	if o.sandboxCodeRewriter.enabled {
+		logger.Debug("Sandbox code rewriter enabled")
+	} else {
+		logger.Debug("Sandbox code rewriter disabled")
 	}
 
 	var activeMCPSanitized []string
@@ -2853,6 +2950,36 @@ func (o *Orchestrator) processToolCalls(
 			continue
 		}
 
+		// Sandbox code rewrite: detect and fix os/exec or print-only patterns
+		if toolName == "go_sandbox" && o.sandboxCodeRewriter != nil {
+			if code, ok := args["code"].(string); ok {
+				rewriteResult, rewriteErr := o.sandboxCodeRewriter.AnalyzeAndRewrite(ctx, code)
+				if rewriteErr != nil {
+					logger.Warn("SandboxCodeRewriter: rewrite failed: %v", rewriteErr)
+				} else {
+					switch rewriteResult.RewriteType {
+					case "os_exec":
+						args["code"] = rewriteResult.RewrittenCode
+						o.rewriteSandboxToolCallInHistory(sess, toolID, rewriteResult.RewrittenCode)
+						dispatchProgress(progressCb, progress.Update{
+							Message:   "Rewrote os/exec code to use sandbox APIs",
+							Mode:      progress.ReportJustStatus,
+							Ephemeral: true,
+						})
+						logger.Info("SandboxCodeRewriter: rewrote os/exec code for tool call %s", toolID)
+					case "print_only":
+						o.convertToolCallToAssistantText(sess, toolID, rewriteResult.ExtractedText)
+						dispatchProgress(progressCb, progress.Update{
+							Message: rewriteResult.ExtractedText,
+							Mode:    progress.ReportNoStatus,
+						})
+						logger.Info("SandboxCodeRewriter: converted print-only code to text for tool call %s", toolID)
+						continue // skip execution entirely
+					}
+				}
+			}
+		}
+
 		toolCallObj := &tools.ToolCall{
 			ID:         toolID,
 			Name:       toolName,
@@ -3049,6 +3176,74 @@ func (o *Orchestrator) processToolCalls(
 	}
 
 	return nil
+}
+
+// rewriteSandboxToolCallInHistory modifies the last assistant message in the
+// session to replace the sandbox code in the tool call with rewritten code.
+// This ensures the LLM doesn't see (and repeat) the original bad code pattern.
+func (o *Orchestrator) rewriteSandboxToolCallInHistory(sess *session.Session, toolID, newCode string) {
+	sess.ModifyLastAssistantMessage(func(msg *session.Message) bool {
+		for i, tc := range msg.ToolCalls {
+			tcID, _ := tc["id"].(string)
+			if tcID != toolID {
+				continue
+			}
+			fn, ok := tc["function"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			argsJSON, ok := fn["arguments"].(string)
+			if !ok {
+				continue
+			}
+
+			var argsMap map[string]interface{}
+			if err := json.Unmarshal([]byte(argsJSON), &argsMap); err != nil {
+				logger.Warn("rewriteSandboxToolCallInHistory: failed to parse args: %v", err)
+				return false
+			}
+			argsMap["code"] = newCode
+			newArgsJSON, err := json.Marshal(argsMap)
+			if err != nil {
+				logger.Warn("rewriteSandboxToolCallInHistory: failed to marshal args: %v", err)
+				return false
+			}
+			fn["arguments"] = string(newArgsJSON)
+			msg.ToolCalls[i] = tc
+			msg.NativeFormat = nil // stale after modification
+			return true
+		}
+		return false
+	})
+}
+
+// convertToolCallToAssistantText removes the tool call from the last assistant
+// message and appends the extracted text as content. This is used for print-only
+// sandbox code that doesn't need execution.
+func (o *Orchestrator) convertToolCallToAssistantText(sess *session.Session, toolID, extractedText string) {
+	sess.ModifyLastAssistantMessage(func(msg *session.Message) bool {
+		newToolCalls := make([]map[string]interface{}, 0, len(msg.ToolCalls))
+		found := false
+		for _, tc := range msg.ToolCalls {
+			tcID, _ := tc["id"].(string)
+			if tcID == toolID {
+				found = true
+				continue // remove this tool call
+			}
+			newToolCalls = append(newToolCalls, tc)
+		}
+		if !found {
+			return false
+		}
+		msg.ToolCalls = newToolCalls
+		if msg.Content != "" {
+			msg.Content += "\n\n" + extractedText
+		} else {
+			msg.Content = extractedText
+		}
+		msg.NativeFormat = nil // stale after modification
+		return true
+	})
 }
 
 func parseToolCallValidationError(err error) *toolCallValidationError {
@@ -4315,6 +4510,18 @@ func (o *Orchestrator) GetWorkingDir() string {
 // GetFeatureFlags returns the feature flags manager
 func (o *Orchestrator) GetFeatureFlags() *features.FeatureFlags {
 	return o.featureFlags
+}
+
+// GetSandboxManager returns the sandbox manager for directory access authorization
+func (o *Orchestrator) GetSandboxManager() *sandbox.Manager {
+	return o.sandboxManager
+}
+
+// SetSandboxAuthorizationCallback sets the callback for directory access authorization
+func (o *Orchestrator) SetSandboxAuthorizationCallback(cb sandbox.AuthorizationCallback) {
+	if o.sandboxManager != nil {
+		o.sandboxManager.SetAuthorizationCallback(cb)
+	}
 }
 
 // ClearSession clears the current session, removing all messages, file tracking, and todos

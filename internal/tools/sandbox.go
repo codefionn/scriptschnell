@@ -162,6 +162,34 @@ func (t *SandboxTool) SetAuthorizationPersistence(cfg *config.Config, configPath
 	t.authConfig = AuthorizationPersistenceConfig{Config: cfg, ConfigPath: configPath}
 }
 
+// buildSandboxEnv returns os.Environ() with TMPDIR/TEMP/TMP overridden to the
+// session's shell temp directory so that TinyGo compilation and direct command
+// execution use the session-specific temp dir.
+func (t *SandboxTool) buildSandboxEnv() []string {
+	env := os.Environ()
+	if t.session != nil {
+		if shellTmpDir := t.session.GetShellTempDir(); shellTmpDir != "" {
+			env = sandboxReplaceOrAppendEnv(env, "TMPDIR", shellTmpDir)
+			env = sandboxReplaceOrAppendEnv(env, "TEMP", shellTmpDir)
+			env = sandboxReplaceOrAppendEnv(env, "TMP", shellTmpDir)
+			env = sandboxReplaceOrAppendEnv(env, "SCRIPTSCHNELL_SHELL_TEMP", shellTmpDir)
+		}
+	}
+	return env
+}
+
+// sandboxReplaceOrAppendEnv replaces an existing environment variable or appends it.
+func sandboxReplaceOrAppendEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
 // interactionCtx returns the parent context (without sandbox timeout) for user
 // interaction calls. If parentCtx was not set (e.g. during tests), it falls
 // back to the provided context.

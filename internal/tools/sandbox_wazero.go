@@ -115,6 +115,16 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 		}
 	}
 
+	// Override TMPDIR/TEMP/TMP with session temp dir so sandboxed code uses it
+	if t.session != nil {
+		if shellTmpDir := t.session.GetShellTempDir(); shellTmpDir != "" {
+			config = config.WithEnv("TMPDIR", shellTmpDir)
+			config = config.WithEnv("TEMP", shellTmpDir)
+			config = config.WithEnv("TMP", shellTmpDir)
+			config = config.WithEnv("SCRIPTSCHNELL_SHELL_TEMP", shellTmpDir)
+		}
+	}
+
 	// Mount filesystem if available
 	if t.filesystem != nil {
 		authorizedFS := NewAuthorizedFS(t.filesystem, t.session, t.workingDir)
@@ -171,7 +181,7 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	case err := <-resultChan:
 		runtimeErr = err
 	case <-ctx.Done():
-		logger.Debug("WASM execution timeout after %d seconds", timeoutSeconds)
+		logger.Warn("sandbox: killing process due to %s (timeout=%ds): %s", ctx.Err(), timeoutSeconds, commandSummary)
 		// Close files before reading on timeout
 		outFile.Close()
 		errFile.Close()

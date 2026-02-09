@@ -1008,16 +1008,6 @@ func truncateStringSmart(s string, maxLen int) string {
 	return s[:truncAt] + "..."
 }
 
-// truncatePath truncates a path for display (legacy, uses smart truncation now)
-func truncatePath(path string, maxLen int) string {
-	return truncatePathSmart(path, maxLen)
-}
-
-// truncateCommand truncates a command for display (legacy, uses smart truncation now)
-func truncateCommand(cmd string, maxLen int) string {
-	return truncateCommandSmart(cmd, maxLen)
-}
-
 // truncateString truncates a string with ellipsis (legacy, simple version)
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {

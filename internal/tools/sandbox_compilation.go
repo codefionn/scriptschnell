@@ -137,7 +137,7 @@ func (t *SandboxTool) buildTinyGoArgs(wasmFile string, libraries []string) []str
 func (t *SandboxTool) compileWithTinyGo(ctx context.Context, tinyGoBinary string, args []string, sandboxDir string) (interface{}, error) {
 	buildCmd := exec.CommandContext(ctx, tinyGoBinary, args...)
 	buildCmd.Dir = sandboxDir
-	buildCmd.Env = os.Environ()
+	buildCmd.Env = t.buildSandboxEnv()
 
 	buildOutput, err := buildCmd.CombinedOutput()
 	if err != nil {
@@ -161,7 +161,7 @@ func (t *SandboxTool) executeDirectCommand(ctx context.Context, commandArgs []st
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, commandArgs[0], commandArgs[1:]...)
-	cmd.Env = os.Environ()
+	cmd.Env = t.buildSandboxEnv()
 
 	// Set stdin if provided
 	if len(stdinData) > 0 {

@@ -3,6 +3,8 @@ package actor
 import (
 	"context"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/sandbox"
 )
 
 // ShellMessage represents different types of shell execution requests
@@ -112,4 +114,19 @@ type ShellActor interface {
 
 	// StopJob stops a background job
 	StopJob(ctx context.Context, jobID string, signal string) error
+}
+
+// ShellActorWithSandbox is an optional interface for shell actors that support sandboxing
+type ShellActorWithSandbox interface {
+	ShellActor
+	// SetSandbox sets the landlock sandbox for the shell actor
+	SetSandbox(sb *sandbox.LandlockSandbox)
+}
+
+// ShellActorWithShellTemp is an optional interface for shell actors that support
+// setting a shell temp directory (used to set SCRIPTSCHNELL_SHELL_TEMP env var)
+type ShellActorWithShellTemp interface {
+	ShellActor
+	// SetShellTempDir sets the shell temp directory path
+	SetShellTempDir(dir string)
 }

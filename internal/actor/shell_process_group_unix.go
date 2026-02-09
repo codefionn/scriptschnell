@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"syscall"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // configureProcessGroup ensures the command runs in its own process group so
@@ -46,5 +48,6 @@ func signalProcessGroup(pgid int, signal string) error {
 		return fmt.Errorf("unsupported signal: %s", signal)
 	}
 
+	logger.Warn("shell: sending %s to process group %d", signal, pgid)
 	return syscall.Kill(-pgid, sig)
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/sandbox"
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"github.com/codefionn/scriptschnell/internal/vcs"
@@ -250,6 +251,12 @@ type Model struct {
 	authorizationDialogOpen bool                             // Is authorization dialog visible
 	authorizationDialog     AuthorizationDialog              // The authorization dialog component
 
+	// Directory access authorization state
+	dirAccessDialogOpen      bool                   // Is directory access dialog visible
+	dirAccessDialog          DirectoryAccessDialog  // The directory access dialog component
+	pendingDirAccessRequests map[string]chan string // path -> response channel for async requests
+	dirAccessRequestMu       sync.Mutex             // Protect directory access state
+
 	// Pending handler-based user interactions (requestID -> channels)
 	pendingUserInteractions map[string]pendingUserInteraction
 	userInteractionMu       sync.RWMutex
@@ -423,6 +430,19 @@ type ShowAuthorizationDialogMsg struct {
 	Request *AuthorizationRequest
 }
 
+// ShowDirectoryAccessDialogMsg is sent to display a directory access authorization dialog
+type ShowDirectoryAccessDialogMsg struct {
+	Request  DirectoryAccessRequest
+	Response chan string // Channel to receive the response: "session", "workspace", or "deny"
+}
+
+// DirectoryAccessResponseMsg is sent when the user responds to the directory access dialog
+type DirectoryAccessResponseMsg struct {
+	Path    string
+	Choice  string
+	Request DirectoryAccessRequest
+}
+
 // RendererReadyMsg is sent when async renderer creation completes
 type RendererReadyMsg struct {
 	Renderer *glamour.TermRenderer
@@ -473,28 +493,29 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 	}
 
 	m := &Model{
-		textarea:                ta,
-		viewport:                vp,
-		messages:                []message{},
-		currentModel:            currentModel,
-		contextFile:             contextFile,
-		renderer:                renderer,
-		rendererCache:           rendererCache,
-		spinner:                 sp,
-		animationsDisabled:      disableAnimations,
-		contextFreePercent:      100,
-		renderWrapWidth:         80,
-		queuedPrompts:           make(map[int][]string),
-		concurrentGens:          make(map[int]bool),
-		pendingAuthorizations:   make(map[string]*AuthorizationRequest),
-		pendingUserInteractions: make(map[string]pendingUserInteraction),
-		authorizationCounter:    0,
-		toolGroupManager:        NewToolGroupManager(),
-		activeGroupID:           "",
-		toolProgressTracker:     NewToolProgressTracker(),
-		showProgressPanel:       false,
-		toolShortcutHandler:     NewToolShortcutHandler(),
-		toolMode:                false,
+		textarea:                 ta,
+		viewport:                 vp,
+		messages:                 []message{},
+		currentModel:             currentModel,
+		contextFile:              contextFile,
+		renderer:                 renderer,
+		rendererCache:            rendererCache,
+		spinner:                  sp,
+		animationsDisabled:       disableAnimations,
+		contextFreePercent:       100,
+		renderWrapWidth:          80,
+		queuedPrompts:            make(map[int][]string),
+		concurrentGens:           make(map[int]bool),
+		pendingAuthorizations:    make(map[string]*AuthorizationRequest),
+		pendingUserInteractions:  make(map[string]pendingUserInteraction),
+		pendingDirAccessRequests: make(map[string]chan string),
+		authorizationCounter:     0,
+		toolGroupManager:         NewToolGroupManager(),
+		activeGroupID:            "",
+		toolProgressTracker:      NewToolProgressTracker(),
+		showProgressPanel:        false,
+		toolShortcutHandler:      NewToolShortcutHandler(),
+		toolMode:                 false,
 	}
 
 	if width, height, ok := detectTerminalSize(); ok {
@@ -1449,6 +1470,98 @@ func (m *Model) handleAuthorizationDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleDirectoryAccessDialog handles messages when directory access dialog is open
+func (m *Model) handleDirectoryAccessDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "esc":
+			// ESC or Ctrl+C means deny
+			logger.Debug("User denied directory access via ESC/Ctrl+C for path %s", m.dirAccessDialog.request.Path)
+			return m, func() tea.Msg {
+				return DirectoryAccessResponseMsg{
+					Path:    m.dirAccessDialog.request.Path,
+					Choice:  "deny",
+					Request: m.dirAccessDialog.request,
+				}
+			}
+
+		case "enter":
+			// Check which option is selected
+			item := m.dirAccessDialog.list.SelectedItem()
+			if item == nil {
+				logger.Error("Directory access dialog has no selected item")
+				return m, func() tea.Msg {
+					return DirectoryAccessResponseMsg{
+						Path:    m.dirAccessDialog.request.Path,
+						Choice:  "deny",
+						Request: m.dirAccessDialog.request,
+					}
+				}
+			}
+
+			if typedItem, ok := item.(dirAccessChoiceItem); ok {
+				choice := typedItem.value
+				path := m.dirAccessDialog.request.Path
+				logger.Debug("User selected choice %s for path %s", choice, path)
+				return m, func() tea.Msg {
+					return DirectoryAccessResponseMsg{
+						Path:    path,
+						Choice:  choice,
+						Request: m.dirAccessDialog.request,
+					}
+				}
+			}
+			return m, nil
+
+		case "s", "S":
+			// Quick approve for session
+			return m, func() tea.Msg {
+				return DirectoryAccessResponseMsg{
+					Path:    m.dirAccessDialog.request.Path,
+					Choice:  "session",
+					Request: m.dirAccessDialog.request,
+				}
+			}
+
+		case "w", "W":
+			// Quick approve for workspace
+			return m, func() tea.Msg {
+				return DirectoryAccessResponseMsg{
+					Path:    m.dirAccessDialog.request.Path,
+					Choice:  "workspace",
+					Request: m.dirAccessDialog.request,
+				}
+			}
+
+		case "d", "D":
+			// Quick deny
+			return m, func() tea.Msg {
+				return DirectoryAccessResponseMsg{
+					Path:    m.dirAccessDialog.request.Path,
+					Choice:  "deny",
+					Request: m.dirAccessDialog.request,
+				}
+			}
+		}
+
+		// Update dialog list for navigation
+		var cmd tea.Cmd
+		m.dirAccessDialog.list, cmd = m.dirAccessDialog.list.Update(msg)
+		return m, cmd
+
+	case tea.WindowSizeMsg:
+		// Update dialog size
+		m.dirAccessDialog.width = msg.Width
+		m.dirAccessDialog.height = msg.Height
+		listWidth, listHeight := m.dirAccessDialog.listSize()
+		m.dirAccessDialog.list.SetSize(listWidth, listHeight)
+		return m, nil
+	}
+
+	return m, nil
+}
+
 // handleUserQuestionDialog handles messages when user question dialog is open
 func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -1548,6 +1661,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	} else if m.authorizationDialogOpen {
 		// Handle other messages through authorization dialog
 		return m.handleAuthorizationDialog(msg)
+	}
+
+	// Handle directory access dialog if open
+	if _, ok := msg.(DirectoryAccessResponseMsg); ok {
+		// Process the response in the main handler below
+		// Don't route to handleDirectoryAccessDialog
+	} else if m.dirAccessDialogOpen {
+		return m.handleDirectoryAccessDialog(msg)
 	}
 
 	// Handle user question dialog if open
@@ -2282,6 +2403,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, tea.Batch(baseCmd, spinnerRestart)
 
+	case ShowDirectoryAccessDialogMsg:
+		// Directory access authorization request
+		logger.Debug("Received ShowDirectoryAccessDialogMsg for path %s", msg.Request.Path)
+
+		// Create dialog
+		dialog := NewDirectoryAccessDialog(msg.Request)
+
+		// Store the response channel
+		m.dirAccessRequestMu.Lock()
+		m.pendingDirAccessRequests[msg.Request.Path] = msg.Response
+		m.dirAccessDialog = dialog
+		m.dirAccessDialogOpen = true
+		m.dirAccessRequestMu.Unlock()
+
+		return m, baseCmd
+
+	case DirectoryAccessResponseMsg:
+		// User responded to directory access dialog
+		logger.Debug("Received DirectoryAccessResponseMsg for path %s: choice=%s", msg.Path, msg.Choice)
+
+		// Send response to waiting channel
+		m.dirAccessRequestMu.Lock()
+		if ch, ok := m.pendingDirAccessRequests[msg.Path]; ok {
+			select {
+			case ch <- msg.Choice:
+				logger.Debug("Sent directory access response for path %s: %s", msg.Path, msg.Choice)
+			default:
+				logger.Warn("Failed to send directory access response - channel full or closed")
+			}
+			delete(m.pendingDirAccessRequests, msg.Path)
+		}
+		m.dirAccessDialogOpen = false
+		m.dirAccessRequestMu.Unlock()
+
+		return m, baseCmd
+
 	case TabContextUsageMsg:
 		tabIdx := m.findTabIndexByID(msg.TabID)
 		if tabIdx >= 0 {
@@ -2646,6 +2803,46 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 		runtime.Orchestrator.SetUserInteractionTabID(tab.ID)
 	}
 
+	// Set up sandbox authorization callback for directory access requests
+	runtime.Orchestrator.SetSandboxAuthorizationCallback(func(req sandbox.RequestedDirectory) sandbox.AuthorizationDecision {
+		logger.Debug("Tab %d: sandbox directory access requested: %s (access: %v)", tab.ID, req.Path, req.Access)
+
+		// Create response channel
+		responseChan := make(chan string, 1)
+
+		// Send request to TUI
+		m.program.Send(ShowDirectoryAccessDialogMsg{
+			Request: DirectoryAccessRequest{
+				Path: req.Path,
+				AccessLevel: func() string {
+					if req.Access == sandbox.AccessReadWrite {
+						return "readwrite"
+					}
+					return "read"
+				}(),
+				Description: req.Description,
+			},
+			Response: responseChan,
+		})
+
+		// Wait for response with timeout
+		select {
+		case choice := <-responseChan:
+			logger.Debug("Tab %d: sandbox directory access response: %s for %s", tab.ID, choice, req.Path)
+			switch choice {
+			case "session":
+				return sandbox.DecisionApprovedSession
+			case "workspace":
+				return sandbox.DecisionApprovedWorkspace
+			default:
+				return sandbox.DecisionDenied
+			}
+		case <-time.After(consts.Timeout5Minutes):
+			logger.Error("Tab %d: sandbox directory access timeout for %s - denying", tab.ID, req.Path)
+			return sandbox.DecisionDenied
+		}
+	})
+
 	// Submit to tab's orchestrator in goroutine
 	return func() tea.Msg {
 		go func() {
@@ -2883,6 +3080,22 @@ func (m *Model) View() string {
 	// Show authorization dialog as overlay if open
 	if m.authorizationDialogOpen {
 		dialogView := m.authorizationDialog.View()
+		// Center the dialog
+		overlay := lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			dialogView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("0")),
+		)
+		return overlay
+	}
+
+	// Show directory access dialog as overlay if open
+	if m.dirAccessDialogOpen {
+		dialogView := m.dirAccessDialog.View()
 		// Center the dialog
 		overlay := lipgloss.Place(
 			m.width,
@@ -4845,9 +5058,5 @@ func shouldAutoCollapseParams(params map[string]interface{}, config *ParamCollap
 		totalChars += len(key)
 		totalChars += len(formatParamValueSimple(value))
 	}
-	if totalChars > config.MaxTotalContentChars {
-		return true
-	}
-
-	return false
+	return totalChars > config.MaxTotalContentChars
 }

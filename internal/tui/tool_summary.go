@@ -342,8 +342,10 @@ func (g *ToolSummaryGenerator) shortenPath(path string) string {
 	dir := filepath.Dir(path)
 
 	// If filename is long enough, just show it
-	if len(filename) >= 30 {
+	if len(filename) >= 35 {
 		return "..." + filename[len(filename)-35:]
+	} else if len(filename) >= 30 {
+		return "..." + filename
 	}
 
 	// Show shortened dir + filename

@@ -15,16 +15,19 @@ import (
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/sandbox"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 // shellActorImpl implements the ShellActor interface
 type shellActorImpl struct {
-	id      string
-	session *session.Session
-	jobs    map[string]*shellJob
-	mu      sync.RWMutex
-	health  *HealthCheckable
+	id           string
+	session      *session.Session
+	jobs         map[string]*shellJob
+	mu           sync.RWMutex
+	health       *HealthCheckable
+	sandbox      *sandbox.LandlockSandbox
+	shellTempDir string // Shell temp directory for SCRIPTSCHNELL_SHELL_TEMP env var
 }
 
 // shellJob represents a running background job
@@ -55,6 +58,20 @@ func NewShellActor(id string, sess *session.Session) ShellActor {
 	actor.health = NewHealthCheckable(id, make(chan Message, 100), actor.getShellMetrics)
 
 	return actor
+}
+
+// SetSandbox sets the landlock sandbox for the shell actor
+func (a *shellActorImpl) SetSandbox(sb *sandbox.LandlockSandbox) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sandbox = sb
+}
+
+// SetShellTempDir sets the shell temp directory for the SCRIPTSCHNELL_SHELL_TEMP env var
+func (a *shellActorImpl) SetShellTempDir(dir string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.shellTempDir = dir
 }
 
 func (a *shellActorImpl) ID() string {
@@ -134,6 +151,12 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, args []string, work
 		return "", "", -1, fmt.Errorf("no command provided")
 	}
 
+	// Apply landlock sandbox if available (only applies once, subsequent calls are no-op)
+	if err := a.applySandbox(); err != nil {
+		logger.Warn("shell: failed to apply landlock sandbox: %v", err)
+		// Continue without sandbox - the sandbox already logged the error
+	}
+
 	resolvedArgs, err := a.resolveCommand(args, workingDir)
 	if err != nil {
 		return "", "", -1, err
@@ -148,7 +171,7 @@ func (a *shellActorImpl) ExecuteCommand(ctx context.Context, args []string, work
 
 	cmd := exec.CommandContext(cmdCtx, resolvedArgs[0], resolvedArgs[1:]...)
 	cmd.Dir = workingDir
-	cmd.Env = os.Environ()
+	cmd.Env = a.buildCommandEnv()
 
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -176,6 +199,12 @@ func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, args []st
 		return "", 0, fmt.Errorf("no command provided")
 	}
 
+	// Apply landlock sandbox if available (only applies once, subsequent calls are no-op)
+	if err := a.applySandbox(); err != nil {
+		logger.Warn("shell: failed to apply landlock sandbox: %v", err)
+		// Continue without sandbox - the sandbox already logged the error
+	}
+
 	resolvedArgs, err := a.resolveCommand(args, workingDir)
 	if err != nil {
 		return "", 0, err
@@ -183,7 +212,7 @@ func (a *shellActorImpl) ExecuteCommandBackground(ctx context.Context, args []st
 
 	cmd := exec.Command(resolvedArgs[0], resolvedArgs[1:]...)
 	cmd.Dir = workingDir
-	cmd.Env = os.Environ()
+	cmd.Env = a.buildCommandEnv()
 	configureProcessGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
@@ -353,6 +382,51 @@ func (a *shellActorImpl) handleStopRequest(ctx context.Context, req ShellStopReq
 }
 
 // Helper methods
+
+// applySandbox applies landlock restrictions if available and enabled.
+// This method is idempotent - once applied, subsequent calls are no-ops.
+func (a *shellActorImpl) applySandbox() error {
+	a.mu.RLock()
+	sb := a.sandbox
+	a.mu.RUnlock()
+
+	if sb == nil {
+		return nil // No sandbox configured
+	}
+
+	return sb.Restrict()
+}
+
+// buildCommandEnv builds the environment variables for command execution
+// It includes the SCRIPTSCHNELL_SHELL_TEMP variable if a shell temp dir is set,
+// and overrides TMPDIR/TEMP/TMP so child processes use the session temp dir.
+func (a *shellActorImpl) buildCommandEnv() []string {
+	a.mu.RLock()
+	shellTempDir := a.shellTempDir
+	a.mu.RUnlock()
+
+	env := os.Environ()
+	if shellTempDir != "" {
+		env = append(env, fmt.Sprintf("SCRIPTSCHNELL_SHELL_TEMP=%s", shellTempDir))
+		env = replaceOrAppendEnv(env, "TMPDIR", shellTempDir)
+		env = replaceOrAppendEnv(env, "TEMP", shellTempDir)
+		env = replaceOrAppendEnv(env, "TMP", shellTempDir)
+	}
+	return env
+}
+
+// replaceOrAppendEnv replaces an existing environment variable or appends it.
+func replaceOrAppendEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
 func (a *shellActorImpl) registerBackgroundJob(cmd *exec.Cmd, command, workingDir string, startedAt time.Time) (string, *shellJob) {
 	job := &shellJob{
 		ID:         generateJobID(),
@@ -436,6 +510,8 @@ func (a *shellActorImpl) stopJobInternal(job *shellJob, signal string) error {
 	if job.Process == nil {
 		return fmt.Errorf("job %s has no process to stop", job.ID)
 	}
+
+	logger.Warn("shell actor %s: sending %s to job %s (pid=%d, pgid=%d)", a.id, signal, job.ID, job.PID, job.ProcessGroup)
 
 	if runtime.GOOS != "windows" && job.ProcessGroup > 0 {
 		if err := signalProcessGroup(job.ProcessGroup, signal); err != nil {

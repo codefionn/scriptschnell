@@ -112,6 +112,7 @@ func (r *shellCommandRunner) run(ctx context.Context) *ToolResult {
 				timer.Stop()
 			}
 			if cmd.Process != nil {
+				logger.Warn("shell: killing process (pid=%d) due to context cancellation: %s", cmd.Process.Pid, ctx.Err())
 				_ = cmd.Process.Kill()
 			}
 			<-r.done
@@ -121,6 +122,7 @@ func (r *shellCommandRunner) run(ctx context.Context) *ToolResult {
 		case <-timerC:
 			timedOut = true
 			if cmd.Process != nil {
+				logger.Warn("shell: killing process (pid=%d) due to timeout after %s", cmd.Process.Pid, r.timeout)
 				_ = cmd.Process.Kill()
 			}
 			timerC = nil

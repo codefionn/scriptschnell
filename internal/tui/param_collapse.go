@@ -89,11 +89,7 @@ func (m *ParamCollapseManager) ShouldAutoCollapse(toolID string, params map[stri
 		totalChars += len(key)
 		totalChars += len(formatParamValueSimple(value))
 	}
-	if totalChars > m.config.MaxTotalContentChars {
-		return true
-	}
-
-	return false
+	return totalChars > m.config.MaxTotalContentChars
 }
 
 // GetInitialState creates initial collapse state for a tool

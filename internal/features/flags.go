@@ -4,8 +4,9 @@ import "sync"
 
 // Global feature flags map for quick access
 var Enabled = map[string]bool{
-	"secret_based_auth": true, // Enable secret-based authorization by default
-	"tool_call_rewrite": true, // Enable tool call rewriting by default
+	"secret_based_auth":    true, // Enable secret-based authorization by default
+	"tool_call_rewrite":    true, // Enable tool call rewriting by default
+	"sandbox_code_rewrite": true, // Enable sandbox code rewriting by default
 }
 
 // FeatureFlags manages runtime feature flags for tools and capabilities.
@@ -42,6 +43,8 @@ type FeatureFlags struct {
 	GrepContextFiles         bool
 	ReadContextFile          bool
 	VerificationAgent        bool // Enable post-execution verification
+	SandboxCodeRewrite       bool // Rewrite bad sandbox code (os/exec, print-only)
+	LinuxSandbox             bool // Enable Linux Landlock sandboxing for shell commands
 }
 
 // NewFeatureFlags creates a new FeatureFlags instance with default values (all enabled)
@@ -72,6 +75,8 @@ func NewFeatureFlags() *FeatureFlags {
 		GrepContextFiles:         true,
 		ReadContextFile:          true,
 		VerificationAgent:        true, // Default to enabled
+		SandboxCodeRewrite:       true, // Default to enabled
+		LinuxSandbox:             true, // Default to enabled
 	}
 }
 
@@ -131,6 +136,10 @@ func (f *FeatureFlags) IsToolEnabled(toolName string) bool {
 		return f.ReadContextFile
 	case "verification_agent":
 		return f.VerificationAgent
+	case "sandbox_code_rewrite":
+		return f.SandboxCodeRewrite
+	case "linux_sandbox":
+		return f.LinuxSandbox
 	default:
 		// Unknown tools default to enabled
 		return true
@@ -194,6 +203,8 @@ func (f *FeatureFlags) EnableAllTools() {
 	f.GrepContextFiles = true
 	f.ReadContextFile = true
 	f.VerificationAgent = true
+	f.SandboxCodeRewrite = true
+	f.LinuxSandbox = true
 }
 
 // setToolFlag sets the tool's flag (must be called with lock held)
@@ -247,6 +258,10 @@ func (f *FeatureFlags) setToolFlag(toolName string, enabled bool) {
 		f.ReadContextFile = enabled
 	case "verification_agent":
 		f.VerificationAgent = enabled
+	case "sandbox_code_rewrite":
+		f.SandboxCodeRewrite = enabled
+	case "linux_sandbox":
+		f.LinuxSandbox = enabled
 	}
 	// Unknown tools are ignored
 }

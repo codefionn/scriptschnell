@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build the binary
 go build -o scriptschnell ./cmd/scriptschnell
 
-# Run simple tests
+# Run simple tests (requires access to scriptschnell cache dir)
 go test ./... -short
 
 # Run in TUI mode

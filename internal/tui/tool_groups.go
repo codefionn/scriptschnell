@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -429,9 +430,9 @@ func GroupHeaderStyle(state ToolState) lipgloss.Style {
 }
 
 // generateGroupID generates a unique group ID
-var groupIDCounter int
+var groupIDCounter int64
 
 func generateGroupID() string {
-	groupIDCounter++
-	return fmt.Sprintf("group-%d-%d", time.Now().UnixNano(), groupIDCounter)
+	id := atomic.AddInt64(&groupIDCounter, 1)
+	return fmt.Sprintf("group-%d-%d", time.Now().UnixNano(), id)
 }

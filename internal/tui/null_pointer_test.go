@@ -53,7 +53,7 @@ func TestNullPointer_ToolGroupManager_AddMessageToGroup_NilMessage(t *testing.T)
 	if !result {
 		t.Error("Expected true when adding nil message (current behavior)")
 	}
-	
+
 	// Note: We don't call GetProgress() here because it would crash
 	// on nil message. This test documents that nil messages can be added
 	// but should be handled carefully.
@@ -327,7 +327,7 @@ func TestNullPointer_ToolGroupManager_RemoveGroup_ThenGet(t *testing.T) {
 
 	// Tab should have no groups now
 	groups := gm.GetGroupsForTab(0)
-	if groups != nil && len(groups) != 0 {
+	if len(groups) != 0 {
 		t.Errorf("Expected 0 groups after removal, got %d", len(groups))
 	}
 }
@@ -710,8 +710,8 @@ func TestNullPointer_MessageRenderer_ToggleCollapse(t *testing.T) {
 	mr := NewMessageRenderer(80, 80)
 
 	msg := &message{
-		role:         "Tool",
-		toolName:     "test_tool",
+		role:          "Tool",
+		toolName:      "test_tool",
 		isCollapsible: false,
 	}
 

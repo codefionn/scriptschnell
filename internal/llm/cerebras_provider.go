@@ -31,22 +31,45 @@ func (p *CerebrasProvider) GetName() string {
 	return "cerebras"
 }
 
-// cerebrasModelResponse represents the response from Cerebras /v1/models endpoint.
-type cerebrasModelResponse struct {
-	Object string               `json:"object"`
-	Data   []cerebrasModelEntry `json:"data"`
+// cerebrasOpenRouterResponse represents the OpenRouter format response from Cerebras API.
+type cerebrasOpenRouterResponse struct {
+	Data []cerebrasOpenRouterModel `json:"data"`
 }
 
-type cerebrasModelEntry struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
+// cerebrasOpenRouterModel represents a model in OpenRouter format with extended metadata.
+type cerebrasOpenRouterModel struct {
+	ID                      string                    `json:"id"`
+	Name                    string                    `json:"name"`
+	Description             string                    `json:"description,omitempty"`
+	ContextLength           int                       `json:"context_length"`
+	MaxOutputLength         int                       `json:"max_output_length"`
+	InputModalities         []string                  `json:"input_modalities"`
+	OutputModalities        []string                  `json:"output_modalities"`
+	Pricing                 cerebrasOpenRouterPricing `json:"pricing"`
+	SupportedSamplingParams []string                  `json:"supported_sampling_parameters"`
+	SupportedFeatures       []string                  `json:"supported_features"`
 }
 
-// ListModels fetches available models from the Cerebras API.
+// cerebrasOpenRouterPricing represents pricing information in OpenRouter format.
+type cerebrasOpenRouterPricing struct {
+	Prompt     string `json:"prompt"`
+	Completion string `json:"completion"`
+}
+
+// containsFeature checks if a feature is in the list of supported features.
+func containsFeature(features []string, feature string) bool {
+	for _, f := range features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}
+
+// ListModels fetches available models from the Cerebras API using OpenRouter format.
 func (p *CerebrasProvider) ListModels(ctx context.Context) ([]*ModelInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.cerebras.ai/v1/models", nil)
+	// Use OpenRouter format for enriched model metadata
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.cerebras.ai/public/v1/models?format=openrouter", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -69,7 +92,7 @@ func (p *CerebrasProvider) ListModels(ctx context.Context) ([]*ModelInfo, error)
 		return p.getFallbackModels(), nil
 	}
 
-	var modelsResp cerebrasModelResponse
+	var modelsResp cerebrasOpenRouterResponse
 	if err := json.Unmarshal(body, &modelsResp); err != nil {
 		return p.getFallbackModels(), nil
 	}
@@ -80,21 +103,32 @@ func (p *CerebrasProvider) ListModels(ctx context.Context) ([]*ModelInfo, error)
 
 	models := make([]*ModelInfo, 0, len(modelsResp.Data))
 	for _, m := range modelsResp.Data {
-		// Skip non-model entries
-		if m.Object != "model" {
-			continue
+		model := &ModelInfo{
+			ID:                      m.ID,
+			Provider:                "cerebras",
+			Name:                    m.Name,
+			Description:             m.Description,
+			ContextWindow:           m.ContextLength,
+			MaxOutputTokens:         m.MaxOutputLength,
+			InputModalities:         m.InputModalities,
+			OutputModalities:        m.OutputModalities,
+			SupportsStreaming:       true, // All Cerebras models support streaming
+			SupportedSamplingParams: m.SupportedSamplingParams,
+			SupportedFeatures:       m.SupportedFeatures,
 		}
 
-		models = append(models, &ModelInfo{
-			ID:                  m.ID,
-			Provider:            "cerebras",
-			Name:                getCerebrasDisplayName(m.ID),
-			Description:         getCerebrasDescription(m.ID),
-			ContextWindow:       getCerebrasContextWindow(m.ID),
-			MaxOutputTokens:     getCerebrasMaxOutputTokens(m.ID),
-			SupportsStreaming:   true,
-			SupportsToolCalling: cerebrasSupportsToolCalling(m.ID),
-		})
+		// Set pricing if available
+		if m.Pricing.Prompt != "" || m.Pricing.Completion != "" {
+			model.Pricing = &Pricing{
+				Prompt:     m.Pricing.Prompt,
+				Completion: m.Pricing.Completion,
+			}
+		}
+
+		// Check for tool support from features
+		model.SupportsToolCalling = containsFeature(m.SupportedFeatures, "tools")
+
+		models = append(models, model)
 	}
 
 	return models, nil
@@ -120,16 +154,22 @@ func (p *CerebrasProvider) getFallbackModels() []*ModelInfo {
 
 	result := make([]*ModelInfo, 0, len(models))
 	for _, id := range models {
-		result = append(result, &ModelInfo{
-			ID:                  id,
-			Provider:            "cerebras",
-			Name:                getCerebrasDisplayName(id),
-			Description:         getCerebrasDescription(id),
-			ContextWindow:       getCerebrasContextWindow(id),
-			MaxOutputTokens:     getCerebrasMaxOutputTokens(id),
-			SupportsStreaming:   true,
-			SupportsToolCalling: cerebrasSupportsToolCalling(id),
-		})
+		model := &ModelInfo{
+			ID:                      id,
+			Provider:                "cerebras",
+			Name:                    getCerebrasDisplayName(id),
+			Description:             getCerebrasDescription(id),
+			ContextWindow:           getCerebrasContextWindow(id),
+			MaxOutputTokens:         getCerebrasMaxOutputTokens(id),
+			InputModalities:         getCerebrasInputModalities(id),
+			OutputModalities:        getCerebrasOutputModalities(id),
+			Pricing:                 getCerebrasPricing(id),
+			SupportedSamplingParams: getCerebrasSupportedSamplingParams(id),
+			SupportedFeatures:       getCerebrasSupportedFeatures(id),
+			SupportsStreaming:       true,
+			SupportsToolCalling:     cerebrasSupportsToolCalling(id),
+		}
+		result = append(result, model)
 	}
 
 	return result
@@ -235,6 +275,50 @@ func cerebrasSupportsToolCalling(id string) bool {
 	return true // Default: assume support
 }
 
+// getCerebrasInputModalities returns the input modalities for a Cerebras model.
+func getCerebrasInputModalities(id string) []string {
+	// All Cerebras models support text input
+	return []string{"text"}
+}
+
+// getCerebrasOutputModalities returns the output modalities for a Cerebras model.
+func getCerebrasOutputModalities(id string) []string {
+	// All Cerebras models support text output
+	return []string{"text"}
+}
+
+// getCerebrasPricing returns the pricing information for a Cerebras model.
+func getCerebrasPricing(id string) *Pricing {
+	// Pricing per token (from Cerebras documentation)
+	pricing := map[string]*Pricing{
+		"llama-4-scout-17b-16e-instruct": {Prompt: "0.0000001", Completion: "0.0000001"},
+		"llama3.1-8b":                    {Prompt: "0.0000001", Completion: "0.0000001"},
+		"llama-3.3-70b":                  {Prompt: "0.0000006", Completion: "0.0000012"},
+		"qwen-3-32b":                     {Prompt: "0.0000002", Completion: "0.0000004"},
+		"qwen-3-235b-a22b-instruct-2507": {Prompt: "0.0000002", Completion: "0.0000004"},
+		"qwen-3-235b-a22b-thinking-2507": {Prompt: "0.0000002", Completion: "0.0000004"},
+		"qwen-3-coder-480b":              {Prompt: "0.0000005", Completion: "0.000001"},
+		"gpt-oss-120b":                   {Prompt: "0.0000002", Completion: "0.0000004"},
+	}
+
+	if p, ok := pricing[id]; ok {
+		return p
+	}
+	return &Pricing{Prompt: "0.0000002", Completion: "0.0000004"} // Default pricing
+}
+
+// getCerebrasSupportedSamplingParams returns the supported sampling parameters for a Cerebras model.
+func getCerebrasSupportedSamplingParams(id string) []string {
+	// All Cerebras models support these sampling parameters
+	return []string{"temperature", "top_p", "stop", "seed"}
+}
+
+// getCerebrasSupportedFeatures returns the supported features for a Cerebras model.
+func getCerebrasSupportedFeatures(id string) []string {
+	// All Cerebras models support these features
+	return []string{"streaming", "json_mode", "tools", "structured_outputs"}
+}
+
 // ValidateAPIKey validates the Cerebras API key by attempting to list models.
 func (p *CerebrasProvider) ValidateAPIKey(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.cerebras.ai/v1/models", nil)
@@ -267,12 +351,18 @@ func (p *CerebrasProvider) ValidateAPIKey(ctx context.Context) error {
 // This is a helper function for testing and debugging.
 func GetCerebrasModelInfo(modelID string) *ModelInfo {
 	return &ModelInfo{
-		ID:                  modelID,
-		Provider:            "cerebras",
-		Name:                getCerebrasDisplayName(modelID),
-		Description:         getCerebrasDescription(modelID),
-		ContextWindow:       getCerebrasContextWindow(modelID),
-		MaxOutputTokens:     getCerebrasMaxOutputTokens(modelID),
-		SupportsToolCalling: cerebrasSupportsToolCalling(modelID),
+		ID:                      modelID,
+		Provider:                "cerebras",
+		Name:                    getCerebrasDisplayName(modelID),
+		Description:             getCerebrasDescription(modelID),
+		ContextWindow:           getCerebrasContextWindow(modelID),
+		MaxOutputTokens:         getCerebrasMaxOutputTokens(modelID),
+		InputModalities:         getCerebrasInputModalities(modelID),
+		OutputModalities:        getCerebrasOutputModalities(modelID),
+		Pricing:                 getCerebrasPricing(modelID),
+		SupportedSamplingParams: getCerebrasSupportedSamplingParams(modelID),
+		SupportedFeatures:       getCerebrasSupportedFeatures(modelID),
+		SupportsToolCalling:     cerebrasSupportsToolCalling(modelID),
+		SupportsStreaming:       true,
 	}
 }

@@ -92,6 +92,7 @@ type Manager struct {
 	mu             sync.RWMutex
 	password       string            // For backward compatibility, kept as plaintext
 	securePassword *securemem.String // Secure password storage
+	refreshWg      sync.WaitGroup    // Tracks ongoing model refresh operations
 }
 
 // NewManager creates a new provider manager
@@ -442,8 +443,10 @@ func (m *Manager) RefreshAllModels(ctx context.Context) {
 		return
 	}
 
-	// Refresh in background goroutine
+	// Track refresh for waiting
+	m.refreshWg.Add(1)
 	go func() {
+		defer m.refreshWg.Done()
 		var wg sync.WaitGroup
 		for _, p := range providers {
 			// Skip if context is cancelled
@@ -461,6 +464,12 @@ func (m *Manager) RefreshAllModels(ctx context.Context) {
 		}
 		wg.Wait()
 	}()
+}
+
+// WaitForRefresh waits for any ongoing background model refresh to complete.
+// Returns immediately if no refresh is in progress.
+func (m *Manager) WaitForRefresh() {
+	m.refreshWg.Wait()
 }
 
 // RefreshAllModelsSync refreshes models for all configured providers synchronously
@@ -815,7 +824,38 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 	}
 
 	if model == nil {
-		return nil, fmt.Errorf("model not found: %s", modelID)
+		// Model not found in cache - wait for any ongoing refresh to complete
+		// This handles the race condition where RefreshAllModels() is called
+		// asynchronously but CreateClient() is called before refresh completes
+		m.mu.RUnlock()
+		m.WaitForRefresh()
+		m.mu.RLock()
+
+		// Try loading models again after waiting for refresh
+		for _, p := range m.config.Providers {
+			if len(p.Models) == 0 {
+				m.mu.RUnlock()
+				_ = m.ensureModelsLoaded(p.Name)
+				m.mu.RLock()
+				if reloaded, ok := m.config.Providers[p.Name]; ok {
+					p = reloaded
+				}
+			}
+			for _, mod := range p.Models {
+				if mod.ID == modelID {
+					model = mod
+					provider = p
+					break
+				}
+			}
+			if model != nil {
+				break
+			}
+		}
+
+		if model == nil {
+			return nil, fmt.Errorf("model not found: %s", modelID)
+		}
 	}
 
 	// Get the canonical provider name

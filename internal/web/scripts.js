@@ -128,7 +128,12 @@ function connect() {
                 addMessage("Error", msg.content, "danger");
                 break;
             case "system":
-                addMessage("System", msg.content, "info");
+                if (msg.is_verification_agent) {
+                    // Verification agent messages use compact display (replace previous)
+                    addVerificationAgentMessage(msg.content);
+                } else {
+                    addMessage("System", msg.content, "info");
+                }
                 break;
         }
     }
@@ -190,6 +195,24 @@ function connect() {
             div.innerHTML = "<strong>Tool Result:</strong> <pre class='mb-0'>" + escapeHtml(String(result)) + "</pre>";
         }
         messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    function addVerificationAgentMessage(content) {
+        // Find or create verification agent message container
+        let div = document.getElementById("verification-agent-message");
+        
+        if (!div) {
+            // Create new verification agent message
+            div = document.createElement("div");
+            div.id = "verification-agent-message";
+            div.className = "alert alert-info mb-2";
+            div.innerHTML = "<strong>Verification agent:</strong> " + escapeHtml(content);
+            messages.appendChild(div);
+        } else {
+            // Replace existing verification agent message content
+            div.innerHTML = "<strong>Verification agent:</strong> " + escapeHtml(content);
+        }
         messages.scrollTop = messages.scrollHeight;
     }
 

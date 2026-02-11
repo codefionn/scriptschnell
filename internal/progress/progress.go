@@ -25,6 +25,9 @@ type Update struct {
 	Mode ReportMode
 	// Ephemeral marks the update as transient (should not persist once superseded).
 	Ephemeral bool
+	// VerificationAgent indicates this update is from the verification agent and should replace
+	// previous verification agent messages (compact display mode).
+	VerificationAgent bool
 }
 
 // ShouldStream returns true if the update should be streamed to the user-facing content channel.
@@ -54,4 +57,15 @@ func Dispatch(cb Callback, update Update) error {
 		return nil
 	}
 	return cb(Normalize(update))
+}
+
+// VerificationAgentUpdate creates a progress update marked as coming from the verification agent.
+// This indicates the UI should display this message in compact mode (replacing previous verification messages).
+func VerificationAgentUpdate(message string, mode ReportMode) Update {
+	return Update{
+		Message:           message,
+		Mode:              mode,
+		VerificationAgent: true,
+		Ephemeral:         true,
+	}
 }

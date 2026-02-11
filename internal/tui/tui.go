@@ -149,6 +149,9 @@ type message struct {
 	outputLines int     // Number of output lines (for streaming display)
 	description string  // Human-readable description of what the tool is doing
 
+	// Verification agent support - compact display mode
+	isVerificationAgent bool // Indicates this is a verification agent message that should replace previous ones
+
 	// Tool parameters for display
 	parameters map[string]interface{} // tool call parameters
 
@@ -363,6 +366,13 @@ type TabReasoningMsg struct {
 type TabProcessingStatusMsg struct {
 	TabID  int
 	Status string
+}
+
+// TabVerificationAgentMsg is sent when verification agent updates are received
+// These messages are displayed in compact mode, replacing previous verification messages
+type TabVerificationAgentMsg struct {
+	TabID   int
+	Content string
 }
 
 // TabGenerationCompleteMsg is sent when a tab's generation completes
@@ -2240,6 +2250,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, baseCmd
 
+	case TabVerificationAgentMsg:
+		tabIdx := m.findTabIndexByID(msg.TabID)
+		if tabIdx < 0 {
+			logger.Warn("Received TabVerificationAgentMsg for unknown tab ID: %d", msg.TabID)
+			return m, baseCmd
+		}
+
+		// Update or create a verification agent message with compact display
+		m.updateOrCreateVerificationMessage(tabIdx, msg.Content)
+		return m, baseCmd
+
 	case TabGenerationCompleteMsg:
 		tabIdx := m.findTabIndexByID(msg.TabID)
 		if tabIdx < 0 {
@@ -2575,10 +2596,18 @@ func (m *Model) createProgressCallbackForTab(tabID int) progress.Callback {
 
 		// Handle streaming content
 		if normalized.Message != "" && normalized.ShouldStream() {
-			m.program.Send(TabGeneratingMsg{
-				TabID:   tabID,
-				Content: normalized.Message,
-			})
+			if normalized.VerificationAgent {
+				// Verification agent messages are handled separately for compact display
+				m.program.Send(TabVerificationAgentMsg{
+					TabID:   tabID,
+					Content: normalized.Message,
+				})
+			} else {
+				m.program.Send(TabGeneratingMsg{
+					TabID:   tabID,
+					Content: normalized.Message,
+				})
+			}
 		}
 
 		return nil
@@ -3727,6 +3756,40 @@ func (m *Model) appendAssistantChunkForTab(tabIdx int, content string) {
 	}
 
 	m.appendToLastMessageForTab(tabIdx, content)
+}
+
+// updateOrCreateVerificationMessage updates or creates a verification agent message.
+// This implements compact display by replacing the last verification message instead of appending.
+func (m *Model) updateOrCreateVerificationMessage(tabIdx int, content string) {
+	if !m.validTabIndex(tabIdx) || content == "" {
+		return
+	}
+
+	msgs := m.sessions[tabIdx].Messages
+	timestamp := time.Now().Format("15:04:05")
+
+	// Check if the last message is a verification agent message
+	if len(msgs) > 0 && msgs[len(msgs)-1].isVerificationAgent {
+		// Replace the last verification agent message content
+		msgs[len(msgs)-1].content = content
+		msgs[len(msgs)-1].timestamp = timestamp
+	} else {
+		// Create a new verification agent message
+		msg := message{
+			role:                "Assistant",
+			content:             content,
+			timestamp:           timestamp,
+			isVerificationAgent: true,
+		}
+		msgs = append(msgs, msg)
+	}
+
+	m.storeMessagesForTab(tabIdx, msgs, tabIdx == m.activeSessionIdx)
+
+	// Update viewport if this is the active tab
+	if tabIdx == m.activeSessionIdx {
+		m.viewportDirty = true
+	}
 }
 
 func (m *Model) addToolCallMessage(toolName, toolID, description string, parameters map[string]interface{}) {

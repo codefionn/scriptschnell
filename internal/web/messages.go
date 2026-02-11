@@ -63,6 +63,9 @@ type WebMessage struct {
 	Compact     bool   `json:"compact,omitempty"`     // Whether this is a compact message
 	Description string `json:"description,omitempty"` // Human-readable description of what the tool is doing
 
+	// Verification agent support - compact display mode
+	IsVerificationAgent bool `json:"is_verification_agent,omitempty"` // Indicates this is a verification agent message that should replace previous ones
+
 	// For authorization requests
 	AuthID   string `json:"auth_id,omitempty"`
 	Reason   string `json:"reason,omitempty"`

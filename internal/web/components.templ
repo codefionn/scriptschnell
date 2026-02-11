@@ -393,6 +393,31 @@ templ SystemMessage(content string) {
 	</div>
 }
 
+templ WelcomeScreen() {
+	<div class="welcome-screen d-flex flex-column align-items-center justify-content-center h-100 text-center">
+		<div class="welcome-icon mb-4">
+			<i class="bi bi-terminal-fill"></i>
+		</div>
+		<h1 class="welcome-title mb-3">Welcome to scriptschnell</h1>
+		<p class="welcome-subtitle mb-4">Your AI-powered programming assistant. Start coding with natural language.</p>
+		<div class="welcome-prompts">
+			<p class="text-muted mb-3">Try these prompts:</p>
+			<button class="btn btn-outline-primary prompt-btn mb-2" onclick="sendPrompt('Help me understand this codebase')">
+				<i class="bi bi-code-slash me-2"></i>Help me understand this codebase
+			</button>
+			<button class="btn btn-outline-primary prompt-btn mb-2" onclick="sendPrompt('Create a new REST API endpoint')">
+				<i class="bi bi-plus-circle me-2"></i>Create a new REST API endpoint
+			</button>
+			<button class="btn btn-outline-primary prompt-btn mb-2" onclick="sendPrompt('Debug the failing test in my project')">
+				<i class="bi bi-bug me-2"></i>Debug the failing test in my project
+			</button>
+			<button class="btn btn-outline-primary prompt-btn" onclick="sendPrompt('Refactor this function for better performance')">
+				<i class="bi bi-lightning-charge me-2"></i>Refactor for better performance
+			</button>
+		</div>
+	</div>
+}
+
 templ MarkdownMessage(role string, content string) {
 	<div class="alert alert-secondary mb-1 message-content py-2">
 		<div class="d-flex justify-content-between align-items-start">

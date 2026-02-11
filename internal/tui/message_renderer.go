@@ -67,27 +67,35 @@ func (mr *MessageRenderer) RenderHeader(msg message) string {
 
 	var roleText string
 
-	switch msg.role {
-	case "You":
+	// Special handling for verification agent messages
+	if msg.isVerificationAgent {
 		style := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("86")).
+			Foreground(lipgloss.Color("150")).
 			Bold(true)
-		roleText = style.Render(msg.role)
+		roleText = style.Render("Verification agent")
+	} else {
+		switch msg.role {
+		case "You":
+			style := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("86")).
+				Bold(true)
+			roleText = style.Render(msg.role)
 
-	case "Assistant":
-		style := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("205")).
-			Bold(true)
-		roleText = style.Render(msg.role)
+		case "Assistant":
+			style := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("205")).
+				Bold(true)
+			roleText = style.Render(msg.role)
 
-	case "Tool":
-		// Use tool-specific styling
-		roleText = mr.renderToolHeader(msg)
+		case "Tool":
+			// Use tool-specific styling
+			roleText = mr.renderToolHeader(msg)
 
-	default:
-		style := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-		roleText = style.Render(msg.role)
+		default:
+			style := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241"))
+			roleText = style.Render(msg.role)
+		}
 	}
 
 	// Calculate padding for right-aligned timestamp

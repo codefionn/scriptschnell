@@ -118,7 +118,9 @@ function isLastMessage(element) {
 
 // Toggle tool section visibility
 function toggleToolSection(toolId, section) {
-    const content = document.getElementById(`tool-${toolId}-${section}`);
+    // For output section, toggle the outer section div
+    const targetId = section === 'output' ? `tool-${toolId}-output-section` : `tool-${toolId}-${section}`;
+    const content = document.getElementById(targetId);
     const icon = document.getElementById(`tool-${toolId}-${section}-icon`);
     if (content && icon) {
         if (content.style.display === 'none') {
@@ -1007,6 +1009,45 @@ const clearBtn = document.getElementById('clear-btn');
 // Track whether the LLM is currently generating
 let isProcessing = false;
 
+// Track whether user has sent their first message
+let hasUserSentMessage = false;
+
+// ==================== Welcome Screen Toggle ====================
+
+function showWelcomeScreen() {
+    const welcomeScreen = document.getElementById('welcome-screen');
+    const messagesContainer = document.getElementById('messages');
+    
+    if (welcomeScreen && messagesContainer) {
+        welcomeScreen.classList.remove('d-none');
+        messagesContainer.classList.add('d-none');
+        hasUserSentMessage = false;
+    }
+}
+
+function hideWelcomeScreen() {
+    const welcomeScreen = document.getElementById('welcome-screen');
+    const messagesContainer = document.getElementById('messages');
+    
+    if (welcomeScreen && messagesContainer) {
+        welcomeScreen.classList.add('d-none');
+        messagesContainer.classList.remove('d-none');
+        hasUserSentMessage = true;
+    }
+}
+
+// Send a prompt from welcome screen button
+function sendPrompt(promptText) {
+    if (messageInput && ws && ws.readyState === WebSocket.OPEN) {
+        messageInput.value = promptText;
+        messageInput.focus();
+        // Trigger form submission
+        if (chatForm) {
+            chatForm.dispatchEvent(new Event('submit'));
+        }
+    }
+}
+
 function setProcessing(processing) {
     isProcessing = processing;
     if (processing) {
@@ -1060,6 +1101,10 @@ if (chatForm) {
         e.preventDefault();
         const message = messageInput.value.trim();
         if (message && !isProcessing) {
+            // Hide welcome screen on first message
+            if (!hasUserSentMessage) {
+                hideWelcomeScreen();
+            }
             // Check if WebSocket connection is ready
             if (ws && ws.readyState === WebSocket.OPEN) {
                 try {
@@ -1101,7 +1146,7 @@ if (clearBtn) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             try {
                 ws.send(JSON.stringify({ type: "clear" }));
-                // Clear the UI immediately for better user experience
+                // Show clearing message - welcome screen will be shown on server confirmation
                 messages.innerHTML = "";
                 addMessage("System", "Clearing session...", "info");
             } catch (error) {
@@ -1170,7 +1215,7 @@ function handleMessage(msg) {
             // Show other system messages in chat
             if (msg.content) {
                 addMessage("System", msg.content, "info");
-                // Special handling for session cleared message
+                // Special handling for session cleared message - show welcome screen after confirmation
                 if (msg.content === "Session cleared") {
                     // Remove the "Clearing session..." message and show confirmation
                     const tempMessages = messages.querySelectorAll('.alert-info');
@@ -1180,6 +1225,11 @@ function handleMessage(msg) {
                         }
                     });
                     addMessage("System", "Session cleared successfully", "success");
+                    // After showing the confirmation, clear messages and show welcome screen
+                    setTimeout(() => {
+                        messages.innerHTML = "";
+                        showWelcomeScreen();
+                    }, 1500);
                 }
                 // Reset processing state when generation is stopped
                 if (msg.content === "Generation stopped") {
@@ -1229,8 +1279,8 @@ function handleToolInteraction(msg) {
                     <div class="tool-section-content" id="tool-${toolId}-input">${paramsHtml}</div>
                 </div>
                 <div class="tool-section" id="tool-${toolId}-output-section" style="display: none;">
-                    <div class="tool-section-header">
-                        <i class="bi bi-chevron-right"></i>
+                    <div class="tool-section-header" onclick="event.stopPropagation(); toggleToolSection('${toolId}', 'output')">
+                        <i class="bi bi-chevron-right" id="tool-${toolId}-output-icon"></i>
                         Output
                     </div>
                     <div class="tool-section-content" id="tool-${toolId}-output"></div>
@@ -1257,6 +1307,7 @@ function updateToolResult(toolId, result, error) {
     const toolName = div.dataset.toolName || 'unknown';
     const outputSection = document.getElementById(`tool-${toolId}-output-section`);
     const outputContent = document.getElementById(`tool-${toolId}-output`);
+    const outputIcon = document.getElementById(`tool-${toolId}-output-icon`);
     const statusSpan = div.querySelector('.tool-status');
     const headerIcon = div.querySelector('.tool-header i:first-child');
     
@@ -1285,6 +1336,10 @@ function updateToolResult(toolId, result, error) {
         if (outputSection) {
             outputSection.style.display = 'block';
         }
+        if (outputIcon) {
+            outputIcon.classList.remove('bi-chevron-right');
+            outputIcon.classList.add('bi-chevron-down');
+        }
     } else {
         div.classList.add('border-success');
         if (headerIcon) {
@@ -1300,6 +1355,10 @@ function updateToolResult(toolId, result, error) {
         }
         if (outputSection) {
             outputSection.style.display = 'block';
+        }
+        if (outputIcon) {
+            outputIcon.classList.remove('bi-chevron-right');
+            outputIcon.classList.add('bi-chevron-down');
         }
     }
     

@@ -281,22 +281,15 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 	logger.Info("Running verification: %s", reason)
 
 	sendStatus := func(msg string) {
-		dispatchProgress(progressCb, progress.Update{
-			Message:   msg,
-			Mode:      progress.ReportJustStatus,
-			Ephemeral: true,
-		})
+		dispatchProgress(progressCb, progress.VerificationAgentUpdate(msg, progress.ReportJustStatus))
 	}
 
 	sendStream := func(msg string) {
-		dispatchProgress(progressCb, progress.Update{
-			Message: msg,
-			Mode:    progress.ReportNoStatus,
-		})
+		dispatchProgress(progressCb, progress.VerificationAgentUpdate(msg, progress.ReportNoStatus))
 	}
 
 	// Send initial progress message
-	sendStream("\n\n---\n\n**Verification Phase**\n\n")
+	sendStream("**Verification Phase**\n\n")
 	sendStatus("Running verification checks...")
 
 	// Create a new session for verification
@@ -647,10 +640,7 @@ func (a *VerificationAgent) reportResults(result *VerificationResult, progressCb
 
 	sb.WriteString("\n---\n")
 
-	dispatchProgress(progressCb, progress.Update{
-		Message: sb.String(),
-		Mode:    progress.ReportNoStatus,
-	})
+	dispatchProgress(progressCb, progress.VerificationAgentUpdate(sb.String(), progress.ReportNoStatus))
 }
 
 func statusText(passed bool) string {

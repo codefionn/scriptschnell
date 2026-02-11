@@ -190,6 +190,17 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 		if msg.Message == "Thinking..." {
 			return nil
 		}
+		// Verification agent messages should be sent even if ephemeral
+		if msg.VerificationAgent && msg.Message != "" {
+			logger.Debug("Progress (verification agent): %s", msg.Message)
+			callback(
+				&WebMessage{
+					Type:                MessageTypeSystem,
+					Content:             msg.Message,
+					IsVerificationAgent: true,
+				})
+			return nil
+		}
 		// Only send non-ephemeral important messages
 		if !msg.Ephemeral && msg.Message != "" {
 			logger.Debug("Progress: %s", msg.Message)

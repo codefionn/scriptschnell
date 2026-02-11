@@ -140,6 +140,18 @@ templ Page(token string, title string) {
 					padding: 0.4rem 0.6rem;
 					margin-bottom: 0.25rem;
 				}
+				/* Verification Agent Message Styles */
+				#verification-agent-message {
+					transition: all 0.3s ease;
+					border-left: 3px solid #0dcaf0;
+				}
+				#verification-agent-message .alert-info {
+					background: #e3f2fd;
+					border: none;
+				}
+				#verification-agent-message strong {
+					color: #0dcaf0;
+				}
 				/* Status Bar Styles */
 				.status-bar {
 					background: #f8f9fa;
@@ -467,6 +479,49 @@ templ Page(token string, title string) {
 				.result-table tr:nth-child(even) {
 					background: #f8f9fa;
 				}
+				/* Welcome Screen Styles */
+				.welcome-screen {
+					padding: 2rem;
+					animation: fadeIn 0.5s ease-in;
+				}
+				.welcome-icon {
+					font-size: 4rem;
+					color: #0d6efd;
+					animation: float 3s ease-in-out infinite;
+				}
+				.welcome-title {
+					font-size: 2.5rem;
+					font-weight: 700;
+					color: #212529;
+				}
+				.welcome-subtitle {
+					font-size: 1.1rem;
+					color: #6c757d;
+					max-width: 600px;
+				}
+				.welcome-prompts {
+					max-width: 700px;
+				}
+				.prompt-btn {
+					width: 100%;
+					text-align: left;
+					padding: 0.75rem 1rem;
+					font-size: 0.95rem;
+					transition: all 0.2s ease;
+					border-radius: 0.5rem;
+				}
+				.prompt-btn:hover {
+					transform: translateY(-2px);
+					box-shadow: 0 4px 12px rgba(13, 110, 253, 0.15);
+				}
+				@keyframes fadeIn {
+					from { opacity: 0; }
+					to { opacity: 1; }
+				}
+				@keyframes float {
+					0%, 100% { transform: translateY(0); }
+					50% { transform: translateY(-10px); }
+				}
 </style>
 		</head>
 		<body class="bg-light">
@@ -505,8 +560,12 @@ templ Header() {
 }
 
 templ Main() {
-	<main class="col-12 h-100 overflow-auto p-3" id="messages">
-		@SystemMessage("Connected to scriptschnell. Start a conversation by typing a message below.")
+	<!-- Welcome screen - initially visible -->
+	<div class="col-12 h-100 overflow-auto p-3" id="welcome-screen">
+		@WelcomeScreen()
+	</div>
+	<!-- Messages container - initially hidden -->
+	<main class="col-12 h-100 overflow-auto p-3 d-none" id="messages">
 	</main>
 }
 

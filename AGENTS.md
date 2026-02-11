@@ -22,6 +22,9 @@ go install ./cmd/scriptschnell
 
 # Format files
 gofmt -s -w .
+
+# Lint
+golangci-lint run
 ```
 
 Test the codebase with `-short` flag to skip slow integration tests.

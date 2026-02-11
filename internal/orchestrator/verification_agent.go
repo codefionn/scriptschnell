@@ -510,6 +510,15 @@ func (a *VerificationAgent) completeWithRetry(ctx context.Context, client llm.Cl
 func (a *VerificationAgent) formatVerificationToolCall(toolName string, args map[string]interface{}) string {
 	switch toolName {
 	case "go_sandbox":
+		// Check for description parameter first
+		if description, ok := args["description"].(string); ok && description != "" {
+			// Truncate long descriptions
+			if len(description) > 80 {
+				description = description[:77] + "..."
+			}
+			return fmt.Sprintf("→ Running: %s\n", description)
+		}
+		// Fall back to showing code if no description
 		if code, ok := args["code"].(string); ok {
 			// Show first line of code or command
 			lines := strings.Split(code, "\n")

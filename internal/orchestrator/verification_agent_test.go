@@ -412,7 +412,7 @@ func TestFormatVerificationToolCall(t *testing.T) {
 
 	agent := NewVerificationAgent(orch)
 
-	// Test go_sandbox with shell command
+	// Test go_sandbox with description parameter (should be used over code)
 	goCode := `package main
 
 import "fmt"
@@ -421,11 +421,30 @@ func main() {
 	stdout, stderr, code := ExecuteCommand([]string{"go", "build", "-o", "app", "./cmd/main.go"}, "")
 	fmt.Printf("Build result: %d", code)
 }`
-	args := map[string]interface{}{"code": goCode}
+	args := map[string]interface{}{"code": goCode, "description": "Building the main application"}
 	result := agent.formatVerificationToolCall("go_sandbox", args)
+	assert.Equal(t, "→ Running: Building the main application\n", result)
+	assert.NotContains(t, result, "package main")
+
+	// Test go_sandbox with empty description (should fall back to code)
+	args = map[string]interface{}{"code": goCode, "description": ""}
+	result = agent.formatVerificationToolCall("go_sandbox", args)
 	assert.Contains(t, result, "Running: `package main`")
 
-	// Test go_sandbox with long code truncation
+	// Test go_sandbox without description (should use code)
+	args = map[string]interface{}{"code": goCode}
+	result = agent.formatVerificationToolCall("go_sandbox", args)
+	assert.Contains(t, result, "Running: `package main`")
+
+	// Test go_sandbox with long description truncation
+	longDescription := strings.Repeat("a", 100)
+	args = map[string]interface{}{"code": goCode, "description": longDescription}
+	result = agent.formatVerificationToolCall("go_sandbox", args)
+	assert.True(t, strings.Contains(result, "..."))
+	// The result should be: "→ Running: aaaaaaaaaaaaa...\n"
+	assert.True(t, len(result) < len("→ Running: "+longDescription+"\n"))
+
+	// Test go_sandbox with long code truncation (fallback when no description)
 	longCode := strings.Repeat("a", 100)
 	args = map[string]interface{}{"code": longCode}
 	result = agent.formatVerificationToolCall("go_sandbox", args)

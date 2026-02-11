@@ -22,9 +22,9 @@ type SandboxCodeRewriter struct {
 
 // RewriteResult describes the outcome of analyzing sandbox code.
 type RewriteResult struct {
-	RewrittenCode string // The corrected code (for os_exec rewrites)
+	RewrittenCode string // The corrected code (for os_exec or compilation_error rewrites)
 	ExtractedText string // The static text (for print_only detection)
-	RewriteType   string // "os_exec", "print_only", or "none"
+	RewriteType   string // "os_exec", "print_only", "compilation_error", or "none"
 }
 
 // NewSandboxCodeRewriter creates a new rewriter instance.
@@ -308,4 +308,87 @@ func (r *SandboxCodeRewriter) AnalyzeAndRewrite(ctx context.Context, code string
 	}
 
 	return &RewriteResult{RewriteType: "none"}, nil
+}
+
+const compilationErrorRewriteSystemPrompt = `You are fixing Go code that failed TinyGo compilation for a WebAssembly sandbox.
+
+The code is compiled with TinyGo targeting WASI. The compilation error messages may reference line numbers that are OFFSET from the original code because the code gets wrapped with ~800 lines of authorization boilerplate before compilation. Ignore exact line numbers and focus on the error descriptions.
+
+Common TinyGo/WASI limitations:
+- No full net/http server support (http.ListenAndServe won't work)
+- No os/exec package (use ExecuteCommand sandbox API instead)
+- Limited reflection support
+- No plugin package
+- No unsafe.Pointer arithmetic with uintptr in some cases
+- Some standard library packages are stubbed or unavailable
+- Missing imports are the most common error
+
+Available sandbox functions (globally available, no imports needed):
+- ExecuteCommand(command []string, stdin string) (stdout, stderr string, exitCode int)
+- Fetch(method, url, body string) (responseBody string, statusCode int)
+- ReadFile(path string, fromLine, toLine int) string
+- WriteFile(path string, append bool, content string) string
+- CreateFile(path, content string) string
+- ListFiles(pattern string) string
+- GrepFile(pattern, path, glob string, context int) string
+- RemoveFile(path string) string
+- RemoveDir(path string, recursive bool) string
+- Mkdir(path string, recursive bool) string
+- Move(src, dst string) string
+- Summarize(prompt, text string) string
+- ConvertHTML(html string) string
+
+Global vars: last_exit_code int, last_stdout string, last_stderr string
+
+Rules:
+1. Fix the compilation errors while preserving the original program's intent
+2. If an import is missing, add it
+3. If an incompatible stdlib package is used, find an alternative or use sandbox APIs
+4. Return ONLY the complete fixed Go code, no markdown fences or explanation
+5. The code must have "package main" and "func main()"
+6. Do not change the program's behavior beyond what is needed to fix compilation`
+
+// RewriteCompilationError calls the summarization LLM to fix Go code that
+// failed TinyGo compilation. Returns the fixed code or an error.
+func (r *SandboxCodeRewriter) RewriteCompilationError(ctx context.Context, originalCode, compileErrors string) (string, error) {
+	if r.summarizeClient == nil {
+		return "", fmt.Errorf("summarization client not available")
+	}
+
+	userPrompt := fmt.Sprintf("Fix the following Go code that failed TinyGo compilation.\n\nCompilation errors:\n%s\n\nOriginal code:\n%s", compileErrors, originalCode)
+
+	response, err := r.summarizeClient.CompleteWithRequest(ctx, &llm.CompletionRequest{
+		Messages: []*llm.Message{
+			{Role: "system", Content: compilationErrorRewriteSystemPrompt},
+			{Role: "user", Content: userPrompt},
+		},
+		MaxTokens:   8192,
+		Temperature: 1.0,
+	})
+	if err != nil {
+		return "", fmt.Errorf("LLM compilation fix request failed: %w", err)
+	}
+
+	fixed := strings.TrimSpace(response.Content)
+	fixed = stripCodeFences(fixed)
+
+	// Sanity checks
+	if !strings.Contains(fixed, "func main()") {
+		return "", fmt.Errorf("fixed code is missing func main()")
+	}
+	if !strings.Contains(fixed, "package main") {
+		return "", fmt.Errorf("fixed code is missing package main")
+	}
+
+	return fixed, nil
+}
+
+// isCompilationError checks if a tool result represents a compilation failure.
+func isCompilationError(result interface{}) bool {
+	resMap, ok := result.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	errStr, _ := resMap["error"].(string)
+	return errStr == "compilation failed"
 }

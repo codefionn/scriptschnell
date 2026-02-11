@@ -3060,6 +3060,56 @@ func (o *Orchestrator) processToolCalls(
 				}
 			}
 
+			// Post-execution: attempt to auto-fix compilation errors for go_sandbox
+			if toolName == "go_sandbox" && result != nil && result.Error == "" &&
+				o.sandboxCodeRewriter != nil && o.sandboxCodeRewriter.enabled {
+				if resMap, ok := result.Result.(map[string]interface{}); ok {
+					if errStr, _ := resMap["error"].(string); errStr == "compilation failed" {
+						code, _ := args["code"].(string)
+						compileOutput, _ := resMap["stdout"].(string)
+						if code != "" && compileOutput != "" {
+							dispatchProgress(progressCb, progress.Update{
+								Message:   "Attempting to fix compilation error...",
+								Mode:      progress.ReportJustStatus,
+								Ephemeral: true,
+							})
+							logger.Info("SandboxCodeRewriter: attempting compilation error fix for tool call %s", toolID)
+
+							fixedCode, fixErr := o.sandboxCodeRewriter.RewriteCompilationError(ctx, code, compileOutput)
+							if fixErr == nil {
+								// Re-execute with fixed code
+								args["code"] = fixedCode
+								callObj.Parameters["code"] = fixedCode
+								result2, execErr2 := execFunc(ctx, callObj, toolName, progressCb, toolCallCb, toolResultCb, false)
+								if execErr2 != nil {
+									// Revert: restore original code, keep original error
+									args["code"] = code
+									callObj.Parameters["code"] = code
+									logger.Warn("SandboxCodeRewriter: re-execution failed: %v", execErr2)
+								} else if isCompilationError(result2.Result) {
+									// Fix didn't work, revert
+									args["code"] = code
+									callObj.Parameters["code"] = code
+									logger.Warn("SandboxCodeRewriter: fixed code still has compilation errors")
+								} else {
+									// Fix worked - use new result and update history
+									result = result2
+									o.rewriteSandboxToolCallInHistory(sess, toolID, fixedCode)
+									dispatchProgress(progressCb, progress.Update{
+										Message:   "Auto-fixed compilation error",
+										Mode:      progress.ReportJustStatus,
+										Ephemeral: true,
+									})
+									logger.Info("SandboxCodeRewriter: successfully fixed compilation error for tool call %s", toolID)
+								}
+							} else {
+								logger.Warn("SandboxCodeRewriter: compilation error fix failed: %v", fixErr)
+							}
+						}
+					}
+				}
+			}
+
 			// Check if authorization is required
 			if result.RequiresUserInput {
 				// Ask user for approval - prefer userInteractionClient, fall back to authCb

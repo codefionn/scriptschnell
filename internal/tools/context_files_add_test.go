@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -245,5 +246,104 @@ func TestNewAddContextDirectoryToolFactory(t *testing.T) {
 	}
 	if executor.Name() != ToolNameAddContextDirectory {
 		t.Fatalf("expected tool name %s, got %s", ToolNameAddContextDirectory, executor.Name())
+	}
+}
+
+func TestAddContextDirectoryToolExecuteHomeDirectory(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	cfg := config.DefaultConfig()
+	sess := session.NewSession("test", "/workspace")
+
+	// Get the home directory for testing
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("cannot get user home directory: %v", err)
+	}
+
+	// Create the home directory in mock filesystem
+	if err := mockFS.MkdirAll(ctx, homeDir, os.ModePerm); err != nil {
+		t.Fatalf("failed to create home directory: %v", err)
+	}
+
+	tool := NewAddContextDirectoryTool(mockFS, cfg, sess)
+	result := tool.Execute(ctx, map[string]interface{}{
+		"directory": homeDir,
+	})
+
+	if result.Error == "" {
+		t.Fatalf("expected error for home directory")
+	}
+	if !strings.Contains(result.Error, "cannot add home directory") {
+		t.Fatalf("expected error to mention home directory restriction, got: %s", result.Error)
+	}
+}
+
+func TestIsHomeDirectory(t *testing.T) {
+	// Get the home directory for testing
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("cannot get user home directory: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		path     string
+		expected bool
+	}{
+		{
+			name:     "home directory - exact match",
+			path:     homeDir,
+			expected: true,
+		},
+		{
+			name:     "home directory with trailing slash",
+			path:     homeDir + "/",
+			expected: true,
+		},
+		{
+			name:     "home directory with tilde",
+			path:     "~",
+			expected: true,
+		},
+		{
+			name:     "home directory with tilde and trailing slash",
+			path:     "~/",
+			expected: true,
+		},
+		{
+			name:     "subdirectory of home",
+			path:     filepath.Join(homeDir, "Documents"),
+			expected: false,
+		},
+		{
+			name:     "subdirectory of home with tilde",
+			path:     "~/Documents",
+			expected: false,
+		},
+		{
+			name:     "non-home directory",
+			path:     "/usr/local",
+			expected: false,
+		},
+		{
+			name:     "non-existent home-like path",
+			path:     "/nonexistent/home",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := IsHomeDirectory(tt.path)
+			if err != nil {
+				t.Logf("IsHomeDirectory(%q) returned error: %v", tt.path, err)
+				// Some tests may error on non-existent paths, which is acceptable
+				return
+			}
+			if result != tt.expected {
+				t.Errorf("IsHomeDirectory(%q) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
 	}
 }

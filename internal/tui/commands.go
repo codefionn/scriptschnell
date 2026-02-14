@@ -15,6 +15,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/session"
+	"github.com/codefionn/scriptschnell/internal/tools"
 )
 
 type commandHelpEntry struct {
@@ -1052,6 +1053,15 @@ func (ch *CommandHandler) handleContextAdd(args []string) (MenuResult, error) {
 
 	if dir == "" {
 		return MenuResult{}, fmt.Errorf("directory path cannot be empty")
+	}
+
+	// Check if the directory is the user's home directory
+	isHomeDir, err := tools.IsHomeDirectory(dir)
+	if err != nil {
+		return MenuResult{}, fmt.Errorf("failed to validate directory: %w", err)
+	}
+	if isHomeDir {
+		return MenuResult{}, fmt.Errorf("cannot add home directory as context directory for security reasons; add a subdirectory instead (e.g., ~/Documents, ~/projects)")
 	}
 
 	// Add to config for current workspace

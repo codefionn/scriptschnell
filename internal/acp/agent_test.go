@@ -406,3 +406,47 @@ func TestToolCallContentUpdates(t *testing.T) {
 		t.Errorf("File content not updated as expected. Got %q, want %q", string(finalContent), modifiedContent)
 	}
 }
+
+// TestHandleContextAdd_HomeDirectoryRejection tests that the home directory cannot be added as a context directory
+func TestHandleContextAdd_HomeDirectoryRejection(t *testing.T) {
+	agent := newTestAgent(t)
+
+	if agent == nil {
+		t.Fatal("Failed to create test agent")
+	}
+
+	// Get the home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("Cannot get user home directory: %v", err)
+	}
+
+	// Try to add the home directory - should fail with home directory error
+	_, err = agent.handleContextAdd(homeDir)
+	if err == nil {
+		t.Error("expected error when adding home directory, got nil")
+	} else if !strings.Contains(err.Error(), "cannot add home directory") {
+		t.Errorf("expected error to mention home directory restriction, got: %v", err)
+	}
+
+	// Try with tilde notation - should also fail
+	_, err = agent.handleContextAdd("~")
+	if err == nil {
+		t.Error("expected error when adding home directory with tilde, got nil")
+	} else if !strings.Contains(err.Error(), "cannot add home directory") {
+		t.Errorf("expected error to mention home directory restriction for tilde, got: %v", err)
+	}
+
+	// Verify that subdirectories of home are allowed (validation passes, but save may fail due to permissions)
+	subDir := filepath.Join(t.TempDir(), "subdir")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("Failed to create test subdirectory: %v", err)
+	}
+
+	_, err = agent.handleContextAdd(subDir)
+	// The validation should pass (not a home directory error)
+	// Save may fail due to permissions in test environment, which is OK for this test
+	if err != nil && strings.Contains(err.Error(), "cannot add home directory") {
+		t.Errorf("expected no home directory error for subdirectory, got: %v", err)
+	}
+}

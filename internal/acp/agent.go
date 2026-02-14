@@ -387,6 +387,15 @@ func (a *ScriptschnellAIAgent) handleContextAdd(dir string) (string, error) {
 		return "", fmt.Errorf("directory path cannot be empty")
 	}
 
+	// Check if the directory is the user's home directory
+	isHomeDir, err := tools.IsHomeDirectory(dir)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate directory: %w", err)
+	}
+	if isHomeDir {
+		return "", fmt.Errorf("cannot add home directory as context directory for security reasons; add a subdirectory instead (e.g., ~/Documents, ~/projects)")
+	}
+
 	// Add to config for current workspace
 	a.config.AddContextDirectory(a.config.WorkingDir, dir)
 

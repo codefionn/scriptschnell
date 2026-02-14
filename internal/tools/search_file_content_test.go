@@ -214,7 +214,7 @@ func TestSearchFileContentTool_Execute_UnreadableFiles(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a directory with a readable file
-	mockFS.MkdirAll(ctx, "testdir", 0755)
+	_ = mockFS.MkdirAll(ctx, "testdir", 0755)
 	_ = mockFS.WriteFile(ctx, "testdir/good.txt", []byte("good content\n"))
 
 	result := tool.Execute(ctx, map[string]interface{}{

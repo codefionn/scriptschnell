@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,6 +16,65 @@ import (
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
+
+// IsHomeDirectory checks if the given path is the user's home directory.
+// It handles path normalization, symlinks, and trailing slashes.
+// Returns true if the path resolves to the home directory, false otherwise.
+// Subdirectories of the home directory (e.g., ~/Documents) are allowed and will return false.
+func IsHomeDirectory(path string) (bool, error) {
+	// Get the user's home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	// Normalize the home directory path
+	absHomeDir, err := filepath.Abs(homeDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve home directory path: %w", err)
+	}
+	absHomeDir = filepath.Clean(absHomeDir)
+
+	// Expand ~ if present in the input path
+	if strings.HasPrefix(path, "~") {
+		path = filepath.Join(homeDir, path[1:])
+	}
+
+	// Normalize the input path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve path: %w", err)
+	}
+	absPath = filepath.Clean(absPath)
+
+	// Check if the path exists and resolve any symlinks
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Path doesn't exist, compare the normalized paths as-is
+			return absPath == absHomeDir, nil
+		}
+		return false, fmt.Errorf("failed to stat path: %w", err)
+	}
+
+	// If it's a symlink, resolve it
+	if info.Mode()&os.ModeSymlink != 0 {
+		resolvedPath, err := filepath.EvalSymlinks(absPath)
+		if err != nil {
+			// Failed to resolve symlink, fall back to normalized path comparison
+			return absPath == absHomeDir, nil
+		}
+		absPath = filepath.Clean(resolvedPath)
+	}
+
+	// Also resolve symlinks in home directory for comparison
+	resolvedHomeDir, err := filepath.EvalSymlinks(absHomeDir)
+	if err == nil {
+		absHomeDir = filepath.Clean(resolvedHomeDir)
+	}
+
+	return absPath == absHomeDir, nil
+}
 
 // SearchContextFilesToolSpec is the static specification for the search_context_files tool
 type SearchContextFilesToolSpec struct{}
@@ -877,7 +937,7 @@ func (s *AddContextDirectoryToolSpec) Name() string {
 }
 
 func (s *AddContextDirectoryToolSpec) Description() string {
-	return "Add a directory to the context directories configuration. This allows the LLM to access files from this directory for documentation, library sources, and other external resources. Requires user authorization before execution."
+	return "Add a directory to the context directories configuration. This allows the LLM to access files from this directory for documentation, library sources, and other external resources. Requires user authorization before execution. Note: The home directory cannot be added as a context directory for security reasons."
 }
 
 func (s *AddContextDirectoryToolSpec) Parameters() map[string]interface{} {
@@ -956,6 +1016,15 @@ func (t *AddContextDirectoryTool) Execute(ctx context.Context, params map[string
 	}
 	if !info.IsDir {
 		return &ToolResult{Error: fmt.Sprintf("path is not a directory: %s", absDir)}
+	}
+
+	// Check if the directory is the user's home directory
+	isHomeDir, err := IsHomeDirectory(absDir)
+	if err != nil {
+		return &ToolResult{Error: fmt.Sprintf("failed to validate directory: %v", err)}
+	}
+	if isHomeDir {
+		return &ToolResult{Error: "cannot add home directory as context directory for security reasons; add a subdirectory instead (e.g., ~/Documents, ~/projects)"}
 	}
 
 	// Check if already configured

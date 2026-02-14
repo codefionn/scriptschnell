@@ -399,6 +399,8 @@ func (a *AuthorizationActor) authorize(ctx context.Context, toolName string, par
 		return a.authorizeShell(ctx, params)
 	case ToolNameCommand:
 		return a.authorizeShell(ctx, params)
+	case ToolNameAddContextDirectory:
+		return a.authorizeAddContextDirectory(ctx, params)
 	default:
 		return &AuthorizationDecision{Allowed: true}, nil
 	}
@@ -564,6 +566,27 @@ func (a *AuthorizationActor) authorizeShell(ctx context.Context, params map[stri
 	}
 
 	return a.judgeShellCommandWithLLM(ctx, command)
+}
+
+// authorizeAddContextDirectory requires user approval for adding context directories
+func (a *AuthorizationActor) authorizeAddContextDirectory(ctx context.Context, params map[string]interface{}) (*AuthorizationDecision, error) {
+	directory := GetStringParam(params, "directory", "")
+	reason := GetStringParam(params, "reason", "")
+
+	if directory == "" {
+		return &AuthorizationDecision{Allowed: false, Reason: "directory is required"}, nil
+	}
+
+	authReason := fmt.Sprintf("Add context directory: %s", directory)
+	if reason != "" {
+		authReason = fmt.Sprintf("Add context directory: %s\n\nReason: %s", directory, reason)
+	}
+
+	return &AuthorizationDecision{
+		Allowed:           false,
+		Reason:            authReason,
+		RequiresUserInput: true,
+	}, nil
 }
 
 // judgeToolCallWithSecrets delegates tool call authorization decisions with detected secrets to the summarize client.

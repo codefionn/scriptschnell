@@ -868,3 +868,122 @@ func NewReadContextFileToolFactory(filesystem fs.FileSystem, cfg *config.Config,
 		return NewReadContextFileTool(filesystem, cfg, sess)
 	}
 }
+
+// AddContextDirectoryToolSpec is the static specification for the add_context_directory tool
+type AddContextDirectoryToolSpec struct{}
+
+func (s *AddContextDirectoryToolSpec) Name() string {
+	return ToolNameAddContextDirectory
+}
+
+func (s *AddContextDirectoryToolSpec) Description() string {
+	return "Add a directory to the context directories configuration. This allows the LLM to access files from this directory for documentation, library sources, and other external resources. Requires user authorization before execution."
+}
+
+func (s *AddContextDirectoryToolSpec) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"directory": map[string]interface{}{
+				"type":        "string",
+				"description": "Path to the directory to add to context directories (required). The directory must exist.",
+			},
+			"reason": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional explanation for why this directory should be added to context. This will be shown to the user during authorization.",
+			},
+		},
+		"required": []string{"directory"},
+	}
+}
+
+// AddContextDirectoryTool adds directories to the context configuration
+type AddContextDirectoryTool struct {
+	fs      fs.FileSystem
+	config  *config.Config
+	session *session.Session
+}
+
+func NewAddContextDirectoryTool(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) *AddContextDirectoryTool {
+	return &AddContextDirectoryTool{
+		fs:      filesystem,
+		config:  cfg,
+		session: sess,
+	}
+}
+
+func (t *AddContextDirectoryTool) Name() string { return ToolNameAddContextDirectory }
+func (t *AddContextDirectoryTool) Description() string {
+	return (&AddContextDirectoryToolSpec{}).Description()
+}
+func (t *AddContextDirectoryTool) Parameters() map[string]interface{} {
+	return (&AddContextDirectoryToolSpec{}).Parameters()
+}
+
+func (t *AddContextDirectoryTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
+	directory := GetStringParam(params, "directory", "")
+	if directory == "" {
+		return &ToolResult{Error: "directory is required"}
+	}
+
+	reason := GetStringParam(params, "reason", "")
+
+	// Get workspace from session
+	workspace := t.session.WorkingDir
+	if workspace == "" {
+		workspace = "."
+	}
+
+	// Convert to absolute path if relative
+	absDir := directory
+	if !filepath.IsAbs(directory) {
+		absDir = filepath.Join(workspace, directory)
+	}
+
+	// Check if directory exists
+	exists, err := t.fs.Exists(ctx, absDir)
+	if err != nil {
+		return &ToolResult{Error: fmt.Sprintf("failed to check directory existence: %v", err)}
+	}
+	if !exists {
+		return &ToolResult{Error: fmt.Sprintf("directory does not exist: %s", absDir)}
+	}
+
+	// Verify it's actually a directory
+	info, err := t.fs.Stat(ctx, absDir)
+	if err != nil {
+		return &ToolResult{Error: fmt.Sprintf("failed to stat directory: %v", err)}
+	}
+	if !info.IsDir {
+		return &ToolResult{Error: fmt.Sprintf("path is not a directory: %s", absDir)}
+	}
+
+	// Check if already configured
+	contextDirs := t.config.GetContextDirectories(workspace)
+	for _, dir := range contextDirs {
+		if dir == absDir {
+			return &ToolResult{Result: fmt.Sprintf("Directory already in context directories: %s", absDir)}
+		}
+	}
+
+	// Add to configuration
+	t.config.AddContextDirectory(workspace, absDir)
+
+	// Format result
+	var result strings.Builder
+	result.WriteString("## Context Directory Added\n\n")
+	result.WriteString(fmt.Sprintf("**Directory:** `%s`\n", absDir))
+	if reason != "" {
+		result.WriteString(fmt.Sprintf("**Reason:** %s\n", reason))
+	}
+	result.WriteString("\nThe directory has been added to the context directories configuration and will be available for searching and reading.")
+
+	return &ToolResult{Result: result.String()}
+}
+
+// NewAddContextDirectoryToolFactory creates a factory for AddContextDirectoryTool
+func NewAddContextDirectoryToolFactory(filesystem fs.FileSystem, cfg *config.Config, sess *session.Session) ToolFactory {
+	return func(reg *Registry) ToolExecutor {
+		return NewAddContextDirectoryTool(filesystem, cfg, sess)
+	}
+}

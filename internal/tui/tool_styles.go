@@ -689,6 +689,10 @@ func extractPrimaryParameter(toolName string, parameters map[string]interface{})
 		if path, ok := parameters["path"].(string); ok {
 			return truncatePathSmart(path, 50)
 		}
+	case tools.ToolNameAddContextDirectory:
+		if directory, ok := parameters["directory"].(string); ok {
+			return truncatePathSmart(directory, 40)
+		}
 
 	// Parallel execution - count
 	case tools.ToolNameParallel:
@@ -833,6 +837,10 @@ func extractSecondaryParameters(toolName string, parameters map[string]interface
 		}
 		if context, ok := parameters["context_lines"].(float64); ok && context > 0 {
 			secondary["context"] = fmt.Sprintf("%.0f", context)
+		}
+	case tools.ToolNameAddContextDirectory:
+		if reason, ok := parameters["reason"].(string); ok && reason != "" {
+			secondary["reason"] = truncateStringSmart(reason, 30)
 		}
 	}
 

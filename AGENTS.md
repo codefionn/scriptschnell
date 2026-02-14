@@ -116,6 +116,10 @@ Available tools:
 - **parallel_tools**: Execute several registered tools concurrently and merge responses
 - **todo**: Manage todo items
 - **status**: Check status of background jobs
+- **search_context_files**: Search for files by name pattern in configured context directories
+- **grep_context_files**: Search for text patterns in files within configured context directories
+- **read_context_file**: Read a file from configured context directories
+- **add_context_directory**: Add a directory to the context directories configuration (requires user authorization)
 
 ### Configuration
 

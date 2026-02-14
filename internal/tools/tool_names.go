@@ -26,4 +26,5 @@ const (
 	ToolNameSearchContextFiles   = "search_context_files"
 	ToolNameGrepContextFiles     = "grep_context_files"
 	ToolNameReadContextFile      = "read_context_file"
+	ToolNameAddContextDirectory  = "add_context_directory"
 )

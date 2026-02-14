@@ -533,6 +533,81 @@ func TestAuthorizationActorReceiveUnknownMessage(t *testing.T) {
 	}
 }
 
+func TestAuthorizationActorAuthorizeAddContextDirectoryRequiresApproval(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameAddContextDirectory, map[string]interface{}{"directory": "/some/path"})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected add_context_directory to require user approval")
+	}
+	if !decision.RequiresUserInput {
+		t.Fatalf("expected add_context_directory to require user input")
+	}
+	if !strings.Contains(decision.Reason, "/some/path") {
+		t.Fatalf("expected reason to contain directory path, got: %s", decision.Reason)
+	}
+}
+
+func TestAuthorizationActorAuthorizeAddContextDirectoryWithReason(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameAddContextDirectory, map[string]interface{}{
+		"directory": "/docs/go",
+		"reason":    "Need Go documentation for reference",
+	})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected add_context_directory to require user approval")
+	}
+	if !decision.RequiresUserInput {
+		t.Fatalf("expected add_context_directory to require user input")
+	}
+	if !strings.Contains(decision.Reason, "/docs/go") {
+		t.Fatalf("expected reason to contain directory path, got: %s", decision.Reason)
+	}
+	if !strings.Contains(decision.Reason, "Need Go documentation for reference") {
+		t.Fatalf("expected reason to contain the provided reason, got: %s", decision.Reason)
+	}
+}
+
+func TestAuthorizationActorAuthorizeAddContextDirectoryMissingDirectory(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameAddContextDirectory, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected add_context_directory without directory to be denied")
+	}
+	if decision.RequiresUserInput {
+		t.Fatalf("expected missing directory to not require user input (just deny)")
+	}
+}
+
 type dummyMessage struct{}
 
 func (dummyMessage) Type() string { return "dummy" }

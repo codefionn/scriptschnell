@@ -1159,6 +1159,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(&tools.SearchContextFilesToolSpec{}, false, tools.NewSearchContextFilesToolFactory(o.fs, o.config, o.session), false, "")
 	addSpec(&tools.GrepContextFilesToolSpec{}, false, tools.NewGrepContextFilesToolFactory(o.fs, o.config, o.session), false, "")
 	addSpec(&tools.ReadContextFileToolSpec{}, false, tools.NewReadContextFileToolFactory(o.fs, o.config, o.session), false, "")
+	addSpec(&tools.AddContextDirectoryToolSpec{}, false, tools.NewAddContextDirectoryToolFactory(o.fs, o.config, o.session), false, "")
 
 	// Task management
 	addSpec(&tools.TodoToolSpec{}, false, tools.NewTodoToolFactory(o.todoClient), false, "")

@@ -6,7 +6,6 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/codefionn/scriptschnell/internal/fs"
@@ -157,8 +156,14 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 		}
 		padding := digits + 1
 
-		// Determine which lines to print (with context)
-		linesToPrint := make(map[int]struct{})
+		// Determine which lines to print (with context) and group them into blocks
+		// Each block represents a continuous range of lines (including context) for a match.
+		// Overlapping or adjacent ranges are merged into a single block.
+		type MatchBlock struct {
+			start int // inclusive line index (0‑based)
+			end   int // inclusive line index (0‑based)
+		}
+		var blocks []MatchBlock
 		for _, idx := range matchedLineIndices {
 			start := idx - contextLines
 			if start < 0 {
@@ -168,36 +173,30 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 			if end >= len(lines) {
 				end = len(lines) - 1
 			}
-			for i := start; i <= end; i++ {
-				linesToPrint[i] = struct{}{}
+			// Merge with previous block if overlapping or directly adjacent
+			if len(blocks) > 0 && start <= blocks[len(blocks)-1].end+1 {
+				if end > blocks[len(blocks)-1].end {
+					blocks[len(blocks)-1].end = end
+				}
+			} else {
+				blocks = append(blocks, MatchBlock{start: start, end: end})
 			}
 		}
-
-		// Sort lines
-		var sortedLines []int
-		for idx := range linesToPrint {
-			sortedLines = append(sortedLines, idx)
-		}
-		sort.Ints(sortedLines)
 
 		// Write file header with markdown formatting
 		results.WriteString(fmt.Sprintf("### `%s`\n\n", path))
 		results.WriteString(fmt.Sprintf("*%d match(es)*\n\n", len(matchedLineIndices)))
 		results.WriteString("```\n")
 
-		lastIdx := -1
-		for _, idx := range sortedLines {
-			if lastIdx != -1 && idx > lastIdx+1 {
-				// Gap detected
-				results.WriteString(fmt.Sprintf("%*s\n", padding+1, "...")) // Indented separator
+		for bIdx, blk := range blocks {
+			for i := blk.start; i <= blk.end; i++ {
+				lineNum := i + 1
+				results.WriteString(fmt.Sprintf("%*d: %s\n", padding, lineNum, lines[i]))
 			}
-
-			// Line number is idx + 1
-			lineNum := idx + 1
-			// Format: padded number, colon, space, content
-			// Using %*d for dynamic width.
-			results.WriteString(fmt.Sprintf("%*d: %s\n", padding, lineNum, lines[idx]))
-			lastIdx = idx
+			// Add separator between blocks (except after the last block)
+			if bIdx < len(blocks)-1 {
+				results.WriteString(fmt.Sprintf("%*s\n", padding+1, "--"))
+			}
 		}
 		results.WriteString("```\n\n")
 

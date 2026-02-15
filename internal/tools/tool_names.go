@@ -27,4 +27,5 @@ const (
 	ToolNameGrepContextFiles     = "grep_context_files"
 	ToolNameReadContextFile      = "read_context_file"
 	ToolNameAddContextDirectory  = "add_context_directory"
+	ToolNameRefactoringAgent     = "refactoring_agent"
 )

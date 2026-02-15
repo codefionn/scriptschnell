@@ -107,6 +107,29 @@ Tools are registered in a central registry ([internal/tools/tools.go](internal/t
 - Tools receive parameters as `map[string]interface{}` from LLM
 - Helper functions: `GetStringParam()`, `GetIntParam()`, `GetBoolParam()`
 
+#### Refactoring Agent
+
+The `refactoring_agent` tool ([internal/tools/refactoring_agent.go](internal/tools/refactoring_agent.go)) enables parallel execution of large refactorings by spawning multiple child orchestrators:
+
+- **Usage**: Call `refactoring_agent` with an array of independent refactoring objectives
+- **Execution**: Each objective runs in a separate child orchestrator with full tool access (except `refactoring_agent` to prevent recursion)
+- **Benefits**: Parallel processing of independent tasks, faster completion of big refactorings
+- **Example**:
+  ```json
+  {
+    "tool": "refactoring_agent",
+    "parameters": {
+      "objectives": [
+        "Refactor all database queries to use parameterized statements",
+        "Update all error handling to use structured error types",
+        "Migrate logging to use structured logging format"
+      ]
+    }
+  }
+  ```
+
+**Important**: Each objective should be independent and self-contained. Child orchestrators cannot spawn additional refactoring agents.
+
 Available tools:
 - **read_file**: Read files with line range support (max 2000 lines)
 - **read_file_summarized**: AI-powered summarization of large files
@@ -120,6 +143,7 @@ Available tools:
 - **grep_context_files**: Search for text patterns in files within configured context directories
 - **read_context_file**: Read a file from configured context directories
 - **add_context_directory**: Add a directory to the context directories configuration (requires user authorization)
+- **refactoring_agent**: Executes large refactoring tasks by spawning multiple child orchestrators to work on different aspects in parallel
 
 ### Configuration
 

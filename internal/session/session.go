@@ -889,3 +889,24 @@ func (s *Session) ClearPlanningQuestionsAnswered() {
 	s.UpdatedAt = time.Now()
 	s.Dirty = true
 }
+
+// GetRole returns the role of the message (implements loop.Message)
+func (m *Message) GetRole() string { return m.Role }
+
+// GetContent returns the message content (implements loop.Message)
+func (m *Message) GetContent() string { return m.Content }
+
+// GetReasoning returns the reasoning content (implements loop.Message)
+func (m *Message) GetReasoning() string { return m.Reasoning }
+
+// GetToolCalls returns the tool calls (implements loop.Message)
+func (m *Message) GetToolCalls() []map[string]interface{} { return m.ToolCalls }
+
+// GetToolID returns the tool ID (implements loop.Message)
+func (m *Message) GetToolID() string { return m.ToolID }
+
+// GetToolName returns the tool name (implements loop.Message)
+func (m *Message) GetToolName() string { return m.ToolName }
+
+// loopMessageSlice wraps []*Message to implement []loop.Message
+// This is used internally for the loop.Session interface

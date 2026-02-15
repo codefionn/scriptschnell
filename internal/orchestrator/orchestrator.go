@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -21,6 +20,7 @@ import (
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/loopdetector"
 	"github.com/codefionn/scriptschnell/internal/mcp"
+	"github.com/codefionn/scriptschnell/internal/orchestrator/loop"
 	"github.com/codefionn/scriptschnell/internal/planning"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
@@ -120,6 +120,8 @@ type Orchestrator struct {
 	sandboxCodeRewriter    *SandboxCodeRewriter
 	sandbox                *sandbox.LandlockSandbox
 	sandboxManager         *sandbox.Manager
+	loop                   loop.Loop // New loop abstraction
+	loopConfig             *loop.Config
 }
 
 const (
@@ -552,6 +554,14 @@ func NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg *config.Config, 
 	orch.toolExecutor = tools.NewToolExecutorActorClient(toolExecutorRef)
 	orch.toolExecutorCancel = toolExecutorCancel
 
+	// Initialize the loop abstraction early in the lifecycle
+	if err := orch.initializeLoop(); err != nil {
+		logger.Warn("Failed to initialize loop abstraction: %v", err)
+		// Non-fatal, loop will be initialized lazily if needed
+	} else {
+		logger.Debug("Loop abstraction initialized successfully")
+	}
+
 	return orch, nil
 }
 
@@ -809,6 +819,14 @@ func NewOrchestratorWithSharedResources(
 	logger.Debug("Tool executor actor spawned")
 	orch.toolExecutor = tools.NewToolExecutorActorClient(toolExecutorRef)
 	orch.toolExecutorCancel = toolExecutorCancel
+
+	// Initialize the loop abstraction early in the lifecycle
+	if err := orch.initializeLoop(); err != nil {
+		logger.Warn("Failed to initialize loop abstraction: %v", err)
+		// Non-fatal, loop will be initialized lazily if needed
+	} else {
+		logger.Debug("Loop abstraction initialized successfully")
+	}
 
 	logger.Info("Orchestrator created successfully with shared resources for session %s", sess.ID)
 	return orch, nil
@@ -1152,6 +1170,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(&tools.SearchFilesToolSpec{}, false, tools.NewSearchFilesToolFactory(o.fs), false, "")
 	addSpec(&tools.SearchFileContentToolSpec{}, false, tools.NewSearchFileContentToolFactory(o.fs), false, "")
 	addSpec(&tools.CodebaseInvestigatorToolSpec{}, false, tools.NewCodebaseInvestigatorToolFactory(NewCodebaseInvestigatorAgent(o)), false, "")
+	addSpec(&tools.RefactoringAgentToolSpec{}, false, tools.NewRefactoringAgentToolFactory(NewRefactoringAgent(o)), false, "")
 	addSpec(&tools.WebSearchToolSpec{}, false, tools.NewWebSearchToolFactory(o.config), false, "")
 	addSpec(&tools.WebFetchToolSpec{}, false, tools.NewWebFetchToolFactory(nil, o.summarizeClient, o.authorizer, secretdetect.NewDetector(), o.featureFlags), false, "")
 
@@ -2435,6 +2454,7 @@ func (o *Orchestrator) runOrchestrationLoopForTask(
 }
 
 // runOrchestrationLoopCore is the core orchestration loop logic
+// Now delegates to the new loop abstraction
 func (o *Orchestrator) runOrchestrationLoopCore(
 	ctx context.Context,
 	prompt string,
@@ -2444,224 +2464,9 @@ func (o *Orchestrator) runOrchestrationLoopCore(
 	toolCallCallback ToolCallCallback,
 	toolResultCallback ToolResultCallback,
 ) error {
-	sendStatus := func(msg string) {
-		dispatchProgress(progressCallback, progress.Update{
-			Message:   msg,
-			Mode:      progress.ReportJustStatus,
-			Ephemeral: true,
-		})
-	}
-
-	sendStream := func(msg string, addNewLine bool) {
-		dispatchProgress(progressCallback, progress.Update{
-			Message:    msg,
-			AddNewLine: addNewLine,
-			Mode:       progress.ReportNoStatus,
-		})
-	}
-
-	modelID := o.providerMgr.GetOrchestrationModel()
-	systemPrompt, err := o.getOrBuildSystemPrompt(ctx, modelID)
-	if err != nil {
-		return fmt.Errorf("failed to build system prompt: %w", err)
-	}
-
-	// Detect provider/model changes for native format support
-	var provider, modelFamily string
-	var converter llm.NativeConverter
-	provider, modelFamily, _ = o.detectProviderChange(modelID)
-	converter = llm.GetConverter(modelID)
-
-	// Tool execution loop
-	maxIterations := 256
-	autoContinueAttempts := 0
-	hitMaxIterations := false
-
-	for iteration := 0; iteration < maxIterations; iteration++ {
-		logger.Debug("Orchestration loop iteration %d starting (max=%d)", iteration, maxIterations)
-
-		// Get session messages
-		sessionMessages := o.session.GetMessages()
-
-		// Convert to LLM messages
-		llmMessages := make([]*llm.Message, len(sessionMessages))
-		for i, msg := range sessionMessages {
-			llmMessages[i] = &llm.Message{
-				Role:              msg.Role,
-				Content:           msg.Content,
-				Reasoning:         msg.Reasoning,
-				ToolCalls:         msg.ToolCalls,
-				ToolID:            msg.ToolID,
-				ToolName:          msg.ToolName,
-				NativeFormat:      msg.NativeFormat,
-				NativeProvider:    msg.NativeProvider,
-				NativeModelFamily: msg.NativeModelFamily,
-				NativeTimestamp:   msg.NativeTimestamp,
-			}
-		}
-
-		// Apply cache control if enabled
-		if o.config != nil && o.config.EnablePromptCache {
-			markCacheControlBreakpoints(llmMessages, cacheControlTokenInterval, cacheControlMaxBreakpoints)
-		}
-
-		// Estimate context and compact if needed
-		totalTokens, perMessageTokens, _ := estimateContextTokens(modelID, systemPrompt, sessionMessages)
-		o.dispatchContextUsage(modelID, totalTokens, contextCallback)
-		o.maybeCompactContext(modelID, systemPrompt, sessionMessages, perMessageTokens, totalTokens, progressCallback, contextCallback)
-
-		// Get max tokens
-		maxTokens := o.providerMgr.GetModelMaxOutputTokens(modelID)
-		if maxTokens == 0 {
-			maxTokens = o.config.MaxTokens
-			if maxTokens == 0 {
-				maxTokens = consts.DefaultMaxTokens
-			}
-		}
-
-		// Prepare request
-		req := &llm.CompletionRequest{
-			Messages:      llmMessages,
-			Tools:         o.toolRegistry.ToJSONSchema(),
-			Temperature:   o.config.Temperature,
-			MaxTokens:     maxTokens,
-			SystemPrompt:  systemPrompt,
-			EnableCaching: o.config.EnablePromptCache,
-			CacheTTL:      o.config.PromptCacheTTL,
-		}
-
-		if prevID := o.orchestrationClient.GetLastResponseID(); prevID != "" {
-			req.PreviousResponseID = prevID
-		}
-
-		o.applyModelSpecificDefaults(req, modelID)
-
-		if progressCallback != nil && len(llmMessages) > 1 {
-			sendStatus("Thinking...")
-		}
-
-		// Get completion with error retry logic
-		var validationErr *toolCallValidationError
-		var ctxSizeErr *contextSizeExceededError
-		response, err := o.completeWithRetry(ctx, req, progressCallback)
-		if err != nil {
-			if errors.As(err, &validationErr) {
-				msg := fmt.Sprintf("Tool call validation failed for '%s': missing required parameter '%s'.", validationErr.toolName, validationErr.missingParam)
-				sendStream(fmt.Sprintf("\n⚠️ %s\n", msg), false)
-				sendStatus("Waiting for tool call validation fix...")
-				o.session.AddMessage(&session.Message{
-					Role:    "user",
-					Content: msg,
-				})
-				o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
-				continue
-			}
-			if errors.As(err, &ctxSizeErr) {
-				logger.Info("Context size exceeded, triggering forced compaction: %s", ctxSizeErr.reason)
-				sendStatus("Compacting context...")
-				o.forceCompactContext(modelID, systemPrompt, o.session.GetMessages(), progressCallback, contextCallback)
-				o.resetCompactionAttempts()
-				continue
-			}
-			return fmt.Errorf("completion failed: %w", err)
-		}
-
-		// Convert to native format if supported
-		var nativeMsgs []interface{}
-		var nativeErr error
-		if converter != nil && converter.SupportsNativeStorage() {
-			nativeMsgs, nativeErr = converter.ConvertToNative([]*llm.Message{{Role: "assistant", Content: response.Content, Reasoning: response.Reasoning, ToolCalls: response.ToolCalls}}, "", o.config.EnablePromptCache, o.config.PromptCacheTTL)
-		}
-
-		// Add assistant message
-		assistantMsg := &session.Message{
-			Role:      "assistant",
-			Content:   response.Content,
-			Reasoning: response.Reasoning,
-			ToolCalls: response.ToolCalls,
-		}
-
-		// Set native format if available
-		if nativeErr == nil && len(nativeMsgs) > 0 {
-			assistantMsg.NativeFormat = nativeMsgs[len(nativeMsgs)-1].(map[string]interface{})
-			assistantMsg.NativeProvider = provider
-			assistantMsg.NativeModelFamily = modelFamily
-			assistantMsg.NativeTimestamp = time.Now()
-		}
-
-		o.session.AddMessage(assistantMsg)
-		o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
-
-		// Stream reasoning content to UI (if present)
-		if response.Reasoning != "" {
-			dispatchProgress(progressCallback, progress.Update{
-				Reasoning: response.Reasoning,
-				Mode:      progress.ReportNoStatus,
-				Ephemeral: true, // Reasoning is ephemeral - only shown during generation
-			})
-		}
-
-		// Stream content to UI
-		if response.Content != "" {
-			sendStream(response.Content, false)
-		}
-
-		// Check for text loops
-		if response.Content != "" {
-			isLoop, pattern, count := o.loopDetector.AddText(response.Content)
-			if isLoop {
-				displayPattern := pattern
-				if len(displayPattern) > 100 {
-					displayPattern = displayPattern[:100] + "..."
-				}
-				sendStream(fmt.Sprintf("\n\n🔁 Loop detected! Pattern '%s' repeated %d times. Stopping.\n", displayPattern, count), false)
-				break
-			}
-		}
-
-		// Check if truncated or incomplete
-		contentEndsIncomplete := strings.HasSuffix(strings.TrimSpace(response.Content), ":") || strings.HasSuffix(strings.TrimSpace(response.Content), ":\n")
-
-		// Handle no tool calls case
-		if len(response.ToolCalls) == 0 {
-			shouldContinue, _ := o.shouldAutoContinue(ctx, systemPrompt)
-
-			if contentEndsIncomplete && !shouldContinue {
-				shouldContinue = true
-			}
-
-			if shouldContinue && autoContinueAttempts < o.getAutoContinueMaxAttempts() {
-				autoContinueAttempts++
-				sendStream("\n⏭ Auto-continue.\n", false)
-				sendStatus("Continuing...")
-				o.session.AddMessage(&session.Message{
-					Role:    "user",
-					Content: "continue",
-				})
-				o.broadcastContextUsage(modelID, systemPrompt, contextCallback)
-				continue
-			}
-
-			sendStatus("")
-			break
-		}
-
-		// Execute tool calls
-		if err := o.processToolCalls(ctx, response.ToolCalls, o.session, progressCallback, authCallback, toolCallCallback, toolResultCallback, nil); err != nil {
-			logger.Warn("Error processing tool calls: %v", err)
-		}
-
-		if iteration == maxIterations-1 {
-			hitMaxIterations = true
-		}
-	}
-
-	if hitMaxIterations {
-		logger.Warn("Orchestration loop reached maximum iteration limit (%d)", maxIterations)
-		sendStream(fmt.Sprintf("\n⚠️  Reached maximum iteration limit (%d).\n", maxIterations), false)
-	}
-
-	return nil
+	// The prompt parameter is already added to the session by the caller
+	// Delegate to the new loop abstraction
+	return o.runOrchestrationLoopWithAbstraction(ctx, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback)
 }
 
 const maxVerificationRetries = 3
@@ -3451,6 +3256,11 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 
 		// Log the error
 		logger.Warn("LLM completion error (attempt %d/%d): %v", attempt, errorRetryMaxAttempts, err)
+
+		// Context cancellation - don't retry, propagate immediately
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 
 		if validationErr := parseToolCallValidationError(err); validationErr != nil {
 			return nil, validationErr

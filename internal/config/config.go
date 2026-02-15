@@ -100,6 +100,15 @@ type SandboxOutputCompactionConfig struct {
 	ChunkSize            int     `json:"chunk_size"`             // Size of each chunk in characters
 }
 
+// LoopConfig holds configuration for the orchestrator loop abstraction
+type LoopConfig struct {
+	Strategy                string `json:"strategy"`                   // Loop strategy: "default", "conservative", "aggressive"
+	MaxIterations           int    `json:"max_iterations"`             // Maximum number of iterations (0 = use default)
+	MaxAutoContinueAttempts int    `json:"max_auto_continue_attempts"` // Maximum auto-continue attempts (0 = use default)
+	EnableLoopDetection     bool   `json:"enable_loop_detection"`      // Enable repetitive pattern detection
+	EnableAutoContinue      bool   `json:"enable_auto_continue"`       // Enable automatic continuation on incomplete responses
+}
+
 // SandboxConfig holds configuration for shell command sandboxing
 // This allows custom paths to be added to the landlock sandbox
 // Default package manager paths are handled automatically
@@ -147,6 +156,7 @@ type Config struct {
 	AutoSave                AutoSaveConfig                         `json:"auto_save,omitempty"`           // Session auto-save configuration
 	AutoResume              bool                                   `json:"auto_resume"`                   // Automatically resume last session on startup
 	SandboxOutputCompaction SandboxOutputCompactionConfig          `json:"sandbox_output_compaction"`     // Sandbox output compaction configuration
+	Loop                    LoopConfig                             `json:"loop,omitempty"`                // Loop abstraction configuration
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
 	secretsPassword string       `json:"-"` // Kept for backward compatibility

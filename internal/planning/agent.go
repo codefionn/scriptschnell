@@ -3,18 +3,17 @@ package planning
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/codefionn/scriptschnell/internal/actor"
-	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/fs"
 	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/loopdetector"
+	"github.com/codefionn/scriptschnell/internal/orchestrator/loop"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/project"
 	"github.com/codefionn/scriptschnell/internal/session"
@@ -98,6 +97,9 @@ type PlanningAgent struct {
 	actorSystem  *actor.System
 	investigator realtools.Investigator
 	loopDetector *loopdetector.LoopDetector
+	loop         loop.Loop
+	loopConfig   *loop.Config
+	planningDeps *PlanningDependencies // stored to access updated messages after loop
 	mu           sync.RWMutex
 }
 
@@ -176,6 +178,108 @@ func NewPlanningAgent(id string, filesystem fs.FileSystem, sess *session.Session
 // initializeTools sets up the planning-specific tools
 func (p *PlanningAgent) initializeTools() {
 	p.resetToolsLocked(nil)
+}
+
+// initializeLoop creates and initializes the loop abstraction for planning
+func (p *PlanningAgent) initializeLoop(req *PlanningRequest, messages []*llm.Message, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) loop.Loop {
+	// Build loop configuration
+	p.loopConfig = &loop.Config{
+		MaxIterations:           96,
+		MaxAutoContinueAttempts: 0, // Planning doesn't use auto-continue
+		EnableLoopDetection:     true,
+		EnableAutoContinue:      false,
+	}
+
+	// Create planning strategy
+	strategy := NewPlanningStrategy(p.loopConfig, req.AllowQuestions, req.MaxQuestions)
+
+	// Create planning dependencies
+	deps := &PlanningDependencies{
+		Agent:              p,
+		LLMClient:          p.client,
+		ToolRegistry:       p.toolRegistry,
+		Request:            req,
+		UserInputCallback:  userInputCb,
+		ProgressCallback:   progressCb,
+		ToolCallCallback:   toolCallCb,
+		ToolResultCallback: toolResultCb,
+		LoopDetector:       p.loopDetector,
+		Messages:           messages,
+		QuestionsAsked:     0,
+	}
+
+	// Store deps so we can access updated messages after the loop
+	p.planningDeps = deps
+
+	// Create planning iteration
+	iteration := NewPlanningIteration(deps)
+
+	// Create and return the loop
+	return loop.NewOrchestratorLoop(p.loopConfig, strategy, iteration, &loop.Dependencies{
+		LLMClient:            p.client,
+		Session:              &planningSessionAdapter{messages: messages},
+		ToolRegistry:         &planningToolRegistryAdapter{registry: p.toolRegistry},
+		SystemPromptProvider: &planningSystemPromptProvider{agent: p, req: req},
+	})
+}
+
+// planningSessionAdapter adapts []*llm.Message to loop.Session
+type planningSessionAdapter struct {
+	messages []*llm.Message
+}
+
+func (a *planningSessionAdapter) AddMessage(msg loop.Message) {
+	a.messages = append(a.messages, &llm.Message{
+		Role:      msg.GetRole(),
+		Content:   msg.GetContent(),
+		Reasoning: msg.GetReasoning(),
+		ToolCalls: msg.GetToolCalls(),
+		ToolID:    msg.GetToolID(),
+		ToolName:  msg.GetToolName(),
+	})
+}
+
+func (a *planningSessionAdapter) GetMessages() []loop.Message {
+	result := make([]loop.Message, len(a.messages))
+	for i, msg := range a.messages {
+		result[i] = &llmMessageAdapter{msg: msg}
+	}
+	return result
+}
+
+// llmMessageAdapter adapts *llm.Message to loop.Message
+type llmMessageAdapter struct {
+	msg *llm.Message
+}
+
+func (a *llmMessageAdapter) GetRole() string                        { return a.msg.Role }
+func (a *llmMessageAdapter) GetContent() string                     { return a.msg.Content }
+func (a *llmMessageAdapter) GetReasoning() string                   { return a.msg.Reasoning }
+func (a *llmMessageAdapter) GetToolCalls() []map[string]interface{} { return a.msg.ToolCalls }
+func (a *llmMessageAdapter) GetToolID() string                      { return a.msg.ToolID }
+func (a *llmMessageAdapter) GetToolName() string                    { return a.msg.ToolName }
+
+// planningToolRegistryAdapter adapts PlanningToolRegistry to loop.ToolRegistry
+type planningToolRegistryAdapter struct {
+	registry *PlanningToolRegistry
+}
+
+func (a *planningToolRegistryAdapter) ToJSONSchema() []map[string]interface{} {
+	return a.registry.ToJSONSchema()
+}
+
+// planningSystemPromptProvider provides the system prompt for planning
+type planningSystemPromptProvider struct {
+	agent *PlanningAgent
+	req   *PlanningRequest
+}
+
+func (p *planningSystemPromptProvider) GetSystemPrompt(ctx context.Context) (string, error) {
+	return p.agent.buildSystemPrompt(p.req), nil
+}
+
+func (p *planningSystemPromptProvider) GetModelID() string {
+	return p.agent.client.GetModelName()
 }
 
 // resetToolsLocked rebuilds the tool registry with the default tools and any extra tools provided.
@@ -291,37 +395,6 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	streamPlanning := func(msg string) {
-		if progressCb == nil {
-			return
-		}
-		if strings.TrimSpace(msg) == "" {
-			return
-		}
-		if err := progress.Dispatch(progressCb, progress.Normalize(progress.Update{
-			Message: msg,
-			Mode:    progress.ReportNoStatus,
-		})); err != nil {
-			logger.Debug("planning stream callback error: %v", err)
-		}
-	}
-
-	updateStatus := func(msg string) {
-		if progressCb == nil {
-			return
-		}
-		if strings.TrimSpace(msg) == "" {
-			return
-		}
-		if err := progress.Dispatch(progressCb, progress.Update{
-			Message:   msg,
-			Mode:      progress.ReportJustStatus,
-			Ephemeral: true,
-		}); err != nil {
-			logger.Debug("planning status callback error: %v", err)
-		}
-	}
-
 	// Validate request
 	if req == nil {
 		return nil, fmt.Errorf("planning request cannot be nil")
@@ -334,9 +407,6 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 	}
 
 	logger.Debug("Planning agent starting plan for objective: %s", req.Objective)
-
-	// Build planning system prompt
-	systemPrompt := p.buildSystemPrompt(req)
 
 	// Build ALL initial messages upfront to preserve prompt cache stability.
 	// The message prefix (initial user messages + context) must remain immutable
@@ -369,130 +439,50 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 		prefixMessage.CacheControl = true
 	}
 
-	maxIterations := 96 // Prevent infinite loops
-	questionsAsked := 0
+	// Initialize and run the planning loop
+	p.loop = p.initializeLoop(req, messages, userInputCb, progressCb, toolCallCb, toolResultCb)
 
-	for iteration := 0; iteration < maxIterations; iteration++ {
-		logger.Debug("Planning iteration %d/%d", iteration+1, maxIterations)
+	// Create a session adapter for the loop
+	sessionAdapter := &planningSessionAdapter{messages: messages}
 
-		// Create completion request
-		// Note: Temperature is set to 1.0 as some models (e.g., certain reasoning models)
-		// only support temperature=1 and will reject other values with:
-		// "invalid temperature: only 1 is allowed for this model"
-		completeReq := &llm.CompletionRequest{
-			Messages:      messages,
-			Tools:         p.toolRegistry.ToJSONSchema(),
-			Temperature:   1.0,
-			MaxTokens:     consts.DefaultMaxTokens,
-			SystemPrompt:  systemPrompt,
-			EnableCaching: true, // Enable caching for planning to speed up multi-turn conversations
-			CacheTTL:      "5m",
-		}
-
-		// Get response from planning model with retry logic
-		response, err := p.completeWithRetry(ctx, completeReq, updateStatus, streamPlanning)
-		if err != nil {
-			return nil, fmt.Errorf("planning completion failed: %w", err)
-		}
-
-		// Ensure tool calls always carry an ID before we echo them back.
-		response.ToolCalls = llm.NormalizeToolCallIDs(response.ToolCalls)
-
-		logger.Debug("Planning response received, tool_calls=%d", len(response.ToolCalls))
-
-		// Check for text loops in the response
-		if response.Content != "" {
-			isLoop, pattern, count := p.loopDetector.AddText(response.Content)
-			if isLoop {
-				logger.Warn("Text loop detected in planning at iteration %d: pattern repeated %d times", iteration, count)
-				// Show a truncated version of the pattern to the user
-				displayPattern := pattern
-				if len(displayPattern) > 100 {
-					displayPattern = displayPattern[:100] + "..."
-				}
-				if err := progress.Dispatch(progressCb, progress.Normalize(progress.Update{
-					Message: fmt.Sprintf("\n\n🔁 Loop detected! The planning model is repeating the same text pattern %d times.\nPattern: %s\nStopping planning to prevent infinite loop.\n", count, displayPattern),
-					Mode:    progress.ReportNoStatus,
-				})); err != nil {
-					logger.Debug("planning loop detection callback error: %v", err)
-				}
-				logger.Debug("Breaking out of planning loop due to text repetition (iteration %d)", iteration)
-				// Return partial plan indicating the loop issue
-				return &PlanningResponse{
-					Plan:       []string{"Planning was stopped due to text repetition in the LLM response"},
-					NeedsInput: false,
-					Complete:   false,
-				}, nil
-			}
-		}
-
-		// Stream planning content to the UI if available
-		if response.Content != "" {
-			streamPlanning(response.Content)
-		}
-
-		// Add assistant response to messages
-		messages = append(messages, &llm.Message{
-			Role:      "assistant",
-			Content:   response.Content,
-			Reasoning: response.Reasoning,
-			ToolCalls: response.ToolCalls,
-		})
-
-		// Process tool calls if any
-		if len(response.ToolCalls) > 0 {
-			toolResults, needsInput, askedCount, err := p.processToolCalls(ctx, response.ToolCalls, userInputCb, req, questionsAsked, updateStatus, toolCallCb, toolResultCb)
-			if err != nil {
-				return nil, fmt.Errorf("tool execution failed: %w", err)
-			}
-
-			// Add tool results to messages
-			messages = append(messages, toolResults...)
-
-			// Update questions asked counter
-			questionsAsked += askedCount
-
-			// If we need user input and have exhausted questions, return partial plan
-			if needsInput && (!req.AllowQuestions || (req.MaxQuestions > 0 && questionsAsked >= req.MaxQuestions)) {
-				logger.Debug("Planning needs user input but max questions reached")
-				return p.extractPartialPlan(messages), nil
-			}
-
-			// Continue to next iteration to get refined plan
-			continue
-		}
-
-		// No tool calls, extract final plan
-		planResp := p.extractPlan(response.Content)
-		// Return if:
-		// 1. We have actual plan content or it's marked complete
-		// 2. It explicitly needs input (with or without questions) - this is a signal from LLM
-		var hasContent, needsUserInput bool
-		if planResp != nil {
-			// Check for content in both simple mode (Plan) and board mode (Board.PrimaryTasks)
-			hasPlanContent := len(planResp.Plan) > 0
-			hasBoardContent := planResp.Board != nil && len(planResp.Board.PrimaryTasks) > 0
-			hasContent = hasPlanContent || hasBoardContent || planResp.Complete
-			needsUserInput = planResp.NeedsInput && req.AllowQuestions
-		}
-		shouldReturn := hasContent || needsUserInput
-		if planResp != nil && shouldReturn {
-			logger.Debug("Planning completed successfully")
-			return planResp, nil
-		}
-
-		// If we can't extract a plan, try asking for clarification
-		if iteration < maxIterations-1 {
-			messages = append(messages, &llm.Message{
-				Role:    "user",
-				Content: "Please provide a clearer plan with specific steps. Format your response with <answer> tags containing a JSON object with a 'plan' array containing the steps.",
-			})
-		}
+	// Run the loop
+	loopResult, err := p.loop.Run(ctx, sessionAdapter, progressCb)
+	if err != nil {
+		return nil, fmt.Errorf("planning loop failed: %w", err)
 	}
 
-	// Max iterations reached, return best effort plan
-	logger.Warn("Planning reached max iterations, returning partial plan")
-	return p.extractPartialPlan(messages), nil
+	// Extract planning result from loop result
+	planningResult := ExtractPlanningResult(loopResult)
+
+	// Check if we have a valid plan response from the loop (including question-only responses)
+	hasValidResponse := planningResult.HasContent() ||
+		len(planningResult.Questions) > 0 ||
+		planningResult.NeedsInput ||
+		planningResult.Complete
+
+	// Handle partial plans (loop detection or iteration limit) or missing content.
+	// Use p.planningDeps.Messages instead of local messages variable,
+	// because the iteration's append() creates a new slice header that
+	// the local variable doesn't see.
+	if planningResult.IsPartialPlan() || !hasValidResponse {
+		return p.extractPartialPlan(p.planningDeps.Messages), nil
+	}
+
+	// Determine mode based on content
+	mode := PlanningModeSimple
+	if planningResult.Board != nil && len(planningResult.Board.PrimaryTasks) > 0 {
+		mode = PlanningModeBoard
+	}
+
+	// Return the extracted plan
+	return &PlanningResponse{
+		Mode:       mode,
+		Plan:       planningResult.Plan,
+		Board:      planningResult.Board,
+		Questions:  planningResult.Questions,
+		NeedsInput: planningResult.NeedsInput,
+		Complete:   planningResult.Complete,
+	}, nil
 }
 
 // toolCallResult represents the result of a single tool execution
@@ -1162,6 +1152,19 @@ func (p *PlanningAgent) extractPartialPlan(messages []*llm.Message) *PlanningRes
 		}
 	}
 
+	// Last resort: use the last assistant message content as a single plan step
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role == "assistant" && msg.Content != "" && len(msg.ToolCalls) == 0 {
+			return &PlanningResponse{
+				Mode:       PlanningModeSimple,
+				Plan:       []string{msg.Content},
+				NeedsInput: true,
+				Complete:   false,
+			}
+		}
+	}
+
 	// Return minimal response with default simple mode
 	return &PlanningResponse{
 		Mode:       PlanningModeSimple,
@@ -1169,72 +1172,6 @@ func (p *PlanningAgent) extractPartialPlan(messages []*llm.Message) *PlanningRes
 		NeedsInput: true,
 		Complete:   false,
 	}
-}
-
-// completeWithRetry wraps LLM completion with retry logic for timeout and transient errors.
-// Uses up to PlanningMaxRetries attempts with exponential backoff.
-func (p *PlanningAgent) completeWithRetry(ctx context.Context, req *llm.CompletionRequest, statusCb func(string), streamCb func(string)) (*llm.CompletionResponse, error) {
-	maxAttempts := consts.PlanningMaxRetries
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		response, err := p.client.CompleteWithRequest(ctx, req)
-		if err == nil {
-			return response, nil
-		}
-
-		logger.Warn("Planning completion error (attempt %d/%d): %v", attempt, maxAttempts, err)
-
-		// Last attempt - return the error
-		if attempt >= maxAttempts {
-			return nil, err
-		}
-
-		// Check for context cancellation (either via ctx.Err() or if the error itself is a context error)
-		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err
-		}
-
-		// Determine sleep duration with exponential backoff
-		errStr := strings.ToLower(err.Error())
-		var sleepSeconds int
-		switch {
-		case strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "429"):
-			sleepSeconds = 5 * (1 << uint(attempt-1)) // 5, 10, 20, 40...
-			if sleepSeconds > 120 {
-				sleepSeconds = 120
-			}
-		case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline"):
-			sleepSeconds = attempt * 3
-		case strings.Contains(errStr, "500") || strings.Contains(errStr, "502") ||
-			strings.Contains(errStr, "503") || strings.Contains(errStr, "overloaded"):
-			sleepSeconds = attempt * 3
-		default:
-			sleepSeconds = attempt * 2
-		}
-
-		// Notify user about retry
-		retryMsg := fmt.Sprintf("\n⏳ Planning: retrying in %d seconds... (attempt %d/%d)\n", sleepSeconds, attempt, maxAttempts)
-		if streamCb != nil {
-			streamCb(retryMsg)
-		}
-		if statusCb != nil {
-			statusCb(fmt.Sprintf("Planning: retrying in %ds...", sleepSeconds))
-		}
-
-		// Sleep before retry
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(time.Duration(sleepSeconds) * time.Second):
-			// Continue to retry
-		}
-
-		if statusCb != nil {
-			statusCb(fmt.Sprintf("Planning: retrying (attempt %d/%d)...", attempt+1, maxAttempts))
-		}
-	}
-
-	return nil, fmt.Errorf("planning: max retry attempts (%d) exceeded", maxAttempts)
 }
 
 // Close cleans up the planning agent

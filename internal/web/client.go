@@ -651,7 +651,7 @@ func (c *Client) setSearchConfig(msg *WebMessage) error {
 	}
 
 	// Save config
-	if err := c.cfg.Save("web"); err != nil {
+	if err := c.cfg.Save(config.GetConfigPath()); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -682,7 +682,7 @@ func (c *Client) setPassword(msg *WebMessage) error {
 	c.cfg.Secrets.PasswordSet = password != ""
 
 	// Save config
-	if err := c.cfg.Save("web"); err != nil {
+	if err := c.cfg.Save(config.GetConfigPath()); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -803,7 +803,7 @@ func (c *Client) addMCPServer(msg *WebMessage) error {
 	c.cfg.MCP.Servers[serverName] = serverConfig
 
 	// Save config
-	if err := c.cfg.Save("web"); err != nil {
+	if err := c.cfg.Save(config.GetConfigPath()); err != nil {
 		delete(c.cfg.MCP.Servers, serverName)
 		return fmt.Errorf("failed to save config: %w", err)
 	}
@@ -836,7 +836,7 @@ func (c *Client) toggleMCPServer(msg *WebMessage) error {
 	server.Disabled = !server.Disabled
 
 	// Save config
-	if err := c.cfg.Save("web"); err != nil {
+	if err := c.cfg.Save(config.GetConfigPath()); err != nil {
 		server.Disabled = !server.Disabled // revert
 		return fmt.Errorf("failed to save config: %w", err)
 	}
@@ -873,7 +873,7 @@ func (c *Client) deleteMCPServer(msg *WebMessage) error {
 	delete(c.cfg.MCP.Servers, serverName)
 
 	// Save config
-	if err := c.cfg.Save("web"); err != nil {
+	if err := c.cfg.Save(config.GetConfigPath()); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 

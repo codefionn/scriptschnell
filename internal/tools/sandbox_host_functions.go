@@ -177,6 +177,12 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 				stdoutStr, stderrStr, exitCode = t.executeDirectCommand(ctx, commandArgs, stdinData)
 			}
 
+			// Record activity after command execution completes
+			// This ensures activity is tracked even when output is empty
+			if t.deadline != nil {
+				t.deadline.RecordActivity()
+			}
+
 			// Write stdout to WASM memory
 			stdoutBytes := []byte(stdoutStr)
 			if uint32(len(stdoutBytes)) > stdoutCap {

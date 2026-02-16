@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // sandboxCall tracks individual sandbox function calls for metadata
@@ -97,6 +99,22 @@ func (t *SandboxTool) buildSandboxMetadata(startTime time.Time, commandSummary s
 		if details := tracker.metadataDetails(); details != nil {
 			metadata.Details = details
 		}
+	}
+
+	// Add adaptive timeout statistics if available
+	if adaptiveDeadline, ok := t.deadline.(*adaptiveExecDeadline); ok {
+		stats := adaptiveDeadline.GetStats()
+		metadata.AdaptiveTimeoutOriginalSeconds = int(stats["original_timeout_seconds"].(float64))
+		metadata.AdaptiveTimeoutExtensions = stats["extensions"].(int)
+		metadata.AdaptiveTimeoutTotalSeconds = stats["total_timeout_seconds"].(float64)
+		metadata.AdaptiveTimeoutMaxExtensions = stats["max_extensions"].(int)
+
+		// Log adaptive timeout summary
+		logger.Debug("sandbox: adaptive timeout summary - original: %ds, extensions: %d, total: %.1fs, max: %d",
+			metadata.AdaptiveTimeoutOriginalSeconds,
+			metadata.AdaptiveTimeoutExtensions,
+			metadata.AdaptiveTimeoutTotalSeconds,
+			metadata.AdaptiveTimeoutMaxExtensions)
 	}
 
 	return metadata

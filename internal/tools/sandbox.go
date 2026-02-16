@@ -47,7 +47,7 @@ type SandboxTool struct {
 	tabIDFunc           func() int                          // Returns current tab ID for user interaction
 	authConfig          AuthorizationPersistenceConfig      // Config for persisting authorized commands/domains
 	parentCtx           context.Context                     // Parent context without sandbox timeout, used for user interaction
-	deadline            *execDeadline                       // Pausable execution deadline, paused during user interaction
+	deadline            ExecDeadline                        // Pausable execution deadline, paused during user interaction
 }
 
 func NewSandboxTool(workingDir, tempDir string) *SandboxTool {

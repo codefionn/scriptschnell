@@ -167,6 +167,12 @@ type ExecutionMetadata struct {
 	WasTimedOut     bool   `json:"was_timed_out,omitempty"`
 	WasBackgrounded bool   `json:"was_backgrounded,omitempty"`
 
+	// Adaptive timeout metrics (for go_sandbox)
+	AdaptiveTimeoutOriginalSeconds int     `json:"adaptive_timeout_original_seconds,omitempty"` // Original configured timeout
+	AdaptiveTimeoutExtensions      int     `json:"adaptive_timeout_extensions,omitempty"`       // Number of times timeout was extended
+	AdaptiveTimeoutTotalSeconds    float64 `json:"adaptive_timeout_total_seconds,omitempty"`    // Total timeout after extensions
+	AdaptiveTimeoutMaxExtensions   int     `json:"adaptive_timeout_max_extensions,omitempty"`   // Maximum allowed extensions
+
 	// Tool-specific metadata
 	ToolType string                 `json:"tool_type,omitempty"`
 	Details  map[string]interface{} `json:"details,omitempty"`

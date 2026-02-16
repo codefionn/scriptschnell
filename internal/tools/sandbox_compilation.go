@@ -70,13 +70,14 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 	}
 
 	// Create cancellable context for compilation and execution.
-	// Instead of context.WithTimeout we use a pausable deadline so that time
+	// Instead of context.WithTimeout we use an adaptive pausable deadline so that time
 	// spent waiting for user authorization prompts does not count against the
-	// sandbox timeout budget.
+	// sandbox timeout budget. The deadline can also extend if there's activity
+	// (stdout/stderr output) after the timeout expires.
 	execCtx, execCancel := context.WithCancel(ctx)
 	defer execCancel()
 
-	deadline := newExecDeadline(time.Duration(timeout)*time.Second, execCancel)
+	deadline := newAdaptiveExecDeadline(time.Duration(timeout)*time.Second, execCancel, 4)
 	t.deadline = deadline
 	defer func() {
 		deadline.Stop()

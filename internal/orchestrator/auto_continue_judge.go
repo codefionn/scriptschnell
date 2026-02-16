@@ -13,12 +13,13 @@ import (
 )
 
 const (
-	autoContinueTokenLimit   = 1000  //nolint:unused // Part of experimental auto-continue feature
+	autoContinueTokenLimit   = 1000             //nolint:unused // Part of experimental auto-continue feature
 	autoContinueJudgeTimeout = 15 * time.Second //nolint:unused // Part of experimental auto-continue feature
 )
 
 // shouldAutoContinue determines if the orchestrator should automatically continue generating a response
 // when the assistant appears to be incomplete. This uses a summarization model to make the decision.
+//
 //nolint:unused // Experimental feature - not yet integrated into main workflow
 func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt string) (bool, string) {
 	if o.summarizeClient == nil {
@@ -148,6 +149,7 @@ func (o *Orchestrator) shouldAutoContinue(ctx context.Context, systemPrompt stri
 // checkMessageEndsWithColonNewline checks if the last message ends with a colon followed by one or more newlines.
 // This is a manual check that happens before calling the summarization model for auto-continue decisions.
 // Returns (true, reason) if the last message ends with ':[newline]*', indicating continuation is required.
+//
 //nolint:unused // Part of experimental auto-continue feature
 func checkMessageEndsWithColonNewline(messages []*session.Message) (bool, string) {
 	if len(messages) == 0 {
@@ -175,6 +177,7 @@ func checkMessageEndsWithColonNewline(messages []*session.Message) (bool, string
 }
 
 // collectRecentUserPrompts collects recent user prompts from messages.
+//
 //nolint:unused // Part of experimental auto-continue feature
 func collectRecentUserPrompts(messages []*session.Message, limit int) []string {
 	if limit <= 0 {
@@ -203,6 +206,7 @@ func collectRecentUserPrompts(messages []*session.Message, limit int) []string {
 }
 
 // selectRecentMessagesByTokens selects recent messages up to a token limit.
+//
 //nolint:unused // Part of experimental auto-continue feature
 func selectRecentMessagesByTokens(modelID string, messages []*session.Message, tokenLimit int) []*session.Message {
 	if tokenLimit <= 0 || len(messages) == 0 {
@@ -236,6 +240,7 @@ func selectRecentMessagesByTokens(modelID string, messages []*session.Message, t
 }
 
 // buildAutoContinueJudgePrompt creates the prompt for the auto-continue judge.
+//
 //nolint:unused // Part of experimental auto-continue feature
 func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Message, systemPrompt, modelID string) string {
 	var sb strings.Builder

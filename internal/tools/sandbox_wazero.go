@@ -47,6 +47,14 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	}
 	defer errFile.Close()
 
+	// Start file monitor for stdout/stderr to track activity for adaptive timeout
+	var fileMonitor *fileMonitor
+	if adaptiveDeadline, ok := t.deadline.(*adaptiveExecDeadline); ok {
+		fileMonitor = newFileMonitor(stdoutFile, stderrFile, adaptiveDeadline)
+		fileMonitor.Start()
+		defer fileMonitor.Stop()
+	}
+
 	// Create shared state for host functions
 	// IMPORTANT: We must ALWAYS provide the authorize_domain host function
 	// because our wrapped code declares it with //go:wasmimport
@@ -90,6 +98,10 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	// Compile the module
 	mod, err := r.CompileModule(ctx, wasmBytes)
 	if err != nil {
+		// Stop file monitor before returning
+		if fileMonitor != nil {
+			fileMonitor.Stop()
+		}
 		logger.Debug("WASM compilation failed for sandbox: %v", err)
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
@@ -134,6 +146,10 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 
 	modInstance, err := r.InstantiateModule(ctx, mod, config)
 	if err != nil {
+		// Stop file monitor before returning
+		if fileMonitor != nil {
+			fileMonitor.Stop()
+		}
 		logger.Debug("WASM instantiation failed for sandbox: %v", err)
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
@@ -148,6 +164,10 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	// Get the _start function and execute
 	startFn := modInstance.ExportedFunction("_start")
 	if startFn == nil {
+		// Stop file monitor before returning
+		if fileMonitor != nil {
+			fileMonitor.Stop()
+		}
 		logger.Debug("WASM module does not export _start function")
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
@@ -182,6 +202,10 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 		runtimeErr = err
 	case <-ctx.Done():
 		logger.Warn("sandbox: killing process due to %s (timeout=%ds): %s", ctx.Err(), timeoutSeconds, commandSummary)
+		// Stop file monitor before closing files
+		if fileMonitor != nil {
+			fileMonitor.Stop()
+		}
 		// Close files before reading on timeout
 		outFile.Close()
 		errFile.Close()
@@ -193,6 +217,11 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			"timeout":   true,
 			"error":     "execution timeout",
 		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, -1, "", "Execution timeout", true, callTracker)), nil
+	}
+
+	// Stop file monitor before reading files
+	if fileMonitor != nil {
+		fileMonitor.Stop()
 	}
 
 	// Close files before reading

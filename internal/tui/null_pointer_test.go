@@ -625,24 +625,6 @@ func TestNullPointer_TabSession_NeedsAuthorization(t *testing.T) {
 // MessageRenderer Null Pointer Tests
 // ============================================================================
 
-func TestNullPointer_MessageRenderer_RenderMessage_NilContent(t *testing.T) {
-	mr := NewMessageRenderer(80, 80)
-
-	msg := message{
-		role:      "Tool",
-		toolName:  "test_tool",
-		toolState: ToolStateRunning,
-		timestamp: "12:00:00",
-		content:   "", // Empty content
-	}
-
-	// Should not panic with empty content
-	rendered := mr.RenderMessage(msg, 0)
-	if rendered == "" {
-		t.Error("Expected non-empty rendered message")
-	}
-}
-
 func TestNullPointer_MessageRenderer_RenderHeader_NilParameters(t *testing.T) {
 	mr := NewMessageRenderer(80, 80)
 

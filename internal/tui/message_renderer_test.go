@@ -35,16 +35,6 @@ func createTestToolMessage(toolName string, content string, state ToolState) mes
 	}
 }
 
-func TestRenderMessage(t *testing.T) {
-	msg := createTestMessage("You", "Hello")
-	mr := NewMessageRenderer(80, 80)
-	result := mr.RenderMessage(msg, 0)
-
-	if !strings.Contains(result, "You") {
-		t.Error("expected 'You' in output")
-	}
-}
-
 func TestRenderHeader(t *testing.T) {
 	msg := createTestMessage("You", "")
 	mr := NewMessageRenderer(80, 80)

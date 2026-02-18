@@ -602,7 +602,7 @@ func (rf *ResultFormatter) formatResultWithContent(toolName string, toolType Too
 		collapseHint := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#666666")).
 			Italic(true).
-			Render("[content truncated, click to expand]")
+			Render("[content truncated]")
 		collapseHint = stripANSISequences(collapseHint)
 		truncated := rf.truncateForPreview(content, 5)
 		return fmt.Sprintf("%s\n%s\n%s", header, collapseHint, truncated)

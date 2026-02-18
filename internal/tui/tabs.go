@@ -8,28 +8,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/logger"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
 const maxTabs = 10
-
-// Tab bar styles
-var (
-	activeTabStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("229")).
-			Background(lipgloss.Color("63"))
-
-	inactiveTabStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("243"))
-
-	newTabButtonStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("243")).
-				Bold(true)
-)
 
 // handleNewTab creates a new session tab
 func (m *Model) handleNewTab(name string) tea.Cmd {
@@ -234,44 +218,6 @@ func (m *Model) handleCloseTab(idx int) tea.Cmd {
 
 	// Switch to adjusted active tab
 	return m.handleSwitchTab(m.activeSessionIdx)
-}
-
-// renderTabBar renders the tab bar UI
-func (m *Model) renderTabBar() string {
-	if len(m.sessions) <= 1 {
-		return "" // Don't show tab bar for single session
-	}
-
-	var tabs []string
-	for i, ts := range m.sessions {
-		isActive := i == m.activeSessionIdx
-		tabText := ts.DisplayName()
-
-		// Add state indicators
-		if ts.NeedsAuthorization() {
-			// Yellow/orange dot for authorization required
-			authDot := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(" ◉")
-			tabText += authDot
-		} else if ts.IsGenerating() {
-			// Regular dot for generating
-			tabText += " ●"
-		} else if ts.HasMessages() {
-			// Regular dot for has messages
-			tabText += " ●"
-		}
-
-		// Apply styling
-		if isActive {
-			tabs = append(tabs, fmt.Sprintf(" %s ", activeTabStyle.Render(tabText)))
-		} else {
-			tabs = append(tabs, fmt.Sprintf(" %s ", inactiveTabStyle.Render(tabText)))
-		}
-	}
-
-	// Add new tab button
-	tabs = append(tabs, newTabButtonStyle.Render(" [+] "))
-
-	return lipgloss.JoinHorizontal(lipgloss.Left, tabs...)
 }
 
 // saveTabState saves the current tab state to config

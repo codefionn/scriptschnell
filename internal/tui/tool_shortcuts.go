@@ -28,6 +28,7 @@ func NewToolShortcuts() *ToolShortcuts {
 // ShortcutKey definitions for tool interactions
 const (
 	ShortcutExpandCollapse = "e"   // Toggle expand/collapse
+	ShortcutToggleParams   = "p"   // Toggle parameters visibility
 	ShortcutCollapseAll    = "C"   // Collapse all tool results
 	ShortcutCopyOutput     = "y"   // Yank (copy) output to clipboard
 	ShortcutCopyFullResult = "Y"   // Copy full result to clipboard
@@ -152,6 +153,8 @@ func (ts *ToolShortcuts) HandleKey(key string, toolMode bool) (ToolShortcutMsg, 
 		switch key {
 		case ShortcutExpandCollapse:
 			return ToolShortcutMsg{Shortcut: "expand_collapse", ToolIdx: ts.GetSelectedIndex()}, true
+		case ShortcutToggleParams:
+			return ToolShortcutMsg{Shortcut: "toggle_params", ToolIdx: ts.GetSelectedIndex()}, true
 		case "ctrl+o", "alt+o":
 			return ToolShortcutMsg{Shortcut: "expand_all", ToolIdx: -1}, true
 		case ShortcutCollapseAll:
@@ -223,6 +226,8 @@ func (tsh *ToolShortcutHandler) Handle(msg ToolShortcutMsg, messages []message) 
 	switch msg.Shortcut {
 	case "expand_collapse":
 		return tsh.handleExpandCollapse(msg.ToolIdx, messages)
+	case "toggle_params":
+		return tsh.handleToggleParams(msg.ToolIdx, messages)
 	case "expand_all":
 		return tsh.handleExpandAll(messages)
 	case "collapse_all":
@@ -248,6 +253,24 @@ func (tsh *ToolShortcutHandler) handleExpandCollapse(idx int, messages []message
 
 	// Toggle collapse state
 	msg.isCollapsed = !msg.isCollapsed
+
+	return func() tea.Msg {
+		return ToolShortcutMsg{Shortcut: "refresh", ToolIdx: idx}
+	}
+}
+
+func (tsh *ToolShortcutHandler) handleToggleParams(idx int, messages []message) tea.Cmd {
+	if idx < 0 || idx >= len(messages) {
+		return nil
+	}
+
+	msg := &messages[idx]
+	if len(msg.parameters) == 0 {
+		return nil
+	}
+
+	// Toggle params collapse state
+	msg.paramsCollapsed = !msg.paramsCollapsed
 
 	return func() tea.Msg {
 		return ToolShortcutMsg{Shortcut: "refresh", ToolIdx: idx}

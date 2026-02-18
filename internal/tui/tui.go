@@ -31,7 +31,6 @@ import (
 	"github.com/codefionn/scriptschnell/internal/session"
 	"github.com/codefionn/scriptschnell/internal/tools"
 	"github.com/codefionn/scriptschnell/internal/vcs"
-	"github.com/muesli/reflow/wordwrap"
 	"golang.org/x/term"
 )
 
@@ -64,61 +63,9 @@ func safeSendError(ch chan<- error, err error) {
 	}
 }
 
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("170")).
-			MarginLeft(2)
-
-	statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			MarginLeft(2)
-
-	contextStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244"))
-
-	contextUsageStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")).
-				MarginLeft(2)
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			MarginLeft(2)
-
-	todoPanelStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("241")).
-			Padding(0, 1).
-			Width(todoPanelWidth)
-
-	todoTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("170")).
-			Bold(true)
-
-	todoItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244"))
-
-	todoCompletedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Strikethrough(true)
-
-	todoInProgressStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")).
-				Bold(true)
-
-	todoEmptyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
-
-	todoErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-)
-
 const (
-	errorDisplayDuration   = consts.Timeout5Seconds
-	resizeViewportDebounce = 75 * time.Millisecond
+	errorDisplayDuration = consts.Timeout5Seconds
 )
-
-const defaultInputPlaceholder = "Type your prompt here... (@ for files, Alt+Enter or Ctrl+J for newline, Ctrl+X for commands)"
 
 // Message represents a chat message with metadata
 type message struct {
@@ -224,7 +171,8 @@ type Model struct {
 
 	// Tool progress tracking for streaming updates
 	toolProgressTracker *ToolProgressTracker
-	showProgressPanel   bool // Show active tool progress sidebar
+	showProgressPanel   bool           // Show active tool progress sidebar
+	activeToolPerTab    map[int]string // Tracks active tool ID per tab (tabID -> toolID)
 
 	// Tool keyboard shortcuts
 	toolShortcutHandler *ToolShortcutHandler
@@ -331,10 +279,6 @@ type OpenRouterUsageMsg struct {
 	Usage map[string]interface{}
 }
 
-type viewportRefreshMsg struct {
-	token int
-}
-
 // AuthorizationRequestMsg is sent when a tool requires user authorization
 type AuthorizationRequestMsg struct {
 	ToolCall   map[string]any
@@ -366,6 +310,7 @@ type TabReasoningMsg struct {
 type TabProcessingStatusMsg struct {
 	TabID  int
 	Status string
+	ToolID string // Optional: tool ID to update progress panel status
 }
 
 // TabVerificationAgentMsg is sent when verification agent updates are received
@@ -524,6 +469,7 @@ func New(currentModel, contextFile string, disableAnimations bool) *Model {
 		activeGroupID:            "",
 		toolProgressTracker:      NewToolProgressTracker(),
 		showProgressPanel:        false,
+		activeToolPerTab:         make(map[int]string),
 		toolShortcutHandler:      NewToolShortcutHandler(),
 		toolMode:                 false,
 	}
@@ -717,14 +663,6 @@ func (m *Model) findTabIndexByID(tabID int) int {
 		}
 	}
 	return -1
-}
-
-func (m *Model) scheduleViewportRefresh() tea.Cmd {
-	m.viewportRefreshToken++
-	token := m.viewportRefreshToken
-	return tea.Tick(resizeViewportDebounce, func(time.Time) tea.Msg {
-		return viewportRefreshMsg{token: token}
-	})
 }
 
 func (m *Model) createRendererAsync(wrapWidth int) tea.Cmd {
@@ -1830,7 +1768,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				toolCount := CountToolMessages(m.messages)
 				m.toolShortcutHandler.GetShortcuts().SetToolCount(toolCount)
 				if toolCount > 0 {
-					m.AddSystemMessage("Tool mode enabled. Use j/k to navigate, e to expand/collapse, y to copy. Press Ctrl+E to exit.")
+					m.AddSystemMessage("Tool mode enabled. Use j/k to navigate, e to expand/collapse, p to toggle parameters, y to copy. Press Ctrl+E to exit.")
 				} else {
 					m.AddSystemMessage("Tool mode enabled (no tool messages in current view). Press Ctrl+E to exit.")
 				}
@@ -2248,6 +2186,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(baseCmd, extra)
 		}
+
+		// Also update progress panel status if ToolID is provided
+		if msg.ToolID != "" {
+			tabIdx := m.findTabIndexByID(msg.TabID)
+
+			if m.toolProgressTracker != nil {
+				m.toolProgressTracker.UpdateProgress(msg.ToolID, -1, msg.Status)
+				m.showProgressPanel = len(m.toolProgressTracker.GetActiveTools()) > 0
+			}
+
+			// Also update the status field in the message itself
+			if tabIdx >= 0 {
+				for i := range m.sessions[tabIdx].Messages {
+					if m.sessions[tabIdx].Messages[i].toolID == msg.ToolID {
+						// Update status directly in the slice
+						m.sessions[tabIdx].Messages[i].status = msg.Status
+						// Update m.messages if this is the active tab
+						if tabIdx == m.activeSessionIdx {
+							m.messages[i].status = msg.Status
+							m.viewportDirty = true
+							return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+						}
+						break
+					}
+				}
+			}
+		}
 		return m, baseCmd
 
 	case TabVerificationAgentMsg:
@@ -2478,6 +2443,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tabIdx := m.findTabIndexByID(msg.TabID)
 		if tabIdx >= 0 {
 			m.addToolCallMessageForTab(tabIdx, msg.ToolName, msg.ToolID, msg.Description, msg.Parameters)
+			// Track active tool for this tab for progress panel updates
+			m.activeToolPerTab[msg.TabID] = msg.ToolID
+			// Start tracking in progress panel
+			if m.toolProgressTracker != nil {
+				m.toolProgressTracker.StartTool(msg.ToolID, msg.ToolName, msg.Description)
+				m.showProgressPanel = len(m.toolProgressTracker.GetActiveTools()) > 0
+			}
 		}
 		return m, baseCmd
 
@@ -2485,6 +2457,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tabIdx := m.findTabIndexByID(msg.TabID)
 		if tabIdx >= 0 {
 			m.addToolResultMessageForTab(tabIdx, msg.ToolName, msg.ToolID, msg.Result, msg.Error)
+			// Clear active tool ID when tool completes
+			delete(m.activeToolPerTab, msg.TabID)
+
+			// Update message status to complete or failed
+			for i := range m.sessions[tabIdx].Messages {
+				if m.sessions[tabIdx].Messages[i].toolID == msg.ToolID {
+					// Update status directly in the slice
+					if msg.Error != "" {
+						m.sessions[tabIdx].Messages[i].status = "failed"
+						m.sessions[tabIdx].Messages[i].toolState = ToolStateFailed
+					} else {
+						m.sessions[tabIdx].Messages[i].status = "complete"
+						m.sessions[tabIdx].Messages[i].toolState = ToolStateCompleted
+					}
+					// Update m.messages if this is the active tab
+					if tabIdx == m.activeSessionIdx {
+						m.messages[i].status = m.sessions[tabIdx].Messages[i].status
+						m.messages[i].toolState = m.sessions[tabIdx].Messages[i].toolState
+						m.viewportDirty = true
+					}
+					break
+				}
+			}
+
+			// Mark tool as complete in progress tracker
+			if m.toolProgressTracker != nil {
+				var err error
+				if msg.Error != "" {
+					err = fmt.Errorf("%s", msg.Error)
+				}
+				m.toolProgressTracker.CompleteTool(msg.ToolID, err)
+				// Schedule cleanup
+				go func(toolID string) {
+					time.Sleep(5 * time.Second)
+					m.toolProgressTracker.RemoveTool(toolID)
+				}(msg.ToolID)
+				m.showProgressPanel = len(m.toolProgressTracker.GetActiveTools()) > 0
+			}
 		}
 		return m, baseCmd
 
@@ -2512,6 +2522,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Show progress panel if we have active tools
 			activeTools := m.toolProgressTracker.GetActiveTools()
 			m.showProgressPanel = len(activeTools) > 0
+		}
+
+		// Also update the status field in the message itself
+		if msg.Status != "" {
+			tabIdx := m.findTabIndexByID(msg.TabID)
+			if tabIdx >= 0 {
+				// Get reference to tab messages
+				tabMessages := m.sessions[tabIdx].Messages
+				for i := range tabMessages {
+					if tabMessages[i].toolID == msg.ToolID {
+						// Update status directly in the slice
+						m.sessions[tabIdx].Messages[i].status = msg.Status
+						// Update m.messages if this is the active tab
+						if tabIdx == m.activeSessionIdx {
+							m.messages[i].status = msg.Status
+						}
+						m.viewportDirty = true
+						break
+					}
+				}
+			}
 		}
 
 		// Refresh the viewport to show progress
@@ -2580,9 +2611,11 @@ func (m *Model) createProgressCallbackForTab(tabID int) progress.Callback {
 
 		// Handle status messages
 		if normalized.ShouldStatus() {
+			toolID := m.activeToolPerTab[tabID]
 			m.program.Send(TabProcessingStatusMsg{
 				TabID:  tabID,
 				Status: strings.TrimRight(normalized.Message, "\n"),
+				ToolID: toolID,
 			})
 		}
 
@@ -3028,76 +3061,29 @@ func (m *Model) View() string {
 
 	var sb strings.Builder
 
-	// Title
-	title := titleStyle.Render("scriptschnell - AI-Powered Coding Assistant")
-	status := statusStyle.Render(fmt.Sprintf("Model: %s", m.currentModel))
-
-	sb.WriteString(title)
-	sb.WriteString("\n")
-	sb.WriteString(status)
-	sb.WriteString("\n")
+	// Header
+	sb.WriteString(m.renderHeader())
 
 	// Tab bar (if multiple sessions)
-	tabBar := m.renderTabBar()
-	if tabBar != "" {
-		sb.WriteString(tabBar)
+	sb.WriteString(m.renderTabBar())
+	if len(m.sessions) > 1 {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
 
 	// Viewport with messages
-	sb.WriteString(m.viewport.View())
+	sb.WriteString(m.renderViewport())
 	sb.WriteString("\n\n")
 
-	// Textarea
-	sb.WriteString(m.textarea.View())
-	sb.WriteString("\n")
+	// Textarea and Autocomplete
+	sb.WriteString(m.renderTextarea())
 
 	// Context usage indicator below the prompt
 	sb.WriteString(m.renderContextUsage())
 	sb.WriteString("\n")
 
-	// Autocomplete suggestions
-	if len(m.suggestions) > 0 {
-		sb.WriteString(m.renderSuggestions())
-		sb.WriteString("\n")
-	}
-
-	footerLeft := ""
-	if m.processingStatus != "" {
-		statusText := m.processingStatus
-		if m.thinkingTokens > 0 {
-			statusText = fmt.Sprintf("%s (%d tokens)", statusText, m.thinkingTokens)
-		}
-		if !m.animationsDisabled && m.spinnerActive {
-			footerLeft = statusStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), statusText))
-		} else {
-			footerLeft = statusStyle.Render(fmt.Sprintf("⚙️  %s", statusText))
-		}
-	} else if m.isCurrentTabGenerating() {
-		var generatingText string
-
-		// Show thinking tokens only if we haven't received content yet (still in thinking phase)
-		if m.thinkingTokens > 0 && !m.contentReceived {
-			generatingText = fmt.Sprintf("Thinking... (%d thinking tokens)", m.thinkingTokens)
-		} else {
-			generatingText = "Generating..."
-		}
-
-		if !m.animationsDisabled && m.spinnerActive {
-			footerLeft = statusStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), generatingText))
-		} else {
-			footerLeft = statusStyle.Render(fmt.Sprintf("⏳ %s", generatingText))
-		}
-	} else if m.err != nil {
-		if m.errVisibleUntil.IsZero() || time.Now().Before(m.errVisibleUntil) {
-			footerLeft = errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
-		}
-	}
-
-	footerRight := contextStyle.Render(m.contextDisplay())
-
-	sb.WriteString(m.renderFooter(footerLeft, footerRight))
+	// Footer
+	sb.WriteString(m.renderMainFooter())
 
 	if m.err != nil && !m.errVisibleUntil.IsZero() && time.Now().After(m.errVisibleUntil) {
 		m.err = nil
@@ -3182,80 +3168,6 @@ func (m *Model) View() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, mainContent, spacing, allPanels)
 }
 
-func (m *Model) renderFooter(left, right string) string {
-	width := m.contentWidth
-	if width <= 0 {
-		switch {
-		case left == "":
-			return right
-		case right == "":
-			return left
-		default:
-			return left + " " + right
-		}
-	}
-
-	leftWidth := lipgloss.Width(left)
-	rightWidth := lipgloss.Width(right)
-	space := width - leftWidth - rightWidth
-	if space < 1 {
-		space = 1
-	}
-
-	return left + strings.Repeat(" ", space) + right
-}
-
-func (m *Model) contextDisplay() string {
-	var parts []string
-
-	// Get current session's accumulated usage
-	var totalCost float64
-	var totalTokens int
-	var cachedTokens int
-	var currentBranch string
-
-	if m.activeSessionIdx >= 0 && m.activeSessionIdx < len(m.sessions) {
-		sess := m.sessions[m.activeSessionIdx].Session
-		if sess != nil {
-			totalCost = sess.GetTotalCost()
-			totalTokens = sess.GetTotalTokens()
-			cachedTokens = sess.TotalCachedTokens + sess.TotalCacheReadTokens
-			currentBranch = sess.GetCurrentBranch()
-		}
-	}
-
-	// Add branch info if available
-	if currentBranch != "" {
-		parts = append(parts, fmt.Sprintf("Branch: %s", currentBranch))
-	}
-
-	// Determine caching state
-	cacheActive := cachedTokens > 0
-
-	// Add context file info
-	if strings.TrimSpace(m.contextFile) == "" {
-		parts = append(parts, "Context: (none)")
-	} else {
-		contextLabel := fmt.Sprintf("Context: %s", m.contextFile)
-		if cacheActive {
-			contextLabel += " (cache on)"
-		}
-		parts = append(parts, contextLabel)
-	}
-
-	// Add accumulated usage from session
-	if totalCost > 0 {
-		parts = append(parts, fmt.Sprintf("Cost: $%.6f", totalCost))
-	}
-
-	if cachedTokens > 0 && totalTokens > 0 {
-		cachePercent := float64(cachedTokens) / float64(totalTokens) * 100
-		parts = append(parts, fmt.Sprintf("Cached: %.0f%%", cachePercent))
-	}
-
-	return strings.Join(parts, " | ")
-}
-
 // formatOpenRouterUsage formats OpenRouter usage data for display
 func (m *Model) formatOpenRouterUsage() string {
 	// Get current session's accumulated usage
@@ -3305,89 +3217,6 @@ func (m *Model) formatOpenRouterUsage() string {
 	}
 
 	return strings.Join(parts, " | ")
-}
-
-func (m *Model) renderContextUsage() string {
-	percent := m.contextFreePercent
-	if percent < 0 {
-		return contextUsageStyle.Render("Free context: unknown")
-	}
-	if percent > 100 {
-		percent = 100
-	}
-
-	// Format context window size in K tokens
-	if m.contextWindow > 0 {
-		contextWindowK := m.contextWindow / 1000
-		return contextUsageStyle.Render(fmt.Sprintf("Free context: %d%% (%dK)", percent, contextWindowK))
-	}
-
-	return contextUsageStyle.Render(fmt.Sprintf("Free context: %d%%", percent))
-}
-
-func (m *Model) renderSuggestions() string {
-	if len(m.suggestions) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-
-	// Suggestion box style
-	suggestionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		MarginLeft(2)
-
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("170")).
-		Background(lipgloss.Color("238")).
-		Bold(true).
-		MarginLeft(2)
-
-	sb.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		MarginLeft(2).
-		Render("Suggestions (↑↓ to navigate, Tab/Shift+Tab to select, ESC to dismiss):"))
-	sb.WriteString("\n")
-
-	// Show max 5 suggestions at a time
-	maxDisplay := 5
-	start := 0
-	if len(m.suggestions) > maxDisplay {
-		// Center the selected item if possible
-		start = m.selectedSuggIndex - maxDisplay/2
-		if start < 0 {
-			start = 0
-		}
-		if start+maxDisplay > len(m.suggestions) {
-			start = len(m.suggestions) - maxDisplay
-		}
-	}
-
-	end := start + maxDisplay
-	if end > len(m.suggestions) {
-		end = len(m.suggestions)
-	}
-
-	for i := start; i < end; i++ {
-		suggestion := m.suggestions[i]
-		if i == m.selectedSuggIndex {
-			sb.WriteString(selectedStyle.Render(fmt.Sprintf("▶ %s", suggestion)))
-		} else {
-			sb.WriteString(suggestionStyle.Render(fmt.Sprintf("  %s", suggestion)))
-		}
-		sb.WriteString("\n")
-	}
-
-	// Show indicator if there are more suggestions
-	if len(m.suggestions) > maxDisplay {
-		more := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			MarginLeft(2).
-			Render(fmt.Sprintf("  ... (%d/%d)", m.selectedSuggIndex+1, len(m.suggestions)))
-		sb.WriteString(more)
-	}
-
-	return sb.String()
 }
 
 // refreshTodoContent updates the todo content for the viewport
@@ -3479,38 +3308,6 @@ func (m *Model) refreshTodoContent() {
 	m.todoContent = content.String()
 	m.todoContentHeight = strings.Count(m.todoContent, "\n") + 1
 	m.todoViewport.SetContent(m.todoContent)
-}
-
-func (m *Model) renderTodoPanel() string {
-	// Always refresh todo content to ensure it's up to date
-	m.refreshTodoContent()
-
-	// If viewport is not initialized or content fits, show content directly
-	if m.todoViewport.Height == 0 || m.todoContentHeight <= m.todoViewport.Height {
-		return todoPanelStyle.Render(strings.TrimRight(m.todoContent, "\n"))
-	}
-
-	// Use viewport for scrollable content
-	viewportContent := m.todoViewport.View()
-
-	// Add scroll indicators
-	var scrollIndicator string
-	if m.todoViewport.AtTop() && m.todoViewport.AtBottom() {
-		scrollIndicator = ""
-	} else if m.todoViewport.AtTop() {
-		scrollIndicator = "\n⬇"
-	} else if m.todoViewport.AtBottom() {
-		scrollIndicator = "⬆\n"
-	} else {
-		scrollIndicator = "⬆\n⬇"
-	}
-
-	content := viewportContent
-	if scrollIndicator != "" {
-		content += scrollIndicator
-	}
-
-	return todoPanelStyle.Render(strings.TrimRight(content, "\n"))
 }
 
 // renderTodoTree renders todos hierarchically
@@ -3825,10 +3622,8 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID, descripti
 		content = fmt.Sprintf("%s %s `%s`", GetStateIndicator(ToolStateRunning), icon, realToolName)
 	}
 
-	// Add description if provided (useful for go_sandbox)
-	if description != "" {
-		content += fmt.Sprintf(" *(%s)*", description)
-	}
+	// Note: description is displayed in the message header, not in content
+	// This avoids duplication since the header already handles it
 
 	if isPlanning {
 		content = fmt.Sprintf("📋 %s", content)
@@ -4520,91 +4315,6 @@ func (m *Model) generateGenericSummary(metadata *tools.ExecutionMetadata) string
 		return fmt.Sprintf("❌ **Failed** • %s", metadata.ErrorType)
 	}
 	return "✓ **Completed successfully**"
-}
-
-func (m *Model) updateViewport() {
-	// Create message renderer with current dimensions
-	renderer := NewMessageRenderer(m.contentWidth, m.renderWrapWidth)
-
-	var rendered strings.Builder
-
-	for i, msg := range m.messages {
-		// Skip header for Assistant messages for more compact display
-		if msg.role != "Assistant" {
-			// Render message header
-			header := renderer.RenderHeader(msg)
-			if i > 0 {
-				rendered.WriteString("\n\n")
-			}
-			rendered.WriteString(header)
-			rendered.WriteString("\n")
-		} else if i > 0 {
-			// Assistant messages still need spacing between them
-			rendered.WriteString("\n\n")
-		}
-
-		// Render reasoning content if present (for extended thinking models)
-		if msg.reasoning != "" {
-			reasoningHeader := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("243")).
-				Bold(true).
-				Render("Thinking:")
-			rendered.WriteString(reasoningHeader)
-			rendered.WriteString("\n")
-
-			// Render reasoning as markdown with a subtle indent
-			if m.renderer != nil {
-				if mdRendered, err := m.renderer.Render(msg.reasoning); err == nil {
-					renderedContent := strings.TrimRight(mdRendered, "\n")
-					// Add a subtle separator line before reasoning
-					rendered.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("---"))
-					rendered.WriteString("\n")
-					rendered.WriteString(renderedContent)
-				} else {
-					rendered.WriteString(msg.reasoning)
-				}
-			} else {
-				rendered.WriteString(msg.reasoning)
-			}
-			rendered.WriteString("\n\n")
-		}
-
-		// Render content with markdown for Assistant and Tool messages
-		if (msg.role == "Assistant" || msg.role == "Tool") && m.renderer != nil && msg.content != "" {
-			// Render markdown with Glamour, which handles syntax highlighting internally via Chroma
-			var renderedContent string
-			if mdRendered, err := m.renderer.Render(msg.content); err == nil {
-				renderedContent = strings.TrimRight(mdRendered, "\n")
-			} else {
-				// Fallback to plain text if rendering fails
-				renderedContent = msg.content
-			}
-
-			rendered.WriteString(renderedContent)
-		} else {
-			// Plain text for user and system messages
-			if msg.role == "You" {
-				// Wrap user prompts to improve readability
-				wrappedContent := wordwrap.String(msg.content, m.renderWrapWidth)
-				rendered.WriteString(wrappedContent)
-			} else {
-				rendered.WriteString(msg.content)
-			}
-		}
-	}
-
-	// Check if we should auto-scroll (user is at or near bottom)
-	shouldScroll := m.viewport.AtBottom() || m.isCurrentTabGenerating()
-
-	m.viewport.SetContent(rendered.String())
-
-	// Auto-scroll to bottom when generating or if user was already at bottom
-	if shouldScroll {
-		m.viewport.GotoBottom()
-	}
-
-	m.lastUpdateHeight = len(m.messages)
-	m.viewportDirty = false
 }
 
 func (m *Model) handleCommand(input string) tea.Cmd {

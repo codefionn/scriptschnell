@@ -32,34 +32,6 @@ func (mr *MessageRenderer) SetWidth(contentWidth, renderWrapWidth int) {
 	mr.renderWrapWidth = renderWrapWidth
 }
 
-// RenderMessage renders a complete message with header and content
-func (mr *MessageRenderer) RenderMessage(msg message, index int) string {
-	var sb strings.Builder
-
-	// Add spacing between messages
-	if index > 0 {
-		sb.WriteString("\n\n")
-	}
-
-	// Render header
-	header := mr.RenderHeader(msg)
-	sb.WriteString(header)
-	sb.WriteString("\n")
-
-	// Render reasoning if present
-	if msg.reasoning != "" {
-		reasoning := mr.RenderReasoning(msg.reasoning)
-		sb.WriteString(reasoning)
-		sb.WriteString("\n\n")
-	}
-
-	// Render content based on role and type
-	content := mr.RenderContent(msg)
-	sb.WriteString(content)
-
-	return sb.String()
-}
-
 // RenderHeader creates a styled header for a message
 func (mr *MessageRenderer) RenderHeader(msg message) string {
 	timestampStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -164,8 +136,9 @@ func (mr *MessageRenderer) renderToolHeader(msg message) string {
 		parts = append(parts, statusStyle.Render(msg.status))
 	}
 
-	// Add description if present
-	if msg.description != "" {
+	// Add description if present and not already in compact summary
+	// Skip for go_sandbox and other tools that include description in their summary
+	if msg.description != "" && !isDescriptionInCompactSummary(msg.toolName) {
 		descStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#AAAAAA")).
 			Italic(true)
@@ -274,12 +247,17 @@ func (mr *MessageRenderer) renderUserContent(content string) string {
 
 // renderToolContent renders tool message content with special handling
 func (mr *MessageRenderer) renderToolContent(msg message) string {
+	var sb strings.Builder
+
+	// Parameters are already shown in the tool header compact summary,
+	// so we don't render them separately to avoid duplication
+
 	// If content is collapsed, show collapsed indicator
 	if msg.isCollapsed && msg.isCollapsible {
 		collapseStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#666666")).
 			Italic(true)
-		return collapseStyle.Render("[output collapsed - press Enter to expand]")
+		return sb.String() + collapseStyle.Render("[output collapsed - press Enter to expand]")
 	}
 
 	content := msg.content
@@ -293,7 +271,8 @@ func (mr *MessageRenderer) renderToolContent(msg message) string {
 		content = content + expandHint
 	}
 
-	return content
+	sb.WriteString(content)
+	return sb.String()
 }
 
 // RenderCompactToolCall creates a compact one-line representation
@@ -337,6 +316,25 @@ func (mr *MessageRenderer) ToggleCollapse(msg *message) bool {
 	}
 	msg.isCollapsed = !msg.isCollapsed
 	return msg.isCollapsed
+}
+
+// ToggleParams toggles the collapsed state of tool parameters
+func (mr *MessageRenderer) ToggleParams(msg *message) bool {
+	if len(msg.parameters) == 0 {
+		return false
+	}
+	msg.paramsCollapsed = !msg.paramsCollapsed
+	return msg.paramsCollapsed
+}
+
+// isDescriptionInCompactSummary returns true if the tool's compact summary
+// already includes the description parameter
+func isDescriptionInCompactSummary(toolName string) bool {
+	switch toolName {
+	case tools.ToolNameGoSandbox:
+		return true
+	}
+	return false
 }
 
 // Helper function to create a summary of a tool result

@@ -106,3 +106,4 @@ build/
 /test-write
 /test-server.go
 /web
+/scriptschnell_test

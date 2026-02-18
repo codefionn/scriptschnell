@@ -3059,7 +3059,7 @@ func (m *Model) View() string {
 		return "\n  Initializing..."
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Header
 	sb.WriteString(m.renderHeader())
@@ -3090,7 +3090,7 @@ func (m *Model) View() string {
 		m.errVisibleUntil = time.Time{}
 	}
 
-	mainContent := sb.String()
+	mainContent := builderString(sb)
 
 	// Show authorization dialog as overlay if open
 	if m.authorizationDialogOpen {
@@ -3227,7 +3227,7 @@ func (m *Model) refreshTodoContent() {
 		todoList, err = m.todoClient.List()
 	}
 
-	var content strings.Builder
+	content := acquireBuilder()
 
 	// Add keyboard shortcuts at the top of the todo panel so they're always visible
 	content.WriteString(todoTitleStyle.Render("Keybinds"))
@@ -3264,7 +3264,7 @@ func (m *Model) refreshTodoContent() {
 	case todoList == nil || len(todoList.Items) == 0:
 		content.WriteString(todoEmptyStyle.Render("No todo items yet."))
 	default:
-		m.renderTodoTree(&content, todoList.Items, "", 0)
+		m.renderTodoTree(content, todoList.Items, "", 0)
 	}
 
 	content.WriteString("\n")
@@ -3305,7 +3305,7 @@ func (m *Model) refreshTodoContent() {
 	}
 
 	// Update the viewport content
-	m.todoContent = content.String()
+	m.todoContent = builderString(content)
 	m.todoContentHeight = strings.Count(m.todoContent, "\n") + 1
 	m.todoViewport.SetContent(m.todoContent)
 }
@@ -3387,7 +3387,7 @@ func (m *Model) renderProgressPanel() string {
 		return ""
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Header
 	headerStyle := lipgloss.NewStyle().
@@ -3439,7 +3439,7 @@ func (m *Model) renderProgressPanel() string {
 		Padding(1).
 		Width(40)
 
-	return panelStyle.Render(sb.String())
+	return panelStyle.Render(builderString(sb))
 }
 
 func (m *Model) validTabIndex(tabIdx int) bool {

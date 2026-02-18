@@ -367,7 +367,7 @@ func truncateForDisplay(s string, maxLen int) string {
 
 // RenderHelp renders the keyboard shortcuts help
 func RenderHelp() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -405,7 +405,7 @@ func RenderHelp() string {
 		sb.WriteString("\n")
 	}
 
-	return sb.String()
+	return builderString(sb)
 }
 
 // IsToolMessage returns true if the message is a tool message

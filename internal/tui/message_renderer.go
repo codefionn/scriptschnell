@@ -195,7 +195,7 @@ func (mr *MessageRenderer) renderGroupedToolHeader(msg message) string {
 
 // RenderReasoning renders reasoning/thinking content
 func (mr *MessageRenderer) RenderReasoning(reasoning string) string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Reasoning header
 	reasoningHeader := lipgloss.NewStyle().
@@ -214,7 +214,7 @@ func (mr *MessageRenderer) RenderReasoning(reasoning string) string {
 	// Content (will be rendered via markdown in main pipeline)
 	sb.WriteString(reasoning)
 
-	return sb.String()
+	return builderString(sb)
 }
 
 // RenderContent renders message content based on role
@@ -247,7 +247,7 @@ func (mr *MessageRenderer) renderUserContent(content string) string {
 
 // renderToolContent renders tool message content with special handling
 func (mr *MessageRenderer) renderToolContent(msg message) string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Parameters are already shown in the tool header compact summary,
 	// so we don't render them separately to avoid duplication
@@ -257,7 +257,8 @@ func (mr *MessageRenderer) renderToolContent(msg message) string {
 		collapseStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#666666")).
 			Italic(true)
-		return sb.String() + collapseStyle.Render("[output collapsed - press Enter to expand]")
+		releaseBuilder(sb)
+		return collapseStyle.Render("[output collapsed - press Enter to expand]")
 	}
 
 	content := msg.content
@@ -272,7 +273,7 @@ func (mr *MessageRenderer) renderToolContent(msg message) string {
 	}
 
 	sb.WriteString(content)
-	return sb.String()
+	return builderString(sb)
 }
 
 // RenderCompactToolCall creates a compact one-line representation

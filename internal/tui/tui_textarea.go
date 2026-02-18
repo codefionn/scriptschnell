@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -12,7 +11,7 @@ const defaultInputPlaceholder = "Type your prompt here... (@ for files, Alt+Ente
 
 // renderTextarea renders the main input area and autocomplete suggestions
 func (m *Model) renderTextarea() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Textarea
 	sb.WriteString(m.textarea.View())
@@ -24,7 +23,7 @@ func (m *Model) renderTextarea() string {
 		sb.WriteString("\n")
 	}
 
-	return sb.String()
+	return builderString(sb)
 }
 
 // renderSuggestions renders the autocomplete suggestions list
@@ -33,7 +32,7 @@ func (m *Model) renderSuggestions() string {
 		return ""
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Suggestion box style
 	suggestionStyle := lipgloss.NewStyle().
@@ -90,5 +89,5 @@ func (m *Model) renderSuggestions() string {
 		sb.WriteString(more)
 	}
 
-	return sb.String()
+	return builderString(sb)
 }

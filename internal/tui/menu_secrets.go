@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -125,7 +124,7 @@ func (m *SecretsMenuModel) View() string {
 		return ""
 	}
 
-	var b strings.Builder
+	b := acquireBuilder()
 	b.WriteString(secretsTitleStyle.Render("Set Encryption Password"))
 	b.WriteString("\n")
 	b.WriteString(secretsHelpStyle.Render("Password protects API keys at rest. Leave both fields blank to reset to the default (empty) password.\n"))
@@ -146,7 +145,7 @@ func (m *SecretsMenuModel) View() string {
 
 	b.WriteString(secretsHelpStyle.Render("Tab: Next • Shift+Tab: Prev • Enter: Save • Esc: Cancel"))
 
-	return secretsFormStyle.Render(b.String())
+	return secretsFormStyle.Render(builderString(b))
 }
 
 // Result returns the selected password and whether the user confirmed changes.

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -22,7 +21,7 @@ var (
 
 // renderHeader renders the application header, including the title and current model
 func (m *Model) renderHeader() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Title
 	title := titleStyle.Render("scriptschnell - AI-Powered Coding Assistant")
@@ -33,5 +32,5 @@ func (m *Model) renderHeader() string {
 	sb.WriteString(status)
 	sb.WriteString("\n")
 
-	return sb.String()
+	return builderString(sb)
 }

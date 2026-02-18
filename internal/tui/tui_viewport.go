@@ -68,7 +68,7 @@ func (m *Model) updateViewport() {
 	// Create message renderer with current dimensions
 	renderer := NewMessageRenderer(m.contentWidth, m.renderWrapWidth)
 
-	var rendered strings.Builder
+	rendered := acquireBuilder()
 
 	for i, msg := range m.messages {
 		// Skip header for Assistant messages for more compact display
@@ -138,7 +138,7 @@ func (m *Model) updateViewport() {
 	// Check if we should auto-scroll (user is at or near bottom)
 	shouldScroll := m.viewport.AtBottom() || m.isCurrentTabGenerating()
 
-	m.viewport.SetContent(rendered.String())
+	m.viewport.SetContent(builderString(rendered))
 
 	// Auto-scroll to bottom when generating or if user was already at bottom
 	if shouldScroll {

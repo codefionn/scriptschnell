@@ -3,6 +3,7 @@ package pprof
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	netpprof "net/http/pprof"
 	"os"
@@ -36,6 +37,7 @@ type Config struct {
 type Handler struct {
 	config    Config
 	server    *http.Server
+	listener  net.Listener
 	cpuFile   *os.File
 	traceFile *os.File
 
@@ -119,13 +121,19 @@ func (h *Handler) Start() error {
 		mux.Handle("/debug/pprof/mutex", netpprof.Handler("mutex"))
 		mux.Handle("/debug/pprof/threadcreate", netpprof.Handler("threadcreate"))
 
+		ln, err := net.Listen("tcp", h.config.HTTPAddr)
+		if err != nil {
+			return fmt.Errorf("failed to bind pprof HTTP server: %w", err)
+		}
+
+		h.listener = ln
 		h.server = &http.Server{
 			Addr:    h.config.HTTPAddr,
 			Handler: mux,
 		}
 
 		go func() {
-			if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := h.server.Serve(h.listener); err != nil && err != http.ErrServerClosed {
 				// Log the error (could be improved with proper logging)
 				fmt.Fprintf(os.Stderr, "pprof server error: %v\n", err)
 			}
@@ -225,6 +233,7 @@ func (h *Handler) Stop() error {
 			errs = append(errs, fmt.Errorf("failed to shutdown pprof server: %w", err))
 		}
 		h.server = nil
+		h.listener = nil
 	}
 
 	if len(errs) > 0 {

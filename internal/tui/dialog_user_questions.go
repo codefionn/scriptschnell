@@ -144,7 +144,7 @@ func clampListSelection(l *list.Model) {
 }
 
 func (d *UserQuestionDialog) View() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Title
 	sb.WriteString(dialogTitleStyle.Render("📋 Planning Questions"))
@@ -177,7 +177,7 @@ func (d *UserQuestionDialog) View() string {
 	dialogWidth := min(max(80, d.width*90/100), 120)
 	dialogBoxStyle := dialogBoxBaseStyle.Width(dialogWidth)
 
-	return dialogBoxStyle.Render(sb.String())
+	return dialogBoxStyle.Render(builderString(sb))
 }
 
 func (d *UserQuestionDialog) GetAnswers() []string {
@@ -293,7 +293,7 @@ func (d *QuestionOptionsDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (d QuestionOptionsDialog) View() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Title with question number
 	questionNum := d.question.index + 1
@@ -323,5 +323,5 @@ func (d QuestionOptionsDialog) View() string {
 	dialogWidth := min(max(80, d.width*90/100), 120)
 	dialogBoxStyle := dialogBoxBaseStyle.Width(dialogWidth)
 
-	return dialogBoxStyle.Render(sb.String())
+	return dialogBoxStyle.Render(builderString(sb))
 }

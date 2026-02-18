@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -235,7 +234,7 @@ func (m DirectoryAccessDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m DirectoryAccessDialog) View() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Title
 	sb.WriteString(dirAccessTitleStyle.Render("📁 Directory Access Request"))
@@ -270,7 +269,7 @@ func (m DirectoryAccessDialog) View() string {
 	sb.WriteString("\n\n")
 	sb.WriteString(dirAccessDescStyle.Render("Shortcuts: [S] Session  [W] Workspace  [D] Deny  [Esc] Cancel"))
 
-	return dirAccessBoxStyle.Render(sb.String())
+	return dirAccessBoxStyle.Render(builderString(sb))
 }
 
 // GetChoice returns the user's choice

@@ -219,13 +219,13 @@ func (ch *CommandHandler) buildHelpMessage() string {
 		}
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 	sb.WriteString("Available Commands:\n\n")
 	for _, entry := range entries {
 		sb.WriteString(fmt.Sprintf("%-*s - %s\n", maxWidth, entry.Usage, entry.Description))
 	}
 	sb.WriteString(helpFooter)
-	return sb.String()
+	return builderString(sb)
 }
 
 func (ch *CommandHandler) handleQuitCommand(_ []string) (MenuResult, error) {
@@ -388,7 +388,7 @@ func (ch *CommandHandler) handleMCPList() (MenuResult, error) {
 		return NewMenuResult("No MCP servers configured."), nil
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 	sb.WriteString("Configured MCP servers:\n\n")
 
 	for name, server := range servers {
@@ -417,7 +417,7 @@ func (ch *CommandHandler) handleMCPList() (MenuResult, error) {
 		sb.WriteString("\n")
 	}
 
-	return NewMenuResult(strings.TrimRight(sb.String(), "\n")), nil
+	return NewMenuResult(strings.TrimRight(builderString(sb), "\n")), nil
 }
 
 func (ch *CommandHandler) handleMCPAddOpenAPI(args []string) (MenuResult, error) {
@@ -791,7 +791,7 @@ func (ch *CommandHandler) handleModels(args []string) (MenuResult, error) {
 			return NewMenuResult("No providers configured. Use /provider to add a provider first."), nil
 		}
 
-		var sb strings.Builder
+		sb := acquireBuilder()
 		sb.WriteString("Refreshing models from provider APIs...\n\n")
 
 		totalModels := 0
@@ -808,7 +808,7 @@ func (ch *CommandHandler) handleModels(args []string) (MenuResult, error) {
 		}
 
 		sb.WriteString(fmt.Sprintf("\nTotal: %d models available\n", totalModels))
-		return NewMenuResult(sb.String()), nil
+		return NewMenuResult(builderString(sb)), nil
 
 	case "menu":
 		if len(args) < 2 {
@@ -1025,7 +1025,7 @@ func (ch *CommandHandler) handleContextList() (MenuResult, error) {
 		return NewMenuResult("No context directories configured for this workspace."), nil
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 	sb.WriteString("Configured context directories:\n\n")
 
 	for i, dir := range contextDirs {
@@ -1039,7 +1039,7 @@ func (ch *CommandHandler) handleContextList() (MenuResult, error) {
 		sb.WriteString("ies")
 	}
 
-	return NewMenuResult(sb.String()), nil
+	return NewMenuResult(builderString(sb)), nil
 }
 
 func (ch *CommandHandler) handleContextAdd(args []string) (MenuResult, error) {
@@ -1225,7 +1225,7 @@ func (ch *CommandHandler) handleSessionList() (MenuResult, error) {
 		return NewMenuResult("No saved sessions found for this workspace."), nil
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 	sb.WriteString(fmt.Sprintf("Saved sessions for workspace: %s\n\n", ch.config.WorkingDir))
 
 	for i, sess := range sessions {
@@ -1245,7 +1245,7 @@ func (ch *CommandHandler) handleSessionList() (MenuResult, error) {
 		sb.WriteString("\n")
 	}
 
-	return NewMenuResult(strings.TrimRight(sb.String(), "\n")), nil
+	return NewMenuResult(strings.TrimRight(builderString(sb), "\n")), nil
 }
 
 func (ch *CommandHandler) handleSessionLoad(args []string) (MenuResult, error) {
@@ -1324,7 +1324,7 @@ func (ch *CommandHandler) handleSessionLoadWithMenu(storageRef *actor.ActorRef) 
 		options = append(options, fmt.Sprintf("%s (%s) - %d messages", displayTitle, sess.ID, sess.MessageCount))
 	}
 
-	var sb strings.Builder
+	sb := acquireBuilder()
 	sb.WriteString("Available sessions to load:\n\n")
 
 	for i, option := range options {
@@ -1334,7 +1334,7 @@ func (ch *CommandHandler) handleSessionLoadWithMenu(storageRef *actor.ActorRef) 
 	sb.WriteString("\nTo load a session, use: /session load <session_id>\n")
 	sb.WriteString("Example: /session load abc123def456")
 
-	return NewMenuResult(sb.String()), nil
+	return NewMenuResult(builderString(sb)), nil
 }
 
 func (ch *CommandHandler) handleSessionDelete(args []string) (MenuResult, error) {

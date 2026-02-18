@@ -362,7 +362,7 @@ func (m ProviderMenuModel) View() string {
 	}
 
 	if m.inputMode {
-		var sb strings.Builder
+		sb := acquireBuilder()
 		switch m.formMode {
 		case formModeAdd:
 			displayName := m.addingLabel
@@ -377,6 +377,7 @@ func (m ProviderMenuModel) View() string {
 			}
 			sb.WriteString(providerTitleStyle.Render(fmt.Sprintf("Configure %s\n\n", label)))
 		default:
+			releaseBuilder(sb)
 			return ""
 		}
 
@@ -401,7 +402,7 @@ func (m ProviderMenuModel) View() string {
 			sb.WriteString("\n\n")
 			sb.WriteString(providerErrorStyle.Render(m.inputError))
 		}
-		return sb.String()
+		return builderString(sb)
 	}
 
 	if m.result != "" {

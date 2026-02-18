@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -188,7 +187,7 @@ func (m AuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m AuthorizationDialog) View() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Title with tab name
 	title := "⚠️  Authorization Required"
@@ -236,7 +235,7 @@ func (m AuthorizationDialog) View() string {
 	sb.WriteString(help)
 
 	dialogWidth := m.dialogWidth()
-	return authDialogStyle.Width(dialogWidth).Render(sb.String())
+	return authDialogStyle.Width(dialogWidth).Render(builderString(sb))
 }
 
 // GetApproved returns whether the user approved the authorization

@@ -496,6 +496,19 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	remaining := fs.Args()
 	optionsUsed := dangerous || allowNetwork || len(allowDirs) > 0 || len(allowFiles) > 0 || len(allowDomains) > 0
 
+	// Build pprof config (used across modes)
+	pprofCfg := &pprof.Config{
+		HTTPAddr:             pprofAddr,
+		CPUProfile:           pprofCPU,
+		HeapProfile:          pprofHeap,
+		GoroutineProfile:     pprofGoroutine,
+		BlockProfile:         pprofBlock,
+		MutexProfile:         pprofMutex,
+		TraceProfile:         pprofTrace,
+		BlockProfileRate:     pprofBlockProfileRate,
+		MutexProfileFraction: pprofMutexProfileFraction,
+	}
+
 	// Handle ACP mode
 	if acpMode {
 		if len(remaining) > 0 {
@@ -517,7 +530,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 			return "", nil, false, nil, false, false, false, flag.ErrHelp
 		}
 		// Return special values to indicate web mode (pass requireSandboxAuth)
-		return "", nil, false, nil, true, webDebug, requireSandboxAuth, nil
+		return "", nil, false, pprofCfg, true, webDebug, requireSandboxAuth, nil
 	}
 
 	if len(remaining) == 0 {
@@ -525,7 +538,7 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 		opts := &cli.Options{
 			RequireSandboxAuth: requireSandboxAuth,
 		}
-		return "", opts, false, nil, false, false, false, nil
+		return "", opts, false, pprofCfg, false, false, false, nil
 	}
 
 	prompt := strings.TrimSpace(strings.Join(remaining, " "))
@@ -548,19 +561,6 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	}
 	if dangerous {
 		opts.AllowAllNetwork = true
-	}
-
-	// Build pprof config
-	pprofCfg := &pprof.Config{
-		HTTPAddr:             pprofAddr,
-		CPUProfile:           pprofCPU,
-		HeapProfile:          pprofHeap,
-		GoroutineProfile:     pprofGoroutine,
-		BlockProfile:         pprofBlock,
-		MutexProfile:         pprofMutex,
-		TraceProfile:         pprofTrace,
-		BlockProfileRate:     pprofBlockProfileRate,
-		MutexProfileFraction: pprofMutexProfileFraction,
 	}
 
 	return prompt, opts, true, pprofCfg, false, false, false, nil

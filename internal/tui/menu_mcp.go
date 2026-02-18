@@ -207,7 +207,7 @@ func (m *MCPMenuModel) View() string {
 	}
 
 	if m.inputMode {
-		var b strings.Builder
+		b := acquireBuilder()
 		b.WriteString(mcpTitleStyle.Render("Configure MCP Server"))
 		b.WriteString("\n\n")
 		for i, field := range m.inputFields {
@@ -221,7 +221,7 @@ func (m *MCPMenuModel) View() string {
 		}
 		help := mcpHelpStyle.Render("Tab/Shift+Tab: Next field • Enter: Confirm • ESC: Cancel")
 		b.WriteString(help)
-		return b.String()
+		return builderString(b)
 	}
 
 	help := mcpHelpStyle.Render("\n↑/↓: Navigate • Enter: Select/Toggle • d: Delete • q/ESC: Close")

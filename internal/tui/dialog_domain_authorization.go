@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -209,7 +208,7 @@ func (m DomainAuthorizationDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m DomainAuthorizationDialog) View() string {
-	var sb strings.Builder
+	sb := acquireBuilder()
 
 	// Title
 	sb.WriteString(domainTitleStyle.Render("🌐 Network Access Authorization"))
@@ -254,7 +253,7 @@ func (m DomainAuthorizationDialog) View() string {
 	sb.WriteString(help)
 
 	dialogWidth := m.dialogWidth()
-	return domainDialogStyle.Width(dialogWidth).Render(sb.String())
+	return domainDialogStyle.Width(dialogWidth).Render(builderString(sb))
 }
 
 // GetChoice returns the user's choice

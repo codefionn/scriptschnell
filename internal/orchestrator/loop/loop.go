@@ -250,6 +250,16 @@ type Config struct {
 
 	// MaxConsecutiveCompactions limits consecutive compactions (default: 2)
 	MaxConsecutiveCompactions int
+
+	// EnableLLMAutoContinueJudge enables LLM-based auto-continue decisions (default: false)
+	// When enabled, uses an LLM to intelligently decide whether to continue incomplete responses
+	EnableLLMAutoContinueJudge bool
+
+	// LLMAutoContinueJudgeTimeout is the max time to wait for LLM judge (default: 15s)
+	LLMAutoContinueJudgeTimeout time.Duration
+
+	// LLMAutoContinueJudgeTokenLimit limits context sent to LLM judge (default: 1000)
+	LLMAutoContinueJudgeTokenLimit int
 }
 
 // DefaultConfig returns a Config with sensible defaults
@@ -261,6 +271,9 @@ func DefaultConfig() *Config {
 		EnableAutoContinue:                true,
 		ContextCompactionThresholdPercent: 90,
 		MaxConsecutiveCompactions:         2,
+		EnableLLMAutoContinueJudge:        false,
+		LLMAutoContinueJudgeTimeout:       15 * time.Second,
+		LLMAutoContinueJudgeTokenLimit:    1000,
 	}
 }
 

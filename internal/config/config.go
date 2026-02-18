@@ -102,11 +102,14 @@ type SandboxOutputCompactionConfig struct {
 
 // LoopConfig holds configuration for the orchestrator loop abstraction
 type LoopConfig struct {
-	Strategy                string `json:"strategy"`                   // Loop strategy: "default", "conservative", "aggressive"
-	MaxIterations           int    `json:"max_iterations"`             // Maximum number of iterations (0 = use default)
-	MaxAutoContinueAttempts int    `json:"max_auto_continue_attempts"` // Maximum auto-continue attempts (0 = use default)
-	EnableLoopDetection     bool   `json:"enable_loop_detection"`      // Enable repetitive pattern detection
-	EnableAutoContinue      bool   `json:"enable_auto_continue"`       // Enable automatic continuation on incomplete responses
+	Strategy                       string `json:"strategy"`                                // Loop strategy: "default", "conservative", "aggressive", "llm-judge"
+	MaxIterations                  int    `json:"max_iterations"`                          // Maximum number of iterations (0 = use default)
+	MaxAutoContinueAttempts        int    `json:"max_auto_continue_attempts"`              // Maximum auto-continue attempts (0 = use default)
+	EnableLoopDetection            bool   `json:"enable_loop_detection"`                   // Enable repetitive pattern detection
+	EnableAutoContinue             bool   `json:"enable_auto_continue"`                    // Enable automatic continuation on incomplete responses
+	EnableLLMAutoContinueJudge     bool   `json:"enable_llm_auto_continue_judge"`          // Enable LLM-based auto-continue decisions
+	LLMAutoContinueJudgeTimeout    int    `json:"llm_auto_continue_judge_timeout_seconds"` // LLM judge timeout in seconds (0 = use default 15s)
+	LLMAutoContinueJudgeTokenLimit int    `json:"llm_auto_continue_judge_token_limit"`     // LLM judge token limit (0 = use default 1000)
 }
 
 // SandboxConfig holds configuration for shell command sandboxing

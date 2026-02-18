@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/codefionn/scriptschnell/internal/llm"
 	"github.com/codefionn/scriptschnell/internal/progress"
 )
 
@@ -304,6 +305,15 @@ func (f *LoopFactory) CreateConservative() (Loop, error) {
 // CreateAggressive creates an aggressive loop
 func (f *LoopFactory) CreateAggressive() (Loop, error) {
 	strategy := NewAggressiveStrategy(f.defaultConfig)
+	iteration := NewIterationExecutor(f.defaultDeps)
+
+	return NewOrchestratorLoop(f.defaultConfig, strategy, iteration, f.defaultDeps), nil
+}
+
+// CreateLLMJudge creates a loop with LLM judge strategy
+func (f *LoopFactory) CreateLLMJudge(llmClient llm.Client, modelID string) (Loop, error) {
+	factory := NewStrategyFactory(f.defaultConfig)
+	strategy := factory.CreateWithLLMJudge("llm-judge", f.defaultConfig, llmClient, modelID, f.defaultDeps.Session)
 	iteration := NewIterationExecutor(f.defaultDeps)
 
 	return NewOrchestratorLoop(f.defaultConfig, strategy, iteration, f.defaultDeps), nil

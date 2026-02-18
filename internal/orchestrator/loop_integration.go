@@ -411,6 +411,15 @@ func (o *Orchestrator) buildLoopConfig() *loop.Config {
 
 		config.EnableLoopDetection = loopCfg.EnableLoopDetection
 		config.EnableAutoContinue = loopCfg.EnableAutoContinue
+
+		// LLM judge settings
+		config.EnableLLMAutoContinueJudge = loopCfg.EnableLLMAutoContinueJudge
+		if loopCfg.LLMAutoContinueJudgeTimeout > 0 {
+			config.LLMAutoContinueJudgeTimeout = time.Duration(loopCfg.LLMAutoContinueJudgeTimeout) * time.Second
+		}
+		if loopCfg.LLMAutoContinueJudgeTokenLimit > 0 {
+			config.LLMAutoContinueJudgeTokenLimit = loopCfg.LLMAutoContinueJudgeTokenLimit
+		}
 	} else {
 		// Use model-specific defaults
 		config.MaxAutoContinueAttempts = o.getAutoContinueMaxAttempts()
@@ -427,6 +436,34 @@ func (o *Orchestrator) createLoopStrategy(config *loop.Config) loop.Strategy {
 	}
 
 	factory := loop.NewStrategyFactory(config)
+
+	// Check if we should use LLM judge strategy
+	if strategyMode == "llm-judge" && config.EnableLLMAutoContinueJudge {
+		// Use summarization client for LLM judge (faster/cheaper than orchestration model)
+		llmClient := o.summarizeClient
+		if llmClient == nil {
+			// Fall back to orchestration client if summarization client is not available
+			llmClient = o.orchestrationClient
+		}
+
+		modelID := o.providerMgr.GetSummarizeModel()
+		if modelID == "" {
+			modelID = o.providerMgr.GetOrchestrationModel()
+		}
+
+		// Create session adapter for the strategy
+		session := newSessionAdapter(o.session)
+
+		if llmClient != nil && modelID != "" {
+			logger.Debug("Creating LLM judge strategy with model: %s", modelID)
+			return factory.CreateWithLLMJudge(strategyMode, config, llmClient, modelID, session)
+		}
+
+		// Fall back to default if LLM client or model not available
+		logger.Warn("LLM judge strategy requested but LLM client/model not available, falling back to default strategy")
+		return factory.Create("default")
+	}
+
 	return factory.Create(strategyMode)
 }
 

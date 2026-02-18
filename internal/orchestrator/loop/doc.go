@@ -118,8 +118,40 @@
 //   - DefaultStrategy: Balanced approach with standard limits
 //   - ConservativeStrategy: Stops earlier to prevent excessive token usage
 //   - AggressiveStrategy: Continues more aggressively for batch operations
+//   - LLMJudgeStrategy: Uses an LLM to make intelligent auto-continue decisions
 //
 // Custom strategies can be implemented by implementing the Strategy interface.
+//
+// # LLM Judge Strategy
+//
+// The LLMJudgeStrategy provides intelligent auto-continue decisions by:
+//
+// 1. Checking for repetitive patterns (loops) in recent messages
+// 2. Using an LLM to evaluate whether continuation is needed
+// 3. Applying model-specific decision logic (Qwen 3, Mistral, etc.)
+// 4. Falling back to pattern matching on any LLM failure
+//
+// Configuration options:
+//
+//   - EnableLLMAutoContinueJudge: Enable/disable the LLM judge
+//   - LLMAutoContinueJudgeTimeout: Maximum time to wait for LLM response (default: 15s)
+//   - LLMAutoContinueJudgeTokenLimit: Context limit sent to LLM judge (default: 1000 tokens)
+//
+// Example usage:
+//
+//	config := loop.DefaultConfig()
+//	config.EnableLLMAutoContinueJudge = true
+//	config.LLMAutoContinueJudgeTimeout = 15 * time.Second
+//	config.LLMAutoContinueJudgeTokenLimit = 1000
+//	factory := loop.NewStrategyFactory(config)
+//	strategy := factory.CreateWithLLMJudge("llm-judge", config, llmClient, modelID, session)
+//
+// The LLM judge automatically falls back to pattern matching if:
+//   - The LLM client is not available
+//   - The model ID is empty
+//   - The LLM call times out
+//   - The LLM returns an invalid response
+//   - Auto-continue is disabled in the config
 //
 // # Testing
 //

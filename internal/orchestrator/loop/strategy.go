@@ -2,6 +2,9 @@ package loop
 
 import (
 	"strings"
+
+	"github.com/codefionn/scriptschnell/internal/llm"
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // DefaultStrategy implements the standard loop control strategy.
@@ -274,15 +277,30 @@ func NewStrategyFactory(config *Config) *StrategyFactory {
 
 // Create returns a Strategy based on the specified mode
 func (f *StrategyFactory) Create(mode string) Strategy {
+	return f.CreateWithConfig(mode, f.defaultConfig)
+}
+
+// CreateWithLLMJudge creates a Strategy with LLM judge support.
+// For the "llm-judge" mode, llmClient and modelID are required.
+// This method is used when you want to create an LLM judge strategy with specific LLM client and model.
+func (f *StrategyFactory) CreateWithLLMJudge(mode string, config *Config, llmClient llm.Client, modelID string, session Session) Strategy {
 	switch mode {
 	case "conservative":
-		return NewConservativeStrategy(f.defaultConfig)
+		return NewConservativeStrategy(config)
 	case "aggressive":
-		return NewAggressiveStrategy(f.defaultConfig)
+		return NewAggressiveStrategy(config)
+	case "llm-judge":
+		// LLM judge strategy requires llmClient and modelID
+		if llmClient != nil && modelID != "" {
+			return NewLLMJudgeStrategy(config, llmClient, modelID, session)
+		}
+		// Fall back to default if LLM client not available
+		logger.Warn("LLM judge strategy requested but no LLM client/model provided, falling back to default strategy")
+		fallthrough
 	case "default":
 		fallthrough
 	default:
-		return NewDefaultStrategy(f.defaultConfig)
+		return NewDefaultStrategy(config)
 	}
 }
 
@@ -293,6 +311,10 @@ func (f *StrategyFactory) CreateWithConfig(mode string, config *Config) Strategy
 		return NewConservativeStrategy(config)
 	case "aggressive":
 		return NewAggressiveStrategy(config)
+	case "llm-judge":
+		// LLM judge strategy without LLM client - fall back to default
+		logger.Warn("LLM judge strategy requested but no LLM client provided, falling back to default strategy")
+		fallthrough
 	case "default":
 		fallthrough
 	default:

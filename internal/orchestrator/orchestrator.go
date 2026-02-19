@@ -961,6 +961,26 @@ func (o *Orchestrator) expandFileReferences(ctx context.Context, prompt string) 
 	return expandedPrompt
 }
 
+// NewCleanOrchestratorForTask creates a fresh orchestrator for executing a single task
+// The orchestrator uses shared filesystem and actors but has its own session
+func NewCleanOrchestratorForTask(
+	cfg *config.Config,
+	providerMgr *provider.Manager,
+	cliMode bool,
+	sharedFS fs.FileSystem,
+	sharedDomainBlocker *actor.ActorRef,
+	sharedSessionStorage *actor.ActorRef,
+	workingDir string,
+) (*Orchestrator, error) {
+	logger.Debug("Creating clean orchestrator for task execution in %s", workingDir)
+
+	// Create a fresh session for this task
+	sess := session.NewSession(session.GenerateID(), workingDir)
+
+	// Create orchestrator with shared resources
+	return NewOrchestratorWithSharedResources(cfg, providerMgr, cliMode, sharedFS, sess, sharedSessionStorage, sharedDomainBlocker, false)
+}
+
 // detectProviderChange checks if the provider/model family has changed
 func (o *Orchestrator) detectProviderChange(modelID string) (provider, modelFamily string, changed bool) {
 	converter := llm.GetConverter(modelID)
@@ -1182,6 +1202,7 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 
 	// Task management
 	addSpec(&tools.TodoToolSpec{}, false, tools.NewTodoToolFactory(o.todoClient), false, "")
+	addSpec(&tools.TaskSummaryToolSpec{}, false, tools.NewTaskSummaryToolFactory(o.session), false, "")
 
 	// Shell tooling
 	if o.shouldUseShellTool(modelFamily) {
@@ -2293,6 +2314,8 @@ func (o *Orchestrator) ProcessPrompt(ctx context.Context, prompt string, progres
 }
 
 // executePlanningBoard executes primary tasks from a planning board in serial
+// Each task runs in a fresh orchestrator with a clean session, but shares filesystem
+// and actors. Summaries from completed tasks are passed to subsequent tasks.
 func (o *Orchestrator) executePlanningBoard(
 	ctx context.Context,
 	originalPrompt string,
@@ -2327,6 +2350,9 @@ func (o *Orchestrator) executePlanningBoard(
 	logger.Info("Executing planning board with %d primary tasks", len(planningBoard.PrimaryTasks))
 	sendStream(fmt.Sprintf("\nExecuting %d primary tasks...\n", len(planningBoard.PrimaryTasks)), false)
 
+	// Track summaries from completed tasks
+	var previousSummaries []session.TaskExecutionSummary
+
 	for i := 0; i < len(planningBoard.PrimaryTasks); i++ {
 		primaryTask := &planningBoard.PrimaryTasks[i]
 
@@ -2341,22 +2367,55 @@ func (o *Orchestrator) executePlanningBoard(
 		sendStream(fmt.Sprintf("\n[Task %d/%d] %s\n", i+1, len(planningBoard.PrimaryTasks), primaryTask.Text), false)
 		sendStatus(fmt.Sprintf("Executing task %d/%d...", i+1, len(planningBoard.PrimaryTasks)))
 
-		// Build task prompt with context about the original objective and subtasks
-		taskPrompt := o.buildTaskPrompt(originalPrompt, primaryTask, i, len(planningBoard.PrimaryTasks))
-
-		// Execute orchestrator loop for this task
-		if err := o.runOrchestrationLoopForTask(ctx, taskPrompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback, openRouterUsageCallback); err != nil {
-			logger.Warn("Task %d failed: %v", i+1, err)
-			sendStream(fmt.Sprintf("⚠️  Task %d failed: %v\n", i+1, err), false)
-			// Continue with next task instead of failing entirely
+		// Create a clean orchestrator for this task
+		cleanOrch, err := NewCleanOrchestratorForTask(
+			o.config,
+			o.providerMgr,
+			o.cliMode,
+			o.fs,                // Shared filesystem
+			o.domainBlockerRef,  // Shared domain blocker
+			o.sessionStorageRef, // Shared session storage
+			o.workingDir,
+		)
+		if err != nil {
+			logger.Error("Failed to create clean orchestrator for task %d: %v", i+1, err)
+			sendStream(fmt.Sprintf("✗ Failed to create orchestrator for task %d: %v\n", i+1, err), false)
 			primaryTask.Status = "failed"
 			continue
 		}
 
-		// Mark task as completed
-		primaryTask.Status = "completed"
-		logger.Info("Task %d completed successfully: %s", i+1, primaryTask.Text)
-		sendStream(fmt.Sprintf("✓ Task %d completed\n", i+1), false)
+		// Copy clients from parent orchestrator for task execution
+		cleanOrch.orchestrationClient = o.orchestrationClient
+		cleanOrch.summarizeClient = o.summarizeClient
+		cleanOrch.planningClient = o.planningClient
+
+		// Build task prompt with context including previous summaries
+		taskPrompt := o.buildTaskPrompt(originalPrompt, primaryTask, i, len(planningBoard.PrimaryTasks), previousSummaries)
+
+		// Execute task in clean orchestrator
+		var taskSummary *session.TaskExecutionSummary
+		if err := cleanOrch.runOrchestrationLoopForTask(ctx, taskPrompt, progressCallback, contextCallback, authCallback, toolCallCallback, toolResultCallback, openRouterUsageCallback); err != nil {
+			logger.Warn("Task %d failed: %v", i+1, err)
+			sendStream(fmt.Sprintf("⚠️  Task %d failed: %v\n", i+1, err), false)
+			primaryTask.Status = "failed"
+			// Generate partial summary even on failure
+			taskSummary = o.extractTaskSummary(cleanOrch, primaryTask, "failed", err.Error())
+		} else {
+			logger.Info("Task %d completed successfully: %s", i+1, primaryTask.Text)
+			sendStream(fmt.Sprintf("✓ Task %d completed\n", i+1), false)
+			primaryTask.Status = "completed"
+			// Extract summary from completed task
+			taskSummary = o.extractTaskSummary(cleanOrch, primaryTask, "completed", "")
+		}
+
+		// Store summary in task and previous summaries list
+		if taskSummary != nil {
+			primaryTask.Summary = taskSummary
+			previousSummaries = append(previousSummaries, *taskSummary)
+		}
+
+		// Clean up the orchestrator
+		cleanOrch.Close()
 	}
 
 	sendStream("\n✓ All primary tasks completed\n", false)
@@ -2364,12 +2423,33 @@ func (o *Orchestrator) executePlanningBoard(
 }
 
 // buildTaskPrompt constructs the prompt for a single primary task execution
-func (o *Orchestrator) buildTaskPrompt(originalPrompt string, task *session.PlanningTask, taskIndex, totalTasks int) string {
+func (o *Orchestrator) buildTaskPrompt(originalPrompt string, task *session.PlanningTask, taskIndex, totalTasks int, previousSummaries []session.TaskExecutionSummary) string {
 	var sb strings.Builder
 
 	// Original context
 	sb.WriteString(fmt.Sprintf("You are working on task %d of %d from the overall objective.\n\n", taskIndex+1, totalTasks))
 	sb.WriteString(fmt.Sprintf("**Overall Objective:** %s\n\n", originalPrompt))
+
+	// Previous summaries if present
+	if len(previousSummaries) > 0 {
+		sb.WriteString("**Previous Tasks Completed:**\n")
+		for i, summary := range previousSummaries {
+			sb.WriteString(fmt.Sprintf("\n%d. Task: %s\n", i+1, summary.TaskText))
+			sb.WriteString(fmt.Sprintf("   Status: %s\n", summary.Status))
+			sb.WriteString(fmt.Sprintf("   Summary: %s\n", summary.Summary))
+			if len(summary.FilesModified) > 0 {
+				sb.WriteString("   Files modified: ")
+				for j, f := range summary.FilesModified {
+					if j > 0 {
+						sb.WriteString(", ")
+					}
+					sb.WriteString(f)
+				}
+				sb.WriteString("\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
 
 	// Current task
 	sb.WriteString(fmt.Sprintf("**Your Current Task:** %s\n", task.Text))
@@ -2392,9 +2472,75 @@ func (o *Orchestrator) buildTaskPrompt(originalPrompt string, task *session.Plan
 	}
 
 	sb.WriteString("Execute this task using the available tools. Focus on completing the current task and its subtasks.\n")
-	sb.WriteString("When complete, continue to the next task or finish if this was the last task.\n")
+	sb.WriteString("When complete, output a summary of what was done (including files read/modified) before finishing.\n")
 
 	return sb.String()
+}
+
+// extractTaskSummary extracts a summary of work completed from a task's session
+func (o *Orchestrator) extractTaskSummary(taskOrch *Orchestrator, task *session.PlanningTask, status, errorMsg string) *session.TaskExecutionSummary {
+	// First, try to get summary from the explicit task_summary tool call
+	if explicitSummary := taskOrch.session.GetTaskExecutionSummary(); explicitSummary != nil {
+		// Update the explicit summary with task metadata
+		explicitSummary.TaskID = task.ID
+		explicitSummary.TaskText = task.Text
+		if status != "" && explicitSummary.Status == "" {
+			explicitSummary.Status = status
+		}
+		if errorMsg != "" {
+			explicitSummary.Errors = append(explicitSummary.Errors, errorMsg)
+		}
+		// If explicit summary has empty summary text, generate a fallback
+		if explicitSummary.Summary == "" {
+			filesModified := taskOrch.session.GetModifiedFiles()
+			if status == "completed" || explicitSummary.Status == "completed" {
+				explicitSummary.Summary = fmt.Sprintf("Task completed. Modified %d files.", len(filesModified))
+			} else if status == "failed" || explicitSummary.Status == "failed" {
+				explicitSummary.Summary = fmt.Sprintf("Task failed. Error: %s", errorMsg)
+			} else {
+				explicitSummary.Summary = fmt.Sprintf("Task finished with status %s. Modified %d files.", explicitSummary.Status, len(filesModified))
+			}
+		}
+		return explicitSummary
+	}
+
+	// Fallback: extract from last assistant message if no explicit summary
+	summary := &session.TaskExecutionSummary{
+		TaskID:    task.ID,
+		TaskText:  task.Text,
+		Status:    status,
+		Timestamp: time.Now(),
+		Metadata:  make(map[string]string),
+	}
+
+	// Extract files modified from the task session
+	summary.FilesModified = taskOrch.session.GetModifiedFiles()
+	summary.FilesRead = taskOrch.session.GetFilesRead()
+
+	// Get last assistant message to extract summary text
+	messages := taskOrch.session.GetMessages()
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			summary.Summary = messages[i].Content
+			break
+		}
+	}
+
+	// If no summary text found, generate a basic one
+	if summary.Summary == "" {
+		if status == "completed" {
+			summary.Summary = fmt.Sprintf("Task completed. Modified %d files.", len(summary.FilesModified))
+		} else {
+			summary.Summary = fmt.Sprintf("Task failed. Error: %s", errorMsg)
+		}
+	}
+
+	// Add error if any
+	if errorMsg != "" {
+		summary.Errors = []string{errorMsg}
+	}
+
+	return summary
 }
 
 // runOrchestrationLoopForTask runs the main orchestration loop for a single task
@@ -4250,6 +4396,9 @@ func (o *Orchestrator) ExecuteTool(ctx context.Context, toolCall *tools.ToolCall
 	}
 
 	// Check if tool exists in registry
+	if o.toolRegistry == nil {
+		return &tools.ToolResult{Error: "tool registry is not initialized"}, nil
+	}
 	if _, exists := o.toolRegistry.GetExecutor(toolName); !exists {
 		// Tool not found - try to rewrite using the rewriter
 		if o.toolCallRewriter != nil && o.toolCallRewriter.CanRewrite() {
@@ -4282,6 +4431,9 @@ func (o *Orchestrator) ExecuteTool(ctx context.Context, toolCall *tools.ToolCall
 		return o.toolExecutor.ExecuteWithCallbacks(ctx, toolCall, toolName, progressFn, toolCallCb, toolResultCb, approved)
 	}
 
+	if o.toolRegistry == nil {
+		return &tools.ToolResult{Error: "tool registry is not initialized"}, nil
+	}
 	result := o.toolRegistry.ExecuteWithCallbacks(ctx, toolCall, toolName, progressFn, toolCallCb, toolResultCb, approved)
 	return result, nil
 }
@@ -4516,7 +4668,13 @@ func (o *Orchestrator) getOrBuildSystemPrompt(ctx context.Context, modelID strin
 	// Build the system prompt
 	logger.Debug("Building new system prompt for session")
 	promptBuilder := llm.NewPromptBuilder(o.fs, o.workingDir, o.config)
-	systemPrompt, err := promptBuilder.BuildSystemPrompt(ctx, modelID, o.cliMode, o.toolRegistry.ToJSONSchema())
+
+	// Get tool schemas if registry is available
+	var toolsJSON []map[string]interface{}
+	if o.toolRegistry != nil {
+		toolsJSON = o.toolRegistry.ToJSONSchema()
+	}
+	systemPrompt, err := promptBuilder.BuildSystemPrompt(ctx, modelID, o.cliMode, toolsJSON)
 	if err != nil {
 		return "", err
 	}

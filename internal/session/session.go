@@ -41,12 +41,13 @@ type QuestionAnswer struct {
 
 // PlanningTask represents a task in the planning board
 type PlanningTask struct {
-	ID          string         `json:"id"`
-	Text        string         `json:"text"`
-	Subtasks    []PlanningTask `json:"subtasks,omitempty"`
-	Priority    string         `json:"priority,omitempty"` // "high", "medium", "low"
-	Status      string         `json:"status,omitempty"`   // "pending", "in_progress", "completed"
-	Description string         `json:"description,omitempty"`
+	ID          string                `json:"id"`
+	Text        string                `json:"text"`
+	Subtasks    []PlanningTask        `json:"subtasks,omitempty"`
+	Priority    string                `json:"priority,omitempty"` // "high", "medium", "low"
+	Status      string                `json:"status,omitempty"`   // "pending", "in_progress", "completed"
+	Description string                `json:"description,omitempty"`
+	Summary     *TaskExecutionSummary `json:"summary,omitempty"` // Summary of work completed for this task
 }
 
 // PlanningBoard represents a hierarchical planning board with primary tasks and subtasks
@@ -64,19 +65,20 @@ type Session struct {
 	FilesRead                 map[string]string // path -> content
 	FilesModified             map[string]bool
 	BackgroundJobs            map[string]*BackgroundJob
-	AuthorizedDomains         map[string]bool  // domain -> authorized (session-level)
-	AuthorizedCommands        []string         // command prefixes that are authorized (session-level)
-	PlanningActive            bool             // whether planning phase is currently running
-	PlanningObjective         string           // objective of current planning phase
-	PlanningStartTime         time.Time        // when current planning phase started
-	PlanningQuestionsAnswered []QuestionAnswer // questions asked and answered during planning
-	PlanningBoard             *PlanningBoard   // hierarchical planning board with primary tasks and subtasks
-	LastSandboxExitCode       int              // exit code from last sandbox execution
-	LastSandboxStdout         string           // stdout from last sandbox execution
-	LastSandboxStderr         string           // stderr from last sandbox execution
-	CurrentProvider           string           // Current LLM provider for native message format
-	CurrentModelFamily        string           // Current model family for native message format
-	CurrentBranch             string           // Current Git branch (if in a repository)
+	AuthorizedDomains         map[string]bool       // domain -> authorized (session-level)
+	AuthorizedCommands        []string              // command prefixes that are authorized (session-level)
+	PlanningActive            bool                  // whether planning phase is currently running
+	PlanningObjective         string                // objective of current planning phase
+	PlanningStartTime         time.Time             // when current planning phase started
+	PlanningQuestionsAnswered []QuestionAnswer      // questions asked and answered during planning
+	PlanningBoard             *PlanningBoard        // hierarchical planning board with primary tasks and subtasks
+	LastSandboxExitCode       int                   // exit code from last sandbox execution
+	LastSandboxStdout         string                // stdout from last sandbox execution
+	LastSandboxStderr         string                // stderr from last sandbox execution
+	CurrentProvider           string                // Current LLM provider for native message format
+	CurrentModelFamily        string                // Current model family for native message format
+	CurrentBranch             string                // Current Git branch (if in a repository)
+	TaskExecutionSummary      *TaskExecutionSummary // Summary of work completed in this task session
 
 	// Verification retry tracking
 	VerificationAttempt      int  // Current verification attempt number (1-3)
@@ -253,6 +255,33 @@ func (s *Session) GetModifiedFiles() []string {
 		files = append(files, path)
 	}
 	return files
+}
+
+// GetFilesRead returns list of files that were read
+func (s *Session) GetFilesRead() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	files := make([]string, 0, len(s.FilesRead))
+	for path := range s.FilesRead {
+		files = append(files, path)
+	}
+	return files
+}
+
+// SetTaskExecutionSummary stores the task execution summary in the session
+func (s *Session) SetTaskExecutionSummary(summary *TaskExecutionSummary) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TaskExecutionSummary = summary
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// GetTaskExecutionSummary retrieves the task execution summary from the session
+func (s *Session) GetTaskExecutionSummary() *TaskExecutionSummary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.TaskExecutionSummary
 }
 
 // GetShellTempDir returns the shell temp directory path

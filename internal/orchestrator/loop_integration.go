@@ -252,9 +252,13 @@ func (i *orchestratorIteration) Execute(ctx context.Context, state loop.State) (
 	}
 
 	// Prepare request
+	var toolsJSON []map[string]interface{}
+	if i.orch.toolRegistry != nil {
+		toolsJSON = i.orch.toolRegistry.ToJSONSchema()
+	}
 	req := &llm.CompletionRequest{
 		Messages:      llmMessages,
-		Tools:         i.orch.toolRegistry.ToJSONSchema(),
+		Tools:         toolsJSON,
 		Temperature:   i.orch.config.Temperature,
 		MaxTokens:     maxTokens,
 		SystemPrompt:  systemPrompt,
@@ -262,8 +266,10 @@ func (i *orchestratorIteration) Execute(ctx context.Context, state loop.State) (
 		CacheTTL:      i.orch.config.PromptCacheTTL,
 	}
 
-	if prevID := i.orch.orchestrationClient.GetLastResponseID(); prevID != "" {
-		req.PreviousResponseID = prevID
+	if i.orch.orchestrationClient != nil {
+		if prevID := i.orch.orchestrationClient.GetLastResponseID(); prevID != "" {
+			req.PreviousResponseID = prevID
+		}
 	}
 
 	i.orch.applyModelSpecificDefaults(req, modelID)

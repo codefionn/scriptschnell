@@ -62,6 +62,10 @@ func (r *ToolCallRewriter) RewriteToolCall(ctx context.Context, invalidToolName 
 		return "", nil, "", fmt.Errorf("summarization client not available for tool call rewriting")
 	}
 
+	if r.toolRegistry == nil {
+		return "", nil, "", fmt.Errorf("tool registry not available for tool call rewriting")
+	}
+
 	// Get available tools as specs
 	availableTools := r.getAvailableToolsSpecs()
 	if len(availableTools) == 0 {

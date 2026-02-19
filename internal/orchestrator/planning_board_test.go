@@ -76,7 +76,8 @@ func TestBuildTaskPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prompt := orch.buildTaskPrompt(originalPrompt, tt.task, tt.taskIndex, tt.totalTasks)
+			var previousSummaries []session.TaskExecutionSummary
+			prompt := orch.buildTaskPrompt(originalPrompt, tt.task, tt.taskIndex, tt.totalTasks, previousSummaries)
 
 			// Check overall objective is included
 			if !strings.Contains(prompt, originalPrompt) {

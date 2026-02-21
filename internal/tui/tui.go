@@ -2920,6 +2920,9 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 				usageCallback,         // usage callback
 			)
 
+			// Auto-save session after orchestrator completes
+			m.autoSaveSession(runtime, err)
+
 			if err != nil {
 				m.program.Send(TabGenerationCompleteMsg{
 					TabID: tab.ID,
@@ -2932,6 +2935,39 @@ func (m *Model) startPromptForTab(tabIdx int, input string) tea.Cmd {
 			}
 		}()
 		return nil
+	}
+}
+
+// autoSaveSession saves the current session after the orchestrator finishes processing.
+func (m *Model) autoSaveSession(runtime *TabRuntime, orchErr error) {
+	if m.factory == nil {
+		return
+	}
+	storageRef := m.factory.GetSessionStorageRef()
+	if storageRef == nil {
+		return
+	}
+
+	currentSession := runtime.Orchestrator.GetSession()
+	if currentSession == nil || len(currentSession.GetMessages()) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Generate title on successful completions only
+	if orchErr == nil {
+		if err := runtime.Orchestrator.GenerateSessionTitle(ctx); err != nil {
+			logger.Warn("autoSaveSession: failed to generate title: %v", err)
+		}
+	}
+
+	name := actor.GenerateSessionName("")
+	if err := actor.SaveSessionViaActor(ctx, storageRef, currentSession, name); err != nil {
+		logger.Warn("autoSaveSession: failed to save session %s: %v", currentSession.ID, err)
+	} else {
+		logger.Debug("autoSaveSession: saved session %s as '%s'", currentSession.ID, name)
 	}
 }
 

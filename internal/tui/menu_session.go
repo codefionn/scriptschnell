@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/codefionn/scriptschnell/internal/actor"
@@ -62,6 +63,20 @@ func (s SessionMenuItem) GetSessionID() string {
 	return s.metadata.ID
 }
 
+// SaveSessionMenuItem is a special menu item for saving the current session
+type SaveSessionMenuItem struct{}
+
+// FilterValue implements list.Item
+func (s SaveSessionMenuItem) FilterValue() string { return "Save current session" }
+
+// Title implements MenuItem
+func (s SaveSessionMenuItem) Title() string { return "Save current session" }
+
+// Description implements MenuItem
+func (s SaveSessionMenuItem) Description() string {
+	return "Save the current conversation to disk"
+}
+
 // formatRelativeTime formats a time.Time as a relative time string
 func formatRelativeTime(t time.Time) string {
 	now := time.Now()
@@ -101,19 +116,23 @@ type SessionMenuModel struct {
 	storageRef    *actor.ActorRef
 	workingDir    string
 	ctx           context.Context
-	action        string // "load" or "delete"
+	action        string // "load", "delete", or "save"
 	selectedItem  SessionMenuItem
+	saveName      string // session name for save action
 	width         int
 	height        int
 	deleteKeyMap  key.Binding
 	confirmDelete bool
 	deleteTarget  SessionMenuItem
+	saveMode      bool
+	saveInput     textinput.Model
 }
 
 // SessionMenuAction represents an action to perform on a session
 type SessionMenuAction struct {
-	Action    string // "load" or "delete"
-	SessionID string
+	Action    string // "load", "delete", or "save"
+	SessionID string // For load/delete
+	Name      string // For save
 }
 
 // NewSessionMenu creates a new session management menu
@@ -122,8 +141,13 @@ func NewSessionMenu(ctx context.Context, storageRef *actor.ActorRef, workingDir 
 	config.Title = "Session Management"
 	config.Width = width
 	config.Height = height
-	config.HelpText = "↑/↓: Navigate • Enter: Load • d: Delete • Esc: Cancel"
+	config.HelpText = "↑/↓: Navigate • Enter: Load/Save • d: Delete • Esc: Cancel"
 	config.DisableQuitKeys = true
+
+	ti := textinput.New()
+	ti.Placeholder = "Session name (leave blank for auto-generated)"
+	ti.CharLimit = 100
+	ti.Width = 50
 
 	sm := &SessionMenuModel{
 		storageRef: storageRef,
@@ -131,6 +155,7 @@ func NewSessionMenu(ctx context.Context, storageRef *actor.ActorRef, workingDir 
 		ctx:        ctx,
 		width:      width,
 		height:     height,
+		saveInput:  ti,
 		deleteKeyMap: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "delete"),
@@ -144,23 +169,18 @@ func NewSessionMenu(ctx context.Context, storageRef *actor.ActorRef, workingDir 
 		config.HelpText = fmt.Sprintf("Error loading sessions: %v • Press Esc to close", err)
 	}
 
-	// Handle empty sessions case
-	if len(sm.sessions) == 0 {
-		config.Title = "Session Management - No Sessions"
-		config.HelpText = "No saved sessions found • Press Esc to close"
-	}
-
-	// Convert to MenuItem
-	items := make([]MenuItem, len(sm.sessions))
-	for i, sess := range sm.sessions {
-		items[i] = sess
+	// Build menu items: "Save" at top, then existing sessions
+	items := make([]MenuItem, 0, len(sm.sessions)+1)
+	items = append(items, SaveSessionMenuItem{})
+	for _, sess := range sm.sessions {
+		items = append(items, sess)
 	}
 
 	sm.menu = NewGenericMenu(items, config)
 
 	// Set custom key handler for delete
 	sm.menu.SetCustomKeyHandler("d", func() tea.Msg {
-		// Get currently selected session
+		// Only allow delete on session items, not on the save item
 		if item, ok := sm.menu.list.SelectedItem().(SessionMenuItem); ok {
 			sm.deleteTarget = item
 			sm.confirmDelete = true
@@ -203,6 +223,26 @@ func (sm *SessionMenuModel) Init() tea.Cmd {
 
 // Update implements tea.Model
 func (sm *SessionMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle save mode (text input for session name)
+	if sm.saveMode {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "enter":
+				sm.action = "save"
+				sm.saveName = sm.saveInput.Value()
+				sm.saveMode = false
+				return sm, tea.Quit
+			case "esc":
+				sm.saveMode = false
+				return sm, nil
+			}
+		}
+		var cmd tea.Cmd
+		sm.saveInput, cmd = sm.saveInput.Update(msg)
+		return sm, cmd
+	}
+
 	// Handle delete confirmation
 	if sm.confirmDelete {
 		switch msg := msg.(type) {
@@ -240,6 +280,13 @@ func (sm *SessionMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle menu selection
 	if menuMsg, ok := msg.(MenuSelectedMsg); ok {
+		// Check if the save item was selected
+		if _, ok := menuMsg.Item.(SaveSessionMenuItem); ok {
+			sm.saveMode = true
+			sm.saveInput.Focus()
+			return sm, textinput.Blink
+		}
+
 		if item, ok := menuMsg.Item.(SessionMenuItem); ok {
 			sm.action = "load"
 			sm.selectedItem = item
@@ -266,6 +313,22 @@ func (sm *SessionMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model
 func (sm *SessionMenuModel) View() string {
+	if sm.saveMode {
+		saveStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("33")).
+			Padding(1, 2).
+			Width(60)
+
+		content := fmt.Sprintf("Save current session\n\n"+
+			"Enter a name (or leave blank for auto-generated):\n\n"+
+			"%s\n\n"+
+			"[Enter] Save  [Esc] Cancel",
+			sm.saveInput.View())
+
+		return saveStyle.Render(content)
+	}
+
 	if sm.confirmDelete {
 		title := sm.deleteTarget.metadata.Title
 		if title == "" {
@@ -300,4 +363,9 @@ func (sm *SessionMenuModel) View() string {
 // GetAction returns the selected action and session
 func (sm *SessionMenuModel) GetAction() (string, SessionMenuItem) {
 	return sm.action, sm.selectedItem
+}
+
+// GetSaveName returns the session name entered for save action
+func (sm *SessionMenuModel) GetSaveName() string {
+	return sm.saveName
 }

@@ -41,7 +41,7 @@ func (m *Model) handleNewTab(name string) tea.Cmd {
 
 	// Generate unique session ID
 	m.sessionIDCounter++
-	sessionID := fmt.Sprintf("tab-%d-%d", m.sessionIDCounter, time.Now().Unix())
+	sessionID := session.GenerateID()
 	tabID := m.sessionIDCounter
 
 	// Determine working directory and create worktree if named
@@ -281,7 +281,7 @@ func (m *Model) restoreTabs() error {
 		}
 
 		// Create session (TODO: load from storage if exists)
-		sessionID := fmt.Sprintf("tab-%d", tabID)
+		sessionID := session.GenerateID()
 		sess := session.NewSession(sessionID, workingDir)
 
 		tabSession := &TabSession{
@@ -317,7 +317,7 @@ func (m *Model) restoreTabs() error {
 // createDefaultTab creates a single default tab
 func (m *Model) createDefaultTab() error {
 	logger.Info("Creating default tab with working directory: %s", m.workingDir)
-	defaultSession := session.NewSession("tab-1", m.workingDir)
+	defaultSession := session.NewSession(session.GenerateID(), m.workingDir)
 
 	defaultTab := &TabSession{
 		ID:                 1,

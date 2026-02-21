@@ -1002,13 +1002,39 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.O
 								return nil
 							}
 
-							sessionID := selectedItem.GetSessionID()
-							if sessionID == "" {
-								return fmt.Errorf("invalid session selected")
-							}
-
 							switch action {
+							case "save":
+								// Save current session
+								activeOrch := getActiveOrchestrator()
+								if activeOrch == nil {
+									return fmt.Errorf("no active session to save")
+								}
+
+								saveName := sessionMenu.GetSaveName()
+								if saveName == "" {
+									saveName = actor.GenerateSessionName("")
+								} else {
+									saveName = actor.GenerateSessionName(saveName)
+								}
+
+								// Generate session title if not already present
+								if err := activeOrch.GenerateSessionTitle(ctx); err != nil {
+									logger.Warn("session save: failed to generate title: %v", err)
+								}
+
+								currentSession := activeOrch.GetSession()
+								if err := actor.SaveSessionViaActor(ctx, storageRef, currentSession, saveName); err != nil {
+									return fmt.Errorf("failed to save session: %w", err)
+								}
+
+								model.AddSystemMessage(fmt.Sprintf("Session saved as '%s'", saveName))
+
 							case "load":
+								sessionID := selectedItem.GetSessionID()
+								if sessionID == "" {
+									return fmt.Errorf("invalid session selected")
+								}
+
 								// Load the session using actor
 								loadedSession, err := actor.LoadSessionViaActor(ctx, storageRef, cfg.WorkingDir, sessionID)
 								if err != nil {
@@ -1041,6 +1067,11 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.O
 								model.AddSystemMessage(fmt.Sprintf("Loaded session: %s", selectedItem.Title()))
 
 							case "delete":
+								sessionID := selectedItem.GetSessionID()
+								if sessionID == "" {
+									return fmt.Errorf("invalid session selected")
+								}
+
 								// Delete the session using actor
 								deleteMsg := actor.SessionStorageDeleteMsg{
 									WorkingDir:   cfg.WorkingDir,

@@ -287,15 +287,35 @@ func (a *ScriptschnellAIAgent) handleClearCommand(session *statcodeSession) stri
 
 	logger.Debug("handleClearCommand[%s]: clearing session", session.sessionID)
 
+	// Auto-save the current session before clearing if it has messages
+	saved := false
+	currentSession := session.orchestrator.GetSession()
+	if currentSession != nil && len(currentSession.GetMessages()) > 0 {
+		if storageRef, exists := session.orchestrator.GetActor("session_storage"); exists {
+			// Generate session title (best-effort)
+			if err := session.orchestrator.GenerateSessionTitle(context.Background()); err != nil {
+				logger.Warn("handleClearCommand[%s]: failed to generate title: %v", session.sessionID, err)
+			}
+
+			name := actor.GenerateSessionName("")
+			if err := actor.SaveSessionViaActor(context.Background(), storageRef, currentSession, name); err != nil {
+				logger.Warn("handleClearCommand[%s]: failed to auto-save session: %v", session.sessionID, err)
+			} else {
+				logger.Info("handleClearCommand[%s]: auto-saved session %s as '%s'", session.sessionID, currentSession.ID, name)
+				saved = true
+			}
+		}
+	}
+
 	if err := session.orchestrator.ClearSession(); err != nil {
 		logger.Warn("handleClearCommand[%s]: failed to clear session: %v", session.sessionID, err)
 		return fmt.Sprintf("⚠️ Failed to clear session: %v", err)
 	}
 
-	response := "🧹 Conversation context and todos cleared.\n\n"
-	response += "Ready for a fresh start! What would you like to work on?\n"
-
-	return response
+	if saved {
+		return "🧹 Session saved and cleared.\n\nReady for a fresh start! What would you like to work on?\n"
+	}
+	return "🧹 Conversation context and todos cleared.\n\nReady for a fresh start! What would you like to work on?\n"
 }
 
 // handleContextCommand handles the /context command

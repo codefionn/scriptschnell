@@ -285,14 +285,15 @@ func (s *SessionStorage) SaveSession(session *Session, name string) error {
 	}
 
 	// Write to temporary file first (atomic write)
-	tempPath := s.getSessionPath(session.WorkingDir, storedID) + ".tmp"
-	logger.Debug("SaveSession: creating temp file: %s", tempPath)
-
-	file, err := os.Create(tempPath)
+	// Use os.CreateTemp to avoid races between concurrent saves (e.g. auto-save + manual save)
+	finalPath := s.getSessionPath(session.WorkingDir, storedID)
+	file, err := os.CreateTemp(workspaceDir, storedID+".gob.tmp.*")
 	if err != nil {
-		logger.Error("SaveSession: failed to create temp file %s: %v", tempPath, err)
+		logger.Error("SaveSession: failed to create temp file in %s: %v", workspaceDir, err)
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
+	tempPath := file.Name()
+	logger.Debug("SaveSession: created temp file: %s", tempPath)
 
 	// Encode with gob
 	logger.Debug("SaveSession: encoding session with gob")
@@ -308,7 +309,6 @@ func (s *SessionStorage) SaveSession(session *Session, name string) error {
 	file.Close()
 
 	// Atomic rename
-	finalPath := s.getSessionPath(session.WorkingDir, storedID)
 	logger.Debug("SaveSession: renaming %s to %s", tempPath, finalPath)
 
 	if err := os.Rename(tempPath, finalPath); err != nil {

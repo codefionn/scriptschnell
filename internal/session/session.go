@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,14 +176,9 @@ func createShellTempDir() string {
 	return dirPath
 }
 
-// GenerateID creates a random session ID (base32-ish hex, 12 chars).
+// GenerateID creates a human-friendly session ID (e.g. "bright-silver-falcon").
 func GenerateID() string {
-	var buf [6]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		timestamp := time.Now().UnixNano()
-		return fmt.Sprintf("sess-%d", timestamp)
-	}
-	return hex.EncodeToString(buf[:])
+	return GenerateWordID()
 }
 
 // AddMessage adds a message to the session

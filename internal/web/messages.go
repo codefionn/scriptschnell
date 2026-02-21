@@ -44,6 +44,14 @@ const (
 	MessageTypeAddMCPServer    = "add_mcp_server"
 	MessageTypeToggleMCPServer = "toggle_mcp_server"
 	MessageTypeDeleteMCPServer = "delete_mcp_server"
+
+	// Session management message types
+	MessageTypeGetSessions   = "get_sessions"
+	MessageTypeSessions      = "sessions"
+	MessageTypeSaveSession   = "save_session"
+	MessageTypeLoadSession   = "load_session"
+	MessageTypeDeleteSession = "delete_session"
+	MessageTypeSessionLoaded = "session_loaded"
 )
 
 // WebMessage represents a message sent over WebSocket
@@ -90,8 +98,10 @@ type QuestionItem struct {
 // SessionInfo represents session information
 type SessionInfo struct {
 	ID           string    `json:"id"`
+	Name         string    `json:"name,omitempty"`
 	Title        string    `json:"title"`
 	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 	MessageCount int       `json:"message_count"`
 }
 

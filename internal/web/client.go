@@ -195,21 +195,19 @@ func (c *Client) handleMessage(msg *WebMessage) error {
 		})
 
 	case MessageTypeClear:
-		// Stop current operations and clear session
+		// Stop current operations and reset session
 		if c.broker != nil {
 			// Stop any ongoing operations
 			if err := c.broker.Stop(); err != nil {
 				logger.Error("Failed to stop broker: %v", err)
 			}
 
-			// Clear the session
-			if c.broker.GetSession() != nil {
-				c.broker.GetSession().Clear()
-				c.sendResponse(&WebMessage{
-					Type:    MessageTypeSystem,
-					Content: "Session cleared",
-				})
-			}
+			// Reset the session so next message creates a fresh one
+			c.broker.ResetSession()
+			c.sendResponse(&WebMessage{
+				Type:    MessageTypeSystem,
+				Content: "Session cleared",
+			})
 		}
 
 	case MessageTypeGetConfig:
@@ -406,6 +404,95 @@ func (c *Client) handleMessage(msg *WebMessage) error {
 			c.sendResponse(&WebMessage{
 				Type:  MessageTypeError,
 				Error: err.Error(),
+			})
+		}
+
+	case MessageTypeGetSessions:
+		sessions, err := c.broker.ListSessions(c.cfg.WorkingDir)
+		if err != nil {
+			c.sendResponse(&WebMessage{
+				Type:  MessageTypeError,
+				Error: err.Error(),
+			})
+		} else {
+			c.sendResponse(&WebMessage{
+				Type: MessageTypeSessions,
+				Data: map[string]interface{}{
+					"sessions": sessions,
+				},
+			})
+		}
+
+	case MessageTypeSaveSession:
+		name, _ := msg.Data["name"].(string)
+		if err := c.broker.SaveCurrentSession(name); err != nil {
+			c.sendResponse(&WebMessage{
+				Type:  MessageTypeError,
+				Error: err.Error(),
+			})
+		} else {
+			c.sendResponse(&WebMessage{
+				Type:    MessageTypeSystem,
+				Content: "Session saved",
+			})
+		}
+
+	case MessageTypeLoadSession:
+		sessionID, ok := msg.Data["session_id"].(string)
+		if !ok || sessionID == "" {
+			c.sendResponse(&WebMessage{
+				Type:  MessageTypeError,
+				Error: "session_id is required",
+			})
+			return nil
+		}
+		msgs, err := c.broker.LoadSessionByID(c.cfg, c.providerMgr, c.secretsPassword, c.requireSandboxAuth, sessionID)
+		if err != nil {
+			c.sendResponse(&WebMessage{
+				Type:  MessageTypeError,
+				Error: err.Error(),
+			})
+		} else {
+			// Convert session messages to a serialisable slice
+			history := make([]map[string]interface{}, len(msgs))
+			for i, m := range msgs {
+				history[i] = map[string]interface{}{
+					"role":    m.Role,
+					"content": m.Content,
+				}
+				if m.ToolName != "" {
+					history[i]["tool_name"] = m.ToolName
+				}
+				if m.ToolID != "" {
+					history[i]["tool_id"] = m.ToolID
+				}
+			}
+			c.sendResponse(&WebMessage{
+				Type: MessageTypeSessionLoaded,
+				Data: map[string]interface{}{
+					"messages": history,
+				},
+			})
+		}
+
+	case MessageTypeDeleteSession:
+		sessionID, ok := msg.Data["session_id"].(string)
+		if !ok || sessionID == "" {
+			c.sendResponse(&WebMessage{
+				Type:  MessageTypeError,
+				Error: "session_id is required",
+			})
+			return nil
+		}
+		if err := c.broker.DeleteSessionByID(c.cfg.WorkingDir, sessionID); err != nil {
+			c.sendResponse(&WebMessage{
+				Type:  MessageTypeError,
+				Error: err.Error(),
+			})
+		} else {
+			c.sendResponse(&WebMessage{
+				Type:    MessageTypeSystem,
+				Content: "Session deleted",
 			})
 		}
 

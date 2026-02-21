@@ -1237,6 +1237,14 @@ function handleMessage(msg) {
                 }
             }
             break;
+        case "sessions":
+            if (msg.data && msg.data.sessions) {
+                renderSessions(msg.data.sessions);
+            }
+            break;
+        case "session_loaded":
+            handleSessionLoaded(msg);
+            break;
     }
 }
 
@@ -2514,6 +2522,113 @@ function submitQuestionResponse() {
     if (questionModal) {
         questionModal.hide();
     }
+}
+
+// ==================== Session Management ====================
+
+function loadSessions() {
+    sendMessage('get_sessions');
+}
+
+function renderSessions(sessions) {
+    const container = document.getElementById('session-list-container');
+    if (!container) return;
+
+    if (!sessions || sessions.length === 0) {
+        container.innerHTML = '<div class="dropdown-item text-muted">No saved sessions</div>';
+        return;
+    }
+
+    // Sort by updated_at descending
+    sessions.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+
+    let html = '';
+    for (const s of sessions) {
+        const title = escapeHtml(s.title || s.name || 'Untitled');
+        const time = formatRelativeTime(s.updated_at || s.created_at);
+        const count = s.message_count || 0;
+        html += `<li>
+            <div class="session-item" onclick="loadSessionById('${escapeHtml(s.id)}')">
+                <div class="session-item-info">
+                    <div class="session-item-title">${title}</div>
+                    <div class="session-item-meta">${count} messages &middot; ${time}</div>
+                </div>
+                <button class="btn btn-sm btn-outline-danger session-item-delete"
+                        onclick="deleteSessionById(event, '${escapeHtml(s.id)}')"
+                        title="Delete session">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        </li>`;
+    }
+    container.innerHTML = html;
+}
+
+function saveCurrentSession(event) {
+    event.stopPropagation();
+    sendMessage('save_session', { data: { name: '' } });
+}
+
+function loadSessionById(id) {
+    // Close dropdown
+    const dropdown = bootstrap.Dropdown.getInstance(document.getElementById('sessionDropdown'));
+    if (dropdown) dropdown.hide();
+
+    sendMessage('load_session', { data: { session_id: id } });
+}
+
+function deleteSessionById(event, id) {
+    event.stopPropagation();
+    event.preventDefault();
+    if (!confirm('Delete this session?')) return;
+    sendMessage('delete_session', { data: { session_id: id } });
+    // Reload the list after a short delay
+    setTimeout(loadSessions, 300);
+}
+
+function handleSessionLoaded(msg) {
+    if (!msg.data || !msg.data.messages) return;
+
+    // Clear messages and show the messages container
+    if (messages) messages.innerHTML = '';
+    hideWelcomeScreen();
+
+    // Replay conversation history
+    for (const m of msg.data.messages) {
+        switch (m.role) {
+            case 'user':
+                addMessage('user', m.content, 'primary');
+                break;
+            case 'assistant':
+                addMessage('assistant', m.content, 'secondary', true);
+                break;
+            case 'tool':
+                addMessage('Tool: ' + (m.tool_name || 'unknown'), m.content, 'info');
+                break;
+            default:
+                addMessage(m.role || 'system', m.content, 'info');
+                break;
+        }
+    }
+
+    addMessage('System', 'Session loaded', 'success');
+}
+
+function formatRelativeTime(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 60) return 'just now';
+    if (diffMin < 60) return diffMin + 'm ago';
+    if (diffHour < 24) return diffHour + 'h ago';
+    if (diffDay < 30) return diffDay + 'd ago';
+    return date.toLocaleDateString();
 }
 
 // ==================== Utility Functions ====================

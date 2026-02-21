@@ -51,20 +51,36 @@ type MessageBroker struct {
 	pendingQuestionMu sync.Mutex
 	pendingQuestions  map[string]*pendingQuestion // questionID -> pending question
 	questionCounter   int
+	sessionStorage    *session.SessionStorage
 }
 
 // NewMessageBroker creates a new message broker
 func NewMessageBroker() *MessageBroker {
-	return &MessageBroker{
+	mb := &MessageBroker{
 		pendingAuths:     make(map[string]*pendingAuthorization),
 		pendingQuestions: make(map[string]*pendingQuestion),
 	}
+
+	storage, err := session.NewSessionStorage()
+	if err != nil {
+		logger.Warn("Failed to initialize session storage: %v", err)
+	} else {
+		mb.sessionStorage = storage
+	}
+
+	return mb
 }
 
-// InitializeSession initializes a new session
+// InitializeSession initializes a new session. If a session and orchestrator
+// already exist (e.g. after loading a saved session), this is a no-op.
 func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, requireSandboxAuth bool) error {
 	mb.cfg = cfg
 	mb.providerMgr = providerMgr
+
+	// Idempotent: if we already have a live session+orchestrator, skip re-init
+	if mb.initialized && mb.session != nil && mb.orchestrator != nil {
+		return nil
+	}
 
 	// Create new session
 	sess := session.NewSession(session.GenerateID(), cfg.WorkingDir)
@@ -581,6 +597,124 @@ func (mb *MessageBroker) HandleQuestionResponse(questionID string, answer string
 	}
 
 	return nil
+}
+
+// ResetSession tears down the current orchestrator and session so the next
+// chat message will trigger a fresh InitializeSession.
+func (mb *MessageBroker) ResetSession() {
+	if mb.orchestrator != nil {
+		_ = mb.orchestrator.Close()
+		mb.orchestrator = nil
+	}
+	mb.session = nil
+	mb.initialized = false
+}
+
+// ListSessions returns saved sessions for the given workspace.
+func (mb *MessageBroker) ListSessions(workingDir string) ([]SessionInfo, error) {
+	if mb.sessionStorage == nil {
+		return nil, fmt.Errorf("session storage not available")
+	}
+
+	metas, err := mb.sessionStorage.ListSessions(workingDir)
+	if err != nil {
+		return nil, err
+	}
+
+	infos := make([]SessionInfo, len(metas))
+	for i, m := range metas {
+		infos[i] = SessionInfo{
+			ID:           m.ID,
+			Name:         m.Name,
+			Title:        m.Title,
+			CreatedAt:    m.CreatedAt,
+			UpdatedAt:    m.UpdatedAt,
+			MessageCount: m.MessageCount,
+		}
+	}
+	return infos, nil
+}
+
+// SaveCurrentSession persists the current session to disk.
+func (mb *MessageBroker) SaveCurrentSession(name string) error {
+	if mb.sessionStorage == nil {
+		return fmt.Errorf("session storage not available")
+	}
+	if mb.session == nil {
+		return fmt.Errorf("no active session to save")
+	}
+	return mb.sessionStorage.SaveSession(mb.session, name)
+}
+
+// LoadSessionByID loads a previously saved session, tears down the old
+// orchestrator, creates a new one with the loaded session, and returns the
+// message history so the frontend can replay it.
+func (mb *MessageBroker) LoadSessionByID(
+	cfg *config.Config,
+	providerMgr *provider.Manager,
+	secretsPassword *securemem.String,
+	requireSandboxAuth bool,
+	sessionID string,
+) ([]*session.Message, error) {
+	if mb.sessionStorage == nil {
+		return nil, fmt.Errorf("session storage not available")
+	}
+
+	sess, err := mb.sessionStorage.LoadSession(cfg.WorkingDir, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load session: %w", err)
+	}
+
+	// Tear down old orchestrator
+	if mb.orchestrator != nil {
+		_ = mb.orchestrator.Close()
+		mb.orchestrator = nil
+	}
+
+	// Create filesystem
+	filesystem := fs.NewCachedFS(
+		cfg.WorkingDir,
+		time.Duration(cfg.CacheTTL)*time.Second,
+		cfg.MaxCacheEntries,
+	)
+
+	// Create new orchestrator with the loaded session
+	orch, err := orchestrator.NewOrchestratorWithSharedResources(
+		cfg,
+		providerMgr,
+		false, // cliMode
+		filesystem,
+		sess,
+		nil, // sessionStorageRef
+		nil, // domainBlockerRef
+		requireSandboxAuth,
+	)
+	if err != nil {
+		filesystem.Close()
+		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
+	}
+
+	mb.session = sess
+	mb.orchestrator = orch
+	mb.cfg = cfg
+	mb.providerMgr = providerMgr
+	mb.initialized = true
+
+	// Set up user interaction handler
+	handler := &webInteractionHandler{broker: mb}
+	if err := orch.SetUserInteractionHandler(handler); err != nil {
+		logger.Warn("Failed to set web interaction handler: %v", err)
+	}
+
+	return sess.GetMessages(), nil
+}
+
+// DeleteSessionByID removes a saved session from disk.
+func (mb *MessageBroker) DeleteSessionByID(workingDir, sessionID string) error {
+	if mb.sessionStorage == nil {
+		return fmt.Errorf("session storage not available")
+	}
+	return mb.sessionStorage.DeleteSession(workingDir, sessionID)
 }
 
 // ToolCallMsg represents a tool call message

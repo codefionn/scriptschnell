@@ -227,74 +227,49 @@ DO NOT just describe the file. DO NOT just tell me what should be in it.
 YOU MUST ACTUALLY CALL THE create_file TOOL to create the file.
 If AGENTS.md already exists, you must read it first and then call write_file_diff with a diff to update it. GPT models may omit @@ hunk markers as long as headers and +/- lines are present.
 
-Steps (DO ALL OF THESE):
-1. Read 8-12 key files from the codebase (README.md, main.go, key packages)
-2. Understand the project structure
-3. **CALL create_file tool with path="AGENTS.md" and the complete content (or use write_file_diff if the file already exists)**
-
-This is NOT complete until you have CALLED create_file (or write_file_diff, if updating).
-
-## What to Include in AGENTS.md
-
-1. Project Overview - what the project does
-2. Architecture - key patterns and design decisions
-3. Project Structure - directory layout
-4. Key Components - main packages/modules
-5. Development Workflow - build, test, run commands
-6. Coding Conventions - patterns you discover
-7. Important Notes - gotchas and key insights
-
 ## How to Complete This Task
 
-1. Use read_file to read README.md, CLAUDE.md, go.mod, and main entry point
-2. Use read_file to read 5-8 key files from major packages (internal/*, cmd/*)
-3. Use shell commands if needed to explore structure
-4. **CALL create_file with path="AGENTS.md"** containing all sections above (or **write_file_diff** with an appropriate diff if the file already exists)
+1. Read key dependency files (go.mod, package.json, Cargo.toml, requirements.txt, etc.)
+2. Read README.md or CLAUDE.md if they exist
+3. Identify the language and version
+4. Identify the most important frameworks and dependencies with versions
+5. Identify basic tooling commands (lint, formatting, build, test, integration test)
+6. **CALL create_file with path="AGENTS.md"** with a short, concise file
 
 ## Template for AGENTS.md
 
-When you call create_file (or write_file_diff), use this structure (fill in with ACTUAL information from the files you read):
+Keep this SHORT and FOCUSED. Only include:
 
-` + "```markdown" + `
-# Agent Context
+` + "```markdown" + `# Project Overview
 
-## Project Overview
-[What this project does - be specific based on README/code you read]
+[Provide a very brief 1-2 sentence description of what this project is and its main components]
 
-## Architecture
-[Key patterns - actor model, dual LLM, etc. - based on code]
+Examples:
+- "A REST API backend built with Go and Echo framework"
+- "A full-stack web application with React frontend and Node.js backend"
+- "A command-line tool for processing data files"
+- "A monorepo containing a Go backend service and TypeScript frontend"
 
-## Project Structure
-` + "```" + `
-[paste actual directory tree]
-` + "```" + `
+# Project Context
 
-## Key Components
-### [Component Name]
-- Location: [path]
-- Purpose: [what it does]
+- **Language**: [e.g., Go, Python, TypeScript]
+- **Language Version**: [e.g., 1.21, 3.11, 5.0]
+- **Framework**: [main framework if any - e.g., Echo, FastAPI, React]
+- **Framework Version**: [version if available]
 
-[repeat for each major component]
+## Dependencies
+[List the most important dependencies and their versions]
 
-## Development Workflow
-` + "```bash" + `
-# Build: [actual command]
-# Test: [actual command]
-# Run: [actual command]
-` + "```" + `
+## Tooling
 
-## Coding Conventions
-- [pattern 1]
-- [pattern 2]
-[etc - at least 5]
-
-## Important Notes
-- [gotcha 1]
-- [gotcha 2]
-[etc - at least 3]
+- **Build**: [command]
+- **Test**: [command]
+- **Integration Test**: [command if different from test]
+- **Lint**: [command]
+- **Format**: [command]
 ` + "```" + `
 
 ---
 
-**REMEMBER: After reading files, you MUST call create_file (or write_file_diff for updates). That is the ONLY way to complete this task.**`
+**REMEMBER: Keep it SHORT. After reading dependency files, you MUST call create_file (or write_file_diff for updates). That is the ONLY way to complete this task.**`
 }

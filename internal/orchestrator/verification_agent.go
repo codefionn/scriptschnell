@@ -98,7 +98,7 @@ Respond with ONLY one word: "QUESTION" or "IMPLEMENTATION"`
 	return true, "Classified as an implementation request", nil
 }
 
-// buildToolRegistry creates a tool registry with read tools and go_sandbox access.
+// buildToolRegistry creates a tool registry with read tools, edit tools, and go_sandbox access.
 func (a *VerificationAgent) buildToolRegistry(verificationSession *session.Session) *tools.Registry {
 	// Use the orchestrator's authorizer (which respects session-level authorizations)
 	registry := tools.NewRegistryWithSecrets(a.orch.authorizer, secretdetect.NewDetector())
@@ -108,6 +108,41 @@ func (a *VerificationAgent) buildToolRegistry(verificationSession *session.Sessi
 
 	// Read File - essential for checking modified files
 	registry.Register(a.orch.getReadFileTool(modelFamily, verificationSession))
+
+	// Edit file tools - allow verification agent to fix issues it finds
+	if a.orch.shouldUseReplaceFileTool(modelFamily) {
+		registry.RegisterSpec(
+			&tools.ReplaceFileToolSpec{},
+			tools.NewReplaceFileToolFactory(a.orch.fs, verificationSession),
+		)
+	}
+	if a.orch.shouldUseNonDiffUpdateTool(modelFamily) {
+		registry.RegisterSpec(
+			&tools.WriteFileJSONToolSpec{},
+			tools.NewWriteFileJSONToolFactory(a.orch.fs, verificationSession),
+		)
+	} else if a.orch.shouldUseSimpleSingleDiffTool(modelFamily) {
+		registry.RegisterSpec(
+			&tools.WriteFileReplaceSingleToolSpec{},
+			tools.NewWriteFileReplaceSingleToolFactory(a.orch.fs, verificationSession),
+		)
+	} else if a.orch.shouldUseSimpleDiffTool(modelFamily) {
+		registry.RegisterSpec(
+			&tools.WriteFileReplaceToolSpec{},
+			tools.NewWriteFileReplaceToolFactory(a.orch.fs, verificationSession),
+		)
+	} else {
+		registry.RegisterSpec(
+			&tools.WriteFileDiffToolSpec{},
+			tools.NewWriteFileDiffToolFactory(a.orch.fs, verificationSession),
+		)
+	}
+
+	// Create file tool - for creating new files if needed
+	registry.RegisterSpec(
+		&tools.CreateFileToolSpec{},
+		tools.NewCreateFileToolFactory(a.orch.fs, verificationSession),
+	)
 
 	// Search tools - for finding related files
 	registry.Register(tools.NewSearchFilesTool(a.orch.fs))
@@ -164,6 +199,7 @@ Verify that the code changes are correct by:
 2. Running the project build command to ensure it compiles
 3. Running the linter (if available) to catch style/quality issues
 4. Running relevant tests to ensure functionality works
+5. Fixing simple issues automatically when possible (typos, formatting, minor errors)
 
 ## Modified Files
 %s
@@ -175,6 +211,9 @@ Verify that the code changes are correct by:
 %s
 
 ## Available Tools
+- **edit_file**: Update existing files using diff or text replacement
+- **create_file**: Create new files if needed
+- **replace_file**: Replace entire file content (use with caution)
 - **go_sandbox**: Execute Go code in a sandboxed environment and run shell commands
 - **read_file**: Read files to check modifications
 - **search_files/search_file_content**: Find relevant files
@@ -193,7 +232,12 @@ Note: Commands will go through normal authorization checks. The system will dete
 3. Run code formatting to ensure code follows project style conventions
 4. Run linting if a linter is configured
 5. Run tests - if tests exist in the project, they MUST be run.
-6. Report any failures with clear error messages
+6. **IF YOU CAN AUTOMATICALLY FIX SIMPLE ISSUES**, do so and re-run verification:
+   - Minor formatting errors detected by linters
+   - Missing imports
+   - Typos or syntax errors
+   - Simple logic mistakes
+7. Report any failures with clear error messages
 
 ## Important Notes
 - Be efficient: don't read files that weren't modified
@@ -202,6 +246,9 @@ Note: Commands will go through normal authorization checks. The system will dete
 - If a command fails, report the error but continue with other checks
 - Keep command output concise (avoid verbose flags unless debugging)
 - Use go_sandbox for all command execution (build, lint, test)
+- **Only make automatic fixes for simple, obvious issues** - leave complex bugs for the user
+- Always re-run verification after making fixes
+- Read files before editing them (read-before-write rule)
 
 When complete, provide a summary wrapped in <verification_result> tags:
 <verification_result>

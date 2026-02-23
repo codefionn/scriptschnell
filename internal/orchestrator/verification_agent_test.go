@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -253,6 +254,20 @@ func TestBuildToolRegistry(t *testing.T) {
 	// Verify that the registry is created successfully
 	assert.NotNil(t, registry)
 
+	// Verify that edit file tools are registered
+	toolsJSON := registry.ToJSONSchema()
+
+	// Convert to JSON string for content checking
+	toolsJSONBytes, err := json.Marshal(toolsJSON)
+	require.NoError(t, err)
+	toolsJSONStr := string(toolsJSONBytes)
+
+	assert.Contains(t, toolsJSONStr, "edit_file", "edit_file tool should be registered")
+	assert.Contains(t, toolsJSONStr, "create_file", "create_file tool should be registered")
+	assert.Contains(t, toolsJSONStr, "replace_file", "replace_file tool should be registered")
+	assert.Contains(t, toolsJSONStr, "go_sandbox", "go_sandbox tool should be registered")
+	assert.Contains(t, toolsJSONStr, "read_file", "read_file tool should be registered")
+
 	// The registry should use normal authorization flow (no pre-authorized commands)
 	// Commands will be checked by the authorization actor at runtime
 }
@@ -288,6 +303,10 @@ func TestBuildSystemPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "Language/Framework: Go")
 	assert.Contains(t, prompt, "go build")
 	assert.Contains(t, prompt, "verification_result")
+	// Verify edit file tools are included in the prompt
+	assert.Contains(t, prompt, "edit_file")
+	assert.Contains(t, prompt, "create_file")
+	assert.Contains(t, prompt, "Fixing simple issues automatically")
 }
 
 // Test buildSystemPrompt with unknown project type

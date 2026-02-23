@@ -24,4 +24,5 @@ A TUI/CLI application that generates code from prompts using LLMs, featuring mul
 - **Build**: `go build -o scriptschnell ./cmd/scriptschnell`
 - **Test**: `go test ./... -short`
 - **Format**: `gofmt -s -w .`
+- **Lint**: `golangci-lint run`
 - **Install**: `go install ./cmd/scriptschnell`

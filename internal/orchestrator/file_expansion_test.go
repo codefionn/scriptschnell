@@ -206,4 +206,69 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 			t.Fatalf("expected @large.go to be kept as-is")
 		}
 	})
+
+	t.Run("file tracked in session for authorization", func(t *testing.T) {
+		mockFS := fs.NewMockFS()
+		orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, mockFS)
+		if err != nil {
+			t.Fatalf("failed to create orchestrator: %v", err)
+		}
+		defer orch.Close()
+
+		const filePath = "tracked.go"
+		const fileContent = "package main\n\nfunc main() { println(\"tracked\") }"
+		if err := mockFS.WriteFile(ctx, filePath, []byte(fileContent)); err != nil {
+			t.Fatalf("failed to write file: %v", err)
+		}
+		defer func() {
+			_ = mockFS.Delete(ctx, filePath)
+		}()
+
+		prompt := "please review @tracked.go"
+		_ = orch.expandFileReferences(ctx, prompt)
+
+		// Verify the file is marked as read in the session
+		if !orch.session.WasFileRead(filePath) {
+			t.Fatalf("expected file %s to be tracked as read in session", filePath)
+		}
+
+		// Verify the file is in the tracked files list
+		trackedFiles := orch.session.GetFilesRead()
+		found := false
+		for _, f := range trackedFiles {
+			if f == filePath {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected file %s to be in tracked files list", filePath)
+		}
+	})
+
+	t.Run("large file tracked even when not expanded", func(t *testing.T) {
+		mockFS := fs.NewMockFS()
+		orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, mockFS)
+		if err != nil {
+			t.Fatalf("failed to create orchestrator: %v", err)
+		}
+		defer orch.Close()
+
+		const filePath = "large_tracked.go"
+		largeContent := strings.Repeat("This is a large file that exceeds the threshold. ", 100)
+		if err := mockFS.WriteFile(ctx, filePath, []byte(largeContent)); err != nil {
+			t.Fatalf("failed to write large file: %v", err)
+		}
+		defer func() {
+			_ = mockFS.Delete(ctx, filePath)
+		}()
+
+		prompt := "review @large_tracked.go"
+		_ = orch.expandFileReferences(ctx, prompt)
+
+		// Verify the large file is still tracked as read even though it wasn't expanded
+		if !orch.session.WasFileRead(filePath) {
+			t.Fatalf("expected large file %s to be tracked as read in session", filePath)
+		}
+	})
 }

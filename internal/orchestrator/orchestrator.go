@@ -942,6 +942,11 @@ func (o *Orchestrator) expandFileReferences(ctx context.Context, prompt string) 
 			continue
 		}
 
+		// Track the file as read in the session for read-before-write authorization
+		if o.session != nil {
+			o.session.TrackFileRead(filePath, string(content))
+		}
+
 		// Check if file is small enough to include directly
 		fileSize := len(content)
 		if fileSize <= thresholdBytes {

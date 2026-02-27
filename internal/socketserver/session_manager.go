@@ -71,7 +71,7 @@ func NewSessionManager(cfg *config.Config) (*SessionManager, error) {
 		sm.startAutoSave()
 	}
 
-	logger.Info("Session manager initialized with auto-save=%s", cfg.AutoSave.Enabled)
+	logger.Info("Session manager initialized with auto-save=%v", cfg.AutoSave.Enabled)
 	return sm, nil
 }
 
@@ -198,13 +198,13 @@ func (sm *SessionManager) LoadSession(workingDir, sessionID string) (*session.Se
 	// Add to registry
 	sm.mu.Lock()
 	sm.sessions[sessionID] = &SessionInternalInfo{
-		ID:            sessionID,
-		Title:         sess.Title,
-		WorkingDir:    workingDir,
-		CreatedAt:     sess.CreatedAt,
-		UpdatedAt:     sess.UpdatedAt,
-		MessageCount:  len(sess.GetMessages()),
-		Dirty:         false, // Just loaded from storage
+		ID:           sessionID,
+		Title:        sess.Title,
+		WorkingDir:   workingDir,
+		CreatedAt:    sess.CreatedAt,
+		UpdatedAt:    sess.UpdatedAt,
+		MessageCount: len(sess.GetMessages()),
+		Dirty:        false, // Just loaded from storage
 	}
 	sm.mu.Unlock()
 

@@ -11,9 +11,9 @@ import (
 
 // SocketConnectionMsg is sent when socket connection state changes
 type SocketConnectionMsg struct {
-	Connected   bool
+	Connected    bool
 	Reconnecting bool
-	Error       error
+	Error        error
 }
 
 // SocketChatCompletedMsg is sent when a chat operation completes
@@ -42,9 +42,9 @@ func (m *Model) handleSocketConnection() tea.Cmd {
 		if err := m.socketFactory.Connect(ctx); err != nil {
 			logger.Warn("Failed to connect to socket server: %v", err)
 			return SocketConnectionMsg{
-				Connected:   false,
+				Connected:    false,
 				Reconnecting: false,
-				Error:       err,
+				Error:        err,
 			}
 		}
 
@@ -52,7 +52,7 @@ func (m *Model) handleSocketConnection() tea.Cmd {
 		m.setupSocketModeCallbacks()
 
 		return SocketConnectionMsg{
-			Connected:   true,
+			Connected:    true,
 			Reconnecting: false,
 		}
 	}
@@ -196,7 +196,7 @@ func (m *Model) checkSocketConnectionStatus() tea.Cmd {
 
 	return func() tea.Msg {
 		return SocketConnectionMsg{
-			Connected:   m.socketFactory.IsConnected(),
+			Connected:    m.socketFactory.IsConnected(),
 			Reconnecting: m.socketFactory.IsReconnecting(),
 		}
 	}

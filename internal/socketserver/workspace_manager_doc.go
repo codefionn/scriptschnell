@@ -14,23 +14,23 @@
 // Workspace Lifecycle:
 //
 // 1. Registration:
-//    - Workspaces are automatically registered when a session is created or explicitly set
-//    - Each workspace is assigned a unique ID (hash of working directory path)
-//    - Git metadata is detected and stored (repository root, current branch)
+//   - Workspaces are automatically registered when a session is created or explicitly set
+//   - Each workspace is assigned a unique ID (hash of working directory path)
+//   - Git metadata is detected and stored (repository root, current branch)
 //
 // 2. Session Tracking:
-//    - WorkspaceManager tracks the number of active sessions per workspace
-//    - Session count is incremented when a session is created in a workspace
-//    - Session count is decremented when a client detaches or disconnects
+//   - WorkspaceManager tracks the number of active sessions per workspace
+//   - Session count is incremented when a session is created in a workspace
+//   - Session count is decremented when a client detaches or disconnects
 //
 // 3. Configuration:
-//    - Context directories can be set per workspace (for documentation lookup)
-//    - Landlock permissions (read/write paths) can be configured per workspace
-//    - Network domains and command prefixes can be approved per workspace
+//   - Context directories can be set per workspace (for documentation lookup)
+//   - Landlock permissions (read/write paths) can be configured per workspace
+//   - Network domains and command prefixes can be approved per workspace
 //
 // 4. Cleanup:
-//    - Git worktrees are automatically cleaned up when they have no active sessions
-//    - Regular working directories are never removed by the manager
+//   - Git worktrees are automatically cleaned up when they have no active sessions
+//   - Regular working directories are never removed by the manager
 //
 // Git Worktree Support:
 //
@@ -55,22 +55,22 @@
 //
 // Example Usage:
 //
-//   // Create workspace manager
-//   wm, err := socketserver.NewWorkspaceManager()
+//	// Create workspace manager
+//	wm, err := socketserver.NewWorkspaceManager()
 //
-//   // Resolve a workspace (registers if not exists)
-//   ws, err := wm.ResolveWorkspace(ctx, "/path/to/project")
+//	// Resolve a workspace (registers if not exists)
+//	ws, err := wm.ResolveWorkspace(ctx, "/path/to/project")
 //
-//   // Create a git worktree for a session
-//   worktree, err := wm.CreateWorktree(ctx, "/path/to/project", "session-name")
+//	// Create a git worktree for a session
+//	worktree, err := wm.CreateWorktree(ctx, "/path/to/project", "session-name")
 //
-//   // Update session count
-//   wm.UpdateWorkspaceSessionCount(ws.ID, 1)
+//	// Update session count
+//	wm.UpdateWorkspaceSessionCount(ws.ID, 1)
 //
-//   // Set workspace configuration
-//   wm.SetWorkspaceContextDirs(ws.ID, []string{"/docs", "/include"})
-//   wm.ApproveDomainForWorkspace(ws.ID, "api.example.com")
-//   wm.ApproveCommandForWorkspace(ws.ID, "docker")
+//	// Set workspace configuration
+//	wm.SetWorkspaceContextDirs(ws.ID, []string{"/docs", "/include"})
+//	wm.ApproveDomainForWorkspace(ws.ID, "api.example.com")
+//	wm.ApproveCommandForWorkspace(ws.ID, "docker")
 //
 // Thread Safety:
 //
@@ -86,5 +86,4 @@
 // - When a session is created, WorkspaceManager resolves and increments count
 // - When a session is detached/deleted, WorkspaceManager decrements count
 // - On shutdown, WorkspaceManager cleans up unused worktrees
-//
 package socketserver

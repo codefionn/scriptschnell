@@ -4,7 +4,7 @@
 // a running scriptschnell instance over Unix domain sockets, supporting concurrent sessions,
 // workspace isolation, and full protocol features.
 //
-// Architecture
+// # Architecture
 //
 // The client follows a straightforward architecture:
 //
@@ -45,7 +45,7 @@
 //	    log.Fatal(err)
 //	}
 //
-// Connection Management
+// # Connection Management
 //
 // The client provides automatic reconnection with configurable parameters:
 //
@@ -62,7 +62,7 @@
 //	    }
 //	})
 //
-// Session Management
+// # Session Management
 //
 // The client provides convenient methods for session operations:
 //
@@ -87,7 +87,7 @@
 //	    log.Fatal(err)
 //	}
 //
-// Workspace Management
+// # Workspace Management
 //
 // Workspaces can be listed and switched:
 //
@@ -103,7 +103,7 @@
 //	    log.Fatal(err)
 //	}
 //
-// Message Protocol
+// # Message Protocol
 //
 // The client implements the full message protocol defined in docs/unix-socket-protocol.md:
 //   - Authentication (auth_request, auth_response)
@@ -118,7 +118,7 @@
 //   - Session persistence (session_save, session_load)
 //   - Connection lifecycle (ping, pong, close, closed)
 //
-// Authorization Flow
+// # Authorization Flow
 //
 // Authorization requests are handled via callbacks:
 //
@@ -130,7 +130,7 @@
 //	    return true, nil // or false, nil
 //	})
 //
-// Question Dialogs
+// # Question Dialogs
 //
 // Planning agent questions are handled via callbacks:
 //
@@ -147,7 +147,7 @@
 //	    return map[string]string{"answer": getUserInput()}, nil
 //	})
 //
-// Progress Updates
+// # Progress Updates
 //
 // Progress updates are streamed via callbacks:
 //
@@ -159,7 +159,7 @@
 //	    }
 //	})
 //
-// Error Handling
+// # Error Handling
 //
 // The client provides detailed error information via the error interface:
 //
@@ -174,13 +174,13 @@
 //	    }
 //	}
 //
-// Thread Safety
+// # Thread Safety
 //
 // SocketClient is thread-safe for concurrent use from multiple goroutines. All operations
 // are protected by mutexes. Callbacks may be invoked concurrently from different goroutines,
 // so implementations must be thread-safe if they access shared state.
 //
-// Context Support
+// # Context Support
 //
 // Most methods accept a context.Context for cancellation and timeout:
 //
@@ -195,7 +195,7 @@
 //	    return
 //	}
 //
-// Reconnection Behavior
+// # Reconnection Behavior
 //
 // When enabled, automatic reconnection attempts to reconnect on connection loss:
 //   - Waits with exponential backoff (configurable)
@@ -204,7 +204,7 @@
 //   - Restores session attachment if previously attached
 //   - Re-subscribes to message callbacks
 //
-// Graceful Shutdown
+// # Graceful Shutdown
 //
 // Always disconnect the client when done:
 //

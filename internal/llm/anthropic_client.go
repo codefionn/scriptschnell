@@ -381,7 +381,102 @@ func extractNativeAnthropicMessages(messages []*Message, enableCaching bool, cac
 		chatMessages = append(chatMessages, betaMsg)
 	}
 
+	if err := validateAnthropicToolSequence(chatMessages); err != nil {
+		return nil, nil, err
+	}
+
 	return systemBlocks, chatMessages, nil
+}
+
+func validateAnthropicToolSequence(messages []anthropic.BetaMessageParam) error {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	for i := 0; i < len(messages); i++ {
+		toolUseIDs := extractAnthropicToolUseIDs(messages[i])
+		if len(toolUseIDs) == 0 {
+			continue
+		}
+
+		if i+1 >= len(messages) {
+			return fmt.Errorf("native messages missing tool_result message after tool_use ids: %v", toolUseIDs)
+		}
+
+		toolResultIDs := extractAnthropicToolResultIDs(messages[i+1])
+		if len(toolResultIDs) == 0 {
+			return fmt.Errorf("native messages missing tool_result blocks after tool_use ids: %v", toolUseIDs)
+		}
+
+		resultSet := make(map[string]struct{}, len(toolResultIDs))
+		for _, id := range toolResultIDs {
+			resultSet[id] = struct{}{}
+		}
+
+		for _, id := range toolUseIDs {
+			if _, ok := resultSet[id]; !ok {
+				return fmt.Errorf("native messages missing tool_result for tool_use id %s", id)
+			}
+		}
+	}
+
+	return nil
+}
+
+func extractAnthropicToolUseIDs(msg anthropic.BetaMessageParam) []string {
+	content, ok := extractAnthropicContentBlocks(msg)
+	if !ok {
+		return nil
+	}
+
+	ids := make([]string, 0)
+	for _, block := range content {
+		if blockType, _ := block["type"].(string); blockType == "tool_use" {
+			if id, _ := block["id"].(string); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	return ids
+}
+
+func extractAnthropicToolResultIDs(msg anthropic.BetaMessageParam) []string {
+	content, ok := extractAnthropicContentBlocks(msg)
+	if !ok {
+		return nil
+	}
+
+	ids := make([]string, 0)
+	for _, block := range content {
+		if blockType, _ := block["type"].(string); blockType == "tool_result" {
+			if id, _ := block["tool_use_id"].(string); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	return ids
+}
+
+func extractAnthropicContentBlocks(msg anthropic.BetaMessageParam) ([]map[string]interface{}, bool) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil, false
+	}
+
+	var payload struct {
+		Content []map[string]interface{} `json:"content"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, false
+	}
+
+	if len(payload.Content) == 0 {
+		return nil, false
+	}
+
+	return payload.Content, true
 }
 
 func convertMessagesToAnthropic(systemPrompt string, messages []*Message, enableCaching bool, cacheTTL string) ([]anthropic.BetaTextBlockParam, []anthropic.BetaMessageParam, error) {

@@ -444,16 +444,17 @@ func (s *SessionStorage) ToStoredSession(session *Session, name string) *StoredS
 	storedMessages := make([]*StoredMessage, len(messages))
 	for i, msg := range messages {
 		storedMessages[i] = &StoredMessage{
-			Role:              msg.Role,
-			Content:           msg.Content,
-			ToolCalls:         msg.ToolCalls,
-			ToolID:            msg.ToolID,
-			ToolName:          msg.ToolName,
-			Timestamp:         msg.Timestamp,
-			NativeFormat:      msg.NativeFormat,
-			NativeProvider:    msg.NativeProvider,
-			NativeModelFamily: msg.NativeModelFamily,
-			NativeTimestamp:   msg.NativeTimestamp,
+			Role:      msg.Role,
+			Content:   msg.Content,
+			ToolCalls: msg.ToolCalls,
+			ToolID:    msg.ToolID,
+			ToolName:  msg.ToolName,
+			Timestamp: msg.Timestamp,
+			// Persist only unified message data to avoid gob-encoding provider-native types.
+			NativeFormat:      nil,
+			NativeProvider:    "",
+			NativeModelFamily: "",
+			NativeTimestamp:   time.Time{},
 		}
 	}
 

@@ -98,12 +98,12 @@ func (m *Model) setupSocketModeCallbacks() {
 
 		// Convert socket tool call to TUI format
 		toolMsg := message{
-			role:       "Tool",
-			content:    msg.ToolName,
-			toolName:   msg.ToolName,
-			toolID:     msg.ToolID,
-			toolState:  ToolStatePending,
-			timestamp:  msg.Timestamp.Format(time.RFC3339),
+			role:      "Tool",
+			content:   msg.ToolName,
+			toolName:  msg.ToolName,
+			toolID:    msg.ToolID,
+			toolState: ToolStatePending,
+			timestamp: msg.Timestamp.Format(time.RFC3339),
 		}
 
 		// Add parameters as description

@@ -18,10 +18,10 @@ var (
 
 // Lockfile represents a file-based lock
 type Lockfile struct {
-	path    string
-	file    *os.File
-	pid     int
-	locked  bool
+	path   string
+	file   *os.File
+	pid    int
+	locked bool
 }
 
 // New creates a new lockfile instance

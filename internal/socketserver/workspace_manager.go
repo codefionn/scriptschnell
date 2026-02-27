@@ -16,20 +16,20 @@ import (
 
 // WorkspaceInternalInfo represents workspace metadata (internal use)
 type WorkspaceInternalInfo struct {
-	ID              string            `json:"id"`               // Unique workspace ID (hash of working dir)
-	Path            string            `json:"path"`             // Working directory path
-	Name            string            `json:"name"`             // Workspace name (from git repo or directory name)
-	RepositoryRoot  string            `json:"repository_root"`  // Git repository root (empty if not in git repo)
-	CurrentBranch   string            `json:"current_branch"`   // Current git branch (empty if not in git repo or detached)
-	IsWorktree      bool              `json:"is_worktree"`      // Whether this is a git worktree
-	WorktreeName    string            `json:"worktree_name"`    // Worktree name (if applicable)
-	SessionCount    int               `json:"session_count"`    // Number of active sessions in this workspace
-	LastAccessed    time.Time         `json:"last_accessed"`    // Last access time
-	CreatedAt       time.Time         `json:"created_at"`       // When workspace was first registered
-	ContextDirs     []string          `json:"context_dirs"`     // Context directories for this workspace
-	LandlockRead    []string          `json:"landlock_read"`    // Landlock read-only paths
-	LandlockWrite   []string          `json:"landlock_write"`   // Landlock read-write paths
-	DomainsApproved map[string]bool   `json:"domains_approved"` // Approved network domains
+	ID               string          `json:"id"`                // Unique workspace ID (hash of working dir)
+	Path             string          `json:"path"`              // Working directory path
+	Name             string          `json:"name"`              // Workspace name (from git repo or directory name)
+	RepositoryRoot   string          `json:"repository_root"`   // Git repository root (empty if not in git repo)
+	CurrentBranch    string          `json:"current_branch"`    // Current git branch (empty if not in git repo or detached)
+	IsWorktree       bool            `json:"is_worktree"`       // Whether this is a git worktree
+	WorktreeName     string          `json:"worktree_name"`     // Worktree name (if applicable)
+	SessionCount     int             `json:"session_count"`     // Number of active sessions in this workspace
+	LastAccessed     time.Time       `json:"last_accessed"`     // Last access time
+	CreatedAt        time.Time       `json:"created_at"`        // When workspace was first registered
+	ContextDirs      []string        `json:"context_dirs"`      // Context directories for this workspace
+	LandlockRead     []string        `json:"landlock_read"`     // Landlock read-only paths
+	LandlockWrite    []string        `json:"landlock_write"`    // Landlock read-write paths
+	DomainsApproved  map[string]bool `json:"domains_approved"`  // Approved network domains
 	CommandsApproved map[string]bool `json:"commands_approved"` // Approved command prefixes
 }
 
@@ -291,13 +291,13 @@ func (wm *WorkspaceManager) createWorkspaceInfo(ctx context.Context, workingDir,
 
 	// Initialize workspace info
 	ws := &WorkspaceInternalInfo{
-		ID:              workspaceID,
-		Path:            workingDir,
-		Name:            filepath.Base(workingDir),
-		SessionCount:    0,
-		LastAccessed:    now,
-		CreatedAt:       now,
-		DomainsApproved: make(map[string]bool),
+		ID:               workspaceID,
+		Path:             workingDir,
+		Name:             filepath.Base(workingDir),
+		SessionCount:     0,
+		LastAccessed:     now,
+		CreatedAt:        now,
+		DomainsApproved:  make(map[string]bool),
 		CommandsApproved: make(map[string]bool),
 	}
 

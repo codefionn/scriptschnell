@@ -14,7 +14,7 @@ func TestSessionManagerBasics(t *testing.T) {
 // TestMessageTypes verifies all message types are properly defined
 func TestMessageTypes(t *testing.T) {
 	tests := []struct {
-		name string
+		name    string
 		msgType string
 	}{
 		{"SessionCreate", MessageTypeSessionCreate},
@@ -35,9 +35,9 @@ func TestMessageTypes(t *testing.T) {
 	}
 }
 
-// TestSessionInfo verifies SessionInfo struct can be created
+// TestSessionInfo verifies SessionInternalInfo struct can be created
 func TestSessionInfo(t *testing.T) {
-	info := SessionInfo{
+	info := SessionInternalInfo{
 		ID:            "test-session",
 		Title:         "Test Session",
 		WorkingDir:    "/tmp/test",

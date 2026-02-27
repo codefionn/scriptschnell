@@ -81,6 +81,10 @@ const (
 	ModelIDClaude45Alt    = "claude-4.5"
 	ModelIDClaude45Sonnet = "claude-sonnet-4.5"
 	ModelIDClaude45Opus   = "claude-opus-4.5"
+	ModelIDClaude46       = "claude-4-6"
+	ModelIDClaude46Alt    = "claude-4.6"
+	ModelIDClaude46Sonnet = "claude-sonnet-4.6"
+	ModelIDClaude46Opus   = "claude-opus-4.6"
 	ModelIDClaude41       = "claude-4-1"
 	ModelIDClaude41Alt    = "claude-4.1"
 	ModelIDClaude4        = "claude-4"
@@ -186,7 +190,17 @@ func DetectModelFamily(modelID string) ModelFamily {
 	}
 
 	// Anthropic families
-	if containsAny(id, ModelIDClaude45, ModelIDClaude45Alt, ModelIDClaude45Sonnet, ModelIDClaude45Opus) || (strings.Contains(id, "claude") && containsAny(id, "4-5", "4.5")) {
+	if containsAny(
+		id,
+		ModelIDClaude46,
+		ModelIDClaude46Alt,
+		ModelIDClaude46Sonnet,
+		ModelIDClaude46Opus,
+		ModelIDClaude45,
+		ModelIDClaude45Alt,
+		ModelIDClaude45Sonnet,
+		ModelIDClaude45Opus,
+	) || (strings.Contains(id, "claude") && containsAny(id, "4-6", "4.6", "4-5", "4.5")) {
 		return FamilyClaude45
 	}
 	if containsAny(id, ModelIDClaude41, ModelIDClaude41Alt) || (strings.Contains(id, "claude") && containsAny(id, "4-1", "4.1")) {
@@ -409,6 +423,9 @@ func DetectContextWindow(modelID string, family ModelFamily) int {
 
 	// Anthropic families
 	case FamilyClaude45:
+		if containsAny(normalizeModelID(modelID), "4-6", "4.6") {
+			return 200000
+		}
 		if strings.Contains(normalizeModelID(modelID), "sonnet") {
 			return 1000000
 		}
@@ -518,6 +535,9 @@ func DetectMaxOutputTokens(modelID string, family ModelFamily, contextWindow int
 
 	// Anthropic families
 	case FamilyClaude45:
+		if containsAny(id, "4-6", "4.6") {
+			return 128000
+		}
 		return 64000
 	case FamilyClaude41:
 		return 32000
@@ -633,6 +653,18 @@ func FormatModelDisplayName(modelID string, family ModelFamily) string {
 	// Family-specific formatting
 	switch family {
 	case FamilyClaude45:
+		if containsAny(normalizeModelID(id), "4-6", "4.6") {
+			if strings.Contains(normalizeModelID(id), "sonnet") {
+				return "Claude 4.6 Sonnet"
+			}
+			if strings.Contains(normalizeModelID(id), "haiku") {
+				return "Claude 4.6 Haiku"
+			}
+			if strings.Contains(normalizeModelID(id), "opus") {
+				return "Claude 4.6 Opus"
+			}
+			return "Claude 4.6"
+		}
 		if strings.Contains(normalizeModelID(id), "sonnet") {
 			return "Claude 4.5 Sonnet"
 		}
@@ -726,6 +758,18 @@ func GetModelDescription(modelID string, family ModelFamily) string {
 		return "Fast, inexpensive model for simple tasks"
 
 	case FamilyClaude45:
+		if containsAny(id, "4-6", "4.6") {
+			if strings.Contains(id, "sonnet") {
+				return "Our most intelligent model for complex agents and coding"
+			}
+			if strings.Contains(id, "haiku") {
+				return "Our fastest model with near frontier intelligence"
+			}
+			if strings.Contains(id, "opus") {
+				return "Premium model combining max intelligence with practical performance"
+			}
+			return "Advanced Claude 4.6 model"
+		}
 		if strings.Contains(id, "sonnet") {
 			return "Our most intelligent model for complex agents and coding"
 		}

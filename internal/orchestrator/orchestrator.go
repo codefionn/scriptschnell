@@ -1069,17 +1069,69 @@ func (o *Orchestrator) convertSessionMessages(modelID, provider, modelFamily str
 		return fmt.Errorf("failed to convert messages to native format: %w", err)
 	}
 
-	// Update session messages with native format
-	for i, msg := range messages {
-		if i < len(nativeMessages) {
-			msg.NativeFormat = nativeMessages[i]
-			msg.NativeProvider = provider
-			msg.NativeModelFamily = modelFamily
-			msg.NativeTimestamp = time.Now()
+	// Filter provider-specific metadata entries (e.g., Anthropic system blocks).
+	filteredNative := filterNativeMessages(nativeMessages)
+
+	// Update session messages with native format, skipping system messages in session.
+	nativeIdx := 0
+	for _, msg := range messages {
+		if msg == nil {
+			continue
 		}
+		if strings.EqualFold(msg.Role, "system") {
+			// System prompt is stored separately; avoid mapping native chat messages to system entries.
+			msg.NativeFormat = nil
+			continue
+		}
+
+		// Skip any native system placeholders just in case.
+		for nativeIdx < len(filteredNative) && nativeMessageIsSystem(filteredNative[nativeIdx]) {
+			nativeIdx++
+		}
+
+		if nativeIdx >= len(filteredNative) {
+			break
+		}
+
+		msg.NativeFormat = filteredNative[nativeIdx]
+		msg.NativeProvider = provider
+		msg.NativeModelFamily = modelFamily
+		msg.NativeTimestamp = time.Now()
+		nativeIdx++
 	}
 
 	return nil
+}
+
+func filterNativeMessages(native []interface{}) []interface{} {
+	if len(native) == 0 {
+		return native
+	}
+
+	filtered := make([]interface{}, 0, len(native))
+	for _, item := range native {
+		if nativeMessageIsSystem(item) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+func nativeMessageIsSystem(item interface{}) bool {
+	m, ok := item.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if _, isSystem := m["_anthropic_system"]; isSystem {
+		return true
+	}
+	if role, ok := m["role"].(string); ok {
+		if strings.EqualFold(strings.TrimSpace(role), "system") {
+			return true
+		}
+	}
+	return false
 }
 
 // initializePlanningAgent creates and initializes the planning agent

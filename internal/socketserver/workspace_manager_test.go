@@ -44,22 +44,22 @@ func TestWorkspaceGeneration(t *testing.T) {
 func TestWorkspaceInfo(t *testing.T) {
 	now := time.Now()
 
-	// Test WorkspaceInfo creation
-	ws := &WorkspaceInfo{
-		ID:              "test-id",
-		Path:            "/tmp/test",
-		Name:            "test",
-		RepositoryRoot:  "/tmp/test",
-		CurrentBranch:   "main",
-		IsWorktree:      false,
-		WorktreeName:    "",
-		SessionCount:    0,
-		LastAccessed:    now,
-		CreatedAt:       now,
-		ContextDirs:     []string{"/tmp/context"},
-		LandlockRead:    []string{"/tmp/read"},
-		LandlockWrite:   []string{"/tmp/write"},
-		DomainsApproved: map[string]bool{"example.com": true},
+	// Test WorkspaceInternalInfo creation
+	ws := &WorkspaceInternalInfo{
+		ID:               "test-id",
+		Path:             "/tmp/test",
+		Name:             "test",
+		RepositoryRoot:   "/tmp/test",
+		CurrentBranch:    "main",
+		IsWorktree:       false,
+		WorktreeName:     "",
+		SessionCount:     0,
+		LastAccessed:     now,
+		CreatedAt:        now,
+		ContextDirs:      []string{"/tmp/context"},
+		LandlockRead:     []string{"/tmp/read"},
+		LandlockWrite:    []string{"/tmp/write"},
+		DomainsApproved:  map[string]bool{"example.com": true},
 		CommandsApproved: map[string]bool{"git": true},
 	}
 
@@ -105,7 +105,14 @@ func TestWorkspaceSessionCountUpdate(t *testing.T) {
 		t.Fatalf("Failed to create workspace manager: %v", err)
 	}
 
-	workspaceID := "test-id"
+	// Register a workspace with a known ID before updating its session count
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	ws0, err := wm.ResolveWorkspace(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to resolve workspace: %v", err)
+	}
+	workspaceID := ws0.ID
 
 	// Test increment
 	wm.UpdateWorkspaceSessionCount(workspaceID, 1)
@@ -144,9 +151,10 @@ func TestWorkspaceSetters(t *testing.T) {
 		t.Fatalf("Failed to create workspace manager: %v", err)
 	}
 
-	// Create a test workspace first
+	// Create a temp directory and use it as the workspace path
 	ctx := context.Background()
-	ws, err := wm.ResolveWorkspace(ctx, "/tmp/test-workspace-setters")
+	tmpDir := t.TempDir()
+	ws, err := wm.ResolveWorkspace(ctx, tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to resolve workspace: %v", err)
 	}

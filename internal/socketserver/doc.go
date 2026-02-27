@@ -4,7 +4,7 @@
 // to a single running scriptschnell instance, supporting concurrent sessions and workspace
 // isolation.
 //
-// Architecture
+// # Architecture
 //
 // The server follows an actor-based architecture with the following components:
 //
@@ -12,7 +12,7 @@
 //   - Hub: Manages active client connections and session registry
 //   - Client: Handles individual client connections with read/write pumps and message dispatching
 //
-// Message Protocol
+// # Message Protocol
 //
 // Communication uses JSON messages delimited by newlines (JSON-RPC style):
 //
@@ -31,7 +31,7 @@
 //   - Session persistence (session_save, session_load)
 //   - Connection lifecycle (ping, pong, close, closed)
 //
-// Session Management
+// # Session Management
 //
 // Each client connection can:
 //   - Create new sessions in a specified workspace
@@ -39,7 +39,7 @@
 //   - Detach from sessions without destroying them
 //   - List and delete sessions
 //
-// Authentication
+// # Authentication
 //
 // The server supports multiple authentication methods:
 //   - File permission-based (recommended): Uses Unix socket file permissions
@@ -87,5 +87,4 @@
 //	// Read response
 //	reader := bufio.NewReader(conn)
 //	response, _ := reader.ReadString('\n')
-//
 package socketserver

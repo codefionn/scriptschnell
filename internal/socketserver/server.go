@@ -17,22 +17,22 @@ import (
 
 // Server represents the Unix socket server
 type Server struct {
-	cfg               *config.Config
-	hub               *Hub
-	broker            *MessageBroker
-	sessionManager    *SessionManager
-	workspaceManager  *WorkspaceManager
-	listener          net.Listener
+	cfg              *config.Config
+	hub              *Hub
+	broker           *MessageBroker
+	sessionManager   *SessionManager
+	workspaceManager *WorkspaceManager
+	listener         net.Listener
 
 	// Dependencies (set via SetDependencies)
-	providerMgr       *provider.Manager
-	secretsPassword   *securemem.String
+	providerMgr     *provider.Manager
+	secretsPassword *securemem.String
 
 	// Connection tracking
-	connMu     sync.RWMutex
-	clients    map[string]*Client
-	connCount  int
-	maxConns   int
+	connMu    sync.RWMutex
+	clients   map[string]*Client
+	connCount int
+	maxConns  int
 
 	// Control
 	mu       sync.Mutex

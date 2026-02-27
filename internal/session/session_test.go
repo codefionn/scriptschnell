@@ -3,6 +3,7 @@ package session
 import (
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestCompactWithSummarySuccess(t *testing.T) {
@@ -126,6 +127,51 @@ func TestSaveSessionStorageDirectoryOverride(t *testing.T) {
 	// Should no longer be dirty
 	if s.IsDirty() {
 		t.Error("Session should not be dirty after being marked as saved")
+	}
+}
+
+func TestSaveSessionStripsNativeFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	setSessionStorageEnv(t, tempDir)
+
+	storage, err := NewSessionStorage()
+	if err != nil {
+		t.Fatalf("Failed to create session storage: %v", err)
+	}
+
+	type nativePayload struct {
+		Foo string
+	}
+
+	s := NewSession("test-native", tempDir)
+	s.AddMessage(&Message{
+		Role:              "user",
+		Content:           "Hello",
+		NativeFormat:      nativePayload{Foo: "bar"},
+		NativeProvider:    "anthropic",
+		NativeModelFamily: "claude-3",
+		NativeTimestamp:   time.Now(),
+	})
+
+	if err := storage.SaveSession(s, "Native Format Session"); err != nil {
+		t.Fatalf("Unexpected error saving session with native format: %v", err)
+	}
+
+	loaded, err := storage.LoadSession(tempDir, s.ID)
+	if err != nil {
+		t.Fatalf("Failed to load saved session: %v", err)
+	}
+	if len(loaded.Messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(loaded.Messages))
+	}
+	if loaded.Messages[0].NativeFormat != nil {
+		t.Fatalf("Expected native format to be stripped on save")
+	}
+	if loaded.Messages[0].NativeProvider != "" || loaded.Messages[0].NativeModelFamily != "" {
+		t.Fatalf("Expected native provider fields to be cleared on save")
+	}
+	if !loaded.Messages[0].NativeTimestamp.IsZero() {
+		t.Fatalf("Expected native timestamp to be zero on save")
 	}
 }
 

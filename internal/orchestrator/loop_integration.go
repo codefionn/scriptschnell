@@ -46,6 +46,18 @@ func (a *sessionAdapter) GetMessages() []loop.Message {
 	return messages
 }
 
+func selectLatestNativeMessage(nativeMsgs []interface{}) interface{} {
+	for i := len(nativeMsgs) - 1; i >= 0; i-- {
+		if m, ok := nativeMsgs[i].(map[string]interface{}); ok {
+			if _, isSystem := m["_anthropic_system"]; isSystem {
+				continue
+			}
+		}
+		return nativeMsgs[i]
+	}
+	return nil
+}
+
 // Ensure sessionAdapter implements loop.Session
 var _ loop.Session = (*sessionAdapter)(nil)
 
@@ -340,10 +352,12 @@ func (i *orchestratorIteration) Execute(ctx context.Context, state loop.State) (
 
 	// Set native format if available
 	if nativeErr == nil && len(nativeMsgs) > 0 {
-		assistantMsg.NativeFormat = nativeMsgs[len(nativeMsgs)-1].(map[string]interface{})
-		assistantMsg.NativeProvider = provider
-		assistantMsg.NativeModelFamily = modelFamily
-		assistantMsg.NativeTimestamp = time.Now()
+		if nativeFormat := selectLatestNativeMessage(nativeMsgs); nativeFormat != nil {
+			assistantMsg.NativeFormat = nativeFormat
+			assistantMsg.NativeProvider = provider
+			assistantMsg.NativeModelFamily = modelFamily
+			assistantMsg.NativeTimestamp = time.Now()
+		}
 	}
 
 	i.orch.session.AddMessage(assistantMsg)

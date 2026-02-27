@@ -400,10 +400,10 @@ func (c *Client) SendToolCompact(toolID string, toolName string, status string, 
 // SendProgress sends a progress update
 func (c *Client) SendProgress(message string, contextUsage int, ephemeral bool, verificationAgent bool) {
 	msg := NewMessage(MessageTypeProgress, map[string]interface{}{
-		"message":             message,
-		"context_usage":       contextUsage,
-		"ephemeral":           ephemeral,
-		"verification_agent":  verificationAgent,
+		"message":            message,
+		"context_usage":      contextUsage,
+		"ephemeral":          ephemeral,
+		"verification_agent": verificationAgent,
 	})
 	c.Send(msg)
 }
@@ -503,9 +503,9 @@ func (c *Client) handleAuthRequest(msg *BaseMessage) error {
 
 	// Send successful auth response
 	c.SendResponse(MessageTypeAuthResponse, msg.RequestID, map[string]interface{}{
-		"success":              true,
-		"connection_id":        connectionID,
-		"server_version":       "1.0.0",
+		"success":             true,
+		"connection_id":       connectionID,
+		"server_version":      "1.0.0",
 		"server_capabilities": []string{"sessions", "workspaces", "chat", "progress", "authorization", "questions"},
 	})
 
@@ -935,14 +935,14 @@ func (c *Client) handleConfigGet(msg *BaseMessage) error {
 			result["context_dirs"] = cfg.ContextDirectories
 		case "auto_save", "autoSave":
 			result["auto_save"] = map[string]interface{}{
-				"enabled":             cfg.AutoSave.Enabled,
+				"enabled":               cfg.AutoSave.Enabled,
 				"save_interval_seconds": cfg.AutoSave.SaveIntervalSeconds,
 			}
 		case "socket":
 			result["socket"] = map[string]interface{}{
-				"path":         cfg.Socket.Path,
-				"enabled":      cfg.Socket.Enabled,
-				"permissions":  cfg.Socket.Permissions,
+				"path":            cfg.Socket.Path,
+				"enabled":         cfg.Socket.Enabled,
+				"permissions":     cfg.Socket.Permissions,
 				"max_connections": cfg.Socket.MaxConnections,
 			}
 		default:

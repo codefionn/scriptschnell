@@ -134,20 +134,20 @@ type SandboxConfig struct {
 
 // SocketConfig holds configuration for the Unix socket server
 type SocketConfig struct {
-	Enabled               bool     `json:"enabled"`                           // Enable/disable socket server
-	AutoConnect           bool     `json:"auto_connect"`                      // Auto-detect and connect to socket server in clients
-	Path                  string   `json:"path"`                              // Socket file path (~/.scriptschnell.sock)
-	Permissions           string   `json:"permissions,omitempty"`             // Octal permissions (e.g., "0600")
-	RequireAuth           bool     `json:"require_auth"`                      // Whether auth is required
-	AuthMethod            string   `json:"auth_method,omitempty"`             // "file", "token", "challenge", "peercred"
-	Token                 string   `json:"token,omitempty"`                   // Pre-shared token (empty string = not encrypted)
-	AllowedUIDs           []int    `json:"allowed_uids,omitempty"`            // Allowed user IDs for peercred
-	AllowedGIDs           []int    `json:"allowed_gids,omitempty"`            // Allowed group IDs for peercred
-	MaxConnections        int      `json:"max_connections"`                   // Max concurrent connections
-	MaxSessionsPerConn    int      `json:"max_sessions_per_connection"`       // Max sessions per connection
-	ConnectionTimeoutSecs int      `json:"connection_timeout_seconds"`        // Idle timeout in seconds
-	EnableBatching        bool     `json:"enable_batching"`                   // Enable message batching
-	BatchSize             int      `json:"batch_size"`                        // Messages per batch
+	Enabled               bool   `json:"enabled"`                     // Enable/disable socket server
+	AutoConnect           bool   `json:"auto_connect"`                // Auto-detect and connect to socket server in clients
+	Path                  string `json:"path"`                        // Socket file path (~/.scriptschnell.sock)
+	Permissions           string `json:"permissions,omitempty"`       // Octal permissions (e.g., "0600")
+	RequireAuth           bool   `json:"require_auth"`                // Whether auth is required
+	AuthMethod            string `json:"auth_method,omitempty"`       // "file", "token", "challenge", "peercred"
+	Token                 string `json:"token,omitempty"`             // Pre-shared token (empty string = not encrypted)
+	AllowedUIDs           []int  `json:"allowed_uids,omitempty"`      // Allowed user IDs for peercred
+	AllowedGIDs           []int  `json:"allowed_gids,omitempty"`      // Allowed group IDs for peercred
+	MaxConnections        int    `json:"max_connections"`             // Max concurrent connections
+	MaxSessionsPerConn    int    `json:"max_sessions_per_connection"` // Max sessions per connection
+	ConnectionTimeoutSecs int    `json:"connection_timeout_seconds"`  // Idle timeout in seconds
+	EnableBatching        bool   `json:"enable_batching"`             // Enable message batching
+	BatchSize             int    `json:"batch_size"`                  // Messages per batch
 }
 
 // DefaultSocketPath is the default socket path
@@ -197,7 +197,7 @@ type Config struct {
 	DisableAnimations       bool                                   `json:"disable_animations"`
 	LogLevel                string                                 `json:"log_level"` // debug, info, warn, error, none
 	LogPath                 string                                 `json:"-"`
-	LogToConsole            bool                                   `json:"log_to_console"` // Enable console logging in addition to file logging
+	LogToConsole            bool                                   `json:"log_to_console"`                // Enable console logging in addition to file logging
 	AuthorizedDomains       map[string]bool                        `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
 	AuthorizedCommands      map[string]bool                        `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
 	Search                  SearchConfig                           `json:"search"`                        // Web search provider configuration
@@ -311,7 +311,7 @@ func DefaultConfig() *Config {
 		},
 		Secrets:            SecretsSettings{},
 		EnablePromptCache:  false,                     // Disabled by default - some providers like Mistral don't support cache_control ephemeral
-		PromptCacheTTL:     "1h",                      // Default to 1 hour for longer sessions
+		PromptCacheTTL:     "5m",                      // Default to 5m
 		ContextDirectories: make(map[string][]string), // No context directories by default
 		AutoSave: AutoSaveConfig{
 			Enabled:             true, // Enable by default
@@ -821,7 +821,7 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 		AutoResume:              c.AutoResume,
 		SandboxOutputCompaction: c.SandboxOutputCompaction,
 		LandlockApprovals:       c.LandlockApprovals,
-		Socket:                 c.Socket,
+		Socket:                  c.Socket,
 		secretsPassword:         c.secretsPassword,
 	}
 

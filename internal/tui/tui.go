@@ -188,13 +188,13 @@ type Model struct {
 	onSaveSession    func(*session.Session) error // Callback to save a session
 
 	// Multi-tab concurrent generation state
-	factory          *RuntimeFactory    // Creates per-tab runtimes (local mode)
+	factory          *RuntimeFactory       // Creates per-tab runtimes (local mode)
 	socketFactory    *SocketRuntimeFactory // Socket-based runtime (socket mode)
-	useSocketMode    bool               // Whether to use socket mode
-	program          *tea.Program       // Reference to tea.Program for self-messaging
-	concurrentGens   map[int]bool       // Track which tabs are generating (tabID -> bool)
-	concurrentGensMu sync.RWMutex       // Protect concurrentGens map
-	overlayActiveMu  sync.RWMutex       // Protect overlayActive field
+	useSocketMode    bool                  // Whether to use socket mode
+	program          *tea.Program          // Reference to tea.Program for self-messaging
+	concurrentGens   map[int]bool          // Track which tabs are generating (tabID -> bool)
+	concurrentGensMu sync.RWMutex          // Protect concurrentGens map
+	overlayActiveMu  sync.RWMutex          // Protect overlayActive field
 
 	// Authorization state
 	pendingAuthorizations   map[string]*AuthorizationRequest // authID -> request
@@ -226,7 +226,7 @@ type Model struct {
 
 	// Socket mode state
 	pendingSocketAuthorizations map[string]pendingSocketAuthorization
-	pendingSocketQuestions    map[string]pendingSocketQuestion
+	pendingSocketQuestions      map[string]pendingSocketQuestion
 }
 
 func init() {
@@ -237,7 +237,7 @@ func init() {
 
 var (
 	pendingSocketAuthorizations map[string]pendingSocketAuthorization
-	pendingSocketQuestions    map[string]pendingSocketQuestion
+	pendingSocketQuestions      map[string]pendingSocketQuestion
 )
 
 // pendingSocketAuthorization tracks a pending socket authorization request

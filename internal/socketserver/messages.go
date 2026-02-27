@@ -9,13 +9,13 @@ const (
 	MessageTypeAuthResponse = "auth_response"
 
 	// Session Management
-	MessageTypeSessionCreate            = "session_create"
-	MessageTypeSessionCreateResponse    = "session_create_response"
-	MessageTypeSessionAttach            = "session_attach"
-	MessageTypeSessionDetach            = "session_detach"
-	MessageTypeSessionList              = "session_list"
-	MessageTypeSessionListResponse      = "session_list_response"
-	MessageTypeSessionDelete            = "session_delete"
+	MessageTypeSessionCreate         = "session_create"
+	MessageTypeSessionCreateResponse = "session_create_response"
+	MessageTypeSessionAttach         = "session_attach"
+	MessageTypeSessionDetach         = "session_detach"
+	MessageTypeSessionList           = "session_list"
+	MessageTypeSessionListResponse   = "session_list_response"
+	MessageTypeSessionDelete         = "session_delete"
 
 	// Chat & Generation
 	MessageTypeChatSend    = "chat_send"
@@ -45,9 +45,9 @@ const (
 	MessageTypeConfigSet = "config_set"
 
 	// Workspace Management
-	MessageTypeWorkspaceList       = "workspace_list"
+	MessageTypeWorkspaceList         = "workspace_list"
 	MessageTypeWorkspaceListResponse = "workspace_list_response"
-	MessageTypeWorkspaceSet       = "workspace_set"
+	MessageTypeWorkspaceSet          = "workspace_set"
 
 	// Session Persistence
 	MessageTypeSessionSave = "session_save"
@@ -135,9 +135,9 @@ type AuthRequest struct {
 
 // AuthResponse data for authentication response
 type AuthResponse struct {
-	Success           bool     `json:"success"`
-	ConnectionID      string   `json:"connection_id"`
-	ServerVersion     string   `json:"server_version"`
+	Success            bool     `json:"success"`
+	ConnectionID       string   `json:"connection_id"`
+	ServerVersion      string   `json:"server_version"`
 	ServerCapabilities []string `json:"server_capabilities"`
 }
 
@@ -208,12 +208,12 @@ type ChatSendRequest struct {
 
 // ChatMessage data for streaming chat messages
 type ChatMessage struct {
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	StreamID  string `json:"stream_id,omitempty"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	StreamID   string `json:"stream_id,omitempty"`
 	ChunkIndex int    `json:"chunk_index,omitempty"`
-	IsFinal   bool   `json:"is_final,omitempty"`
-	Reasoning bool   `json:"reasoning,omitempty"` // Extended thinking content
+	IsFinal    bool   `json:"is_final,omitempty"`
+	Reasoning  bool   `json:"reasoning,omitempty"` // Extended thinking content
 }
 
 // ToolCallRequest data for tool call notification
@@ -234,20 +234,20 @@ type ToolResultData struct {
 
 // ToolCompact data for compact tool interaction
 type ToolCompact struct {
-	ToolID     string `json:"tool_id"`
-	ToolName   string `json:"tool_name"`
-	Status     string `json:"status"` // "calling", "completed", "error"
-	Result     string `json:"result,omitempty"`
-	Error      string `json:"error,omitempty"`
+	ToolID      string `json:"tool_id"`
+	ToolName    string `json:"tool_name"`
+	Status      string `json:"status"` // "calling", "completed", "error"
+	Result      string `json:"result,omitempty"`
+	Error       string `json:"error,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 
 // AuthorizationRequestData data for authorization request
 type AuthorizationRequestData struct {
-	AuthID    string                 `json:"auth_id"`
-	ToolName  string                 `json:"tool_name"`
+	AuthID     string                 `json:"auth_id"`
+	ToolName   string                 `json:"tool_name"`
 	Parameters map[string]interface{} `json:"parameters"`
-	Reason    string                 `json:"reason"`
+	Reason     string                 `json:"reason"`
 }
 
 // AuthorizationAck data for authorization acknowledgment
@@ -264,10 +264,10 @@ type AuthorizationResponseData struct {
 
 // QuestionRequest data for question requests
 type QuestionRequest struct {
-	QuestionID  string        `json:"question_id"`
-	Question    string        `json:"question"`
-	MultiMode   bool          `json:"multi_mode"`
-	Questions   []QuestionDef `json:"questions,omitempty"` // Only in multi_mode
+	QuestionID string        `json:"question_id"`
+	Question   string        `json:"question"`
+	MultiMode  bool          `json:"multi_mode"`
+	Questions  []QuestionDef `json:"questions,omitempty"` // Only in multi_mode
 }
 
 // QuestionDef defines a question in multi-mode
@@ -293,11 +293,11 @@ type QuestionResponseData struct {
 
 // ProgressData data for progress updates
 type ProgressData struct {
-	Message            string `json:"message"`
-	ContextUsage       int    `json:"context_usage,omitempty"`
-	Ephemeral          bool   `json:"ephemeral,omitempty"`
-	VerificationAgent  bool   `json:"verification_agent,omitempty"`
-	IsCompact          bool   `json:"is_compact,omitempty"`
+	Message           string `json:"message"`
+	ContextUsage      int    `json:"context_usage,omitempty"`
+	Ephemeral         bool   `json:"ephemeral,omitempty"`
+	VerificationAgent bool   `json:"verification_agent,omitempty"`
+	IsCompact         bool   `json:"is_compact,omitempty"`
 }
 
 // ConfigGetRequest data for getting configuration
@@ -312,21 +312,21 @@ type ConfigSetRequest struct {
 
 // WorkspaceInfo represents workspace information (for API responses)
 type WorkspaceInfo struct {
-	ID                string            `json:"id"`
-	Path              string            `json:"path"`
-	Name              string            `json:"name"`
-	RepositoryRoot    string            `json:"repository_root"`
-	CurrentBranch     string            `json:"current_branch"`
-	IsWorktree        bool              `json:"is_worktree"`
-	WorktreeName      string            `json:"worktree_name"`
-	SessionCount      int               `json:"session_count"`
-	LastAccessed      string            `json:"last_accessed"`
-	CreatedAt         string            `json:"created_at"`
-	ContextDirs       []string          `json:"context_dirs"`
-	LandlockRead      []string          `json:"landlock_read"`
-	LandlockWrite     []string          `json:"landlock_write"`
-	DomainsApproved   map[string]bool   `json:"domains_approved"`
-	CommandsApproved  map[string]bool   `json:"commands_approved"`
+	ID               string          `json:"id"`
+	Path             string          `json:"path"`
+	Name             string          `json:"name"`
+	RepositoryRoot   string          `json:"repository_root"`
+	CurrentBranch    string          `json:"current_branch"`
+	IsWorktree       bool            `json:"is_worktree"`
+	WorktreeName     string          `json:"worktree_name"`
+	SessionCount     int             `json:"session_count"`
+	LastAccessed     string          `json:"last_accessed"`
+	CreatedAt        string          `json:"created_at"`
+	ContextDirs      []string        `json:"context_dirs"`
+	LandlockRead     []string        `json:"landlock_read"`
+	LandlockWrite    []string        `json:"landlock_write"`
+	DomainsApproved  map[string]bool `json:"domains_approved"`
+	CommandsApproved map[string]bool `json:"commands_approved"`
 }
 
 // WorkspaceListResponse data for workspace list response
@@ -382,15 +382,15 @@ type FlowControlData struct {
 
 // Error codes
 const (
-	ErrorCodeAuthFailed           = "AUTH_FAILED"
-	ErrorCodeAuthRequired         = "AUTH_REQUIRED"
-	ErrorCodeInvalidRequest       = "INVALID_REQUEST"
-	ErrorCodeSessionNotFound      = "SESSION_NOT_FOUND"
-	ErrorCodeSessionExists        = "SESSION_EXISTS"
-	ErrorCodeWorkspaceInvalid     = "WORKSPACE_INVALID"
+	ErrorCodeAuthFailed            = "AUTH_FAILED"
+	ErrorCodeAuthRequired          = "AUTH_REQUIRED"
+	ErrorCodeInvalidRequest        = "INVALID_REQUEST"
+	ErrorCodeSessionNotFound       = "SESSION_NOT_FOUND"
+	ErrorCodeSessionExists         = "SESSION_EXISTS"
+	ErrorCodeWorkspaceInvalid      = "WORKSPACE_INVALID"
 	ErrorCodeWorkspaceAccessDenied = "WORKSPACE_ACCESS_DENIED"
-	ErrorCodeOperationNotAllowed  = "OPERATION_NOT_ALLOWED"
-	ErrorCodeInternalError        = "INTERNAL_ERROR"
-	ErrorCodeTimeout              = "TIMEOUT"
-	ErrorCodeNotImplemented       = "NOT_IMPLEMENTED"
+	ErrorCodeOperationNotAllowed   = "OPERATION_NOT_ALLOWED"
+	ErrorCodeInternalError         = "INTERNAL_ERROR"
+	ErrorCodeTimeout               = "TIMEOUT"
+	ErrorCodeNotImplemented        = "NOT_IMPLEMENTED"
 )

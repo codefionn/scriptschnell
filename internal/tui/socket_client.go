@@ -16,7 +16,7 @@ import (
 type SocketClientWrapper struct {
 	client       *socketclient.Client
 	config       *config.Config
-	socketPath   string // Stored socket path for detection
+	socketPath   string      // Stored socket path for detection
 	providerMgr  interface{} // provider.Manager interface
 	connected    bool
 	reconnecting bool
@@ -51,11 +51,11 @@ func NewSocketClientWrapper(cfg *config.Config) *SocketClientWrapper {
 	}
 
 	wrapper := &SocketClientWrapper{
-		client:          client,
-		config:          cfg,
-		socketPath:      socketPath,
-		connected:       false,
-		pendingPrompts:  make(map[string]chan struct{}),
+		client:         client,
+		config:         cfg,
+		socketPath:     socketPath,
+		connected:      false,
+		pendingPrompts: make(map[string]chan struct{}),
 	}
 
 	// Set up client callbacks

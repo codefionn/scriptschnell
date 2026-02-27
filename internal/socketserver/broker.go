@@ -39,20 +39,20 @@ type pendingQuestion struct {
 
 // MessageBroker handles the orchestration of LLM interactions for socket clients
 type MessageBroker struct {
-	session           *session.Session
-	orchestrator      *orchestrator.Orchestrator
-	cfg               *config.Config
-	providerMgr       *provider.Manager
-	secretsPassword   *securemem.String
-	initialized       bool
-	sessionStorage    *session.SessionStorage
+	session            *session.Session
+	orchestrator       *orchestrator.Orchestrator
+	cfg                *config.Config
+	providerMgr        *provider.Manager
+	secretsPassword    *securemem.String
+	initialized        bool
+	sessionStorage     *session.SessionStorage
 	requireSandboxAuth bool
 
-	pendingAuthMu     sync.Mutex
-	pendingAuths      map[string]*pendingAuthorization // authID -> pending auth
-	authCounter       int
+	pendingAuthMu sync.Mutex
+	pendingAuths  map[string]*pendingAuthorization // authID -> pending auth
+	authCounter   int
 
-	sendMessage       func(*BaseMessage) // callback to send messages to client
+	sendMessage func(*BaseMessage) // callback to send messages to client
 
 	pendingQuestionMu sync.Mutex
 	pendingQuestions  map[string]*pendingQuestion // questionID -> pending question
@@ -267,7 +267,7 @@ func (mb *MessageBroker) handleProgress(msg progress.Update, requestID string) e
 			MessageTypeProgress,
 			requestID,
 			map[string]interface{}{
-				"message":   msg.Message,
+				"message":    msg.Message,
 				"is_compact": true,
 			},
 		))
@@ -547,7 +547,7 @@ func (mb *MessageBroker) handleQuestion(ctx context.Context, question string, qu
 	// Send question request to client
 	data := map[string]interface{}{
 		"question_id": questionID,
-		"question":   question,
+		"question":    question,
 		"multi_mode":  multiMode,
 	}
 	if len(questions) > 0 {

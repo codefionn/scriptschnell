@@ -9,11 +9,11 @@ import (
 
 // Message represents a protocol message
 type Message struct {
-	Type      string                 `json:"type"`
-	RequestID string                 `json:"request_id,omitempty"`
-	Data      json.RawMessage        `json:"data,omitempty"`
-	Timestamp string                 `json:"timestamp,omitempty"`
-	Error     *ErrorInfo             `json:"error,omitempty"`
+	Type      string          `json:"type"`
+	RequestID string          `json:"request_id,omitempty"`
+	Data      json.RawMessage `json:"data,omitempty"`
+	Timestamp string          `json:"timestamp,omitempty"`
+	Error     *ErrorInfo      `json:"error,omitempty"`
 }
 
 // ErrorInfo contains error details
@@ -162,7 +162,7 @@ type ChatMessage struct {
 
 // ToolCall represents a tool call notification
 type ToolCall struct {
-	SessionID  string                 `json:"session_id,omitempty"`
+	SessionID   string                 `json:"session_id,omitempty"`
 	ToolName    string                 `json:"tool_name"`
 	ToolID      string                 `json:"tool_id"`
 	Parameters  map[string]interface{} `json:"parameters"`
@@ -195,11 +195,11 @@ type ProgressData struct {
 
 // AuthorizationRequest represents an authorization request
 type AuthorizationRequest struct {
-	SessionID   string                 `json:"session_id,omitempty"`
-	AuthID      string                 `json:"auth_id"`
-	ToolName    string                 `json:"tool_name"`
-	Parameters  map[string]interface{} `json:"parameters"`
-	Reason      string                 `json:"reason"`
+	SessionID  string                 `json:"session_id,omitempty"`
+	AuthID     string                 `json:"auth_id"`
+	ToolName   string                 `json:"tool_name"`
+	Parameters map[string]interface{} `json:"parameters"`
+	Reason     string                 `json:"reason"`
 }
 
 // AuthorizationAck represents an authorization acknowledgment
@@ -231,17 +231,17 @@ type QuestionResponse struct {
 
 // SessionInfo represents session information
 type SessionInfo struct {
-	SessionID    string              `json:"session_id"`
-	Workspace    string              `json:"workspace"`
-	Title        string              `json:"title"`
-	CreatedAt    string              `json:"created_at"`
-	UpdatedAt    string              `json:"updated_at"`
-	MessageCount int                 `json:"message_count"`
-	Status       string              `json:"status"`
-	TotalTokens  int64               `json:"total_tokens,omitempty"`
-	CachedTokens int64               `json:"cached_tokens,omitempty"`
-	TotalCost    float64             `json:"total_cost,omitempty"`
-	MessageHistory []MessageHistory  `json:"message_history,omitempty"`
+	SessionID      string           `json:"session_id"`
+	Workspace      string           `json:"workspace"`
+	Title          string           `json:"title"`
+	CreatedAt      string           `json:"created_at"`
+	UpdatedAt      string           `json:"updated_at"`
+	MessageCount   int              `json:"message_count"`
+	Status         string           `json:"status"`
+	TotalTokens    int64            `json:"total_tokens,omitempty"`
+	CachedTokens   int64            `json:"cached_tokens,omitempty"`
+	TotalCost      float64          `json:"total_cost,omitempty"`
+	MessageHistory []MessageHistory `json:"message_history,omitempty"`
 }
 
 // MessageHistory represents a message in session history
@@ -254,21 +254,21 @@ type MessageHistory struct {
 
 // WorkspaceInfo represents workspace information
 type WorkspaceInfo struct {
-	ID               string            `json:"id"`
-	Path             string            `json:"path"`
-	Name             string            `json:"name"`
-	RepositoryRoot   string            `json:"repository_root"`
-	CurrentBranch    string            `json:"current_branch"`
-	IsWorktree       bool              `json:"is_worktree"`
-	WorktreeName     string            `json:"worktree_name"`
-	SessionCount     int               `json:"session_count"`
-	LastAccessed     string            `json:"last_accessed"`
-	CreatedAt        string            `json:"created_at"`
-	ContextDirs      []string          `json:"context_dirs"`
-	LandlockRead     []string          `json:"landlock_read"`
-	LandlockWrite    []string          `json:"landlock_write"`
-	DomainsApproved  map[string]bool   `json:"domains_approved"`
-	CommandsApproved map[string]bool   `json:"commands_approved"`
+	ID               string          `json:"id"`
+	Path             string          `json:"path"`
+	Name             string          `json:"name"`
+	RepositoryRoot   string          `json:"repository_root"`
+	CurrentBranch    string          `json:"current_branch"`
+	IsWorktree       bool            `json:"is_worktree"`
+	WorktreeName     string          `json:"worktree_name"`
+	SessionCount     int             `json:"session_count"`
+	LastAccessed     string          `json:"last_accessed"`
+	CreatedAt        string          `json:"created_at"`
+	ContextDirs      []string        `json:"context_dirs"`
+	LandlockRead     []string        `json:"landlock_read"`
+	LandlockWrite    []string        `json:"landlock_write"`
+	DomainsApproved  map[string]bool `json:"domains_approved"`
+	CommandsApproved map[string]bool `json:"commands_approved"`
 }
 
 // ConfigValue represents a configuration value

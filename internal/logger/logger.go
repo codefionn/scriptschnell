@@ -64,13 +64,13 @@ func ParseLevel(s string) Level {
 
 // Logger provides structured logging capabilities
 type Logger struct {
-	mu       sync.RWMutex
-	level    Level
-	logger   *log.Logger
-	consoleLogger *log.Logger
-	prefix   string
-	file     *os.File
-	disabled bool
+	mu             sync.RWMutex
+	level          Level
+	logger         *log.Logger
+	consoleLogger  *log.Logger
+	prefix         string
+	file           *os.File
+	disabled       bool
 	consoleEnabled bool
 }
 
@@ -101,8 +101,8 @@ func New(level Level, logPath string, prefix string) (*Logger, error) {
 // NewWithConsole creates a new Logger instance with optional console output
 func NewWithConsole(level Level, logPath string, prefix string, enableConsole bool) (*Logger, error) {
 	l := &Logger{
-		level:  level,
-		prefix: prefix,
+		level:          level,
+		prefix:         prefix,
 		consoleEnabled: enableConsole,
 	}
 
@@ -170,12 +170,12 @@ func (l *Logger) WithPrefix(prefix string) *Logger {
 	}
 
 	return &Logger{
-		level:    l.level,
-		logger:   l.logger,
-		consoleLogger: l.consoleLogger,
-		prefix:   newPrefix,
-		file:     l.file,
-		disabled: l.disabled,
+		level:          l.level,
+		logger:         l.logger,
+		consoleLogger:  l.consoleLogger,
+		prefix:         newPrefix,
+		file:           l.file,
+		disabled:       l.disabled,
 		consoleEnabled: l.consoleEnabled,
 	}
 }
@@ -212,10 +212,10 @@ func (l *Logger) log(level Level, format string, args ...interface{}) {
 	}
 
 	logLine := fmt.Sprintf("%s [%s] %s%s", timestamp, level.String(), prefix, msg)
-	
+
 	// Write to file
 	l.logger.Println(logLine)
-	
+
 	// Write to console if enabled
 	if l.consoleEnabled {
 		l.consoleLogger.Println(logLine)

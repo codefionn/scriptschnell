@@ -156,4 +156,3 @@ func (m *Model) processNextQueuedPromptForTabSocket(tabIdx int) tea.Cmd {
 	// Start prompt for this specific tab using socket mode
 	return m.startPromptForTabSocket(tabIdx, next)
 }
-

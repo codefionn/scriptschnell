@@ -127,12 +127,12 @@ type Client struct {
 	config *Config
 
 	// Connection
-	conn         net.Conn
-	connMu       sync.RWMutex
-	state        atomic.Int32 // ConnectionState
-	connectCtx   context.Context
+	conn          net.Conn
+	connMu        sync.RWMutex
+	state         atomic.Int32 // ConnectionState
+	connectCtx    context.Context
 	connectCancel context.CancelFunc
-	connectMu    sync.Mutex
+	connectMu     sync.Mutex
 
 	// Message I/O
 	outgoing chan *Message
@@ -143,16 +143,16 @@ type Client struct {
 	requestMu       sync.RWMutex
 
 	// Callbacks
-	chatMessageCallback        func(ChatMessage)
-	toolCallCallback           func(ToolCall)
-	toolResultCallback         func(ToolResult)
-	progressCallback           func(ProgressData)
-	authorizationCallback      func(AuthorizationRequest) (bool, error)
-	questionCallback           func(QuestionRequest) (map[string]string, error)
-	completionCallback         func(requestID string, success bool, errorMsg string)
-	stateChangedCallback       func(ConnectionState, error)
-	reconnectingCallback       func(attempt int, maxAttempts int)
-	connectionLostCallback     func(error)
+	chatMessageCallback    func(ChatMessage)
+	toolCallCallback       func(ToolCall)
+	toolResultCallback     func(ToolResult)
+	progressCallback       func(ProgressData)
+	authorizationCallback  func(AuthorizationRequest) (bool, error)
+	questionCallback       func(QuestionRequest) (map[string]string, error)
+	completionCallback     func(requestID string, success bool, errorMsg string)
+	stateChangedCallback   func(ConnectionState, error)
+	reconnectingCallback   func(attempt int, maxAttempts int)
+	connectionLostCallback func(error)
 
 	// Session tracking
 	currentSessionID atomic.Value // string
@@ -255,9 +255,9 @@ func (c *Client) connect(ctx context.Context, isReconnect bool) error {
 
 	// Send authentication request
 	authReq := map[string]interface{}{
-		"client_type":   c.config.ClientType,
-		"version":       c.config.ClientVersion,
-		"capabilities":  c.config.Capabilities,
+		"client_type":  c.config.ClientType,
+		"version":      c.config.ClientVersion,
+		"capabilities": c.config.Capabilities,
 	}
 
 	if c.config.AuthToken != "" {
@@ -286,9 +286,9 @@ func (c *Client) connect(ctx context.Context, isReconnect bool) error {
 
 	// Parse auth response
 	var authRespData struct {
-		Success           bool     `json:"success"`
-		ConnectionID      string   `json:"connection_id"`
-		ServerVersion     string   `json:"server_version"`
+		Success            bool     `json:"success"`
+		ConnectionID       string   `json:"connection_id"`
+		ServerVersion      string   `json:"server_version"`
 		ServerCapabilities []string `json:"server_capabilities"`
 	}
 
@@ -733,7 +733,7 @@ func (c *Client) handleQuestionRequest(msg *Message) {
 		// Auto-empty response if no callback
 		respMsg := NewMessage("question_response", map[string]interface{}{
 			"question_id": qReq.QuestionID,
-			"answer":     "",
+			"answer":      "",
 		})
 		c.SendMessage(respMsg)
 		return

@@ -188,11 +188,13 @@ type Model struct {
 	onSaveSession    func(*session.Session) error // Callback to save a session
 
 	// Multi-tab concurrent generation state
-	factory          *RuntimeFactory // Creates per-tab runtimes
-	program          *tea.Program    // Reference to tea.Program for self-messaging
-	concurrentGens   map[int]bool    // Track which tabs are generating (tabID -> bool)
-	concurrentGensMu sync.RWMutex    // Protect concurrentGens map
-	overlayActiveMu  sync.RWMutex    // Protect overlayActive field
+	factory          *RuntimeFactory    // Creates per-tab runtimes (local mode)
+	socketFactory    *SocketRuntimeFactory // Socket-based runtime (socket mode)
+	useSocketMode    bool               // Whether to use socket mode
+	program          *tea.Program       // Reference to tea.Program for self-messaging
+	concurrentGens   map[int]bool       // Track which tabs are generating (tabID -> bool)
+	concurrentGensMu sync.RWMutex       // Protect concurrentGens map
+	overlayActiveMu  sync.RWMutex       // Protect overlayActive field
 
 	// Authorization state
 	pendingAuthorizations   map[string]*AuthorizationRequest // authID -> request
@@ -221,6 +223,41 @@ type Model struct {
 
 	// User interaction handler for actor-based authorization
 	userInteractionHandler *TUIInteractionHandler
+
+	// Socket mode state
+	pendingSocketAuthorizations map[string]pendingSocketAuthorization
+	pendingSocketQuestions    map[string]pendingSocketQuestion
+}
+
+func init() {
+	// Initialize socket mode maps at package level
+	pendingSocketAuthorizations = make(map[string]pendingSocketAuthorization)
+	pendingSocketQuestions = make(map[string]pendingSocketQuestion)
+}
+
+var (
+	pendingSocketAuthorizations map[string]pendingSocketAuthorization
+	pendingSocketQuestions    map[string]pendingSocketQuestion
+)
+
+// pendingSocketAuthorization tracks a pending socket authorization request
+type pendingSocketAuthorization struct {
+	requestID string
+	toolName  string
+	params    map[string]interface{}
+	reason    string
+	tabID     int
+	startTime time.Time
+	acked     bool
+}
+
+// pendingSocketQuestion tracks a pending socket question request
+type pendingSocketQuestion struct {
+	requestID string
+	questions map[string]string
+	multiMode bool
+	tabID     int
+	startTime time.Time
 }
 
 // EndUserQuestionsMsg is sent when the user finishes answering questions
@@ -490,9 +527,28 @@ func NewWithFactory(factory *RuntimeFactory, cfg *config.Config, providerMgr *pr
 	m.factory = factory
 	m.config = cfg
 	m.workingDir = factory.GetWorkingDir()
+	m.useSocketMode = false
 
 	// Initialize context file without requiring orchestrator
 	m.contextFile = m.getExtendedContextFileWithoutOrchestrator()
+
+	return m
+}
+
+// NewWithSocketFactory creates a new TUI model with SocketRuntimeFactory for socket mode
+func NewWithSocketFactory(socketFactory *SocketRuntimeFactory, cfg *config.Config, providerMgr *provider.Manager) *Model {
+	// Get current model name from provider manager
+	currentModel := providerMgr.GetOrchestrationModel()
+
+	m := New(currentModel, "", cfg.DisableAnimations)
+	m.socketFactory = socketFactory
+	m.config = cfg
+	m.workingDir = socketFactory.GetWorkingDir()
+	m.useSocketMode = true
+	m.factory = nil // No local factory in socket mode
+
+	// Initialize context file (will be fetched from server)
+	m.contextFile = ""
 
 	return m
 }

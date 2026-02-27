@@ -8,6 +8,8 @@ A TUI/CLI application that generates code from prompts using LLMs, featuring mul
 - **Language Version**: 1.25.1
 - **Framework**: Bubbletea (TUI), wazero (WebAssembly runtime)
 
+- 
+
 ## Dependencies
 
 - bubbletea v1.3.10 (TUI framework)
@@ -21,7 +23,7 @@ A TUI/CLI application that generates code from prompts using LLMs, featuring mul
 
 ## Tooling
 
-- **Build**: `go build -o scriptschnell ./cmd/scriptschnell`
+- **Build**: `go build ./...`
 - **Test**: `go test ./... -short`
 - **Format**: `gofmt -s -w .`
 - **Lint**: `golangci-lint run`

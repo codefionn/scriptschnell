@@ -31,6 +31,9 @@ type Options struct {
 	JSONOutput          bool
 	JSONExtended        bool
 	JSONFull            bool // Include full tool call outputs in JSON
+	SocketClientMode    bool // Connect to running Unix socket server
+	SocketClientPath    string // Path to Unix socket for CLI mode
+	NoSocket            bool // Disable auto-detection of socket server
 }
 
 // CLI handles command-line interface using the orchestrator

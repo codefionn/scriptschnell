@@ -282,6 +282,7 @@ func (a *CodebaseInvestigatorAgent) investigateInternal(ctx context.Context, obj
 	systemPrompt := fmt.Sprintf(`You are a Codebase Investigator agent.:
 Your goal is to explore the codebase to answer the user's objective.
 You have access to tools to search and read files.
+You do not have access to tools that create or update files.
 You should systematically explore relevant files.
 
 %s
@@ -396,11 +397,11 @@ The requested logic is found in internal/module/file.go function DoWork().
 			}
 		}
 
-		// Send progress update for tool calls with details
-		if len(resp.ToolCalls) > 0 {
-			for _, tc := range resp.ToolCalls {
-				if fn, ok := tc["function"].(map[string]interface{}); ok {
-					toolName, _ := fn["name"].(string)
+	// Send progress update for tool calls with details
+	if len(resp.ToolCalls) > 0 {
+		for _, tc := range resp.ToolCalls {
+			if fn, ok := tc["function"].(map[string]interface{}); ok {
+				toolName, _ := fn["name"].(string)
 					argsJSON, _ := fn["arguments"].(string)
 
 					// Parse arguments to extract relevant details
@@ -417,15 +418,25 @@ The requested logic is found in internal/module/file.go function DoWork().
 						// Also send status updates so ACP clients receive progress as tool_call_update
 						sendStatus(strings.TrimSpace(msg))
 					}
-				}
 			}
 		}
+	}
 
-		// Execute tools using extracted logic.
-		// Use a unified execution function so ACP-aware callbacks share the same path.
-		execFn := func(execCtx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error) {
-			return registry.ExecuteWithCallbacks(execCtx, call, toolName, progressCb, toolCallCb, toolResultCb, approved), nil
+	disallowedTools := map[string]struct{}{
+		tools.ToolNameCreateFile:  {},
+		tools.ToolNameEditFile:    {},
+		tools.ToolNameReplaceFile: {},
+		"write_file_replace":      {},
+	}
+
+	// Execute tools using extracted logic.
+	// Use a unified execution function so ACP-aware callbacks share the same path.
+	execFn := func(execCtx context.Context, call *tools.ToolCall, toolName string, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, approved bool) (*tools.ToolResult, error) {
+		if _, blocked := disallowedTools[toolName]; blocked {
+			return &tools.ToolResult{Error: "codebase investigator is read-only and cannot create or update files"}, nil
 		}
+		return registry.ExecuteWithCallbacks(execCtx, call, toolName, progressCb, toolCallCb, toolResultCb, approved), nil
+	}
 
 		// Use the extracted processToolCalls method.
 		// Pass the enhanced status callback to show live progress in the UI and ACP.

@@ -64,6 +64,8 @@ func TestNewCleanOrchestratorForTask(t *testing.T) {
 		baseOrch.fs,
 		domainBlockerRef,
 		sessionStorageRef,
+		nil,
+		nil,
 		".",
 	)
 
@@ -345,6 +347,8 @@ func TestTaskIsolation(t *testing.T) {
 			baseOrch.fs,
 			domainBlockerRef,
 			sessionStorageRef,
+			nil,
+			nil,
 			".",
 		)
 		if err != nil {

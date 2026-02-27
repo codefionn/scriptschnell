@@ -138,7 +138,12 @@ func (t *SandboxTool) buildTinyGoArgs(wasmFile string, libraries []string) []str
 func (t *SandboxTool) compileWithTinyGo(ctx context.Context, tinyGoBinary string, args []string, sandboxDir string) (interface{}, error) {
 	buildCmd := exec.CommandContext(ctx, tinyGoBinary, args...)
 	buildCmd.Dir = sandboxDir
-	buildCmd.Env = t.buildSandboxEnv()
+	// TinyGo requires a compatible Go toolchain even when invoked directly.
+	// Pin to a supported version so environments with newer Go (e.g., 1.26)
+	// don't fail TinyGo's version check.
+	env := t.buildSandboxEnv()
+	env = sandboxReplaceOrAppendEnv(env, "GOTOOLCHAIN", "go1.25.1+auto")
+	buildCmd.Env = env
 
 	buildOutput, err := buildCmd.CombinedOutput()
 	if err != nil {

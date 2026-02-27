@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/codefionn/scriptschnell/internal/features"
 	"github.com/codefionn/scriptschnell/internal/llm"
@@ -106,7 +107,7 @@ Common rewrite examples:
 - Summarization: "summarize_file" → "read_file_summarized"
 - Task management: "add_todo", "task" → "todo"
 
-Return ONLY valid JSON in the following format:
+	Return ONLY valid JSON in the following format (no Markdown or code fences):
 {
   "rewritten_tool_name": "<valid tool name>",
   "rewritten_params": {<adjusted parameters>},
@@ -135,8 +136,8 @@ Return ONLY valid JSON in the following format:
 	}
 
 	// Parse the response
-	var rewriteResp RewriteResponse
-	if err := json.Unmarshal([]byte(response.Content), &rewriteResp); err != nil {
+	rewriteResp, err := parseRewriteResponse(response.Content)
+	if err != nil {
 		logger.Warn("ToolCallRewriter: failed to parse rewrite response as JSON: %v (content: %s)", err, response.Content)
 		return "", nil, "", fmt.Errorf("failed to parse rewrite response: %w", err)
 	}
@@ -178,4 +179,33 @@ func (r *ToolCallRewriter) getAvailableToolsSpecs() []ToolSpec {
 // CanRewrite checks if the rewriter can attempt to rewrite a tool call.
 func (r *ToolCallRewriter) CanRewrite() bool {
 	return r.enabled && r.summarizeClient != nil && r.toolRegistry != nil
+}
+
+func parseRewriteResponse(content string) (RewriteResponse, error) {
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSpace(trimmed)
+		if strings.HasPrefix(trimmed, "json") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "json"))
+		}
+		if fenceEnd := strings.LastIndex(trimmed, "```"); fenceEnd >= 0 {
+			trimmed = strings.TrimSpace(trimmed[:fenceEnd])
+		}
+	}
+
+	var rewriteResp RewriteResponse
+	if err := json.Unmarshal([]byte(trimmed), &rewriteResp); err == nil {
+		return rewriteResp, nil
+	}
+
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end > start {
+		if err := json.Unmarshal([]byte(trimmed[start:end+1]), &rewriteResp); err == nil {
+			return rewriteResp, nil
+		}
+	}
+
+	return RewriteResponse{}, fmt.Errorf("invalid JSON response")
 }

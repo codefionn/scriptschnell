@@ -105,6 +105,18 @@ func TestToolCallRewriter_RewriteToolCall(t *testing.T) {
 			expectErr:     true,
 		},
 		{
+			name:            "fenced JSON response",
+			invalidToolName: "shell",
+			invalidParams:   map[string]interface{}{"code": "fmt.Println(\"hello\")"},
+			reason:          "tool not found",
+			mockResponse: "```json\n{\n  \"rewritten_tool_name\": \"go_sandbox\",\n  \"rewritten_params\": {\"code\": \"fmt.Println(\\\"hello\\\")\"},\n  \"explanation\": \"shell is not available, using go_sandbox for code execution\",\n  \"should_rewrite\": true\n}\n```",
+			mockErr:           nil,
+			expectRewrite:     true,
+			expectNewTool:     "go_sandbox",
+			expectExplanation: "shell is not available, using go_sandbox for code execution",
+			expectErr:         false,
+		},
+		{
 			name:            "invalid JSON response",
 			invalidToolName: "python",
 			invalidParams:   map[string]interface{}{"code": "print('hello')"},

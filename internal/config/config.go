@@ -132,6 +132,58 @@ type SandboxConfig struct {
 	BestEffort bool `json:"best_effort,omitempty"`
 }
 
+// SocketConfig holds configuration for the Unix socket server
+type SocketConfig struct {
+	Enabled               bool     `json:"enabled"`                           // Enable/disable socket server
+	AutoConnect           bool     `json:"auto_connect"`                      // Auto-detect and connect to socket server in clients
+	Path                  string   `json:"path"`                              // Socket file path (~/.scriptschnell.sock)
+	Permissions           string   `json:"permissions,omitempty"`             // Octal permissions (e.g., "0600")
+	RequireAuth           bool     `json:"require_auth"`                      // Whether auth is required
+	AuthMethod            string   `json:"auth_method,omitempty"`             // "file", "token", "challenge", "peercred"
+	Token                 string   `json:"token,omitempty"`                   // Pre-shared token (empty string = not encrypted)
+	AllowedUIDs           []int    `json:"allowed_uids,omitempty"`            // Allowed user IDs for peercred
+	AllowedGIDs           []int    `json:"allowed_gids,omitempty"`            // Allowed group IDs for peercred
+	MaxConnections        int      `json:"max_connections"`                   // Max concurrent connections
+	MaxSessionsPerConn    int      `json:"max_sessions_per_connection"`       // Max sessions per connection
+	ConnectionTimeoutSecs int      `json:"connection_timeout_seconds"`        // Idle timeout in seconds
+	EnableBatching        bool     `json:"enable_batching"`                   // Enable message batching
+	BatchSize             int      `json:"batch_size"`                        // Messages per batch
+}
+
+// DefaultSocketPath is the default socket path
+const DefaultSocketPath = "~/.scriptschnell.sock"
+
+// testSocketPath is used during tests to avoid conflicts with production socket
+var testSocketPath = ""
+
+// SetTestSocketPath sets the socket path for testing (should be called in test init)
+func SetTestSocketPath(path string) {
+	testSocketPath = path
+}
+
+// GetSocketPath returns the expanded socket path with ~ expansion
+func (s *SocketConfig) GetSocketPath() string {
+	path := s.Path
+	if path == "" {
+		// Use test socket path if set (for tests)
+		if testSocketPath != "" {
+			path = testSocketPath
+		} else {
+			path = DefaultSocketPath
+		}
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(path, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(homeDir, path[2:])
+		}
+	}
+
+	return path
+}
+
 // Config represents application configuration
 type Config struct {
 	WorkingDir              string                                 `json:"working_dir"`
@@ -145,6 +197,7 @@ type Config struct {
 	DisableAnimations       bool                                   `json:"disable_animations"`
 	LogLevel                string                                 `json:"log_level"` // debug, info, warn, error, none
 	LogPath                 string                                 `json:"-"`
+	LogToConsole            bool                                   `json:"log_to_console"` // Enable console logging in addition to file logging
 	AuthorizedDomains       map[string]bool                        `json:"authorized_domains,omitempty"`  // Permanently authorized domains for network access
 	AuthorizedCommands      map[string]bool                        `json:"authorized_commands,omitempty"` // Permanently authorized command prefixes for this project
 	Search                  SearchConfig                           `json:"search"`                        // Web search provider configuration
@@ -159,6 +212,7 @@ type Config struct {
 	AutoSave                AutoSaveConfig                         `json:"auto_save,omitempty"`           // Session auto-save configuration
 	AutoResume              bool                                   `json:"auto_resume"`                   // Automatically resume last session on startup
 	SandboxOutputCompaction SandboxOutputCompactionConfig          `json:"sandbox_output_compaction"`     // Sandbox output compaction configuration
+	Socket                  SocketConfig                           `json:"socket,omitempty"`              // Unix socket server configuration
 	Loop                    LoopConfig                             `json:"loop,omitempty"`                // Loop abstraction configuration
 
 	authMu          sync.RWMutex `json:"-"` // Protects AuthorizedDomains and AuthorizedCommands for concurrent access
@@ -276,6 +330,19 @@ func DefaultConfig() *Config {
 			AdditionalReadWritePaths: []string{},
 			DisableSandbox:           false,
 			BestEffort:               true, // Best-effort mode for better compatibility
+		},
+		Socket: SocketConfig{
+			Enabled:               true,
+			AutoConnect:           true,
+			Path:                  "~/.scriptschnell.sock",
+			Permissions:           "0600",
+			RequireAuth:           false,
+			AuthMethod:            "file",
+			MaxConnections:        10,
+			MaxSessionsPerConn:    1,
+			ConnectionTimeoutSecs: 300,
+			EnableBatching:        true,
+			BatchSize:             10,
 		},
 	}
 }
@@ -692,6 +759,7 @@ func (c *Config) decryptSensitiveFields(password string) error {
 		&c.Search.Exa.APIKey,
 		&c.Search.GooglePSE.APIKey,
 		&c.Search.Perplexity.APIKey,
+		&c.Socket.Token,
 	}
 
 	for _, srv := range c.mcpServersInOrder() {
@@ -753,6 +821,7 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 		AutoResume:              c.AutoResume,
 		SandboxOutputCompaction: c.SandboxOutputCompaction,
 		LandlockApprovals:       c.LandlockApprovals,
+		Socket:                 c.Socket,
 		secretsPassword:         c.secretsPassword,
 	}
 
@@ -766,6 +835,10 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 		return nil, err
 	}
 	copyCfg.Search.Perplexity.APIKey, err = encryptField(copyCfg.Search.Perplexity.APIKey, c.secretsPassword)
+	if err != nil {
+		return nil, err
+	}
+	copyCfg.Socket.Token, err = encryptField(copyCfg.Socket.Token, c.secretsPassword)
 	if err != nil {
 		return nil, err
 	}

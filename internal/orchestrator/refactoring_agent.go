@@ -183,6 +183,8 @@ func (a *RefactoringAgent) createChildOrchestrator() (*Orchestrator, error) {
 		childSession,
 		a.orch.sessionStorageRef,
 		a.orch.domainBlockerRef,
+		nil,
+		nil,
 		false, // requireSandboxAuth
 	)
 	if err != nil {

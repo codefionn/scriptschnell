@@ -9,20 +9,26 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
+
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/codefionn/scriptschnell/internal/acp"
 	"github.com/codefionn/scriptschnell/internal/actor"
 	"github.com/codefionn/scriptschnell/internal/cli"
 	"github.com/codefionn/scriptschnell/internal/config"
+	"github.com/codefionn/scriptschnell/internal/lockfile"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/pidfile"
 	"github.com/codefionn/scriptschnell/internal/pprof"
 	"github.com/codefionn/scriptschnell/internal/progress"
 	"github.com/codefionn/scriptschnell/internal/provider"
 	"github.com/codefionn/scriptschnell/internal/secrets"
 	"github.com/codefionn/scriptschnell/internal/securemem"
+	"github.com/codefionn/scriptschnell/internal/socketserver"
 	"github.com/codefionn/scriptschnell/internal/tui"
 	"github.com/codefionn/scriptschnell/internal/web"
 	"golang.org/x/term"
@@ -32,6 +38,7 @@ var (
 	ErrQuitRequested = errors.New("quit requested")
 	errACPMode       = errors.New("ACP mode requested")
 	errWebMode       = errors.New("web mode requested")
+	errSocketMode    = errors.New("socket server mode requested")
 )
 
 type stringSlice []string
@@ -68,7 +75,7 @@ func main() {
 }
 
 func run() (err error) {
-	prompt, cliOptions, cliMode, pprofCfg, webMode, webDebug, requireSandboxAuth, parseErr := parseCLIArgs(os.Args[1:])
+	prompt, cliOptions, cliMode, pprofCfg, webMode, webDebug, socketServerMode, socketPath, requireSandboxAuth, parseErr := parseCLIArgs(os.Args[1:])
 	if parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			return nil
@@ -77,7 +84,10 @@ func run() (err error) {
 			// Handle ACP mode separately
 			return runACPMode()
 		}
-		if errors.Is(parseErr, errWebMode) {
+		if errors.Is(parseErr, errSocketMode) {
+			// Handle socket server mode separately (after config is loaded)
+			// Fall through to config loading
+		} else if errors.Is(parseErr, errWebMode) {
 			// Handle web mode separately (after config is loaded)
 			// Fall through to config loading
 		} else if parseErr != nil {
@@ -146,7 +156,10 @@ func run() (err error) {
 	// Initialize logger
 	logLevel := logger.ParseLevel(cfg.LogLevel)
 
-	if initErr := logger.Init(logLevel, cfg.LogPath); initErr != nil {
+	// Enable console logging for socket server mode to allow users to see logs
+	// when running the server interactively (can be disabled via config)
+	enableConsole := cfg.LogToConsole || socketServerMode
+	if initErr := logger.InitWithConsole(logLevel, cfg.LogPath, enableConsole); initErr != nil {
 		return fmt.Errorf("failed to initialize logger: %w", initErr)
 	}
 	loggerInitialized = true
@@ -176,9 +189,20 @@ func run() (err error) {
 			// Non-fatal, log warning and continue
 			logger.Warn("Failed to refresh models: %v", err)
 		}
+	} else if webMode {
+		// Async refresh for web mode
+		providerMgr.RefreshAllModels(ctx)
+	} else if socketServerMode {
+		// Async refresh for socket server mode
+		providerMgr.RefreshAllModels(ctx)
 	} else {
 		// Async refresh for TUI mode
 		providerMgr.RefreshAllModels(ctx)
+	}
+
+	// Check for socket server mode after config is loaded
+	if socketServerMode {
+		return runSocketServer(cfg, providerMgr, secretsPassword, socketPath)
 	}
 
 	// Check for web mode flag after config is loaded
@@ -206,6 +230,41 @@ func runCLI(cfg *config.Config, providerMgr *provider.Manager, prompt string, op
 		)
 	}
 
+	// Check if socket client mode is explicitly enabled or auto-detected
+	useSocketMode := false
+	if options != nil && options.SocketClientMode {
+		// Explicitly enabled via --connect-to-socket flag
+		useSocketMode = true
+		logger.Info("Socket mode explicitly enabled via --connect-to-socket flag")
+		fmt.Fprintln(os.Stderr, "Connecting to socket server...")
+	} else if cli.ShouldUseSocketMode(cfg, options) {
+		// Auto-detected socket server
+		useSocketMode = true
+		// Enable socket client mode for the options
+		if options != nil {
+			options.SocketClientMode = true
+		}
+		logger.Info("Socket server auto-detected, using socket mode")
+		fmt.Fprintln(os.Stderr, "Socket server detected, connecting...")
+	} else {
+		// Log why socket mode is not being used
+		if options != nil && options.NoSocket {
+			logger.Info("Socket mode disabled via --no-socket flag, using local mode")
+			fmt.Fprintln(os.Stderr, "Socket auto-detection disabled, using local mode")
+		} else if !cfg.Socket.Enabled {
+			logger.Info("Socket mode disabled in config, using local mode")
+		} else if !cfg.Socket.AutoConnect {
+			logger.Info("Socket auto-connect disabled in config, using local mode")
+		} else {
+			logger.Info("No socket server detected, using local mode")
+			fmt.Fprintln(os.Stderr, "No socket server detected, using local mode")
+		}
+	}
+
+	if useSocketMode {
+		return runCLISocket(cfg, options, prompt)
+	}
+
 	cliRunner, err := cli.New(cfg, providerMgr, options)
 	if err != nil {
 		logger.Error("Failed to create CLI runner: %v", err)
@@ -219,6 +278,32 @@ func runCLI(cfg *config.Config, providerMgr *provider.Manager, prompt string, op
 	}()
 
 	return cliRunner.Run(context.Background(), prompt)
+}
+
+// runCLISocket runs CLI mode using the socket server
+func runCLISocket(cfg *config.Config, options *cli.Options, prompt string) error {
+	logger.Info("Running CLI mode with socket server at: %s", options.SocketClientPath)
+
+	socketRunner, err := cli.NewSocket(cfg, options)
+	if err != nil {
+		logger.Error("Failed to create socket CLI runner: %v", err)
+		return fmt.Errorf("failed to create socket CLI runner: %w", err)
+	}
+	defer func() {
+		if closeErr := socketRunner.Close(); closeErr != nil {
+			logger.Warn("Failed to close socket CLI runner cleanly: %v", closeErr)
+			fmt.Fprintf(os.Stderr, "Warning: failed to close socket CLI runner cleanly: %v\n", closeErr)
+		}
+	}()
+
+	// Connect to socket server
+	ctx := context.Background()
+	if err := socketRunner.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect to socket server: %w", err)
+	}
+
+	// Run the prompt
+	return socketRunner.Run(ctx, prompt)
 }
 
 func ensureSecretsPassword(cfg *config.Config) (string, error) {
@@ -416,7 +501,156 @@ func runWeb(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *
 	return nil
 }
 
-func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, bool, bool, bool, error) {
+func runSocketServer(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, socketPath string) error {
+	fmt.Fprintf(os.Stderr, "Starting scriptschnell in socket server mode...\n")
+
+	// Enable console logging by default for socket server mode
+	// This allows users to see logs when running the server interactively
+	if !cfg.LogToConsole {
+		cfg.LogToConsole = true
+	}
+
+	// Initialize logger if not already initialized
+	if logger.Global() == nil {
+		logLevel := logger.ParseLevel(cfg.LogLevel)
+		// Enable console logging in socket server mode
+		if initErr := logger.InitWithConsole(logLevel, cfg.LogPath, cfg.LogToConsole); initErr != nil {
+			return fmt.Errorf("failed to initialize logger: %w", initErr)
+		}
+		defer func() {
+			if closeErr := logger.Global().Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to close logger: %v\n", closeErr)
+			}
+		}()
+	}
+
+	logger.Info("scriptschnell starting in socket server mode")
+
+	// Ensure temp directory exists
+	if err := os.MkdirAll(cfg.TempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	// Refresh models from APIs
+	ctx := context.Background()
+	providerMgr.RefreshAllModels(ctx)
+
+	// Override socket path if specified via CLI
+	if socketPath != "" {
+		// Expand ~ to home directory
+		expandedPath := os.ExpandEnv(socketPath)
+		if strings.HasPrefix(expandedPath, "~/") {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get home directory: %w", err)
+			}
+			expandedPath = filepath.Join(homeDir, expandedPath[2:])
+		}
+		cfg.Socket.Path = expandedPath
+		logger.Info("Socket path overridden to: %s", expandedPath)
+	}
+
+	// Create lockfile for single instance enforcement
+	lockfilePath := filepath.Join(filepath.Dir(cfg.Socket.GetSocketPath()), ".scriptschnell-server.lock")
+	lf := lockfile.New(lockfilePath)
+	if err := lf.TryAcquire(); err != nil {
+		if errors.Is(err, lockfile.ErrLocked) {
+			return fmt.Errorf("another socket server instance is already running: %w", err)
+		}
+		return fmt.Errorf("failed to acquire lockfile: %w", err)
+	}
+	logger.Info("Lockfile acquired: %s", lockfilePath)
+
+	// Create PID file
+	pidfilePath := filepath.Join(filepath.Dir(cfg.Socket.GetSocketPath()), ".scriptschnell-server.pid")
+	pf := pidfile.New(pidfilePath)
+	if err := pf.Write(); err != nil {
+		// Clean up lockfile before returning error
+		lf.Release()
+		return fmt.Errorf("failed to write pidfile: %w", err)
+	}
+	logger.Info("PID file written: %s", pidfilePath)
+
+	// Track if cleanup was done to avoid double cleanup in defers
+	cleanupDone := false
+	defer func() {
+		if !cleanupDone {
+			if releaseErr := lf.Release(); releaseErr != nil {
+				logger.Warn("Failed to release lockfile: %v", releaseErr)
+			}
+			if removeErr := pf.Remove(); removeErr != nil {
+				logger.Warn("Failed to remove pidfile: %v", removeErr)
+			}
+		}
+	}()
+
+	// Create socket server
+	srv, err := socketserver.NewServer(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create socket server: %w", err)
+	}
+
+	// Set broker dependencies (provider manager, secrets password, config)
+	// This is needed for the broker to create orchestrators
+	srv.SetDependencies(providerMgr, secretsPassword)
+
+	// Start server
+	if err := srv.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start socket server: %w", err)
+	}
+
+	// Get socket path
+	socketPath = cfg.Socket.GetSocketPath()
+
+	// Print socket path to console
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "========================================")
+	fmt.Fprintf(os.Stderr, "  Unix socket server listening at:\n")
+	fmt.Fprintf(os.Stderr, "  %s\n", socketPath)
+	fmt.Fprintln(os.Stderr, "========================================")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "PID: %d\n", os.Getpid())
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Use 'scriptschnell --socket-path', or any frontend")
+	fmt.Fprintln(os.Stderr, "to connect to this server.")
+	fmt.Fprintln(os.Stderr)
+
+	// Wait for shutdown signal
+	logger.Info("Socket server started, waiting for shutdown signal")
+
+	// Setup signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	<-sigChan
+	logger.Info("Shutdown signal received")
+
+	// Stop server (this also removes the socket file)
+	if err := srv.Stop(); err != nil {
+		logger.Error("Error stopping socket server: %v", err)
+	}
+
+	// Explicitly clean up lockfile and pidfile before returning
+	// (defers may not run if process exits too quickly)
+	cleanupDone = true
+
+	if err := lf.Release(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to release lockfile: %v\n", err)
+	} else {
+		logger.Info("Lockfile released: %s", lockfilePath)
+	}
+
+	if err := pf.Remove(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove pidfile: %v\n", err)
+	} else {
+		logger.Info("PID file removed: %s", pidfilePath)
+	}
+
+	logger.Info("Socket server stopped")
+	return nil
+}
+
+func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, bool, bool, bool, string, bool, error) {
 	fs := flag.NewFlagSet("scriptschnell", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -433,6 +667,11 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 		acpMode            bool
 		webMode            bool
 		webDebug           bool
+		socketServerMode   bool
+		socketPath         string
+		socketClientMode   bool
+		socketClientPath   string
+		noSocket           bool
 		jsonOutput         bool
 		jsonExtended       bool
 		jsonFull           bool
@@ -460,6 +699,11 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	fs.BoolVar(&acpMode, "acp", false, "Run in Agent Client Protocol (ACP) mode for integration with code editors")
 	fs.BoolVar(&webMode, "web", false, "Run in web mode with browser-based UI")
 	fs.BoolVar(&webDebug, "web-debug", false, "Enable debug logging for web server and WebSocket connections")
+	fs.BoolVar(&socketServerMode, "socket-server", false, "Run in Unix socket server mode for daemon operation")
+	fs.StringVar(&socketPath, "socket-path", "", "Path to Unix socket file (default: ~/.scriptschnell.sock)")
+	fs.BoolVar(&socketClientMode, "connect-to-socket", false, "Force connection to socket server (fails if not running)")
+	fs.StringVar(&socketClientPath, "socket-client-path", "", "Path to Unix socket file for CLI mode (default: ~/.scriptschnell.sock)")
+	fs.BoolVar(&noSocket, "no-socket", false, "Disable socket auto-detection, always use local mode")
 	fs.BoolVar(&jsonOutput, "json", false, "Output final assistant message and usage as JSON")
 	fs.BoolVar(&jsonExtended, "json-extended", false, "Output all messages as JSON one-liners plus usage statistics")
 	fs.BoolVar(&jsonFull, "json-full", false, "Output all messages with full tool call outputs as single JSON object")
@@ -477,20 +721,24 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	fs.IntVar(&pprofMutexProfileFraction, "pprof.mutex-fraction", 1, "Mutex profile sampling fraction (1/n events, default: 1)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0])
+		fmt.Fprintln(fs.Output(), "CLI mode automatically connects to a running socket server if one is detected.")
+		fmt.Fprintln(fs.Output(), "Use --no-socket to disable auto-detection and run locally.")
+		fmt.Fprintln(fs.Output(), "Use --connect-to-socket to force socket mode (fails if server is not running).")
+		fmt.Fprintln(fs.Output())
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return "", nil, false, nil, false, false, false, flag.ErrHelp
+			return "", nil, false, nil, false, false, false, "", false, flag.ErrHelp
 		}
-		return "", nil, false, nil, false, false, false, err
+		return "", nil, false, nil, false, false, false, "", false, err
 	}
 
 	if showHelp {
 		fs.Usage()
-		return "", nil, false, nil, false, false, false, flag.ErrHelp
+		return "", nil, false, nil, false, false, false, "", false, flag.ErrHelp
 	}
 
 	remaining := fs.Args()
@@ -512,38 +760,53 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	// Handle ACP mode
 	if acpMode {
 		if len(remaining) > 0 {
-			return "", nil, false, nil, false, false, false, nil
+			return "", nil, false, nil, false, false, false, "", false, nil
 		}
 		if optionsUsed {
-			return "", nil, false, nil, false, false, false, nil
+			return "", nil, false, nil, false, false, false, "", false, nil
 		}
 		// Return special values to indicate ACP mode
-		return "", nil, false, nil, false, false, false, errACPMode
+		return "", nil, false, nil, false, false, false, "", false, errACPMode
+	}
+
+	// Handle socket server mode
+	if socketServerMode {
+		if len(remaining) > 0 {
+			return "", nil, false, nil, false, false, false, "", false, flag.ErrHelp
+		}
+		if optionsUsed {
+			return "", nil, false, nil, false, false, false, "", false, flag.ErrHelp
+		}
+		// Return special values to indicate socket server mode
+		return "", nil, false, pprofCfg, false, false, true, socketPath, false, errSocketMode
 	}
 
 	// Handle web mode
 	if webMode {
 		if len(remaining) > 0 {
-			return "", nil, false, nil, false, false, false, flag.ErrHelp
+			return "", nil, false, nil, false, false, false, "", false, flag.ErrHelp
 		}
 		if optionsUsed {
-			return "", nil, false, nil, false, false, false, flag.ErrHelp
+			return "", nil, false, nil, false, false, false, "", false, flag.ErrHelp
 		}
 		// Return special values to indicate web mode (pass requireSandboxAuth)
-		return "", nil, false, pprofCfg, true, webDebug, requireSandboxAuth, nil
+		return "", nil, false, pprofCfg, true, webDebug, false, "", requireSandboxAuth, nil
 	}
 
 	if len(remaining) == 0 {
-		// TUI mode - return options with RequireSandboxAuth if set
+		// TUI mode - return options with RequireSandboxAuth and socket flags
 		opts := &cli.Options{
 			RequireSandboxAuth: requireSandboxAuth,
+			SocketClientMode:   socketClientMode,
+			SocketClientPath:   socketClientPath,
+			NoSocket:           noSocket,
 		}
-		return "", opts, false, pprofCfg, false, false, false, nil
+		return "", opts, false, pprofCfg, false, false, false, "", false, nil
 	}
 
 	prompt := strings.TrimSpace(strings.Join(remaining, " "))
 	if prompt == "" {
-		return "", nil, false, nil, false, false, false, fmt.Errorf("prompt must not be empty")
+		return "", nil, false, nil, false, false, false, "", false, fmt.Errorf("prompt must not be empty")
 	}
 
 	opts := &cli.Options{
@@ -563,7 +826,11 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 		opts.AllowAllNetwork = true
 	}
 
-	return prompt, opts, true, pprofCfg, false, false, false, nil
+	opts.SocketClientMode = socketClientMode
+	opts.SocketClientPath = socketClientPath
+	opts.NoSocket = noSocket
+
+	return prompt, opts, true, pprofCfg, false, false, false, "", false, nil
 }
 
 func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.Options) error {
@@ -573,33 +840,115 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.O
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create RuntimeFactory for multi-tab concurrent generation
-	requireSandboxAuth := false
-	if cliOptions != nil {
-		requireSandboxAuth = cliOptions.RequireSandboxAuth
+	// Check if socket server is available
+	useSocketMode := tui.ShouldUseSocketMode(cfg)
+
+	// Check if socket mode is explicitly enabled via --connect-to-socket flag
+	if cliOptions != nil && cliOptions.SocketClientMode {
+		logger.Info("Socket mode explicitly enabled via --connect-to-socket flag")
+		useSocketMode = true
 	}
-	factory, err := tui.NewRuntimeFactoryWithRequireSandboxAuth(cfg, providerMgr, cfg.WorkingDir, false, requireSandboxAuth)
-	if err != nil {
-		logger.Error("Failed to create RuntimeFactory: %v", err)
-		return fmt.Errorf("failed to create RuntimeFactory: %w", err)
-	}
-	defer factory.Close()
 
-	// Create TUI model with factory
-	model := tui.NewWithFactory(factory, cfg, providerMgr)
+	var factory *tui.RuntimeFactory
+	var socketFactory *tui.SocketRuntimeFactory
+	var model *tui.Model
 
-	// Set filesystem for filepath autocomplete
-	model.SetFilesystem(factory.GetSharedFilesystem(), factory.GetWorkingDir())
+	if useSocketMode {
+		// Socket mode: connect to existing socket server
+		logger.Info("Using socket mode - connecting to server")
+		logger.Info("%s", tui.GetSocketDetectionInfo(cfg))
 
-	// MCP provider callback (will be set per-tab via orchestrator)
-	model.SetActiveMCPProvider(func() []string {
-		// Get active tab's runtime
-		tab := model.GetActiveTab()
-		if tab != nil && tab.Runtime != nil {
-			return tab.Runtime.Orchestrator.GetActiveMCPServers()
+		// Apply socket path override from CLI if provided
+		var socketPathOverride string
+		if cliOptions != nil && cliOptions.SocketClientPath != "" {
+			// Expand ~ to home directory and environment variables
+			expandedPath := os.ExpandEnv(cliOptions.SocketClientPath)
+			if strings.HasPrefix(expandedPath, "~/") {
+				homeDir, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("failed to get home directory: %w", err)
+				}
+				expandedPath = filepath.Join(homeDir, expandedPath[2:])
+			}
+			socketPathOverride = expandedPath
+			logger.Info("Socket path override from CLI: %s", socketPathOverride)
 		}
-		return []string{}
-	})
+
+		var err error
+		socketFactory, err = tui.NewSocketRuntimeFactory(cfg, socketPathOverride)
+		if err != nil {
+			if cliOptions != nil && cliOptions.SocketClientMode {
+				logger.Error("Failed to create socket factory (socket mode explicitly enabled): %v", err)
+				return fmt.Errorf("failed to create socket factory: %w", err)
+			}
+			logger.Warn("Failed to create socket factory, falling back to local mode: %v", err)
+			useSocketMode = false
+		}
+	}
+
+	if useSocketMode {
+		// Connect to socket server
+		connectCtx, connectCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer connectCancel()
+
+		// Log the socket path we're attempting to connect to
+		socketPath := cfg.Socket.GetSocketPath()
+		if cliOptions != nil && cliOptions.SocketClientPath != "" {
+			logger.Info("Attempting to connect to socket server at: %s (from CLI override)", socketPath)
+		} else {
+			logger.Info("Attempting to connect to socket server at: %s (from config)", socketPath)
+		}
+
+		if err := socketFactory.Connect(connectCtx); err != nil {
+			if cliOptions != nil && cliOptions.SocketClientMode {
+				logger.Error("Failed to connect to socket server (socket mode explicitly enabled): %v", err)
+				return fmt.Errorf("failed to connect to socket server: %w", err)
+			}
+			logger.Warn("Failed to connect to socket server, falling back to local mode: %v", err)
+			useSocketMode = false
+		}
+	}
+
+	if !useSocketMode {
+		// Local mode: create RuntimeFactory for multi-tab concurrent generation
+		requireSandboxAuth := false
+		if cliOptions != nil {
+			requireSandboxAuth = cliOptions.RequireSandboxAuth
+		}
+		var err error
+		factory, err = tui.NewRuntimeFactoryWithRequireSandboxAuth(cfg, providerMgr, cfg.WorkingDir, false, requireSandboxAuth)
+		if err != nil {
+			logger.Error("Failed to create RuntimeFactory: %v", err)
+			return fmt.Errorf("failed to create RuntimeFactory: %w", err)
+		}
+		defer factory.Close()
+	}
+
+	// Create TUI model with appropriate factory
+	if useSocketMode && socketFactory != nil {
+		model = tui.NewWithSocketFactory(socketFactory, cfg, providerMgr)
+		model.AddSystemMessage("Connected to scriptschnell socket server")
+		defer socketFactory.Close()
+		// In socket mode, we don't have a local filesystem
+		// Filesystem operations are handled by the server
+	} else {
+		model = tui.NewWithFactory(factory, cfg, providerMgr)
+		logger.Info("Using local mode")
+		// Set filesystem for filepath autocomplete
+		model.SetFilesystem(factory.GetSharedFilesystem(), factory.GetWorkingDir())
+	}
+
+	// MCP provider callback (will be set per-tab via orchestrator in local mode)
+	if !useSocketMode {
+		model.SetActiveMCPProvider(func() []string {
+			// Get active tab's runtime
+			tab := model.GetActiveTab()
+			if tab != nil && tab.Runtime != nil {
+				return tab.Runtime.Orchestrator.GetActiveMCPServers()
+			}
+			return []string{}
+		})
+	}
 
 	// Declare program variable first (will be assigned later)
 	var program *tea.Program

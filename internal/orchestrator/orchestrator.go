@@ -575,6 +575,8 @@ func NewOrchestratorWithSharedResources(
 	sess *session.Session,
 	sharedSessionStorage *actor.ActorRef,
 	sharedDomainBlocker *actor.ActorRef,
+	sharedTodoClient *tools.TodoActorClient,
+	sharedTodoActor tools.TodoActorInterface,
 	requireSandboxAuth bool,
 ) (*Orchestrator, error) {
 	logger.Debug("Creating orchestrator with shared resources for session %s, requireSandboxAuth=%v", sess.ID, requireSandboxAuth)
@@ -648,22 +650,33 @@ func NewOrchestratorWithSharedResources(
 	}
 	orch.actorCancel = authorizationCancel
 
-	// Set up todo actor
-	todoCtx, todoCancel := context.WithCancel(context.Background())
-	var todoActor actor.Actor = tools.NewTodoActor("todo")
-	logger.Debug("Using default todo actor")
-	todoRef, err := orch.actorSystem.SpawnWithOptions(todoCtx, "todo", todoActor, 16, actor.WithSequentialProcessing())
-	if err != nil {
-		todoCancel()
-		authorizationCancel()
-		cancel()
-		logger.Error("Failed to start todo actor: %v", err)
-		return nil, fmt.Errorf("failed to start todo actor: %w", err)
+	// Set up todo actor (shared if provided)
+	var todoCancel context.CancelFunc
+	if sharedTodoClient != nil {
+		orch.todoClient = sharedTodoClient
+		orch.todoActor = sharedTodoActor
+		orch.todoActorCancel = nil
+		logger.Debug("Using shared todo actor")
+	} else {
+		todoCtx, cancelTodo := context.WithCancel(context.Background())
+		todoCancel = cancelTodo
+		var todoActor actor.Actor = tools.NewTodoActor("todo")
+		logger.Debug("Using default todo actor")
+		todoRef, err := orch.actorSystem.SpawnWithOptions(todoCtx, "todo", todoActor, 16, actor.WithSequentialProcessing())
+		if err != nil {
+			if todoCancel != nil {
+				todoCancel()
+			}
+			authorizationCancel()
+			cancel()
+			logger.Error("Failed to start todo actor: %v", err)
+			return nil, fmt.Errorf("failed to start todo actor: %w", err)
+		}
+		logger.Debug("Todo actor spawned")
+		orch.todoClient = tools.NewTodoActorClient(todoRef)
+		orch.todoActor = todoActor.(tools.TodoActorInterface)
+		orch.todoActorCancel = todoCancel
 	}
-	logger.Debug("Todo actor spawned")
-	orch.todoClient = tools.NewTodoActorClient(todoRef)
-	orch.todoActor = todoActor.(tools.TodoActorInterface)
-	orch.todoActorCancel = todoCancel
 
 	// Initialize landlock sandbox for shell command execution
 	var sandboxCfg *sandbox.SandboxConfig
@@ -712,7 +725,9 @@ func NewOrchestratorWithSharedResources(
 	shellRef, err := orch.actorSystem.Spawn(shellCtx, "shell", shellActor, 64)
 	if err != nil {
 		shellCancel()
-		todoCancel()
+		if todoCancel != nil {
+			todoCancel()
+		}
 		authorizationCancel()
 		cancel()
 		logger.Error("Failed to start shell actor: %v", err)
@@ -784,7 +799,9 @@ func NewOrchestratorWithSharedResources(
 	errorJudgeRef, err := orch.actorSystem.Spawn(errorJudgeCtx, "error_judge", errorJudgeActor, 8)
 	if err != nil {
 		errorJudgeCancel()
-		todoCancel()
+		if todoCancel != nil {
+			todoCancel()
+		}
 		authorizationCancel()
 		cancel()
 		logger.Error("Failed to start error judge actor: %v", err)
@@ -810,7 +827,9 @@ func NewOrchestratorWithSharedResources(
 	if err != nil {
 		toolExecutorCancel()
 		errorJudgeCancel()
-		todoCancel()
+		if todoCancel != nil {
+			todoCancel()
+		}
 		authorizationCancel()
 		cancel()
 		logger.Error("Failed to start tool executor actor: %v", err)
@@ -975,6 +994,8 @@ func NewCleanOrchestratorForTask(
 	sharedFS fs.FileSystem,
 	sharedDomainBlocker *actor.ActorRef,
 	sharedSessionStorage *actor.ActorRef,
+	sharedTodoClient *tools.TodoActorClient,
+	sharedTodoActor tools.TodoActorInterface,
 	workingDir string,
 ) (*Orchestrator, error) {
 	logger.Debug("Creating clean orchestrator for task execution in %s", workingDir)
@@ -983,7 +1004,18 @@ func NewCleanOrchestratorForTask(
 	sess := session.NewSession(session.GenerateID(), workingDir)
 
 	// Create orchestrator with shared resources
-	return NewOrchestratorWithSharedResources(cfg, providerMgr, cliMode, sharedFS, sess, sharedSessionStorage, sharedDomainBlocker, false)
+	return NewOrchestratorWithSharedResources(
+		cfg,
+		providerMgr,
+		cliMode,
+		sharedFS,
+		sess,
+		sharedSessionStorage,
+		sharedDomainBlocker,
+		sharedTodoClient,
+		sharedTodoActor,
+		false,
+	)
 }
 
 // detectProviderChange checks if the provider/model family has changed
@@ -2380,6 +2412,8 @@ func (o *Orchestrator) executePlanningBoard(
 			o.fs,                // Shared filesystem
 			o.domainBlockerRef,  // Shared domain blocker
 			o.sessionStorageRef, // Shared session storage
+			o.todoClient,
+			o.todoActor,
 			o.workingDir,
 		)
 		if err != nil {

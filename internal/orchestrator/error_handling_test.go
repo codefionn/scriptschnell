@@ -85,6 +85,8 @@ func TestTaskFailureHandling(t *testing.T) {
 			baseOrch.fs,
 			domainBlockerRef,
 			sessionStorageRef,
+			nil,
+			nil,
 			".",
 		)
 		if err != nil {

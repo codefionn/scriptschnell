@@ -39,40 +39,73 @@ func (m *Model) handleNewTab(name string) tea.Cmd {
 		}
 	}
 
-	// Generate unique session ID
-	m.sessionIDCounter++
-	sessionID := session.GenerateID()
-	tabID := m.sessionIDCounter
+	var tabSession *TabSession
 
-	// Determine working directory and create worktree if named
-	workingDir := m.workingDir
-	worktreePath := ""
+	if m.useSocketMode && m.socketFactory != nil {
+		// Socket mode: create session on server
+		workingDir := m.workingDir
+		worktreePath := ""
 
-	if name != "" {
-		// Try to create worktree for named session
-		wtp, err := m.handleWorktreeCreation(name)
-		if err == nil && wtp != "" {
-			worktreePath = wtp
-			workingDir = wtp
+		if name != "" {
+			// Note: Worktree creation handled by server in socket mode
+			wtp, err := m.handleWorktreeCreation(name)
+			if err == nil && wtp != "" {
+				worktreePath = wtp
+				workingDir = wtp
+			}
 		}
-	}
 
-	// Create new session
-	sess := session.NewSession(sessionID, workingDir)
+		// Create session on socket server
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-	// Create TabSession wrapper
-	tabSession := &TabSession{
-		ID:                 tabID,
-		Session:            sess,
-		Name:               name,
-		WorktreePath:       worktreePath,
-		Messages:           []message{},
-		CreatedAt:          time.Now(),
-		LastActiveAt:       time.Now(),
-		ContextFreePercent: 100,
-		Runtime:            nil,   // Lazy-loaded on first prompt
-		Generating:         false, // Not generating initially
-		WaitingForAuth:     false, // Not waiting for auth initially
+		var err error
+		workspace := m.workingDir // Use working dir as workspace
+		tabSession, err = m.socketFactory.CreateSocketSession(ctx, workspace, workingDir)
+		if err != nil {
+			m.AddSystemMessage(fmt.Sprintf("Failed to create socket session: %v", err))
+			return nil
+		}
+
+		// Set tab metadata
+		tabSession.Name = name
+		tabSession.WorktreePath = worktreePath
+	} else {
+		// Local mode: create session locally
+		m.sessionIDCounter++
+		sessionID := session.GenerateID()
+		tabID := m.sessionIDCounter
+
+		// Determine working directory and create worktree if named
+		workingDir := m.workingDir
+		worktreePath := ""
+
+		if name != "" {
+			// Try to create worktree for named session
+			wtp, err := m.handleWorktreeCreation(name)
+			if err == nil && wtp != "" {
+				worktreePath = wtp
+				workingDir = wtp
+			}
+		}
+
+		// Create new session
+		sess := session.NewSession(sessionID, workingDir)
+
+		// Create TabSession wrapper
+		tabSession = &TabSession{
+			ID:                 tabID,
+			Session:            sess,
+			Name:               name,
+			WorktreePath:       worktreePath,
+			Messages:           []message{},
+			CreatedAt:          time.Now(),
+			LastActiveAt:       time.Now(),
+			ContextFreePercent: 100,
+			Runtime:            nil,   // Lazy-loaded on first prompt
+			Generating:         false, // Not generating initially
+			WaitingForAuth:     false, // Not waiting for auth initially
+		}
 	}
 
 	// Add to sessions list
@@ -158,21 +191,38 @@ func (m *Model) handleCloseTab(idx int) tea.Cmd {
 	// Auto-save session if it has messages
 	if len(closingTab.Session.GetMessages()) > 0 {
 		logger.Info("Auto-saving session %s on tab close", closingTab.Session.ID)
-		// Use tab's runtime to save if available
-		if closingTab.Runtime != nil {
+
+		if m.useSocketMode && m.socketFactory != nil {
+			// Socket mode: save via socket factory
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := closingTab.Runtime.Orchestrator.SaveCurrentSession(ctx); err != nil {
-				logger.Warn("Failed to auto-save session on tab close: %v", err)
-			} else {
-				logger.Info("Successfully auto-saved session %s on tab close", closingTab.Session.ID)
-			}
-		} else if m.onSaveSession != nil {
-			if err := m.onSaveSession(closingTab.Session); err != nil {
-				logger.Warn("Failed to auto-save session on tab close: %v", err)
+			if err := m.socketFactory.SaveSession(ctx, closingTab, closingTab.Name); err != nil {
+				logger.Warn("Failed to auto-save socket session on tab close: %v", err)
 				m.AddSystemMessage(fmt.Sprintf("Warning: Failed to auto-save session: %v", err))
 			} else {
-				logger.Info("Successfully auto-saved session %s on tab close", closingTab.Session.ID)
+				logger.Info("Successfully auto-saved socket session %s on tab close", closingTab.Session.ID)
+			}
+			// Detach from session
+			if err := m.socketFactory.DetachSession(ctx, closingTab); err != nil {
+				logger.Warn("Failed to detach from socket session: %v", err)
+			}
+		} else {
+			// Local mode: use tab's runtime to save
+			if closingTab.Runtime != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := closingTab.Runtime.Orchestrator.SaveCurrentSession(ctx); err != nil {
+					logger.Warn("Failed to auto-save session on tab close: %v", err)
+				} else {
+					logger.Info("Successfully auto-saved session %s on tab close", closingTab.Session.ID)
+				}
+			} else if m.onSaveSession != nil {
+				if err := m.onSaveSession(closingTab.Session); err != nil {
+					logger.Warn("Failed to auto-save session on tab close: %v", err)
+					m.AddSystemMessage(fmt.Sprintf("Warning: Failed to auto-save session: %v", err))
+				} else {
+					logger.Info("Successfully auto-saved session %s on tab close", closingTab.Session.ID)
+				}
 			}
 		}
 	}
@@ -185,6 +235,9 @@ func (m *Model) handleCloseTab(idx int) tea.Cmd {
 			logger.Info("Successfully destroyed runtime for tab %d", closingTab.ID)
 		}
 	}
+
+	// Note: Socket mode sessions don't have local runtimes to destroy
+	// Session lifecycle is managed by the server
 
 	// Note: We do NOT delete the worktree (per user requirement)
 	if closingTab.WorktreePath != "" {

@@ -1,4 +1,4 @@
-package web
+package socketserver
 
 import (
 	"context"
@@ -25,33 +25,38 @@ type pendingAuthorization struct {
 	parameters map[string]interface{}
 	reason     string
 	response   chan bool
-	ack        chan struct{} // signals that the frontend displayed the dialog
+	ack        chan struct{} // signals that the client displayed the dialog
 }
 
 // pendingQuestion tracks a question request waiting for user response
 type pendingQuestion struct {
 	question  string
-	questions []QuestionItem
+	questions map[string]string // question_id -> question text
 	multiMode bool
 	response  chan string            // Single answer
-	multiResp chan map[string]string // Multiple answers (question -> answer)
+	multiResp chan map[string]string // Multiple answers (question_id -> answer)
 }
 
-// MessageBroker handles the orchestration of LLM interactions for web clients
+// MessageBroker handles the orchestration of LLM interactions for socket clients
 type MessageBroker struct {
 	session           *session.Session
 	orchestrator      *orchestrator.Orchestrator
 	cfg               *config.Config
 	providerMgr       *provider.Manager
+	secretsPassword   *securemem.String
 	initialized       bool
+	sessionStorage    *session.SessionStorage
+	requireSandboxAuth bool
+
 	pendingAuthMu     sync.Mutex
 	pendingAuths      map[string]*pendingAuthorization // authID -> pending auth
 	authCounter       int
-	sendMessage       func(*WebMessage) // callback to send messages to client
+
+	sendMessage       func(*BaseMessage) // callback to send messages to client
+
 	pendingQuestionMu sync.Mutex
 	pendingQuestions  map[string]*pendingQuestion // questionID -> pending question
 	questionCounter   int
-	sessionStorage    *session.SessionStorage
 }
 
 // NewMessageBroker creates a new message broker
@@ -71,9 +76,21 @@ func NewMessageBroker() *MessageBroker {
 	return mb
 }
 
-// InitializeSession initializes a new session. If a session and orchestrator
-// already exist (e.g. after loading a saved session), this is a no-op.
-func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, requireSandboxAuth bool) error {
+// SetDependencies sets the provider manager and secrets password
+func (mb *MessageBroker) SetDependencies(providerMgr *provider.Manager, secretsPassword *securemem.String, cfg *config.Config) {
+	mb.providerMgr = providerMgr
+	mb.secretsPassword = secretsPassword
+	mb.cfg = cfg
+}
+
+// InitializeSession initializes a new session with the given configuration.
+// If a session and orchestrator already exist (e.g. after loading a saved session), this is a no-op.
+func (mb *MessageBroker) InitializeSession(
+	cfg *config.Config,
+	providerMgr *provider.Manager,
+	secretsPassword *securemem.String,
+	existingSession *session.Session,
+) error {
 	mb.cfg = cfg
 	mb.providerMgr = providerMgr
 
@@ -82,8 +99,11 @@ func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *prov
 		return nil
 	}
 
-	// Create new session
-	sess := session.NewSession(session.GenerateID(), cfg.WorkingDir)
+	// Use existing session if provided, otherwise create new
+	sess := existingSession
+	if sess == nil {
+		sess = session.NewSession(session.GenerateID(), cfg.WorkingDir)
+	}
 	mb.session = sess
 
 	// Create filesystem
@@ -104,7 +124,7 @@ func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *prov
 		nil, // domainBlockerRef
 		nil,
 		nil,
-		requireSandboxAuth,
+		mb.requireSandboxAuth,
 	)
 	if err != nil {
 		filesystem.Close()
@@ -113,11 +133,11 @@ func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *prov
 
 	mb.orchestrator = orch
 
-	// Set up user interaction handler for web mode so sandbox host functions
+	// Set up user interaction handler for socket mode so sandbox host functions
 	// can prompt the user for authorization during WASM execution
-	handler := &webInteractionHandler{broker: mb}
+	handler := &socketInteractionHandler{broker: mb}
 	if err := orch.SetUserInteractionHandler(handler); err != nil {
-		logger.Warn("Failed to set web interaction handler: %v", err)
+		logger.Warn("Failed to set socket interaction handler: %v", err)
 	}
 
 	mb.initialized = true
@@ -125,43 +145,47 @@ func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *prov
 	return nil
 }
 
+// SetMessageCallback sets the callback function for sending messages to the client
+func (mb *MessageBroker) SetMessageCallback(callback func(*BaseMessage)) {
+	mb.sendMessage = callback
+}
+
 // ProcessUserMessage processes a user message through the orchestrator
-func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string, callback func(*WebMessage)) error {
+// This is the main entry point for prompt submission over the socket
+func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string, requestID string) error {
 	if !mb.initialized {
 		return fmt.Errorf("session not initialized")
 	}
 
-	// Store the callback for authorization requests
-	mb.sendMessage = callback
+	if mb.sendMessage == nil {
+		return fmt.Errorf("message callback not set")
+	}
 
-	// Send user message to callback
-	callback(&WebMessage{
-		Type:    MessageTypeChat,
-		Role:    "user",
-		Content: message,
-	})
+	// Send user message to client
+	mb.sendMessage(NewRequest(
+		MessageTypeChatMessage,
+		requestID,
+		map[string]interface{}{
+			"role":    "user",
+			"content": message,
+		},
+	))
 
-	// Track messages for callback
-	pendingMessages := make(chan *session.Message, 100)
-	pendingToolCalls := make(chan ToolCallMsg, 100)
-	pendingToolResults := make(chan ToolResultMsg, 100)
-	pendingErrors := make(chan error, 10)
-
-	// Create auth callback - sends request to web client and waits for response
+	// Create auth callback - sends request to client and waits for response
 	authCallback := func(toolName string, params map[string]interface{}, reason string) (bool, error) {
-		return mb.handleAuthorization(ctx, toolName, params, reason, callback)
+		return mb.handleAuthorization(ctx, toolName, params, reason, requestID)
 	}
 
 	// Create question callback for planning agent
 	questionCallback := func(question string) (string, error) {
-		answer, _, err := mb.handleQuestion(ctx, question, nil, false, callback)
+		answer, _, err := mb.handleQuestion(ctx, question, nil, false, requestID)
 		return answer, err
 	}
 
 	// Set the question callback on the orchestrator
 	mb.orchestrator.SetUserInputCallback(questionCallback)
 
-	// Create tool call callback - now sends compact interactions
+	// Create tool call callback - sends tool call notification to client
 	toolCallCallback := func(toolName, toolID string, parameters map[string]interface{}) error {
 		// Extract description from parameters if present
 		var description string
@@ -170,99 +194,45 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 				description = descStr
 			}
 		}
-		// Send compact tool interaction message
-		callback(
-			&WebMessage{
-				Type:        MessageTypeToolInteraction,
-				ToolName:    toolName,
-				ToolID:      toolID,
-				Parameters:  parameters,
-				Status:      "calling",
-				Compact:     true,
-				Description: description,
-			})
+
+		// Send tool call message
+		mb.sendMessage(NewRequest(
+			MessageTypeToolCall,
+			requestID,
+			map[string]interface{}{
+				"tool_id":     toolID,
+				"tool_name":   toolName,
+				"parameters":  parameters,
+				"description": description,
+			},
+		))
 		return nil
 	}
 
-	// Create tool result callback - updates existing compact interaction
+	// Create tool result callback - sends tool result to client
 	toolResultCallback := func(toolName, toolID, result, errorMsg string) error {
-		callback(
-			&WebMessage{
-				Type:    MessageTypeToolInteraction,
-				ToolID:  toolID,
-				Result:  result,
-				Error:   errorMsg,
-				Status:  "completed",
-				Compact: true,
-			})
+		data := map[string]interface{}{
+			"tool_id": toolID,
+		}
+		if errorMsg != "" {
+			data["error"] = errorMsg
+		}
+		if result != "" {
+			data["result"] = result
+		}
+
+		mb.sendMessage(NewRequest(
+			MessageTypeToolResult,
+			requestID,
+			data,
+		))
 		return nil
 	}
 
-	// Create progress callback - filter out tool call status messages
+	// Create progress callback - filters and forwards progress updates
 	progressCallback := func(msg progress.Update) error {
-		// Skip tool calling status messages for web UI
-		if strings.Contains(msg.Message, "Calling tool:") {
-			return nil
-		}
-		// Skip "Thinking..." messages
-		if msg.Message == "Thinking..." {
-			return nil
-		}
-		// Verification agent messages should be sent even if ephemeral
-		if msg.VerificationAgent && msg.Message != "" {
-			logger.Debug("Progress (verification agent): %s", msg.Message)
-			callback(
-				&WebMessage{
-					Type:                MessageTypeSystem,
-					Content:             msg.Message,
-					IsVerificationAgent: true,
-				})
-			return nil
-		}
-		// Only send non-ephemeral important messages
-		if !msg.Ephemeral && msg.Message != "" {
-			logger.Debug("Progress: %s", msg.Message)
-			callback(&WebMessage{
-				Type:    MessageTypeSystem,
-				Content: msg.Message,
-			})
-		}
-		return nil
+		return mb.handleProgress(msg, requestID)
 	}
-
-	// Start goroutine to send responses to callback
-	// Note: Tool calls and results are now handled directly via callbacks
-	// This goroutine only handles assistant messages and errors
-	done := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case msg := <-pendingMessages:
-				if msg.Role == "assistant" {
-					callback(&WebMessage{
-						Type:    MessageTypeChat,
-						Role:    "assistant",
-						Content: msg.Content,
-					})
-				}
-			case tc := <-pendingToolCalls:
-				// Tool calls are now handled directly via callback
-				_ = tc // Avoid unused variable error
-				continue
-			case tr := <-pendingToolResults:
-				// Tool results are now handled directly via callback
-				_ = tr // Avoid unused variable error
-				continue
-			case err := <-pendingErrors:
-				callback(&WebMessage{
-					Type:    MessageTypeError,
-					Content: err.Error(),
-				})
-			case <-done:
-				return
-			}
-		}
-	}()
 
 	// Process through orchestrator
 	err := mb.orchestrator.ProcessPromptWithVerification(
@@ -276,22 +246,77 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 		nil, // openRouterUsageCallback
 	)
 
-	// Signal completion
-	close(done)
+	return err
+}
 
-	// Wait for the response goroutine to finish
-	// This prevents sending to closed channels
-	select {
-	case <-done:
-	case <-time.After(consts.Timeout5Seconds):
-		logger.Warn("Timeout waiting for response goroutine to finish")
+// handleProgress handles progress updates from the orchestrator
+func (mb *MessageBroker) handleProgress(msg progress.Update, requestID string) error {
+	// Skip tool calling status messages for socket clients
+	if strings.Contains(msg.Message, "Calling tool:") {
+		return nil
+	}
+	// Skip "Thinking..." messages
+	if msg.Message == "Thinking..." {
+		return nil
 	}
 
-	if err != nil {
-		pendingErrors <- err
-		return err
+	// Verification agent messages should be sent even if ephemeral
+	if msg.VerificationAgent && msg.Message != "" {
+		logger.Debug("Progress (verification agent): %s", msg.Message)
+		mb.sendMessage(NewRequest(
+			MessageTypeProgress,
+			requestID,
+			map[string]interface{}{
+				"message":   msg.Message,
+				"is_compact": true,
+			},
+		))
+		return nil
 	}
 
+	// Handle reasoning content (extended thinking)
+	if msg.Reasoning != "" {
+		logger.Debug("Progress (reasoning): %s", msg.Reasoning)
+		mb.sendMessage(NewRequest(
+			MessageTypeChatMessage,
+			requestID,
+			map[string]interface{}{
+				"role":      "assistant",
+				"content":   msg.Reasoning,
+				"reasoning": true,
+			},
+		))
+		return nil
+	}
+
+	// Only send non-ephemeral important messages
+	if !msg.Ephemeral && msg.Message != "" {
+		logger.Debug("Progress: %s", msg.Message)
+		mb.sendMessage(NewRequest(
+			MessageTypeProgress,
+			requestID,
+			map[string]interface{}{
+				"message": msg.Message,
+			},
+		))
+	}
+
+	return nil
+}
+
+// Stop stops the current session operations
+func (mb *MessageBroker) Stop() error {
+	if mb.orchestrator != nil {
+		mb.orchestrator.Stop()
+	}
+	return nil
+}
+
+// Close cleans up resources
+func (mb *MessageBroker) Close() error {
+	if mb.orchestrator != nil {
+		return mb.orchestrator.Close()
+	}
 	return nil
 }
 
@@ -310,45 +335,34 @@ func (mb *MessageBroker) GetProviderManager() *provider.Manager {
 	return mb.providerMgr
 }
 
-// Stop stops the current session operations
-func (mb *MessageBroker) Stop() error {
-	if mb.orchestrator != nil {
-		mb.orchestrator.Stop()
-	}
-	return nil
-}
-
 // GetConfig returns the config
 func (mb *MessageBroker) GetConfig() *config.Config {
 	return mb.cfg
 }
 
-// Close cleans up resources
-func (mb *MessageBroker) Close() error {
-	if mb.orchestrator != nil {
-		return mb.orchestrator.Close()
-	}
-	return nil
+// SetRequireSandboxAuth sets whether sandbox authentication is required
+func (mb *MessageBroker) SetRequireSandboxAuth(require bool) {
+	mb.requireSandboxAuth = require
 }
 
-// webInteractionHandler implements actor.UserInteractionHandler for web mode.
-// It delegates authorization requests to the broker's existing web-based authorization mechanism.
-type webInteractionHandler struct {
+// socketInteractionHandler implements actor.UserInteractionHandler for socket mode.
+// It delegates authorization requests to the broker's socket-based authorization mechanism.
+type socketInteractionHandler struct {
 	broker *MessageBroker
 }
 
-func (h *webInteractionHandler) Mode() string { return "web" }
+func (h *socketInteractionHandler) Mode() string { return "socket" }
 
-func (h *webInteractionHandler) SupportsInteraction(interactionType actor.InteractionType) bool {
+func (h *socketInteractionHandler) SupportsInteraction(interactionType actor.InteractionType) bool {
 	return interactionType == actor.InteractionTypeAuthorization
 }
 
-func (h *webInteractionHandler) HandleInteraction(ctx context.Context, req *actor.UserInteractionRequest) (*actor.UserInteractionResponse, error) {
+func (h *socketInteractionHandler) HandleInteraction(ctx context.Context, req *actor.UserInteractionRequest) (*actor.UserInteractionResponse, error) {
 	if req.InteractionType != actor.InteractionTypeAuthorization {
 		return &actor.UserInteractionResponse{
 			RequestID: req.RequestID,
 			Approved:  false,
-			Error:     fmt.Errorf("web mode does not support %d interactions", req.InteractionType),
+			Error:     fmt.Errorf("socket mode does not support %d interactions", req.InteractionType),
 		}, nil
 	}
 
@@ -357,16 +371,16 @@ func (h *webInteractionHandler) HandleInteraction(ctx context.Context, req *acto
 		return nil, fmt.Errorf("invalid payload type for authorization: expected *AuthorizationPayload, got %T", req.Payload)
 	}
 
-	callback := h.broker.sendMessage
-	if callback == nil {
+	if h.broker.sendMessage == nil {
 		return &actor.UserInteractionResponse{
 			RequestID: req.RequestID,
 			Approved:  false,
-			Error:     fmt.Errorf("no active web session to send authorization request"),
+			Error:     fmt.Errorf("no active socket session to send authorization request"),
 		}, nil
 	}
 
-	approved, err := h.broker.handleAuthorization(ctx, payload.ToolName, payload.Parameters, payload.Reason, callback)
+	// Use empty requestID for authorization requests (they're not tied to a specific chat message)
+	approved, err := h.broker.handleAuthorization(ctx, payload.ToolName, payload.Parameters, payload.Reason, "")
 	if err != nil {
 		return &actor.UserInteractionResponse{
 			RequestID: req.RequestID,
@@ -382,11 +396,11 @@ func (h *webInteractionHandler) HandleInteraction(ctx context.Context, req *acto
 	}, nil
 }
 
-// handleAuthorization handles an authorization request by sending it to the web client
+// handleAuthorization handles an authorization request by sending it to the client
 // and waiting for the response. Uses a two-phase timeout:
-// Phase 1 (30s): Wait for the frontend to acknowledge it displayed the dialog.
+// Phase 1 (30s): Wait for the client to acknowledge it displayed the dialog.
 // Phase 2 (10min): Wait for the user's actual approve/deny response.
-func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName string, params map[string]interface{}, reason string, callback func(*WebMessage)) (bool, error) {
+func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName string, params map[string]interface{}, reason string, requestID string) (bool, error) {
 	// Generate unique auth ID
 	mb.pendingAuthMu.Lock()
 	mb.authCounter++
@@ -415,16 +429,19 @@ func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName strin
 
 	logger.Debug("Authorization request for tool %s (authID: %s)", toolName, authID)
 
-	// Send authorization request to web client
-	callback(&WebMessage{
-		Type:       MessageTypeAuthorizationRequest,
-		AuthID:     authID,
-		ToolName:   toolName,
-		Parameters: params,
-		Reason:     reason,
-	})
+	// Send authorization request to client
+	mb.sendMessage(NewRequest(
+		MessageTypeAuthorizationRequest,
+		requestID,
+		map[string]interface{}{
+			"auth_id":    authID,
+			"tool_name":  toolName,
+			"parameters": params,
+			"reason":     reason,
+		},
+	))
 
-	// Phase 1: Wait for ack (frontend confirmed dialog is displayed) or early response
+	// Phase 1: Wait for ack (client confirmed dialog is displayed) or early response
 	select {
 	case approved := <-responseChan:
 		// User responded before ack (fast user) — return immediately
@@ -432,7 +449,7 @@ func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName strin
 		cleanup()
 		return approved, nil
 	case <-ackChan:
-		// Frontend confirmed dialog is displayed — proceed to phase 2
+		// Client confirmed dialog is displayed — proceed to phase 2
 		logger.Debug("Authorization ack received for %s, waiting for user response", authID)
 	case <-ctx.Done():
 		logger.Debug("Authorization cancelled during ack wait for %s", authID)
@@ -441,7 +458,7 @@ func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName strin
 	case <-time.After(consts.Timeout30Seconds):
 		logger.Error("Authorization ack timeout for %s — dialog was not displayed", authID)
 		cleanup()
-		return false, fmt.Errorf("authorization timed out: dialog was not displayed by the frontend within 30 seconds")
+		return false, fmt.Errorf("authorization timed out: dialog was not displayed by the client within 30 seconds")
 	}
 
 	// Phase 2: Wait for user's approve/deny response (generous timeout)
@@ -461,7 +478,7 @@ func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName strin
 	}
 }
 
-// HandleAuthorizationResponse handles a response from the web client for an authorization request
+// HandleAuthorizationResponse handles a response from the client for an authorization request
 func (mb *MessageBroker) HandleAuthorizationResponse(authID string, approved bool) error {
 	mb.pendingAuthMu.Lock()
 	defer mb.pendingAuthMu.Unlock()
@@ -482,7 +499,7 @@ func (mb *MessageBroker) HandleAuthorizationResponse(authID string, approved boo
 	return nil
 }
 
-// HandleAuthorizationAck handles an ack from the web client confirming the authorization dialog was displayed
+// HandleAuthorizationAck handles an ack from the client confirming the authorization dialog was displayed
 func (mb *MessageBroker) HandleAuthorizationAck(authID string) error {
 	mb.pendingAuthMu.Lock()
 	defer mb.pendingAuthMu.Unlock()
@@ -504,8 +521,8 @@ func (mb *MessageBroker) HandleAuthorizationAck(authID string) error {
 }
 
 // handleQuestion handles a question request from the planning agent
-// It sends the question to the web client and waits for a response
-func (mb *MessageBroker) handleQuestion(ctx context.Context, question string, questions []QuestionItem, multiMode bool, callback func(*WebMessage)) (string, map[string]string, error) {
+// It sends the question to the client and waits for a response
+func (mb *MessageBroker) handleQuestion(ctx context.Context, question string, questions map[string]string, multiMode bool, requestID string) (string, map[string]string, error) {
 	// Generate unique question ID
 	mb.pendingQuestionMu.Lock()
 	mb.questionCounter++
@@ -527,14 +544,21 @@ func (mb *MessageBroker) handleQuestion(ctx context.Context, question string, qu
 
 	logger.Debug("Question request (questionID: %s, multiMode: %v)", questionID, multiMode)
 
-	// Send question request to web client
-	callback(&WebMessage{
-		Type:       MessageTypeQuestionRequest,
-		QuestionID: questionID,
-		Question:   question,
-		Questions:  questions,
-		MultiMode:  multiMode,
-	})
+	// Send question request to client
+	data := map[string]interface{}{
+		"question_id": questionID,
+		"question":   question,
+		"multi_mode":  multiMode,
+	}
+	if len(questions) > 0 {
+		data["questions"] = questions
+	}
+
+	mb.sendMessage(NewRequest(
+		MessageTypeQuestionRequest,
+		requestID,
+		data,
+	))
 
 	// Wait for response with timeout
 	select {
@@ -569,7 +593,7 @@ func (mb *MessageBroker) handleQuestion(ctx context.Context, question string, qu
 	}
 }
 
-// HandleQuestionResponse handles a response from the web client for a question request
+// HandleQuestionResponse handles a response from the client for a question request
 func (mb *MessageBroker) HandleQuestionResponse(questionID string, answer string, answers map[string]string) error {
 	mb.pendingQuestionMu.Lock()
 	defer mb.pendingQuestionMu.Unlock()
@@ -601,6 +625,11 @@ func (mb *MessageBroker) HandleQuestionResponse(questionID string, answer string
 	return nil
 }
 
+// IsInitialized returns whether the broker has been initialized
+func (mb *MessageBroker) IsInitialized() bool {
+	return mb.initialized
+}
+
 // ResetSession tears down the current orchestrator and session so the next
 // chat message will trigger a fresh InitializeSession.
 func (mb *MessageBroker) ResetSession() {
@@ -610,128 +639,4 @@ func (mb *MessageBroker) ResetSession() {
 	}
 	mb.session = nil
 	mb.initialized = false
-}
-
-// ListSessions returns saved sessions for the given workspace.
-func (mb *MessageBroker) ListSessions(workingDir string) ([]SessionInfo, error) {
-	if mb.sessionStorage == nil {
-		return nil, fmt.Errorf("session storage not available")
-	}
-
-	metas, err := mb.sessionStorage.ListSessions(workingDir)
-	if err != nil {
-		return nil, err
-	}
-
-	infos := make([]SessionInfo, len(metas))
-	for i, m := range metas {
-		infos[i] = SessionInfo{
-			ID:           m.ID,
-			Name:         m.Name,
-			Title:        m.Title,
-			CreatedAt:    m.CreatedAt,
-			UpdatedAt:    m.UpdatedAt,
-			MessageCount: m.MessageCount,
-		}
-	}
-	return infos, nil
-}
-
-// SaveCurrentSession persists the current session to disk.
-func (mb *MessageBroker) SaveCurrentSession(name string) error {
-	if mb.sessionStorage == nil {
-		return fmt.Errorf("session storage not available")
-	}
-	if mb.session == nil {
-		return fmt.Errorf("no active session to save")
-	}
-	return mb.sessionStorage.SaveSession(mb.session, name)
-}
-
-// LoadSessionByID loads a previously saved session, tears down the old
-// orchestrator, creates a new one with the loaded session, and returns the
-// message history so the frontend can replay it.
-func (mb *MessageBroker) LoadSessionByID(
-	cfg *config.Config,
-	providerMgr *provider.Manager,
-	secretsPassword *securemem.String,
-	requireSandboxAuth bool,
-	sessionID string,
-) ([]*session.Message, error) {
-	if mb.sessionStorage == nil {
-		return nil, fmt.Errorf("session storage not available")
-	}
-
-	sess, err := mb.sessionStorage.LoadSession(cfg.WorkingDir, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load session: %w", err)
-	}
-
-	// Tear down old orchestrator
-	if mb.orchestrator != nil {
-		_ = mb.orchestrator.Close()
-		mb.orchestrator = nil
-	}
-
-	// Create filesystem
-	filesystem := fs.NewCachedFS(
-		cfg.WorkingDir,
-		time.Duration(cfg.CacheTTL)*time.Second,
-		cfg.MaxCacheEntries,
-	)
-
-	// Create new orchestrator with the loaded session
-	orch, err := orchestrator.NewOrchestratorWithSharedResources(
-		cfg,
-		providerMgr,
-		false, // cliMode
-		filesystem,
-		sess,
-		nil, // sessionStorageRef
-		nil, // domainBlockerRef
-		nil,
-		nil,
-		requireSandboxAuth,
-	)
-	if err != nil {
-		filesystem.Close()
-		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
-	}
-
-	mb.session = sess
-	mb.orchestrator = orch
-	mb.cfg = cfg
-	mb.providerMgr = providerMgr
-	mb.initialized = true
-
-	// Set up user interaction handler
-	handler := &webInteractionHandler{broker: mb}
-	if err := orch.SetUserInteractionHandler(handler); err != nil {
-		logger.Warn("Failed to set web interaction handler: %v", err)
-	}
-
-	return sess.GetMessages(), nil
-}
-
-// DeleteSessionByID removes a saved session from disk.
-func (mb *MessageBroker) DeleteSessionByID(workingDir, sessionID string) error {
-	if mb.sessionStorage == nil {
-		return fmt.Errorf("session storage not available")
-	}
-	return mb.sessionStorage.DeleteSession(workingDir, sessionID)
-}
-
-// ToolCallMsg represents a tool call message
-type ToolCallMsg struct {
-	Name        string
-	ID          string
-	Params      map[string]interface{}
-	Description string // Human-readable description of what the tool is doing
-}
-
-// ToolResultMsg represents a tool result message
-type ToolResultMsg struct {
-	ID     string
-	Result interface{}
-	Error  string
 }

@@ -17,7 +17,7 @@ func (s *CodebaseInvestigatorToolSpec) Name() string {
 }
 
 func (s *CodebaseInvestigatorToolSpec) Description() string {
-	return `Investigates the codebase to answer a specific query or goal. Starts a separate agent that as only access to reading and searching the codebase.
+	return `Investigates the codebase to answer a specific query or goal. Starts a separate agent that has only access to reading and searching the codebase (no create/update file tools).
 Use cases:
 - Gather context about specific parts of the codebase
 - Find where certain logic is implemented

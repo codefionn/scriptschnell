@@ -152,7 +152,9 @@ func (rf *RuntimeFactory) CreateTabRuntime(tabID int, sess *session.Session) (*T
 		sess,                        // Tab's session
 		rf.shared.sessionStorageRef, // Shared session storage
 		rf.shared.domainBlockerRef,  // Shared domain blocker
-		rf.requireSandboxAuth,       // requireSandboxAuth (passed from CLI flag)
+		nil,
+		nil,
+		rf.requireSandboxAuth, // requireSandboxAuth (passed from CLI flag)
 	)
 	if err != nil {
 		cancel()

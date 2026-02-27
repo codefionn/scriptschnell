@@ -50,3 +50,8 @@ func (ts *TabSession) IsGenerating() bool {
 func (ts *TabSession) NeedsAuthorization() bool {
 	return ts.WaitingForAuth
 }
+
+// SetGenerating sets the generating state for this tab
+func (ts *TabSession) SetGenerating(generating bool) {
+	ts.Generating = generating
+}

@@ -31,7 +31,9 @@ func TestProcessPromptSendsInitialMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create orchestrator: %v", err)
 	}
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	// Disable planning so we only send a single request
 	orch.featureFlags.SetPlanningEnabled(false)

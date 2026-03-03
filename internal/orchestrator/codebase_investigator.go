@@ -556,7 +556,7 @@ func (a *CodebaseInvestigatorAgent) buildFileTree(ctx context.Context, maxDepth 
 
 		for i, entry := range entries {
 			if fileCount >= maxFiles {
-				result.WriteString(fmt.Sprintf("%s... (truncated, %d files shown)\n", prefix, maxFiles))
+				fmt.Fprintf(&result, "%s... (truncated, %d files shown)\n", prefix, maxFiles)
 				return nil
 			}
 
@@ -575,7 +575,7 @@ func (a *CodebaseInvestigatorAgent) buildFileTree(ctx context.Context, maxDepth 
 			}
 
 			if entry.IsDir {
-				result.WriteString(fmt.Sprintf("%s%s%s/\n", prefix, connector, name))
+				fmt.Fprintf(&result, "%s%s%s/\n", prefix, connector, name)
 				fileCount++
 
 				// Recurse into subdirectory
@@ -587,7 +587,7 @@ func (a *CodebaseInvestigatorAgent) buildFileTree(ctx context.Context, maxDepth 
 				}
 				_ = walk(entry.Path, newPrefix, depth+1)
 			} else {
-				result.WriteString(fmt.Sprintf("%s%s%s\n", prefix, connector, name))
+				fmt.Fprintf(&result, "%s%s%s\n", prefix, connector, name)
 				fileCount++
 			}
 		}
@@ -598,7 +598,7 @@ func (a *CodebaseInvestigatorAgent) buildFileTree(ctx context.Context, maxDepth 
 	_ = walk(a.orch.workingDir, "", 0)
 
 	if fileCount >= maxFiles {
-		result.WriteString(fmt.Sprintf("\n(Showing first %d files/directories)\n", maxFiles))
+		fmt.Fprintf(&result, "\n(Showing first %d files/directories)\n", maxFiles)
 	}
 
 	return result.String()

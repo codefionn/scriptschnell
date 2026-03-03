@@ -57,7 +57,7 @@ func (h *HTTPBlocklistDownloader) DownloadBlocklist(ctx context.Context, url str
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		h.setHealthy(false)
 		return nil, fmt.Errorf("blocklist download failed with status %d", resp.StatusCode)
 	}
@@ -90,7 +90,9 @@ func (h *HTTPBlocklistDownloader) GetLastModified(ctx context.Context, url strin
 		h.setHealthy(false)
 		return time.Time{}, fmt.Errorf("failed to get HEAD response: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		h.setHealthy(false)

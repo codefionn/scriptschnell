@@ -190,17 +190,17 @@ func (t *SearchContextFilesTool) Execute(ctx context.Context, params map[string]
 
 	// Header
 	result.WriteString("## Context Directory Search Results\n\n")
-	result.WriteString(fmt.Sprintf("**Pattern:** `%s`\n", pattern))
+	fmt.Fprintf(&result, "**Pattern:** `%s`\n", pattern)
 	if contentRegex != "" {
-		result.WriteString(fmt.Sprintf("**Content Filter:** `%s`\n", contentRegex))
+		fmt.Fprintf(&result, "**Content Filter:** `%s`\n", contentRegex)
 	}
-	result.WriteString(fmt.Sprintf("**Context Directories:** %d\n", len(contextDirs)))
+	fmt.Fprintf(&result, "**Context Directories:** %d\n", len(contextDirs))
 	for _, dir := range contextDirs {
-		result.WriteString(fmt.Sprintf("  - `%s`\n", dir))
+		fmt.Fprintf(&result, "  - `%s`\n", dir)
 	}
-	result.WriteString(fmt.Sprintf("**Found:** %d file(s)", len(allMatches)))
+	fmt.Fprintf(&result, "**Found:** %d file(s)", len(allMatches))
 	if len(allMatches) >= maxResults {
-		result.WriteString(fmt.Sprintf(" (limited to %d results)", maxResults))
+		fmt.Fprintf(&result, " (limited to %d results)", maxResults)
 	}
 	result.WriteString("\n\n")
 
@@ -210,7 +210,7 @@ func (t *SearchContextFilesTool) Execute(ctx context.Context, params map[string]
 	} else {
 		result.WriteString("### Matching Files\n\n")
 		for _, match := range allMatches {
-			result.WriteString(fmt.Sprintf("- `%s`\n", match))
+			fmt.Fprintf(&result, "- `%s`\n", match)
 		}
 	}
 
@@ -218,7 +218,7 @@ func (t *SearchContextFilesTool) Execute(ctx context.Context, params map[string]
 	if len(searchErrors) > 0 {
 		result.WriteString("\n### Errors\n\n")
 		for _, errMsg := range searchErrors {
-			result.WriteString(fmt.Sprintf("- %s\n", errMsg))
+			fmt.Fprintf(&result, "- %s\n", errMsg)
 		}
 	}
 
@@ -396,7 +396,9 @@ func decompressData(data []byte, filename string) ([]byte, error) {
 		if err != nil {
 			return data, nil // Not actually gzipped, return original
 		}
-		defer reader.Close()
+		defer func() {
+			_ = reader.Close()
+		}()
 
 		decompressed, err := io.ReadAll(reader)
 		if err != nil {
@@ -554,14 +556,14 @@ func (t *GrepContextFilesTool) Execute(ctx context.Context, params map[string]in
 	var result strings.Builder
 
 	result.WriteString("## Context Directory Grep Results\n\n")
-	result.WriteString(fmt.Sprintf("**Pattern:** `%s`\n", pattern))
+	fmt.Fprintf(&result, "**Pattern:** `%s`\n", pattern)
 	if filePattern != "" {
-		result.WriteString(fmt.Sprintf("**File Pattern:** `%s`\n", filePattern))
+		fmt.Fprintf(&result, "**File Pattern:** `%s`\n", filePattern)
 	}
-	result.WriteString(fmt.Sprintf("**Context Lines:** %d\n", contextLines))
-	result.WriteString(fmt.Sprintf("**Found:** %d file(s) with matches", len(allMatches)))
+	fmt.Fprintf(&result, "**Context Lines:** %d\n", contextLines)
+	fmt.Fprintf(&result, "**Found:** %d file(s) with matches", len(allMatches))
 	if len(allMatches) >= maxResults {
-		result.WriteString(fmt.Sprintf(" (limited to %d files)", maxResults))
+		fmt.Fprintf(&result, " (limited to %d files)", maxResults)
 	}
 	result.WriteString("\n\n")
 
@@ -569,22 +571,22 @@ func (t *GrepContextFilesTool) Execute(ctx context.Context, params map[string]in
 		result.WriteString("*No matches found.*\n")
 	} else {
 		for _, fileMatch := range allMatches {
-			result.WriteString(fmt.Sprintf("### `%s`\n\n", fileMatch.path))
-			result.WriteString(fmt.Sprintf("Found %d match(es):\n\n", len(fileMatch.matches)))
+			fmt.Fprintf(&result, "### `%s`\n\n", fileMatch.path)
+			fmt.Fprintf(&result, "Found %d match(es):\n\n", len(fileMatch.matches))
 
 			for _, match := range fileMatch.matches {
 				result.WriteString("```\n")
 				// Show before context
 				for i, line := range match.beforeLines {
 					lineNum := match.lineNum - len(match.beforeLines) + i
-					result.WriteString(fmt.Sprintf("%4d  %s\n", lineNum, line))
+					fmt.Fprintf(&result, "%4d  %s\n", lineNum, line)
 				}
 				// Show matching line
-				result.WriteString(fmt.Sprintf("%4d: %s\n", match.lineNum, match.line))
+				fmt.Fprintf(&result, "%4d: %s\n", match.lineNum, match.line)
 				// Show after context
 				for i, line := range match.afterLines {
 					lineNum := match.lineNum + i + 1
-					result.WriteString(fmt.Sprintf("%4d  %s\n", lineNum, line))
+					fmt.Fprintf(&result, "%4d  %s\n", lineNum, line)
 				}
 				result.WriteString("```\n\n")
 			}
@@ -594,7 +596,7 @@ func (t *GrepContextFilesTool) Execute(ctx context.Context, params map[string]in
 	if len(searchErrors) > 0 {
 		result.WriteString("\n### Errors\n\n")
 		for _, errMsg := range searchErrors {
-			result.WriteString(fmt.Sprintf("- %s\n", errMsg))
+			fmt.Fprintf(&result, "- %s\n", errMsg)
 		}
 	}
 
@@ -909,12 +911,12 @@ func (t *ReadContextFileTool) Execute(ctx context.Context, params map[string]int
 
 	// Extract requested lines
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("## File: %s\n\n", absPath))
-	result.WriteString(fmt.Sprintf("Lines %d-%d of %d total\n\n", fromLine, toLine, totalLines))
+	fmt.Fprintf(&result, "## File: %s\n\n", absPath)
+	fmt.Fprintf(&result, "Lines %d-%d of %d total\n\n", fromLine, toLine, totalLines)
 	result.WriteString("```\n")
 
 	for i := fromLine - 1; i < toLine; i++ {
-		result.WriteString(fmt.Sprintf("%4d: %s\n", i+1, lines[i]))
+		fmt.Fprintf(&result, "%4d: %s\n", i+1, lines[i])
 	}
 
 	result.WriteString("```\n")
@@ -1041,9 +1043,9 @@ func (t *AddContextDirectoryTool) Execute(ctx context.Context, params map[string
 	// Format result
 	var result strings.Builder
 	result.WriteString("## Context Directory Added\n\n")
-	result.WriteString(fmt.Sprintf("**Directory:** `%s`\n", absDir))
+	fmt.Fprintf(&result, "**Directory:** `%s`\n", absDir)
 	if reason != "" {
-		result.WriteString(fmt.Sprintf("**Reason:** %s\n", reason))
+		fmt.Fprintf(&result, "**Reason:** %s\n", reason)
 	}
 	result.WriteString("\nThe directory has been added to the context directories configuration and will be available for searching and reading.")
 

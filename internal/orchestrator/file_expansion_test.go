@@ -33,7 +33,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		prompt := "hello world"
 		result := orch.expandFileReferences(ctx, prompt)
@@ -49,7 +53,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		const filePath = "small.go"
 		const fileContent = "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}"
@@ -77,7 +85,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		const file1 = "file1.go"
 		const content1 = "package main"
@@ -113,7 +125,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		prompt := "please review @nonexistent.go"
 		result := orch.expandFileReferences(ctx, prompt)
@@ -132,7 +148,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		const filePath = "dup.go"
 		const fileContent = "package main"
@@ -158,7 +178,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		const filePath = "internal/helper/utils.go"
 		const fileContent = "package utils"
@@ -183,7 +207,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		const filePath = "large.go"
 		// Create content larger than 10% of default context window (8192 tokens -> ~3277 bytes)
@@ -213,7 +241,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		const filePath = "tracked.go"
 		const fileContent = "package main\n\nfunc main() { println(\"tracked\") }"
@@ -252,7 +284,11 @@ func TestExpandFileReferences_Unit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create orchestrator: %v", err)
 		}
-		defer orch.Close()
+		defer func() {
+			if err := orch.Close(); err != nil {
+				t.Errorf("Failed to close orchestrator: %v", err)
+			}
+		}()
 
 		const filePath = "large_tracked.go"
 		largeContent := strings.Repeat("This is a large file that exceeds the threshold. ", 100)

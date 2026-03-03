@@ -63,7 +63,7 @@ func (d domainChoiceDelegate) Render(w io.Writer, m list.Model, index int, listI
 	}
 
 	desc := domainChoiceItemStyle.Render(roleDescStyle.Render(item.desc))
-	fmt.Fprintf(w, "%s\n%s", title, desc)
+	_, _ = fmt.Fprintf(w, "%s\n%s", title, desc)
 }
 
 // DomainAuthorizationRequest contains the details of a domain authorization request

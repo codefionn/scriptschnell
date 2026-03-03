@@ -73,14 +73,14 @@ func NewRuntimeFactoryWithRequireSandboxAuth(cfg *config.Config, providerMgr *pr
 	})
 	if err != nil {
 		cancel()
-		filesystem.Close()
+		_ = filesystem.Close()
 		return nil, fmt.Errorf("failed to create session storage actor: %w", err)
 	}
 
 	storageRef, err := actorSystem.Spawn(ctx, "session-storage", storageActor, 16)
 	if err != nil {
 		cancel()
-		filesystem.Close()
+		_ = filesystem.Close()
 		return nil, fmt.Errorf("failed to spawn session storage actor: %w", err)
 	}
 
@@ -93,14 +93,14 @@ func NewRuntimeFactoryWithRequireSandboxAuth(cfg *config.Config, providerMgr *pr
 		BlocklistURL:    actor.DefaultRPZURL,
 		RefreshInterval: consts.Duration6Hours,
 		TTL:             consts.Duration24Hours,
-		HTTPClient:      &http.Client{Timeout: consts.Timeout30Seconds},
+		HTTPClient:      &http.Client{Timeout: consts.Timeout30},
 	}
 	domainBlockerActor := actor.NewDomainBlockerActor("domain-blocker", domainBlockerConfig)
 	domainBlockerRef, err := domainBlockerSystem.Spawn(domainBlockerCtx, "domain-blocker", domainBlockerActor, 16)
 	if err != nil {
 		domainBlockerCancel()
 		cancel()
-		filesystem.Close()
+		_ = filesystem.Close()
 		return nil, fmt.Errorf("failed to spawn domain blocker actor: %w", err)
 	}
 
@@ -250,7 +250,7 @@ func (rf *RuntimeFactory) Close() error {
 	// Close shared filesystem
 	logger.Debug("Closing shared filesystem")
 	if cfs, ok := rf.shared.filesystem.(*fs.CachedFS); ok {
-		cfs.Close()
+		_ = cfs.Close()
 	}
 
 	logger.Info("RuntimeFactory closed successfully")

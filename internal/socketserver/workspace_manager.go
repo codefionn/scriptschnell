@@ -42,10 +42,6 @@ type WorkspaceManager struct {
 
 	// Path to workspace ID mapping (for quick lookup)
 	pathToID map[string]string // working dir -> workspace ID
-
-	// Configuration references
-	configDir    string // Config directory for workspace-scoped settings
-	configLoaded bool
 }
 
 // NewWorkspaceManager creates a new workspace manager

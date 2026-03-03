@@ -120,7 +120,9 @@ func (c *OpenAIClient) completeWithChat(ctx context.Context, req *CompletionRequ
 	if err != nil {
 		return nil, fmt.Errorf("openai completion failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -171,7 +173,9 @@ func (c *OpenAIClient) streamWithChat(ctx context.Context, req *CompletionReques
 	if err != nil {
 		return fmt.Errorf("openai stream failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

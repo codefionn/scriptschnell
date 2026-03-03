@@ -104,7 +104,9 @@ func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI
 	}
 	handler := actor.NewNonInteractiveHandler(handlerOpts)
 	if err := orch.SetUserInteractionHandler(handler); err != nil {
-		orch.Close()
+		if closeErr := orch.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to set user interaction handler: %w (failed to close orchestrator: %v)", err, closeErr)
+		}
 		return nil, fmt.Errorf("failed to set user interaction handler: %w", err)
 	}
 
@@ -121,7 +123,7 @@ func New(cfg *config.Config, providerMgr *provider.Manager, opts *Options) (*CLI
 // Close releases resources associated with the CLI runner.
 func (c *CLI) Close() error {
 	if c.orchestrator != nil {
-		c.orchestrator.Close()
+		return c.orchestrator.Close()
 	}
 	return nil
 }

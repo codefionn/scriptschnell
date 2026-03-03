@@ -201,7 +201,7 @@ func (t *WriteFileReplaceTool) Execute(ctx context.Context, params map[string]in
 			return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string in edit %d, but expected %d. Try to read more surrounding text and redo the edit.\n\nFound matches at:\n%s", count, i+1, expected, matchLocations)}
 		}
 
-		finalContent = strings.Replace(finalContent, oldStr, newStr, -1)
+		finalContent = strings.ReplaceAll(finalContent, oldStr, newStr)
 		totalReplacements += count
 	}
 

@@ -74,7 +74,10 @@ func (h *Handler) Start() error {
 			return fmt.Errorf("failed to create CPU profile file: %w", err)
 		}
 		if err := pprof.StartCPUProfile(f); err != nil {
-			f.Close()
+			closeErr := f.Close()
+			if closeErr != nil {
+				return fmt.Errorf("failed to start CPU profiling: %w (close failed: %v)", err, closeErr)
+			}
 			return fmt.Errorf("failed to start CPU profiling: %w", err)
 		}
 		h.cpuFile = f
@@ -91,7 +94,10 @@ func (h *Handler) Start() error {
 			return fmt.Errorf("failed to create trace profile file: %w", err)
 		}
 		if err := trace.Start(f); err != nil {
-			f.Close()
+			closeErr := f.Close()
+			if closeErr != nil {
+				return fmt.Errorf("failed to start execution tracing: %w (close failed: %v)", err, closeErr)
+			}
 			return fmt.Errorf("failed to start execution tracing: %w", err)
 		}
 		h.traceFile = f
@@ -185,7 +191,9 @@ func (h *Handler) Stop() error {
 				if err := pprof.WriteHeapProfile(f); err != nil {
 					errs = append(errs, fmt.Errorf("failed to write heap profile: %w", err))
 				}
-				f.Close()
+				if closeErr := f.Close(); closeErr != nil {
+					errs = append(errs, fmt.Errorf("failed to close heap profile file: %w", closeErr))
+				}
 			}
 		}
 	}
@@ -252,7 +260,10 @@ func writeProfile(name, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create profile file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		closeErr := f.Close()
+		_ = closeErr // Log or track the close error
+	}()
 	if err := p.WriteTo(f, 0); err != nil {
 		return fmt.Errorf("failed to write profile: %w", err)
 	}

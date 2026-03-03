@@ -25,7 +25,11 @@ func TestStaticFileContentType(t *testing.T) {
 	mux.ServeHTTP(recorder, req)
 
 	resp := recorder.Result()
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Logf("Failed to close response body: %v", closeErr)
+		}
+	}()
 
 	// Read the response body to ensure it's working
 	_, err = io.ReadAll(resp.Body)

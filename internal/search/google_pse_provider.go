@@ -71,7 +71,10 @@ func (g *GooglePSEProvider) Search(ctx context.Context, query string, numResults
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		closeErr := resp.Body.Close()
+		_ = closeErr // Log error but don't fail the request handling
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

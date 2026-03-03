@@ -21,7 +21,7 @@ func NewCerebrasProvider(apiKey string) *CerebrasProvider {
 	return &CerebrasProvider{
 		apiKey: apiKey,
 		client: &http.Client{
-			Timeout: consts.Timeout30Seconds,
+			Timeout: consts.Timeout30,
 		},
 	}
 }
@@ -81,7 +81,9 @@ func (p *CerebrasProvider) ListModels(ctx context.Context) ([]*ModelInfo, error)
 	if err != nil {
 		return p.getFallbackModels(), nil // Return fallback on network error
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return p.getFallbackModels(), nil // Return fallback on API error
@@ -333,7 +335,9 @@ func (p *CerebrasProvider) ValidateAPIKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to validate API key: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("invalid API key")

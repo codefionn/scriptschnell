@@ -480,6 +480,48 @@ func TestAuthorizationActorAuthorizeWebFetchRequiresApproval(t *testing.T) {
 	}
 }
 
+func TestAuthorizationActorAuthorizeShellFormattingCommandAllowedWithoutLLM(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameShell, map[string]interface{}{"command": "gofmt -w ."})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if !decision.Allowed {
+		t.Fatalf("expected formatting command to be allowed without prompting")
+	}
+	if decision.RequiresUserInput {
+		t.Fatalf("expected formatting command to not require user input")
+	}
+}
+
+func TestAuthorizationActorAuthorizeShellFormattingCommandWithChainingRequiresApproval(t *testing.T) {
+	ctx := context.Background()
+	mockFS := fs.NewMockFS()
+	sess := session.NewSession("test", ".")
+	actor := NewAuthorizationActor("auth", mockFS, sess, nil, nil)
+
+	decision, err := actor.authorize(ctx, ToolNameShell, map[string]interface{}{"command": "gofmt -w . && rm -rf /tmp/foo"})
+	if err != nil {
+		t.Fatalf("authorize returned error: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("expected decision, got nil")
+	}
+	if decision.Allowed {
+		t.Fatalf("expected chained command to require authorization")
+	}
+	if !decision.RequiresUserInput {
+		t.Fatalf("expected chained command to require user input")
+	}
+}
+
 func TestAuthorizationActorDangerouslyAllowAllBypassesChecks(t *testing.T) {
 	ctx := context.Background()
 	mockFS := fs.NewMockFS()

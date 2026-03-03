@@ -107,7 +107,9 @@ func (mb *MessageBroker) InitializeSession(cfg *config.Config, providerMgr *prov
 		requireSandboxAuth,
 	)
 	if err != nil {
-		filesystem.Close()
+		if closeErr := filesystem.Close(); closeErr != nil {
+			return fmt.Errorf("failed to create orchestrator: %w (filesystem close failed: %v)", err, closeErr)
+		}
 		return fmt.Errorf("failed to create orchestrator: %w", err)
 	}
 
@@ -219,8 +221,19 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 				})
 			return nil
 		}
-		// Only send non-ephemeral important messages
-		if !msg.Ephemeral && msg.Message != "" {
+		// Handle streaming content from LLM (ReportNoStatus mode means stream to user)
+		// This is the primary way assistant messages are delivered
+		if msg.ShouldStream() && msg.Message != "" {
+			logger.Debug("Progress (streaming): %s", msg.Message)
+			callback(&WebMessage{
+				Type:    MessageTypeChat,
+				Role:    "assistant",
+				Content: msg.Message,
+			})
+			return nil
+		}
+		// Send status updates as system messages (ReportJustStatus or ReportStreamAndStatus)
+		if msg.ShouldStatus() && !msg.Ephemeral && msg.Message != "" {
 			logger.Debug("Progress: %s", msg.Message)
 			callback(&WebMessage{
 				Type:    MessageTypeSystem,
@@ -283,7 +296,7 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 	// This prevents sending to closed channels
 	select {
 	case <-done:
-	case <-time.After(consts.Timeout5Seconds):
+	case <-time.After(consts.Timeout5):
 		logger.Warn("Timeout waiting for response goroutine to finish")
 	}
 
@@ -438,7 +451,7 @@ func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName strin
 		logger.Debug("Authorization cancelled during ack wait for %s", authID)
 		cleanup()
 		return false, ctx.Err()
-	case <-time.After(consts.Timeout30Seconds):
+	case <-time.After(consts.Timeout30):
 		logger.Error("Authorization ack timeout for %s — dialog was not displayed", authID)
 		cleanup()
 		return false, fmt.Errorf("authorization timed out: dialog was not displayed by the frontend within 30 seconds")
@@ -694,7 +707,9 @@ func (mb *MessageBroker) LoadSessionByID(
 		requireSandboxAuth,
 	)
 	if err != nil {
-		filesystem.Close()
+		if closeErr := filesystem.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to create orchestrator: %w (filesystem close failed: %v)", err, closeErr)
+		}
 		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
 	}
 

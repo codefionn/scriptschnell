@@ -109,7 +109,7 @@ func (a *ErrorJudgeActor) llmJudge(ctx context.Context, msg *ErrorJudgeMessage) 
 	prompt := a.buildErrorJudgePrompt(msg)
 
 	// Call LLM with timeout
-	judgeCtx, cancel := context.WithTimeout(ctx, consts.Timeout10Seconds)
+	judgeCtx, cancel := context.WithTimeout(ctx, consts.Timeout10)
 	defer cancel()
 
 	result, err := a.llmClient.Complete(judgeCtx, prompt)
@@ -142,9 +142,9 @@ func (a *ErrorJudgeActor) buildErrorJudgePrompt(msg *ErrorJudgeMessage) string {
 	sb.WriteString("- Invalid request/parameter errors: HALT (bad input)\n")
 	sb.WriteString("- Unknown errors after 3+ attempts: HALT (prevent infinite loops)\n\n")
 
-	sb.WriteString(fmt.Sprintf("Current attempt: %d of %d\n", msg.AttemptNumber, msg.MaxAttempts))
-	sb.WriteString(fmt.Sprintf("Model: %s\n", msg.ModelID))
-	sb.WriteString(fmt.Sprintf("Error: %v\n\n", msg.Error))
+	fmt.Fprintf(&sb, "Current attempt: %d of %d\n", msg.AttemptNumber, msg.MaxAttempts)
+	fmt.Fprintf(&sb, "Model: %s\n", msg.ModelID)
+	fmt.Fprintf(&sb, "Error: %v\n\n", msg.Error)
 
 	sb.WriteString("Analyze this error and provide your decision in the exact format above.")
 
@@ -369,7 +369,7 @@ func (c *ErrorJudgeActorClient) Judge(ctx context.Context, err error, attemptNum
 		return ErrorJudgeDecision{}, ctx.Err()
 	case decision := <-response:
 		return decision, nil
-	case <-time.After(consts.Timeout10Seconds + consts.Timeout5Seconds):
+	case <-time.After(consts.Timeout10 + consts.Timeout5):
 		return ErrorJudgeDecision{}, fmt.Errorf("error judge timeout")
 	}
 }

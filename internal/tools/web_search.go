@@ -185,22 +185,22 @@ func formatSearchResults(response *search.SearchResponse) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Search results for: %s\n\n", response.Query))
-	sb.WriteString(fmt.Sprintf("Found %d result(s):\n\n", len(response.Results)))
+	fmt.Fprintf(&sb, "Search results for: %s\n\n", response.Query)
+	fmt.Fprintf(&sb, "Found %d result(s):\n\n", len(response.Results))
 
 	for i, result := range response.Results {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, result.Title))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, result.Title)
 		if result.URL != "" {
-			sb.WriteString(fmt.Sprintf("   URL: %s\n", result.URL))
+			fmt.Fprintf(&sb, "   URL: %s\n", result.URL)
 		}
 		if result.Snippet != "" {
-			sb.WriteString(fmt.Sprintf("   %s\n", result.Snippet))
+			fmt.Fprintf(&sb, "   %s\n", result.Snippet)
 		}
 		if result.Content != "" && len(result.Content) > 500 {
 			// Include a preview of full content if available
-			sb.WriteString(fmt.Sprintf("   Preview: %s...\n", result.Content[:500]))
+			fmt.Fprintf(&sb, "   Preview: %s...\n", result.Content[:500])
 		} else if result.Content != "" {
-			sb.WriteString(fmt.Sprintf("   Content: %s\n", result.Content))
+			fmt.Fprintf(&sb, "   Content: %s\n", result.Content)
 		}
 		sb.WriteString("\n")
 	}

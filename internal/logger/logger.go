@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -248,7 +249,12 @@ func (l *Logger) Close() error {
 	defer l.mu.Unlock()
 
 	if l.file != nil {
-		return l.file.Close()
+		err := l.file.Close()
+		if err == nil || errors.Is(err, os.ErrClosed) {
+			l.file = nil
+			return nil
+		}
+		return err
 	}
 	return nil
 }

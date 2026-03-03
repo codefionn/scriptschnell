@@ -23,6 +23,8 @@ type SocketChatCompletedMsg struct {
 }
 
 // handleSocketConnection manages socket connection lifecycle
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) handleSocketConnection() tea.Cmd {
 	if m.socketFactory == nil {
 		return nil
@@ -59,6 +61,8 @@ func (m *Model) handleSocketConnection() tea.Cmd {
 }
 
 // handleSocketDisconnection handles socket disconnection
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) handleSocketDisconnection(err error) tea.Cmd {
 	logger.Warn("Socket disconnected: %v", err)
 
@@ -86,6 +90,8 @@ func (m *Model) handleSocketDisconnection(err error) tea.Cmd {
 }
 
 // handleSocketReconnecting handles socket reconnection attempts
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) handleSocketReconnecting(attempt int, maxAttempts int) tea.Cmd {
 	m.processingStatus = fmt.Sprintf("Reconnecting... (%d/%d)", attempt, maxAttempts)
 	m.spinnerActive = true
@@ -94,6 +100,8 @@ func (m *Model) handleSocketReconnecting(attempt int, maxAttempts int) tea.Cmd {
 }
 
 // handleSocketReconnected handles successful reconnection
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) handleSocketReconnected() tea.Cmd {
 	logger.Info("Socket reconnected successfully")
 	m.AddSystemMessage("Reconnected to socket server")
@@ -109,6 +117,8 @@ func (m *Model) handleSocketReconnected() tea.Cmd {
 }
 
 // handleSocketAuthorizationResponseMsg processes authorization responses in socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) handleSocketAuthorizationResponseMsg(msg SocketAuthorizationResponseMsg) tea.Cmd {
 	if m.useSocketMode && m.socketFactory != nil {
 		if err := m.handleSocketAuthorizationResponse(msg.RequestID, msg.Approved); err != nil {
@@ -119,6 +129,8 @@ func (m *Model) handleSocketAuthorizationResponseMsg(msg SocketAuthorizationResp
 }
 
 // handleSocketQuestionResponseMsg processes question responses in socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) handleSocketQuestionResponseMsg(msg SocketQuestionResponseMsg) tea.Cmd {
 	if m.useSocketMode && m.socketFactory != nil {
 		if err := m.handleSocketQuestionResponse(msg.RequestID, msg.Answers); err != nil {
@@ -141,6 +153,8 @@ type SocketQuestionResponseMsg struct {
 }
 
 // sendSocketAuthorizationResponse sends authorization response to the socket server
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) sendSocketAuthorizationResponse(requestID string, approved bool) {
 	if m.program != nil {
 		m.program.Send(SocketAuthorizationResponseMsg{
@@ -151,6 +165,8 @@ func (m *Model) sendSocketAuthorizationResponse(requestID string, approved bool)
 }
 
 // sendSocketQuestionResponse sends question response to the socket server
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) sendSocketQuestionResponse(requestID string, answers map[string]string) {
 	if m.program != nil {
 		m.program.Send(SocketQuestionResponseMsg{
@@ -161,6 +177,8 @@ func (m *Model) sendSocketQuestionResponse(requestID string, answers map[string]
 }
 
 // updateAuthorizationDialogForSocketMode updates authorization dialog handling for socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) updateAuthorizationDialogForSocketMode(authID string, approved bool) {
 	if m.useSocketMode && m.socketFactory != nil {
 		// Send response via socket
@@ -175,6 +193,8 @@ func (m *Model) updateAuthorizationDialogForSocketMode(authID string, approved b
 }
 
 // updateQuestionDialogForSocketMode updates question dialog handling for socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) updateQuestionDialogForSocketMode(requestID string, answers map[string]string) {
 	if m.useSocketMode && m.socketFactory != nil {
 		// Send response via socket
@@ -189,6 +209,8 @@ func (m *Model) updateQuestionDialogForSocketMode(requestID string, answers map[
 }
 
 // checkSocketConnectionStatus checks if socket is still connected
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) checkSocketConnectionStatus() tea.Cmd {
 	if !m.useSocketMode || m.socketFactory == nil {
 		return nil
@@ -203,6 +225,8 @@ func (m *Model) checkSocketConnectionStatus() tea.Cmd {
 }
 
 // getSocketStatusIndicator returns a status indicator for socket connection
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) getSocketStatusIndicator() string {
 	if !m.useSocketMode {
 		return ""

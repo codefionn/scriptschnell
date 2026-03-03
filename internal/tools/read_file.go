@@ -285,15 +285,15 @@ func (t *ReadFileTool) formatUIResult(path, content string, lineCount int) strin
 
 	// Create UI result with plain content
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📖 **Read file:** `%s`\n\n", path))
+	fmt.Fprintf(&sb, "📖 **Read file:** `%s`\n\n", path)
 
 	// Add file info
 	if language != "" {
-		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines | Language: %s\n\n`, lineCount, language))
+		fmt.Fprintf(&sb, `📊 **File info:** %d lines | Language: %s\n\n`, lineCount, language)
 		// Use language tag for Glamour's syntax highlighting
 		sb.WriteString("```" + language + "\n")
 	} else {
-		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines\n\n`, lineCount))
+		fmt.Fprintf(&sb, `📊 **File info:** %d lines\n\n`, lineCount)
 		sb.WriteString("```\n")
 	}
 
@@ -314,17 +314,17 @@ func (t *ReadFileTool) formatUIResultWithTruncation(path, content string, shownL
 	numberedContent := addLineNumbers(lines, 1)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📖 **Read file:** `%s`\n\n", path))
+	fmt.Fprintf(&sb, "📖 **Read file:** `%s`\n\n", path)
 
 	// Add file info with truncation warning
 	if language != "" {
-		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines | Language: %s\n\n`, totalLines, language))
+		fmt.Fprintf(&sb, `📊 **File info:** %d lines | Language: %s\n\n`, totalLines, language)
 	} else {
-		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d lines\n\n`, totalLines))
+		fmt.Fprintf(&sb, `📊 **File info:** %d lines\n\n`, totalLines)
 	}
 
 	// Add prominent truncation warning
-	sb.WriteString(fmt.Sprintf("⚠️  **File truncated:** Showing lines 1-%d of %d total lines. Use `sections` parameter to read specific ranges.\n\n", shownLines, totalLines))
+	fmt.Fprintf(&sb, "⚠️  **File truncated:** Showing lines 1-%d of %d total lines. Use `sections` parameter to read specific ranges.\n\n", shownLines, totalLines)
 
 	// Add code block with plain content
 	if language != "" {
@@ -345,13 +345,13 @@ func (t *ReadFileTool) formatMultiSectionUIResult(path string, sections []sectio
 	language := syntax.DetectLanguage(path)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📖 **Read file (multiple sections):** `%s`\n\n", path))
+	fmt.Fprintf(&sb, "📖 **Read file (multiple sections):** `%s`\n\n", path)
 
 	// Add file info
 	if language != "" {
-		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d total lines | Reading %d sections | Language: %s\n\n`, totalFileLines, len(sections), language))
+		fmt.Fprintf(&sb, `📊 **File info:** %d total lines | Reading %d sections | Language: %s\n\n`, totalFileLines, len(sections), language)
 	} else {
-		sb.WriteString(fmt.Sprintf(`📊 **File info:** %d total lines | Reading %d sections\n\n`, totalFileLines, len(sections)))
+		fmt.Fprintf(&sb, `📊 **File info:** %d total lines | Reading %d sections\n\n`, totalFileLines, len(sections))
 	}
 
 	// Process each section
@@ -362,7 +362,7 @@ func (t *ReadFileTool) formatMultiSectionUIResult(path string, sections []sectio
 		}
 
 		// Add section info
-		sb.WriteString(fmt.Sprintf("**Lines %d-%d**\n\n", section.fromLine, section.toLine))
+		fmt.Fprintf(&sb, "**Lines %d-%d**\n\n", section.fromLine, section.toLine)
 
 		// Add line numbers to section content
 		lines := strings.Split(section.content, "\n")
@@ -393,7 +393,7 @@ func addLineNumbers(lines []string, startLine int) string {
 	var sb strings.Builder
 	for i, line := range lines {
 		lineNum := startLine + i
-		sb.WriteString(fmt.Sprintf("%*d | %s", maxDigits, lineNum, line))
+		fmt.Fprintf(&sb, "%*d | %s", maxDigits, lineNum, line)
 		if i < len(lines)-1 {
 			sb.WriteString("\n")
 		}

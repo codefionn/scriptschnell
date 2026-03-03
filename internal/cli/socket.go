@@ -134,12 +134,15 @@ func (c *SocketCLI) Run(ctx context.Context, prompt string) error {
 					mode = progress.ReportMode(modeVal)
 				}
 			}
-			progressCallback(progress.Update{
+			if err := progressCallback(progress.Update{
 				Message:   msg.Message,
 				Reasoning: msg.Reasoning,
 				Mode:      mode,
 				Ephemeral: msg.Ephemeral,
-			})
+			}); err != nil {
+				// Log error but don't break the flow
+				fmt.Fprintf(os.Stderr, "[progress callback error: %v]\n", err)
+			}
 		}
 	})
 

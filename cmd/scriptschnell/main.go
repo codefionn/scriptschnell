@@ -566,7 +566,9 @@ func runSocketServer(cfg *config.Config, providerMgr *provider.Manager, secretsP
 	pf := pidfile.New(pidfilePath)
 	if err := pf.Write(); err != nil {
 		// Clean up lockfile before returning error
-		lf.Release()
+		if releaseErr := lf.Release(); releaseErr != nil {
+			logger.Warn("Failed to release lockfile: %v", releaseErr)
+		}
 		return fmt.Errorf("failed to write pidfile: %w", err)
 	}
 	logger.Info("PID file written: %s", pidfilePath)
@@ -720,12 +722,27 @@ func parseCLIArgs(args []string) (string, *cli.Options, bool, *pprof.Config, boo
 	fs.IntVar(&pprofBlockProfileRate, "pprof.block-rate", 1, "Blocking profile sampling rate (1/n events, default: 1)")
 	fs.IntVar(&pprofMutexProfileFraction, "pprof.mutex-fraction", 1, "Mutex profile sampling fraction (1/n events, default: 1)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0])
-		fmt.Fprintln(fs.Output(), "CLI mode automatically connects to a running socket server if one is detected.")
-		fmt.Fprintln(fs.Output(), "Use --no-socket to disable auto-detection and run locally.")
-		fmt.Fprintln(fs.Output(), "Use --connect-to-socket to force socket mode (fails if server is not running).")
-		fmt.Fprintln(fs.Output())
-		fmt.Fprintln(fs.Output(), "Options:")
+		if _, err := fmt.Fprintf(fs.Output(), "Usage: %s [options] \"your prompt here\"\n\n", os.Args[0]); err != nil {
+			fmt.Printf("Failed to write usage: %v\n", err)
+			return
+		}
+		if _, err := fmt.Fprintln(fs.Output(), "CLI mode automatically connects to a running socket server if one is detected."); err != nil {
+			fmt.Printf("Failed to write usage: %v\n", err)
+			return
+		}
+		if _, err := fmt.Fprintln(fs.Output(), "Use --no-socket to disable auto-detection and run locally."); err != nil {
+			fmt.Printf("Failed to write usage: %v\n", err)
+			return
+		}
+		if _, err := fmt.Fprintln(fs.Output(), "Use --connect-to-socket to force socket mode (fails if server is not running)."); err != nil {
+			fmt.Printf("Failed to write usage: %v\n", err)
+			return
+		}
+		if _, err := fmt.Fprintln(fs.Output()); err != nil {
+			fmt.Printf("Failed to write usage: %v\n", err)
+			return
+		}
+		_, _ = fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
 
@@ -921,7 +938,11 @@ func runTUI(cfg *config.Config, providerMgr *provider.Manager, cliOptions *cli.O
 			logger.Error("Failed to create RuntimeFactory: %v", err)
 			return fmt.Errorf("failed to create RuntimeFactory: %w", err)
 		}
-		defer factory.Close()
+		defer func() {
+			if err := factory.Close(); err != nil {
+				logger.Error("Failed to close RuntimeFactory: %v", err)
+			}
+		}()
 	}
 
 	// Create TUI model with appropriate factory

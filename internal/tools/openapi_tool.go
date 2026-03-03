@@ -66,7 +66,7 @@ type OpenAPITool struct {
 func NewOpenAPITool(cfg *OpenAPIToolConfig) *OpenAPITool {
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = consts.Timeout30Seconds
+		timeout = consts.Timeout30
 	}
 
 	client := cfg.HTTPClient
@@ -237,7 +237,9 @@ func (o *OpenAPITool) Execute(ctx context.Context, params map[string]interface{}
 	if err != nil {
 		return &ToolResult{Error: fmt.Sprintf("request failed: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

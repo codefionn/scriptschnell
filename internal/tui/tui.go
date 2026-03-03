@@ -64,7 +64,7 @@ func safeSendError(ch chan<- error, err error) {
 }
 
 const (
-	errorDisplayDuration = consts.Timeout5Seconds
+	errorDisplayDuration = consts.Timeout5
 )
 
 // Message represents a chat message with metadata
@@ -228,17 +228,6 @@ type Model struct {
 	pendingSocketAuthorizations map[string]pendingSocketAuthorization
 	pendingSocketQuestions      map[string]pendingSocketQuestion
 }
-
-func init() {
-	// Initialize socket mode maps at package level
-	pendingSocketAuthorizations = make(map[string]pendingSocketAuthorization)
-	pendingSocketQuestions = make(map[string]pendingSocketQuestion)
-}
-
-var (
-	pendingSocketAuthorizations map[string]pendingSocketAuthorization
-	pendingSocketQuestions      map[string]pendingSocketQuestion
-)
 
 // pendingSocketAuthorization tracks a pending socket authorization request
 type pendingSocketAuthorization struct {
@@ -549,6 +538,21 @@ func NewWithSocketFactory(socketFactory *SocketRuntimeFactory, cfg *config.Confi
 
 	// Initialize context file (will be fetched from server)
 	m.contextFile = ""
+
+	// Initialize tabs - in socket mode create a socket session
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	workspace := m.workingDir
+	tabSession, err := socketFactory.CreateSocketSession(ctx, workspace, m.workingDir)
+	cancel()
+	if err != nil {
+		logger.Warn("Failed to create socket session: %v", err)
+		// Fallback to empty tabs
+	} else {
+		m.sessions = []*TabSession{tabSession}
+		m.activeSessionIdx = 0
+		m.sessionIDCounter = tabSession.ID + 1
+		logger.Info("Default socket session created. Total sessions: %d", len(m.sessions))
+	}
 
 	return m
 }
@@ -1585,7 +1589,7 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var formattedAnswers strings.Builder
 			for i, answer := range answers {
 				if answer != "" {
-					formattedAnswers.WriteString(fmt.Sprintf("Question %d: %s\n", i+1, answer))
+					fmt.Fprintf(&formattedAnswers, "Question %d: %s\n", i+1, answer)
 				}
 			}
 			response = formattedAnswers.String()
@@ -1623,7 +1627,7 @@ func (m *Model) handleUserQuestionDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 				select {
 				case m.userQuestionError <- fmt.Errorf("timeout sending response to planning agent after 30 seconds"):
 					logger.Debug("Sent timeout error to planning agent")
-				case <-time.After(consts.Timeout5Seconds):
+				case <-time.After(consts.Timeout5):
 					logger.Warn("Could not send error to planning agent - error channel also blocked")
 				}
 			}
@@ -1715,7 +1719,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.overlayActiveMu.RLock()
 	overlayActive := m.overlayActive
 	m.overlayActiveMu.RUnlock()
-	if !(overlayActive && isKeyMsg(msg)) && !shouldBlockTextarea {
+	if (!overlayActive || !isKeyMsg(msg)) && !shouldBlockTextarea {
 		m.textarea, tiCmd = m.textarea.Update(msg)
 
 		// Sanitize ANSI sequences
@@ -1954,30 +1958,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showTodoPanel && m.todoContentHeight > m.todoViewport.Height {
 				m.todoViewport.GotoBottom()
 				return m, baseCmd
-			}
-
-		default:
-			// Handle tool mode shortcuts
-			if m.toolMode {
-				if shortcutMsg, handled := m.toolShortcutHandler.GetShortcuts().HandleKey(msg.String(), true); handled {
-					// Execute the shortcut
-					cmd := m.toolShortcutHandler.Handle(shortcutMsg, m.messages)
-
-					// Update selection display
-					if shortcutMsg.Shortcut == "select" {
-						toolIdx := shortcutMsg.ToolIdx
-						if toolIdx >= 0 && toolIdx < CountToolMessages(m.messages) {
-							// Find the actual message index
-							msgIdx := GetToolMessageIndex(m.messages, toolIdx)
-							if msgIdx >= 0 {
-								m.AddSystemMessage(fmt.Sprintf("Selected tool: %s", m.messages[msgIdx].toolName))
-							}
-						}
-					}
-
-					m.viewportDirty = true
-					return m, tea.Batch(baseCmd, cmd, m.scheduleViewportRefresh())
-				}
 			}
 
 		case "enter":
@@ -2394,7 +2374,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// to avoid blocking the TUI event loop while waiting for the receiver.
 		m.authorizationMu.Lock()
 		request, ok := m.pendingAuthorizations[msg.AuthID]
-		var tabIdxToUpdate int = -1
+		var tabIdxToUpdate = -1
 		if ok {
 			// Get tab index and remove from pending while holding lock
 			tabIdxToUpdate = m.findTabIndexByID(request.TabID)
@@ -2419,7 +2399,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			select {
 			case request.ResponseChan <- msg.Approved:
 				logger.Info("Authorization response sent for authID %s: %v", msg.AuthID, msg.Approved)
-			case <-time.After(consts.Timeout5Seconds):
+			case <-time.After(consts.Timeout5):
 				logger.Error("Timeout sending authorization response for authID %s after 5 seconds - receiver may have timed out", msg.AuthID)
 			}
 		}
@@ -2648,6 +2628,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.AddSystemMessage(fmt.Sprintf("Copy failed: %s", msg.Error))
 		}
+		return m, baseCmd
+
+	// Socket mode message handlers
+	case SocketChatMessageMsg:
+		m.handleSocketChatMessage(msg)
+		return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+
+	case SocketToolCallMsg:
+		m.handleSocketToolCall(msg)
+		return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+
+	case SocketToolResultMsg:
+		m.handleSocketToolResult(msg)
+		return m, tea.Batch(baseCmd, m.scheduleViewportRefresh())
+
+	case SocketProgressMsg:
+		m.handleSocketProgress(msg)
+		return m, baseCmd
+
+	case SocketAuthorizationRequestMsg:
+		m.handleSocketAuthorizationRequest(msg)
+		return m, baseCmd
+
+	case SocketQuestionRequestMsg:
+		m.handleSocketQuestionRequest(msg)
 		return m, baseCmd
 	}
 
@@ -3029,6 +3034,9 @@ func (m *Model) autoSaveSession(runtime *TabRuntime, orchErr error) {
 
 func (m *Model) startPrompt(tabIdx int, input string) tea.Cmd {
 	// In concurrent mode, directly start the prompt for the specified tab
+	if m.useSocketMode {
+		return m.startPromptForTabSocket(tabIdx, input)
+	}
 	return m.startPromptForTab(tabIdx, input)
 }
 
@@ -3068,7 +3076,10 @@ func (m *Model) processNextQueuedPromptForTab(tabIdx int) tea.Cmd {
 		m.addMessageForTab(tabIdx, "System", fmt.Sprintf("Processing queued prompt: %s", preview))
 	}
 
-	// Start prompt for this specific tab
+	// Start prompt for this specific tab (use appropriate mode)
+	if m.useSocketMode {
+		return m.startPromptForTabSocket(tabIdx, next)
+	}
 	return m.startPromptForTab(tabIdx, next)
 }
 

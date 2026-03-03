@@ -39,6 +39,7 @@ type ActorRef struct {
 	sequenceMu sync.Mutex
 	ctx        context.Context
 	health     *HealthCheckable
+	events     *ActorEventPublisher
 }
 
 // NewActorRef creates a new actor reference
@@ -60,6 +61,7 @@ func NewActorRef(id string, actor Actor, mailboxSize int, opts ...ActorRefOption
 		id:      id,
 		actor:   actor,
 		mailbox: make(chan Message, mailboxSize),
+		events:  NewActorEventPublisher(id, ""),
 	}
 
 	// Initialize health monitoring
@@ -78,6 +80,16 @@ func NewActorRef(id string, actor Actor, mailboxSize int, opts ...ActorRefOption
 // ID returns the actor's ID
 func (ref *ActorRef) ID() string {
 	return ref.id
+}
+
+// EventPublisher returns the actor's event publisher for sending events to frontends
+func (ref *ActorRef) EventPublisher() *ActorEventPublisher {
+	return ref.events
+}
+
+// SetSessionID sets the session ID for event publishing
+func (ref *ActorRef) SetSessionID(sessionID string) {
+	ref.events = ref.events.WithSession(sessionID)
 }
 
 // Send sends a message to the actor (non-blocking)

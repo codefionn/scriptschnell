@@ -374,10 +374,7 @@ func (t *WaitProgramTool) Execute(ctx context.Context, params map[string]interfa
 	} else if !jobCompleted() {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
-		for {
-			if jobCompleted() {
-				break
-			}
+		for !jobCompleted() {
 			select {
 			case <-ctx.Done():
 				return &ToolResult{Error: ctx.Err().Error()}

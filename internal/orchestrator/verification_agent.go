@@ -186,7 +186,7 @@ func (a *VerificationAgent) buildSystemPrompt(projectTypes []project.ProjectType
 	if len(questionsAnswered) > 0 {
 		var sb strings.Builder
 		for i, qa := range questionsAnswered {
-			sb.WriteString(fmt.Sprintf("%d. Q: %s\n   A: %s\n", i+1, qa.Question, qa.Answer))
+			fmt.Fprintf(&sb, "%d. Q: %s\n   A: %s\n", i+1, qa.Question, qa.Answer)
 		}
 		questionsStr = sb.String()
 	}
@@ -605,7 +605,7 @@ func (a *VerificationAgent) formatVerificationFailureFeedback(result *Verificati
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("VERIFICATION FAILED (Attempt %d/%d)\n\n", attempt, maxVerificationRetries))
+	fmt.Fprintf(&sb, "VERIFICATION FAILED (Attempt %d/%d)\n\n", attempt, maxVerificationRetries)
 
 	hasDetails := false
 	if result.Summary != "" {
@@ -618,7 +618,7 @@ func (a *VerificationAgent) formatVerificationFailureFeedback(result *Verificati
 	if len(result.Errors) > 0 {
 		sb.WriteString("Errors:\n")
 		for _, err := range result.Errors {
-			sb.WriteString(fmt.Sprintf("- %s\n", err))
+			fmt.Fprintf(&sb, "- %s\n", err)
 		}
 		sb.WriteString("\n")
 		hasDetails = true
@@ -627,7 +627,7 @@ func (a *VerificationAgent) formatVerificationFailureFeedback(result *Verificati
 	if len(result.Warnings) > 0 {
 		sb.WriteString("Warnings:\n")
 		for _, warn := range result.Warnings {
-			sb.WriteString(fmt.Sprintf("- %s\n", warn))
+			fmt.Fprintf(&sb, "- %s\n", warn)
 		}
 		sb.WriteString("\n")
 		hasDetails = true
@@ -659,16 +659,16 @@ func (a *VerificationAgent) reportResults(result *VerificationResult, progressCb
 	}
 
 	// Individual check results
-	sb.WriteString(fmt.Sprintf("- Build: %s\n", statusText(result.BuildPassed)))
-	sb.WriteString(fmt.Sprintf("- Format: %s\n", statusText(result.FormatPassed)))
-	sb.WriteString(fmt.Sprintf("- Lint: %s\n", statusText(result.LintPassed)))
-	sb.WriteString(fmt.Sprintf("- Tests: %s\n", statusText(result.TestsPassed)))
+	fmt.Fprintf(&sb, "- Build: %s\n", statusText(result.BuildPassed))
+	fmt.Fprintf(&sb, "- Format: %s\n", statusText(result.FormatPassed))
+	fmt.Fprintf(&sb, "- Lint: %s\n", statusText(result.LintPassed))
+	fmt.Fprintf(&sb, "- Tests: %s\n", statusText(result.TestsPassed))
 
 	// Errors
 	if len(result.Errors) > 0 {
 		sb.WriteString("\n**Errors:**\n")
 		for _, err := range result.Errors {
-			sb.WriteString(fmt.Sprintf("- %s\n", err))
+			fmt.Fprintf(&sb, "- %s\n", err)
 		}
 	}
 
@@ -676,13 +676,13 @@ func (a *VerificationAgent) reportResults(result *VerificationResult, progressCb
 	if len(result.Warnings) > 0 {
 		sb.WriteString("\n**Warnings:**\n")
 		for _, warn := range result.Warnings {
-			sb.WriteString(fmt.Sprintf("- %s\n", warn))
+			fmt.Fprintf(&sb, "- %s\n", warn)
 		}
 	}
 
 	// Summary
 	if result.Summary != "" {
-		sb.WriteString(fmt.Sprintf("\n**Summary:** %s\n", result.Summary))
+		fmt.Fprintf(&sb, "\n**Summary:** %s\n", result.Summary)
 	}
 
 	sb.WriteString("\n---\n")

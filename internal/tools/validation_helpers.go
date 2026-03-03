@@ -18,20 +18,20 @@ func formatValidationWarning(path string, content string, result *syntax.Validat
 	lines := strings.Split(content, "\n")
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d syntax error(s) in %s:\n",
-		len(result.Errors), filepath.Base(path)))
+	fmt.Fprintf(&sb, "Found %d syntax error(s) in %s:\n",
+		len(result.Errors), filepath.Base(path))
 
 	// Limit to first 5 errors for readability
 	maxErrors := 5
 	for i, syntaxErr := range result.Errors {
 		if i >= maxErrors {
-			sb.WriteString(fmt.Sprintf("  ... and %d more error(s)\n",
-				len(result.Errors)-maxErrors))
+			fmt.Fprintf(&sb, "  ... and %d more error(s)\n",
+				len(result.Errors)-maxErrors)
 			break
 		}
 
-		sb.WriteString(fmt.Sprintf("  • Line %d, Column %d: %s\n",
-			syntaxErr.Line, syntaxErr.Column, syntaxErr.Message))
+		fmt.Fprintf(&sb, "  • Line %d, Column %d: %s\n",
+			syntaxErr.Line, syntaxErr.Column, syntaxErr.Message)
 
 		// Extract context lines (4 lines before and after)
 		context := extractContextLines(lines, syntaxErr.Line, 4)
@@ -64,7 +64,7 @@ func extractContextLines(lines []string, errorLine int, contextLines int) string
 		if i == errorLine-1 {
 			prefix = "  > " // Mark the error line
 		}
-		sb.WriteString(fmt.Sprintf("%s%d: %s\n", prefix, lineNum, lines[i]))
+		fmt.Fprintf(&sb, "%s%d: %s\n", prefix, lineNum, lines[i])
 	}
 
 	return sb.String()

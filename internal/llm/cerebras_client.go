@@ -89,7 +89,9 @@ func (c *CerebrasClient) CompleteWithRequest(ctx context.Context, req *Completio
 	if err != nil {
 		return nil, fmt.Errorf("cerebras completion failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -138,7 +140,9 @@ func (c *CerebrasClient) Stream(ctx context.Context, req *CompletionRequest, cal
 	if err != nil {
 		return fmt.Errorf("cerebras stream failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

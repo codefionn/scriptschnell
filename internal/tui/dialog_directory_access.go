@@ -62,8 +62,8 @@ func (d dirAccessChoiceDelegate) Render(w io.Writer, m list.Model, index int, li
 	}
 
 	desc := authChoiceItemStyle.Render(roleDescStyle.Render(i.description))
-	fmt.Fprintln(w, title)
-	fmt.Fprintln(w, desc)
+	_, _ = fmt.Fprintln(w, title)
+	_, _ = fmt.Fprintln(w, desc)
 }
 
 var (

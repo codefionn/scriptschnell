@@ -12,8 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codefionn/scriptschnell/internal/config"
 	"github.com/codefionn/scriptschnell/internal/consts"
 	"github.com/codefionn/scriptschnell/internal/logger"
+	"github.com/codefionn/scriptschnell/internal/provider"
+	"github.com/codefionn/scriptschnell/internal/securemem"
 	"github.com/codefionn/scriptschnell/internal/session"
 )
 
@@ -44,7 +47,6 @@ type Client struct {
 
 	// Authentication state
 	authenticated bool
-	authMethod    string
 	clientType    string
 
 	// Control
@@ -56,12 +58,17 @@ type Client struct {
 	// Broker for LLM interactions
 	broker *MessageBroker
 
-	// Dependencies - to be populated when orchestrator integration is added
-	// orchestrator *orchestrator.Orchestrator
+	// Event bridge for actor events
+	eventBridge *EventBridge
+
+	// Dependencies
+	providerMgr     *provider.Manager
+	secretsPassword *securemem.String
+	cfg             *config.Config
 }
 
 // NewClient creates a new client instance
-func NewClient(id string, conn net.Conn, hub *Hub, sessionMgr *SessionManager, workspaceMgr *WorkspaceManager, broker *MessageBroker) *Client {
+func NewClient(id string, conn net.Conn, hub *Hub, sessionMgr *SessionManager, workspaceMgr *WorkspaceManager, broker *MessageBroker, providerMgr *provider.Manager, secretsPassword *securemem.String, cfg *config.Config, eventBridge *EventBridge) *Client {
 	return &Client{
 		ID:               id,
 		conn:             conn,
@@ -69,6 +76,10 @@ func NewClient(id string, conn net.Conn, hub *Hub, sessionMgr *SessionManager, w
 		sessionManager:   sessionMgr,
 		workspaceManager: workspaceMgr,
 		broker:           broker,
+		providerMgr:      providerMgr,
+		secretsPassword:  secretsPassword,
+		cfg:              cfg,
+		eventBridge:      eventBridge,
 		send:             make(chan *BaseMessage, 256),
 		messages:         make([]BaseMessage, 0),
 		stopChan:         make(chan struct{}),
@@ -102,6 +113,11 @@ func (c *Client) Stop() {
 		// Unregister from hub
 		c.hub.UnregisterClient(c)
 
+		// Unregister from event bridge
+		if c.eventBridge != nil {
+			c.eventBridge.UnregisterClient(c)
+		}
+
 		// Detach from session
 		sessionID := c.GetSession()
 		if c.sessionManager != nil {
@@ -118,7 +134,9 @@ func (c *Client) Stop() {
 
 		// Close connection
 		if c.conn != nil {
-			c.conn.Close()
+			if closeErr := c.conn.Close(); closeErr != nil {
+				logger.Warn("Failed to close connection for client %s: %v", c.ID, closeErr)
+			}
 		}
 
 		// Close send channel
@@ -146,7 +164,7 @@ func (c *Client) readPump() {
 			return
 		default:
 			// Set read deadline
-			if err := c.conn.SetReadDeadline(time.Now().Add(consts.Timeout60Seconds)); err != nil {
+			if err := c.conn.SetReadDeadline(time.Now().Add(consts.Timeout60)); err != nil {
 				logger.Error("Failed to set read deadline for client %s: %v", c.ID, err)
 				return
 			}
@@ -212,7 +230,7 @@ func (c *Client) writePump() {
 			}
 
 			// Set write deadline
-			if err := c.conn.SetWriteDeadline(time.Now().Add(consts.Timeout10Seconds)); err != nil {
+			if err := c.conn.SetWriteDeadline(time.Now().Add(consts.Timeout10)); err != nil {
 				logger.Error("Failed to set write deadline for client %s: %v", c.ID, err)
 				return
 			}
@@ -562,7 +580,7 @@ func (c *Client) handleSessionCreate(msg *BaseMessage) error {
 	if err != nil {
 		// Rollback session count
 		if c.workspaceManager != nil {
-			_, cancel := context.WithTimeout(context.Background(), consts.Timeout30Seconds)
+			_, cancel := context.WithTimeout(context.Background(), consts.Timeout30)
 			defer cancel()
 			if ws, ok := c.workspaceManager.GetWorkspaceByPath(workingDir); ok {
 				c.workspaceManager.UpdateWorkspaceSessionCount(ws.ID, -1)
@@ -576,7 +594,7 @@ func (c *Client) handleSessionCreate(msg *BaseMessage) error {
 	if err := c.sessionManager.AttachClient(c.ID, sessionID); err != nil {
 		// Rollback session count
 		if c.workspaceManager != nil {
-			_, cancel := context.WithTimeout(context.Background(), consts.Timeout30Seconds)
+			_, cancel := context.WithTimeout(context.Background(), consts.Timeout30)
 			defer cancel()
 			if ws, ok := c.workspaceManager.GetWorkspaceByPath(workingDir); ok {
 				c.workspaceManager.UpdateWorkspaceSessionCount(ws.ID, -1)
@@ -584,6 +602,11 @@ func (c *Client) handleSessionCreate(msg *BaseMessage) error {
 		}
 		c.SendError(msg.RequestID, ErrorCodeInternalError, "Failed to attach to session", err.Error())
 		return nil
+	}
+
+	// Register client with event bridge for this session
+	if c.eventBridge != nil {
+		c.eventBridge.RegisterSessionClient(sessionID, c)
 	}
 
 	// Update client session state
@@ -625,6 +648,11 @@ func (c *Client) handleSessionAttach(msg *BaseMessage) error {
 		return nil
 	}
 
+	// Register client with event bridge for this session
+	if c.eventBridge != nil {
+		c.eventBridge.RegisterSessionClient(data.SessionID, c)
+	}
+
 	// Get session info to update client state
 	if sessInfo, exists := c.sessionManager.GetSessionInfo(data.SessionID); exists {
 		c.SetSession(data.SessionID, sessInfo.WorkingDir)
@@ -649,6 +677,11 @@ func (c *Client) handleSessionDetach(msg *BaseMessage) error {
 	if sessionID == "" {
 		c.SendError(msg.RequestID, ErrorCodeInvalidRequest, "Not attached to a session", "")
 		return nil
+	}
+
+	// Unregister from event bridge
+	if c.eventBridge != nil && sessionID != "" {
+		c.eventBridge.UnregisterSessionClient(sessionID, c)
 	}
 
 	// Detach client from session
@@ -784,10 +817,22 @@ func (c *Client) handleChatSend(msg *BaseMessage) error {
 		return nil
 	}
 
-	// Set message callback for streaming responses
-	c.broker.SetMessageCallback(func(baseMsg *BaseMessage) {
-		c.Send(baseMsg)
-	})
+	// Register this client with the event bridge for this session
+	// This ensures the client receives events published by actors/broker for this session
+	if c.eventBridge != nil {
+		logger.Debug("[Client %s] Registering with event bridge for session %s", c.ID, sessionID)
+		c.eventBridge.RegisterSessionClient(sessionID, c)
+	} else {
+		logger.Warn("[Client %s] Event bridge is nil!", c.ID)
+	}
+
+	// Initialize session if needed - pass the event publisher so broker can publish events
+	existingSession, _ := c.sessionManager.GetSession(sessionID)
+	if err := c.broker.InitializeSession(c.cfg, c.providerMgr, c.secretsPassword, existingSession); err != nil {
+		logger.Error("Error initializing session for client %s: %v", c.ID, err)
+		c.SendError(msg.RequestID, ErrorCodeInternalError, "Failed to initialize session", err.Error())
+		return nil
+	}
 
 	// Process message through broker
 	ctx := context.Background()
@@ -1014,10 +1059,8 @@ func (c *Client) handleConfigSet(msg *BaseMessage) error {
 		}
 	}
 
-	// Update the orchestrator if there is one
-	if c.broker.GetOrchestrator() != nil {
-		// The orchestrator will pick up the new config values on next generation
-	}
+	// The orchestrator will pick up the new config values on next generation
+	_ = c.broker.GetOrchestrator() // Config is accessed dynamically from the orchestrator
 
 	// Send response
 	c.SendResponse(MessageTypeConfigSet, msg.RequestID, map[string]interface{}{

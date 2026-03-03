@@ -173,7 +173,7 @@ func (t *WriteFileReplaceSingleTool) Execute(ctx context.Context, params map[str
 		return &ToolResult{Error: fmt.Sprintf("found %d occurrences of old_string, but expected %d. Try to read more surrounding text and redo the edit.", count, expectedReplacements)}
 	}
 
-	finalContent := strings.Replace(content, oldString, normalizedNewString, -1)
+	finalContent := strings.ReplaceAll(content, oldString, normalizedNewString)
 	totalReplacements := count
 
 	if err := t.fs.WriteFile(ctx, path, []byte(finalContent)); err != nil {

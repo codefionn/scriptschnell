@@ -16,8 +16,7 @@ import (
 type SocketClientWrapper struct {
 	client       *socketclient.Client
 	config       *config.Config
-	socketPath   string      // Stored socket path for detection
-	providerMgr  interface{} // provider.Manager interface
+	socketPath   string // Stored socket path for detection
 	connected    bool
 	reconnecting bool
 
@@ -29,14 +28,12 @@ type SocketClientWrapper struct {
 	mu sync.RWMutex
 
 	// Message handlers for streaming responses
-	onChatMessage      func(msg socketclient.ChatMessage)
-	onToolCall         func(msg socketclient.ToolCall)
-	onToolResult       func(msg socketclient.ToolResult)
-	onProgress         func(msg socketclient.ProgressData)
-	onAuthorization    func(req socketclient.AuthorizationRequest)
-	onQuestion         func(req socketclient.QuestionRequest)
-	onSessionChanged   func(sessionID string)
-	onWorkspaceChanged func(workspace string)
+	onChatMessage   func(msg socketclient.ChatMessage)
+	onToolCall      func(msg socketclient.ToolCall)
+	onToolResult    func(msg socketclient.ToolResult)
+	onProgress      func(msg socketclient.ProgressData)
+	onAuthorization func(req socketclient.AuthorizationRequest)
+	onQuestion      func(req socketclient.QuestionRequest)
 
 	// Completion tracking
 	pendingPrompts map[string]chan struct{} // requestID -> completion channel
@@ -100,11 +97,16 @@ func (w *SocketClientWrapper) setupClientCallbacks() {
 
 	// Chat message callback
 	w.client.SetChatMessageCallback(func(msg socketclient.ChatMessage) {
+		logger.Debug("[SocketClientWrapper] Received chat message callback: session_id=%s, role=%s, content_len=%d", msg.SessionID, msg.Role, len(msg.Content))
 		w.mu.RLock()
 		handler := w.onChatMessage
 		w.mu.RUnlock()
 		if handler != nil {
+			logger.Debug("[SocketClientWrapper] Calling onChatMessage handler")
 			handler(msg)
+			logger.Debug("[SocketClientWrapper] onChatMessage handler completed")
+		} else {
+			logger.Warn("[SocketClientWrapper] onChatMessage handler is nil! Message dropped: session_id=%s, role=%s, content_len=%d", msg.SessionID, msg.Role, len(msg.Content))
 		}
 	})
 
@@ -190,16 +192,17 @@ func (w *SocketClientWrapper) IsReconnecting() bool {
 
 // Disconnect closes the connection
 func (w *SocketClientWrapper) Disconnect() {
-	w.client.Disconnect()
+	_ = w.client.Disconnect()
 }
 
 // Close terminates the client
 func (w *SocketClientWrapper) Close() {
-	w.client.Close()
+	_ = w.client.Close()
 }
 
 // SetChatMessageHandler sets the callback for chat messages
 func (w *SocketClientWrapper) SetChatMessageHandler(handler func(msg socketclient.ChatMessage)) {
+	logger.Debug("[SocketClientWrapper] SetChatMessageHandler called")
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.onChatMessage = handler

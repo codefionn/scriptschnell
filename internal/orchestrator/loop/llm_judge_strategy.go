@@ -55,7 +55,7 @@ func NewLLMJudgeStrategy(config *Config, llmClient llm.Client, modelID string, s
 // Falls back to pattern matching on any LLM failure.
 func (s *LLMJudgeStrategy) ShouldAutoContinue(state State, content string) bool {
 	// First check standard limits (via embedded DefaultStrategy)
-	if !s.DefaultStrategy.config.EnableAutoContinue {
+	if !s.config.EnableAutoContinue {
 		return false
 	}
 	if state.HasReachedAutoContinueLimit() {
@@ -63,7 +63,7 @@ func (s *LLMJudgeStrategy) ShouldAutoContinue(state State, content string) bool 
 	}
 
 	// If LLM judge is disabled or not available, use pattern matching fallback
-	if !s.DefaultStrategy.config.EnableLLMAutoContinueJudge || s.llmClient == nil || s.modelID == "" {
+	if !s.config.EnableLLMAutoContinueJudge || s.llmClient == nil || s.modelID == "" {
 		logger.Debug("LLM judge disabled or unavailable, using pattern matching fallback")
 		return s.DefaultStrategy.ShouldAutoContinue(state, content)
 	}
@@ -364,7 +364,7 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []Message, mode
 	if len(userPrompts) > 0 {
 		sb.WriteString("Recent user prompts (oldest to newest):\n")
 		for i, prompt := range userPrompts {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, prompt))
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, prompt)
 		}
 	} else {
 		sb.WriteString("Recent user prompts: (none)\n")

@@ -56,7 +56,9 @@ func TestHTTPBlocklistDownloader_DownloadSuccess(t *testing.T) {
 	body, err := downloader.DownloadBlocklist(ctx, "https://example.com/blocklist.txt")
 	require.NoError(t, err)
 	require.NotNil(t, body)
-	defer body.Close()
+	defer func() {
+		_ = body.Close()
+	}()
 
 	content, err := io.ReadAll(body)
 	require.NoError(t, err)
@@ -201,7 +203,7 @@ func TestHTTPBlocklistDownloader_ContentTypes(t *testing.T) {
 			body, err := downloader.DownloadBlocklist(ctx, "https://example.com/blocklist.txt")
 			require.NoError(t, err)
 			require.NotNil(t, body)
-			body.Close()
+			_ = body.Close()
 
 			assert.True(t, downloader.IsHealthy())
 		})
@@ -237,7 +239,7 @@ func TestHTTPBlocklistDownloader_ContextCancellation(t *testing.T) {
 	// The mock doesn't fail on canceled context, so we expect success
 	require.NoError(t, err)
 	require.NotNil(t, body)
-	body.Close()
+	_ = body.Close()
 }
 
 // TestHTTPBlocklistDownloader_RequestHeaders tests that correct headers are sent
@@ -264,7 +266,7 @@ func TestHTTPBlocklistDownloader_RequestHeaders(t *testing.T) {
 	body, err := downloader.DownloadBlocklist(ctx, "https://example.com/blocklist.txt")
 	require.NoError(t, err)
 	require.NotNil(t, body)
-	body.Close()
+	_ = body.Close()
 
 	assert.True(t, downloader.IsHealthy())
 	assert.Equal(t, 1, mockClient.GetCallCount("https://example.com/blocklist.txt"))
@@ -294,7 +296,7 @@ func TestHTTPBlocklistDownloader_HealthTracking(t *testing.T) {
 	// First successful download
 	body, err := downloader.DownloadBlocklist(ctx, "https://example.com/blocklist.txt")
 	require.NoError(t, err)
-	body.Close()
+	_ = body.Close()
 	assert.True(t, downloader.IsHealthy())
 
 	// Now set up for error
@@ -317,6 +319,6 @@ func TestHTTPBlocklistDownloader_HealthTracking(t *testing.T) {
 	// Successful download should mark as healthy again
 	body, err = downloader.DownloadBlocklist(ctx, "https://example.com/blocklist.txt")
 	require.NoError(t, err)
-	body.Close()
+	_ = body.Close()
 	assert.True(t, downloader.IsHealthy())
 }

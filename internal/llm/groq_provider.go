@@ -60,7 +60,9 @@ func (p *GroqProvider) ListModels(ctx context.Context) ([]*ModelInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -138,7 +140,9 @@ func (p *GroqProvider) ValidateAPIKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to validate API key: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("invalid API key")

@@ -122,7 +122,7 @@ func ConnectToSocket(cfg *config.Config) (*socketclient.Client, error) {
 	defer cancel()
 
 	if err := client.Connect(ctx); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, fmt.Errorf("failed to connect to socket server: %w", err)
 	}
 

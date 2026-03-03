@@ -343,10 +343,10 @@ func (p *PlanningIteration) processToolCalls(ctx context.Context, toolCalls []ma
 							if opts, hasOptions := args["options"]; hasOptions {
 								if optsArray, ok := opts.([]interface{}); ok && len(optsArray) == 3 {
 									var questionsText strings.Builder
-									questionsText.WriteString(fmt.Sprintf("1. %s\n", question))
+									fmt.Fprintf(&questionsText, "1. %s\n", question)
 									for j, opt := range optsArray {
 										if optStr, ok := opt.(string); ok {
-											questionsText.WriteString(fmt.Sprintf("   %c. %s\n", 'a'+j, optStr))
+											fmt.Fprintf(&questionsText, "   %c. %s\n", 'a'+j, optStr)
 										}
 									}
 									questionText = questionsText.String()
@@ -395,10 +395,10 @@ func (p *PlanningIteration) processToolCalls(ctx context.Context, toolCalls []ma
 								if questionMap, ok := q.(map[string]interface{}); ok {
 									question, _ := questionMap["question"].(string)
 									options, _ := questionMap["options"].([]interface{})
-									questionsText.WriteString(fmt.Sprintf("%d. %s\n", i+1, question))
+									fmt.Fprintf(&questionsText, "%d. %s\n", i+1, question)
 									for j, opt := range options {
 										if optStr, ok := opt.(string); ok {
-											questionsText.WriteString(fmt.Sprintf("   %c. %s\n", 'a'+j, optStr))
+											fmt.Fprintf(&questionsText, "   %c. %s\n", 'a'+j, optStr)
 										}
 									}
 									questionsText.WriteString("\n")

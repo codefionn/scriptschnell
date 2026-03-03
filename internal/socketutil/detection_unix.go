@@ -59,7 +59,9 @@ func detectSocketServerUnix(cfg *config.Config) bool {
 		logger.Debug("Failed to create socket client: %v", err)
 		return false
 	}
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	if err := client.Connect(ctx); err != nil {
 		logger.Debug("Socket exists but connection failed: %v", err)

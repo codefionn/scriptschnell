@@ -384,10 +384,10 @@ func (a *ScriptschnellAIAgent) handleContextList() (string, error) {
 	sb.WriteString("📁 Configured context directories:\n\n")
 
 	for i, dir := range contextDirs {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, dir))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, dir)
 	}
 
-	sb.WriteString(fmt.Sprintf("\nTotal: %d context director", len(contextDirs)))
+	fmt.Fprintf(&sb, "\nTotal: %d context director", len(contextDirs))
 	if len(contextDirs) == 1 {
 		sb.WriteString("y")
 	} else {
@@ -585,7 +585,7 @@ func (a *ScriptschnellAIAgent) handleSessionList() (string, error) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("💾 Saved sessions for workspace: %s\n\n", a.config.WorkingDir))
+	fmt.Fprintf(&sb, "💾 Saved sessions for workspace: %s\n\n", a.config.WorkingDir)
 
 	for i, sess := range sessions {
 		// Display title if available, otherwise fall back to name
@@ -596,11 +596,11 @@ func (a *ScriptschnellAIAgent) handleSessionList() (string, error) {
 		if displayTitle == "" {
 			displayTitle = "Unnamed"
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, displayTitle))
-		sb.WriteString(fmt.Sprintf("   ID: %s\n", sess.ID))
-		sb.WriteString(fmt.Sprintf("   Created: %s\n", sess.CreatedAt.Format("2006-01-02 15:04:05")))
-		sb.WriteString(fmt.Sprintf("   Updated: %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05")))
-		sb.WriteString(fmt.Sprintf("   Messages: %d\n", sess.MessageCount))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, displayTitle)
+		fmt.Fprintf(&sb, "   ID: %s\n", sess.ID)
+		fmt.Fprintf(&sb, "   Created: %s\n", sess.CreatedAt.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "   Updated: %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "   Messages: %d\n", sess.MessageCount)
 		sb.WriteString("\n")
 	}
 
@@ -680,7 +680,7 @@ func (a *ScriptschnellAIAgent) handleSessionLoadWithMenu(storageRef *actor.Actor
 		if name == "" {
 			name = "Unnamed"
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s (ID: %s) - %d messages\n", i+1, name, sess.ID, sess.MessageCount))
+		fmt.Fprintf(&sb, "%d. %s (ID: %s) - %d messages\n", i+1, name, sess.ID, sess.MessageCount)
 	}
 
 	sb.WriteString("\nTo load a session, use: /session load <session_id>\n")
@@ -1920,14 +1920,18 @@ func (a *ScriptschnellAIAgent) Close() error {
 			session.promptCancel()
 		}
 		logger.Debug("Close: tearing down session %s", sessionID)
-		session.orchestrator.Close()
+		if err := session.orchestrator.Close(); err != nil {
+			logger.Warn("Failed to close orchestrator for session %s: %v", sessionID, err)
+		}
 		delete(a.sessions, sessionID)
 	}
 
 	// Close the main orchestrator
 	if a.orchestrator != nil {
 		logger.Debug("Close: closing base orchestrator")
-		a.orchestrator.Close()
+		if err := a.orchestrator.Close(); err != nil {
+			logger.Warn("Failed to close base orchestrator: %v", err)
+		}
 	}
 
 	return nil
@@ -1941,7 +1945,9 @@ func RunACPAgent(ctx context.Context, cfg *config.Config, providerMgr *provider.
 	if err != nil {
 		return fmt.Errorf("failed to create ACP agent: %w", err)
 	}
-	defer agent.Close()
+	defer func() {
+		_ = agent.Close()
+	}()
 
 	// Create the ACP connection for stdio communication
 	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)

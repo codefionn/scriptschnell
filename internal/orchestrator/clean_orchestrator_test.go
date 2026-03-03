@@ -88,7 +88,9 @@ func TestNewCleanOrchestratorForTask(t *testing.T) {
 	}
 
 	// Clean up
-	cleanOrch.Close()
+	if err := cleanOrch.Close(); err != nil {
+		t.Errorf("Failed to close clean orchestrator: %v", err)
+	}
 }
 
 // TestExtractTaskSummary tests the extractTaskSummary method
@@ -354,7 +356,11 @@ func TestTaskIsolation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create clean orchestrator for task %d: %v", i+1, err)
 		}
-		defer cleanOrch.Close()
+		defer func() {
+			if err := cleanOrch.Close(); err != nil {
+				t.Errorf("Failed to close clean orchestrator: %v", err)
+			}
+		}()
 
 		// Set appropriate mock client
 		switch i {

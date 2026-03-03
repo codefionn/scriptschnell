@@ -103,16 +103,16 @@ func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interfa
 
 	// Header
 	result.WriteString("## Search Results\n\n")
-	result.WriteString(fmt.Sprintf("**Pattern:** `%s`\n", pattern))
+	fmt.Fprintf(&result, "**Pattern:** `%s`\n", pattern)
 	if contentRegex != "" {
-		result.WriteString(fmt.Sprintf("**Content Filter:** `%s`\n", contentRegex))
+		fmt.Fprintf(&result, "**Content Filter:** `%s`\n", contentRegex)
 	}
 	if basePath != "." {
-		result.WriteString(fmt.Sprintf("**Base Path:** `%s`\n", basePath))
+		fmt.Fprintf(&result, "**Base Path:** `%s`\n", basePath)
 	}
-	result.WriteString(fmt.Sprintf("**Found:** %d file(s)", len(matches)))
+	fmt.Fprintf(&result, "**Found:** %d file(s)", len(matches))
 	if len(matches) >= maxResults {
-		result.WriteString(fmt.Sprintf(" (limited to %d results)", maxResults))
+		fmt.Fprintf(&result, " (limited to %d results)", maxResults)
 	}
 	result.WriteString("\n\n")
 
@@ -122,7 +122,7 @@ func (t *SearchFilesTool) Execute(ctx context.Context, params map[string]interfa
 	} else {
 		result.WriteString("### Matching Files\n\n")
 		for _, match := range matches {
-			result.WriteString(fmt.Sprintf("- `%s`\n", match))
+			fmt.Fprintf(&result, "- `%s`\n", match)
 		}
 	}
 

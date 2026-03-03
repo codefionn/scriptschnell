@@ -299,20 +299,28 @@ func (s *SessionStorage) SaveSession(session *Session, name string) error {
 	logger.Debug("SaveSession: encoding session with gob")
 	encoder := gob.NewEncoder(file)
 	if err := encoder.Encode(stored); err != nil {
-		file.Close()
-		os.Remove(tempPath)
+		if closeErr := file.Close(); closeErr != nil {
+			_ = os.Remove(tempPath)
+			logger.Error("SaveSession: failed to close file after encode error: %v", closeErr)
+			return fmt.Errorf("failed to encode session: %w (close failed: %v)", err, closeErr)
+		}
+		_ = os.Remove(tempPath)
 		logger.Error("SaveSession: failed to encode session: %v", err)
 		return fmt.Errorf("failed to encode session: %w", err)
 	}
 	logger.Debug("SaveSession: session encoded successfully")
 
-	file.Close()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		logger.Error("SaveSession: failed to close file: %v", err)
+		return fmt.Errorf("failed to close file: %w", err)
+	}
 
 	// Atomic rename
 	logger.Debug("SaveSession: renaming %s to %s", tempPath, finalPath)
 
 	if err := os.Rename(tempPath, finalPath); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		logger.Error("SaveSession: failed to rename temp file: %v", err)
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
@@ -332,7 +340,9 @@ func (s *SessionStorage) LoadSession(workingDir, sessionID string) (*Session, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to open session file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	var stored StoredSession
 	decoder := gob.NewDecoder(file)
@@ -379,10 +389,10 @@ func (s *SessionStorage) ListSessions(workingDir string) ([]SessionMetadata, err
 		var stored StoredSession
 		decoder := gob.NewDecoder(file)
 		if err := decoder.Decode(&stored); err != nil {
-			file.Close()
+			_ = file.Close()
 			continue // Skip corrupted files
 		}
-		file.Close()
+		_ = file.Close()
 
 		// Check version compatibility
 		if stored.Version != SessionStorageVersion {

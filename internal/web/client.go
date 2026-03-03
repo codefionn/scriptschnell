@@ -19,10 +19,10 @@ import (
 
 const (
 	// Time allowed to write a message to the peer.
-	writeWait = consts.Timeout10Seconds
+	writeWait = consts.Timeout10
 
 	// Time allowed to read the next pong message from the peer.
-	pongWait = consts.Timeout60Seconds
+	pongWait = consts.Timeout60
 
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
@@ -70,7 +70,9 @@ func NewClient(hub *Hub, conn *websocket.Conn, broker *MessageBroker, cfg *confi
 func (c *Client) ReadPump() {
 	defer func() {
 		c.hub.Unregister(c)
-		c.conn.Close()
+		if closeErr := c.conn.Close(); closeErr != nil {
+			logger.Warn("Failed to close WebSocket connection: %v", closeErr)
+		}
 	}()
 
 	c.conn.SetReadLimit(maxMessageSize)
@@ -112,7 +114,9 @@ func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		if closeErr := c.conn.Close(); closeErr != nil {
+			logger.Warn("Failed to close WebSocket connection: %v", closeErr)
+		}
 	}()
 
 	for {

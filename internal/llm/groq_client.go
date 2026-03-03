@@ -180,7 +180,9 @@ func (c *GroqClient) completeWithGroqResponses(ctx context.Context, req *Complet
 	if err != nil {
 		return nil, fmt.Errorf("groq responses completion failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -286,7 +288,7 @@ func (c *GroqClient) convertGroqResponsesResponse(resp *groqResponsesResponse) *
 	}
 
 	var content string
-	var stopReason string = "stop"
+	var stopReason = "stop"
 
 	// Extract text from the response output
 	for _, output := range resp.Output {

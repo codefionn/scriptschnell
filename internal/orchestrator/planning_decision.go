@@ -57,7 +57,7 @@ func (o *Orchestrator) decidePlanningConfiguration(ctx context.Context, prompt s
 			if desc == "" {
 				desc = "No description provided"
 			}
-			mcpContext.WriteString(fmt.Sprintf("- %s: %s\n", name, desc))
+			fmt.Fprintf(&mcpContext, "- %s: %s\n", name, desc)
 		}
 	} else {
 		mcpContext.WriteString("No external MCP servers available.\n")

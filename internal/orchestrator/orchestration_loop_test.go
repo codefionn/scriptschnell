@@ -127,7 +127,9 @@ func createTestOrchestrator(t *testing.T) *Orchestrator {
 // TestOrchestrationLoop_SingleResponseNoToolCalls tests the simplest case
 func TestOrchestrationLoop_SingleResponseNoToolCalls(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -154,7 +156,9 @@ func TestOrchestrationLoop_SingleResponseNoToolCalls(t *testing.T) {
 // TestOrchestrationLoop_WithToolCall tests tool call execution
 func TestOrchestrationLoop_WithToolCall(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -197,7 +201,9 @@ func TestOrchestrationLoop_WithToolCall(t *testing.T) {
 // TestOrchestrationLoop_MultipleToolCalls tests multiple sequential tool calls
 func TestOrchestrationLoop_MultipleToolCalls(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -252,7 +258,9 @@ func TestOrchestrationLoop_MultipleToolCalls(t *testing.T) {
 // TestOrchestrationLoop_ParallelToolCalls tests handling of multiple tool calls in single response
 func TestOrchestrationLoop_ParallelToolCalls(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -301,7 +309,9 @@ func TestOrchestrationLoop_ParallelToolCalls(t *testing.T) {
 // TestOrchestrationLoop_ContextCancellation tests that context cancellation stops the loop
 func TestOrchestrationLoop_ContextCancellation(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -360,7 +370,9 @@ func (c *infiniteToolCallClient) SetPreviousResponseID(responseID string) {}
 // TestOrchestrationLoop_EmptyResponse tests handling of empty LLM response
 func TestOrchestrationLoop_EmptyResponse(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -388,7 +400,9 @@ func TestOrchestrationLoop_EmptyResponse(t *testing.T) {
 // TestOrchestrationLoop_ProgressCallback tests that progress callbacks are called
 func TestOrchestrationLoop_ProgressCallback(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -428,7 +442,9 @@ func TestOrchestrationLoop_ProgressCallback(t *testing.T) {
 // TestOrchestrationLoop_ToolCallCallback tests that tool call callbacks are invoked
 func TestOrchestrationLoop_ToolCallCallback(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -480,7 +496,9 @@ func TestOrchestrationLoop_ToolCallCallback(t *testing.T) {
 // TestOrchestrationLoop_SessionMessagesAccumulate tests that session messages are accumulated
 func TestOrchestrationLoop_SessionMessagesAccumulate(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -522,7 +540,9 @@ func TestOrchestrationLoop_SessionMessagesAccumulate(t *testing.T) {
 // TestOrchestrationLoop_StopReasonLength tests handling of truncated response
 func TestOrchestrationLoop_StopReasonLength(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -548,7 +568,9 @@ func TestOrchestrationLoop_StopReasonLength(t *testing.T) {
 // TestOrchestrationLoop_MaxIterationsLimit tests that max iterations limit is respected
 func TestOrchestrationLoop_MaxIterationsLimit(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -617,7 +639,9 @@ func (c *countingToolCallClient) SetPreviousResponseID(responseID string) {}
 // TestOrchestrationLoop_ToolResultsInMessages tests that tool results are added to messages
 func TestOrchestrationLoop_ToolResultsInMessages(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -672,7 +696,9 @@ func TestOrchestrationLoop_ToolResultsInMessages(t *testing.T) {
 // TestOrchestrationLoop_UnknownTool tests handling of unknown tool calls
 func TestOrchestrationLoop_UnknownTool(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -710,7 +736,9 @@ func TestOrchestrationLoop_UnknownTool(t *testing.T) {
 // TestOrchestrationLoop_MalformedToolCall tests handling of malformed tool calls
 func TestOrchestrationLoop_MalformedToolCall(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -745,7 +773,9 @@ func TestOrchestrationLoop_MalformedToolCall(t *testing.T) {
 // TestOrchestrationLoop_WithPlanningEnabled tests the loop with planning phase
 func TestOrchestrationLoop_WithPlanningEnabled(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	// Enable planning
 	orch.featureFlags.SetPlanningEnabled(true)
@@ -793,7 +823,9 @@ func TestOrchestrationLoop_WithPlanningEnabled(t *testing.T) {
 // TestOrchestrationLoop_ToolCallWithContent tests tool calls with accompanying content
 func TestOrchestrationLoop_ToolCallWithContent(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -855,7 +887,9 @@ func TestOrchestrationLoop_ToolCallWithContent(t *testing.T) {
 // TestOrchestrationLoop_VerificationPhase tests the verification phase after main loop
 func TestOrchestrationLoop_VerificationPhase(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 	// Verification is controlled by config, not feature flags
@@ -879,7 +913,9 @@ func TestOrchestrationLoop_VerificationPhase(t *testing.T) {
 // TestOrchestrationLoop_MultipleTurns tests multi-turn conversation flow
 func TestOrchestrationLoop_MultipleTurns(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -928,7 +964,9 @@ func TestOrchestrationLoop_MultipleTurns(t *testing.T) {
 // TestOrchestrationLoop_ToolResultCallback tests tool result callbacks
 func TestOrchestrationLoop_ToolResultCallback(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 
@@ -980,7 +1018,9 @@ func TestOrchestrationLoop_ToolResultCallback(t *testing.T) {
 // TestOrchestrationLoop_JSONToolArguments tests that JSON tool arguments are parsed correctly
 func TestOrchestrationLoop_JSONToolArguments(t *testing.T) {
 	orch := createTestOrchestrator(t)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	orch.featureFlags.SetPlanningEnabled(false)
 

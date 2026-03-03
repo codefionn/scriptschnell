@@ -56,7 +56,8 @@ Consider the following as potentially harmful (requiring approval):
 Consider as harmless (no approval needed):
 - Read-only commands (ls, cat, find, grep, rg, head, tail, etc.)
 - Information commands (pwd, echo, env, printenv, which, whereis, etc.)
-- Build/test commands in local directory (go build, go test, npm test, make, cargo build, etc.)
+- Build/test commands (go build, go test, npm test, make, cargo build, etc.)
+- Formatting commands (gofmt, go fmt, gofumpt, cargo fmt, rustfmt, black, ruff format, prettier, npm/pnpm/yarn/bun run format)
 - Git read commands (git status, git log, git diff, git show, etc.)
 - Package manager read commands (npm list, pip list, apt search, etc.)
 
@@ -132,7 +133,7 @@ func (a *AuthorizationActor) judgeDomainWithLLM(ctx context.Context, displayDoma
 	})
 
 	req := &llm.CompletionRequest{
-		SystemPrompt: domainAuthSystemPrompt,
+		SystemPrompt: a.withSessionWorkingDirPrompt(domainAuthSystemPrompt),
 		Messages:     messages,
 	}
 
@@ -240,7 +241,7 @@ func (a *AuthorizationActor) judgeShellCommandWithLLM(ctx context.Context, comma
 	})
 
 	req := &llm.CompletionRequest{
-		SystemPrompt: shellAuthSystemPrompt,
+		SystemPrompt: a.withSessionWorkingDirPrompt(shellAuthSystemPrompt),
 		Messages:     messages,
 	}
 
@@ -347,4 +348,18 @@ func commandNameForLog(command string) string {
 		return ""
 	}
 	return fields[0]
+}
+
+func (a *AuthorizationActor) withSessionWorkingDirPrompt(basePrompt string) string {
+	workingDir := ""
+	if a != nil && a.session != nil {
+		workingDir = strings.TrimSpace(a.session.WorkingDir)
+	}
+	if workingDir == "" && a != nil {
+		workingDir = strings.TrimSpace(a.workingDir)
+	}
+	if workingDir == "" {
+		workingDir = "."
+	}
+	return fmt.Sprintf("%s\n\nSession working directory: %s", basePrompt, workingDir)
 }

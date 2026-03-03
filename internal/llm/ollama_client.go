@@ -81,7 +81,9 @@ func (c *OllamaClient) CompleteWithRequest(ctx context.Context, req *CompletionR
 	if err != nil {
 		return nil, fmt.Errorf("ollama completion failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -133,7 +135,9 @@ func (c *OllamaClient) Stream(ctx context.Context, req *CompletionRequest, callb
 	if err != nil {
 		return fmt.Errorf("ollama stream failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

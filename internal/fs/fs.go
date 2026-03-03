@@ -655,13 +655,21 @@ func CopyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer sourceFile.Close()
+	defer func() {
+		if err := sourceFile.Close(); err != nil {
+			log.Printf("Failed to close source file: %v", err)
+		}
+	}()
 
 	destFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer func() {
+		if err := destFile.Close(); err != nil {
+			log.Printf("Failed to close destination file: %v", err)
+		}
+	}()
 
 	_, err = io.Copy(destFile, sourceFile)
 	return err

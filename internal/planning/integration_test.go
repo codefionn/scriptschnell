@@ -79,7 +79,7 @@ func TestPlanningAgent_Integration_WithRealTools(t *testing.T) {
 	}
 
 	// Cleanup
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 // TestPlanningAgent_Integration_WithQuestions tests interactive planning with user questions
@@ -158,7 +158,7 @@ func TestPlanningAgent_Integration_WithQuestions(t *testing.T) {
 	}
 
 	// Cleanup
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 // TestPlanningAgent_Integration_ToolChaining tests complex tool usage scenarios
@@ -241,7 +241,7 @@ func TestPlanningAgent_Integration_ToolChaining(t *testing.T) {
 	}
 
 	// Cleanup
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 // TestPlanningAgent_Integration_ErrorHandling tests error scenarios in integration
@@ -301,7 +301,7 @@ func TestPlanningAgent_Integration_ErrorHandling(t *testing.T) {
 	}
 
 	// Cleanup
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 // TestPlanningAgent_Integration_ConcurrentRequests tests concurrent planning requests
@@ -369,7 +369,7 @@ func TestPlanningAgent_Integration_ConcurrentRequests(t *testing.T) {
 	}
 
 	// Cleanup
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 // TestPlanningAgent_Integration_LargeProject tests planning with larger codebase
@@ -454,7 +454,7 @@ func TestPlanningAgent_Integration_LargeProject(t *testing.T) {
 	}
 
 	// Cleanup
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 func truncateTestError(err error, maxLen int) string {

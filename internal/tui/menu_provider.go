@@ -99,7 +99,7 @@ func (d providerItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	}
 
 	desc := providerHelpStyle.Render(i.description)
-	fmt.Fprintf(w, "%s\n%s", str, providerItemStyle.Render(desc))
+	_, _ = fmt.Fprintf(w, "%s\n%s", str, providerItemStyle.Render(desc))
 }
 
 type ProviderMenuModel struct {

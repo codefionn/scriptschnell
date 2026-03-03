@@ -634,7 +634,6 @@ func (s *Service) parseUsageFromOutput(output string) (map[string]interface{}, e
 				braceDepth--
 				if braceDepth == 0 {
 					jsonStart = i
-					break
 				}
 			}
 			if jsonStart != -1 {

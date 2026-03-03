@@ -114,7 +114,11 @@ func (a *RefactoringAgent) refactorInternal(ctx context.Context, objective strin
 	if err != nil {
 		return "", fmt.Errorf("failed to create child orchestrator: %w", err)
 	}
-	defer childOrch.Close()
+	defer func() {
+		if err := childOrch.Close(); err != nil {
+			fmt.Printf("Failed to close child orchestrator: %v\n", err)
+		}
+	}()
 
 	// Create a progress callback wrapper
 	childProgressCb := func(update progress.Update) error {
@@ -139,7 +143,7 @@ func (a *RefactoringAgent) refactorInternal(ctx context.Context, objective strin
 
 	// Get the session and return the messages as result
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("## Refactoring Result: %s\n\n", objective))
+	fmt.Fprintf(&output, "## Refactoring Result: %s\n\n", objective)
 
 	// Get the assistant's response from the child session
 	messages := childOrch.session.GetMessages()

@@ -35,7 +35,9 @@ func (t *SandboxTool) executeInternal(ctx context.Context, builder *SandboxBuild
 	if err := os.MkdirAll(sandboxDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create sandbox directory: %w", err)
 	}
-	defer os.RemoveAll(sandboxDir)
+	defer func() {
+		_ = os.RemoveAll(sandboxDir)
+	}()
 
 	// Wrap code with authorization layer
 	wrappedCode, detectedDomains := wasi.GenerateWASMStub(code)
@@ -163,7 +165,7 @@ func (t *SandboxTool) compileWithTinyGo(ctx context.Context, tinyGoBinary string
 // executeDirectCommand executes a command directly without using the shell executor
 // This is a fallback when no shell executor is configured
 func (t *SandboxTool) executeDirectCommand(ctx context.Context, commandArgs []string, stdinData []byte) (string, string, int) {
-	cmdCtx, cancel := context.WithTimeout(ctx, consts.Timeout30Seconds)
+	cmdCtx, cancel := context.WithTimeout(ctx, consts.Timeout30)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, commandArgs[0], commandArgs[1:]...)

@@ -130,7 +130,7 @@ const (
 	minimaxAutoContinueMaxAttempts  = consts.MaxExtendedAttempts
 	deepSeekAutoContinueMaxAttempts = consts.ExtendedMaxAttempts
 	errorRetryMaxAttempts           = consts.DefaultMaxRetries
-	preconnectThrottle              = consts.Timeout2Seconds
+	preconnectThrottle              = consts.Timeout2
 )
 
 // Multi-stage compaction configuration
@@ -420,7 +420,7 @@ func NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg *config.Config, 
 		BlocklistURL:    actor.DefaultRPZURL,
 		RefreshInterval: consts.Duration6Hours,  // Refresh every 6 hours
 		TTL:             consts.Duration24Hours, // Blocklist expires after 24 hours
-		HTTPClient:      &http.Client{Timeout: consts.Timeout30Seconds},
+		HTTPClient:      &http.Client{Timeout: consts.Timeout30},
 	}
 	domainBlockerActor := actor.NewDomainBlockerActor("domain_blocker", domainBlockerConfig)
 	domainBlockerRef, err := orch.actorSystem.Spawn(domainBlockerCtx, "domain_blocker", domainBlockerActor, 16)
@@ -2086,27 +2086,27 @@ func formatPlanForDisplay(mode planning.PlanningMode, plan []string, board *plan
 		var sb strings.Builder
 		sb.WriteString("\nPlanning Board (read-only):\n")
 		if board.Description != "" {
-			sb.WriteString(fmt.Sprintf("\nDescription: %s\n", board.Description))
+			fmt.Fprintf(&sb, "\nDescription: %s\n", board.Description)
 		}
 		sb.WriteString("\nPrimary Tasks:\n")
 		for i, task := range board.PrimaryTasks {
-			sb.WriteString(fmt.Sprintf("%d. %s", i+1, task.Text))
+			fmt.Fprintf(&sb, "%d. %s", i+1, task.Text)
 			if task.Priority != "" && task.Priority != "medium" {
-				sb.WriteString(fmt.Sprintf(" [%s]", task.Priority))
+				fmt.Fprintf(&sb, " [%s]", task.Priority)
 			}
 			sb.WriteString("\n")
 			if task.Description != "" {
-				sb.WriteString(fmt.Sprintf("   Description: %s\n", task.Description))
+				fmt.Fprintf(&sb, "   Description: %s\n", task.Description)
 			}
 			if len(task.Subtasks) > 0 {
 				sb.WriteString("   Subtasks:\n")
 				for j, subtask := range task.Subtasks {
-					sb.WriteString(fmt.Sprintf("   %c. %s", 'a'+j, subtask.Text))
+					fmt.Fprintf(&sb, "   %c. %s", 'a'+j, subtask.Text)
 					if subtask.Priority != "" && subtask.Priority != "medium" {
-						sb.WriteString(fmt.Sprintf(" [%s]", subtask.Priority))
+						fmt.Fprintf(&sb, " [%s]", subtask.Priority)
 					}
 					if subtask.Status != "" && subtask.Status != "pending" {
-						sb.WriteString(fmt.Sprintf(" (%s)", subtask.Status))
+						fmt.Fprintf(&sb, " (%s)", subtask.Status)
 					}
 					sb.WriteString("\n")
 				}
@@ -2122,7 +2122,7 @@ func formatPlanForDisplay(mode planning.PlanningMode, plan []string, board *plan
 	var sb strings.Builder
 	sb.WriteString("\nPlanning pass (read-only):\n")
 	for i, step := range plan {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, strings.TrimSpace(step)))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, strings.TrimSpace(step))
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -2506,7 +2506,7 @@ func (o *Orchestrator) executePlanningBoard(
 		}
 
 		// Clean up the orchestrator
-		cleanOrch.Close()
+		_ = cleanOrch.Close()
 	}
 
 	sendStream("\n✓ All primary tasks completed\n", false)
@@ -2518,16 +2518,16 @@ func (o *Orchestrator) buildTaskPrompt(originalPrompt string, task *session.Plan
 	var sb strings.Builder
 
 	// Original context
-	sb.WriteString(fmt.Sprintf("You are working on task %d of %d from the overall objective.\n\n", taskIndex+1, totalTasks))
-	sb.WriteString(fmt.Sprintf("**Overall Objective:** %s\n\n", originalPrompt))
+	fmt.Fprintf(&sb, "You are working on task %d of %d from the overall objective.\n\n", taskIndex+1, totalTasks)
+	fmt.Fprintf(&sb, "**Overall Objective:** %s\n\n", originalPrompt)
 
 	// Previous summaries if present
 	if len(previousSummaries) > 0 {
 		sb.WriteString("**Previous Tasks Completed:**\n")
 		for i, summary := range previousSummaries {
-			sb.WriteString(fmt.Sprintf("\n%d. Task: %s\n", i+1, summary.TaskText))
-			sb.WriteString(fmt.Sprintf("   Status: %s\n", summary.Status))
-			sb.WriteString(fmt.Sprintf("   Summary: %s\n", summary.Summary))
+			fmt.Fprintf(&sb, "\n%d. Task: %s\n", i+1, summary.TaskText)
+			fmt.Fprintf(&sb, "   Status: %s\n", summary.Status)
+			fmt.Fprintf(&sb, "   Summary: %s\n", summary.Summary)
 			if len(summary.FilesModified) > 0 {
 				sb.WriteString("   Files modified: ")
 				for j, f := range summary.FilesModified {
@@ -2543,9 +2543,9 @@ func (o *Orchestrator) buildTaskPrompt(originalPrompt string, task *session.Plan
 	}
 
 	// Current task
-	sb.WriteString(fmt.Sprintf("**Your Current Task:** %s\n", task.Text))
+	fmt.Fprintf(&sb, "**Your Current Task:** %s\n", task.Text)
 	if task.Description != "" {
-		sb.WriteString(fmt.Sprintf("Description: %s\n", task.Description))
+		fmt.Fprintf(&sb, "Description: %s\n", task.Description)
 	}
 	sb.WriteString("\n")
 
@@ -2557,7 +2557,7 @@ func (o *Orchestrator) buildTaskPrompt(originalPrompt string, task *session.Plan
 			if subtask.Status == "completed" {
 				statusIcon = "[x]"
 			}
-			sb.WriteString(fmt.Sprintf("%c. %s %s\n", 'a'+j, statusIcon, subtask.Text))
+			fmt.Fprintf(&sb, "%c. %s %s\n", 'a'+j, statusIcon, subtask.Text)
 		}
 		sb.WriteString("\n")
 	}
@@ -4228,7 +4228,7 @@ func compactUserPrompts(prompts []string) string {
 
 	var sb strings.Builder
 	for i, prompt := range prompts {
-		sb.WriteString(fmt.Sprintf("- #%d: %s\n", i+1, condenseContent(prompt, 200)))
+		fmt.Fprintf(&sb, "- #%d: %s\n", i+1, condenseContent(prompt, 200))
 	}
 
 	return strings.TrimSpace(sb.String())

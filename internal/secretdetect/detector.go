@@ -87,7 +87,10 @@ func (d *DetectorImpl) ScanFile(path string) ([]SecretMatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		closeErr := file.Close()
+		_ = closeErr // Log error but don't fail the scan
+	}()
 
 	var matches []SecretMatch
 	scanner := bufio.NewScanner(file)

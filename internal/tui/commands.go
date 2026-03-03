@@ -220,7 +220,7 @@ func (ch *CommandHandler) buildHelpMessage() string {
 	sb := acquireBuilder()
 	sb.WriteString("Available Commands:\n\n")
 	for _, entry := range entries {
-		sb.WriteString(fmt.Sprintf("%-*s - %s\n", maxWidth, entry.Usage, entry.Description))
+		fmt.Fprintf(sb, "%-*s - %s\n", maxWidth, entry.Usage, entry.Description)
 	}
 	sb.WriteString(helpFooter)
 	return builderString(sb)
@@ -394,22 +394,22 @@ func (ch *CommandHandler) handleMCPList() (MenuResult, error) {
 		if server.Disabled {
 			status = "disabled"
 		}
-		sb.WriteString(fmt.Sprintf("- %s (%s, %s)\n", name, server.Type, status))
+		fmt.Fprintf(sb, "- %s (%s, %s)\n", name, server.Type, status)
 		if desc := strings.TrimSpace(server.Description); desc != "" {
-			sb.WriteString(fmt.Sprintf("  \u2514 %s\n", desc))
+			fmt.Fprintf(sb, "  \u2514 %s\n", desc)
 		}
 		switch strings.ToLower(server.Type) {
 		case "openapi":
 			if server.OpenAPI != nil {
-				sb.WriteString(fmt.Sprintf("  \u2514 spec: %s\n", server.OpenAPI.SpecPath))
+				fmt.Fprintf(sb, "  \u2514 spec: %s\n", server.OpenAPI.SpecPath)
 			}
 		case "command":
 			if server.Command != nil {
-				sb.WriteString(fmt.Sprintf("  \u2514 command: %s\n", strings.Join(server.Command.Exec, " ")))
+				fmt.Fprintf(sb, "  \u2514 command: %s\n", strings.Join(server.Command.Exec, " "))
 			}
 		case "openai":
 			if server.OpenAI != nil {
-				sb.WriteString(fmt.Sprintf("  \u2514 model: %s\n", server.OpenAI.Model))
+				fmt.Fprintf(sb, "  \u2514 model: %s\n", server.OpenAI.Model)
 			}
 		}
 		sb.WriteString("\n")
@@ -795,17 +795,17 @@ func (ch *CommandHandler) handleModels(args []string) (MenuResult, error) {
 		totalModels := 0
 		for _, p := range providers {
 			if err := ch.providerMgr.RefreshModels(ch.ctx, p.Name); err != nil {
-				sb.WriteString(fmt.Sprintf("✗ %s: %v\n", p.Name, err))
+				fmt.Fprintf(sb, "✗ %s: %v\n", p.Name, err)
 			} else {
 				// Get updated provider
 				updatedProvider, _ := ch.providerMgr.GetProvider(p.Name)
 				modelCount := len(updatedProvider.Models)
 				totalModels += modelCount
-				sb.WriteString(fmt.Sprintf("✓ %s: fetched %d models\n", p.Name, modelCount))
+				fmt.Fprintf(sb, "✓ %s: fetched %d models\n", p.Name, modelCount)
 			}
 		}
 
-		sb.WriteString(fmt.Sprintf("\nTotal: %d models available\n", totalModels))
+		fmt.Fprintf(sb, "\nTotal: %d models available\n", totalModels)
 		return NewMenuResult(builderString(sb)), nil
 
 	case "menu":
@@ -1059,10 +1059,10 @@ func (ch *CommandHandler) handleContextList() (MenuResult, error) {
 	sb.WriteString("Configured context directories:\n\n")
 
 	for i, dir := range contextDirs {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, dir))
+		fmt.Fprintf(sb, "%d. %s\n", i+1, dir)
 	}
 
-	sb.WriteString(fmt.Sprintf("\nTotal: %d context director", len(contextDirs)))
+	fmt.Fprintf(sb, "\nTotal: %d context director", len(contextDirs))
 	if len(contextDirs) == 1 {
 		sb.WriteString("y")
 	} else {

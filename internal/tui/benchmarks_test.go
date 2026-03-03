@@ -223,9 +223,9 @@ func BenchmarkQuestionParsing_Large(b *testing.B) {
 	// Generate a large questions string
 	var sb strings.Builder
 	for i := 0; i < 20; i++ {
-		sb.WriteString(fmt.Sprintf("%d. Question %d?\n", i+1, i+1))
+		fmt.Fprintf(&sb, "%d. Question %d?\n", i+1, i+1)
 		for j := 0; j < 5; j++ {
-			sb.WriteString(fmt.Sprintf("   %c. Option %c\n", 'a'+j, 'A'+j))
+			fmt.Fprintf(&sb, "   %c. Option %c\n", 'a'+j, 'A'+j)
 		}
 		sb.WriteString("\n")
 	}

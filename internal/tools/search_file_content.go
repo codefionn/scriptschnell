@@ -88,14 +88,14 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 
 	// Start with header
 	results.WriteString("## Content Search Results\n\n")
-	results.WriteString(fmt.Sprintf("**Pattern:** `%s`\n", pattern))
+	fmt.Fprintf(&results, "**Pattern:** `%s`\n", pattern)
 	if globPattern != "" {
-		results.WriteString(fmt.Sprintf("**File Filter:** `%s`\n", globPattern))
+		fmt.Fprintf(&results, "**File Filter:** `%s`\n", globPattern)
 	}
 	if searchPath != "." {
-		results.WriteString(fmt.Sprintf("**Search Path:** `%s`\n", searchPath))
+		fmt.Fprintf(&results, "**Search Path:** `%s`\n", searchPath)
 	}
-	results.WriteString(fmt.Sprintf("**Context Lines:** %d\n\n", contextLines))
+	fmt.Fprintf(&results, "**Context Lines:** %d\n\n", contextLines)
 
 	err = t.walkDir(ctx, searchPath, func(path string, info *fs.FileInfo) error {
 		if info.IsDir {
@@ -184,18 +184,18 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 		}
 
 		// Write file header with markdown formatting
-		results.WriteString(fmt.Sprintf("### `%s`\n\n", path))
-		results.WriteString(fmt.Sprintf("*%d match(es)*\n\n", len(matchedLineIndices)))
+		fmt.Fprintf(&results, "### `%s`\n\n", path)
+		fmt.Fprintf(&results, "*%d match(es)*\n\n", len(matchedLineIndices))
 		results.WriteString("```\n")
 
 		for bIdx, blk := range blocks {
 			for i := blk.start; i <= blk.end; i++ {
 				lineNum := i + 1
-				results.WriteString(fmt.Sprintf("%*d: %s\n", padding, lineNum, lines[i]))
+				fmt.Fprintf(&results, "%*d: %s\n", padding, lineNum, lines[i])
 			}
 			// Add separator between blocks (except after the last block)
 			if bIdx < len(blocks)-1 {
-				results.WriteString(fmt.Sprintf("%*s\n", padding+1, "--"))
+				fmt.Fprintf(&results, "%*s\n", padding+1, "--")
 			}
 		}
 		results.WriteString("```\n\n")
@@ -212,7 +212,7 @@ func (t *SearchFileContentTool) Execute(ctx context.Context, params map[string]i
 	} else {
 		// Add summary at the end
 		results.WriteString("---\n\n")
-		results.WriteString(fmt.Sprintf("**Summary:** Found %d match(es) in %d file(s)\n", matchCount, fileCount))
+		fmt.Fprintf(&results, "**Summary:** Found %d match(es) in %d file(s)\n", matchCount, fileCount)
 	}
 
 	return &ToolResult{Result: results.String()}

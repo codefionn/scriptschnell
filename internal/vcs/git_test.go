@@ -25,7 +25,7 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	runGitCmd(t, tmpDir, "config", "user.email", "test@example.com")
 
 	cleanup := func() {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 	}
 
 	return tmpDir, cleanup
@@ -89,7 +89,9 @@ func TestGit_RepositoryRoot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
-		defer os.RemoveAll(tmpDir)
+		defer func() {
+			_ = os.RemoveAll(tmpDir)
+		}()
 
 		git := NewGit(tmpDir)
 		_, err = git.RepositoryRoot(ctx, tmpDir)
@@ -200,7 +202,9 @@ func TestGit_IsIgnored(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
-		defer os.RemoveAll(tmpDir)
+		defer func() {
+			_ = os.RemoveAll(tmpDir)
+		}()
 
 		outsideFile := filepath.Join(tmpDir, "outside.txt")
 		if err := os.WriteFile(outsideFile, []byte("outside content"), 0644); err != nil {
@@ -260,7 +264,9 @@ func TestGit_CreateWorktree(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create parent dir: %v", err)
 		}
-		defer os.RemoveAll(parentDir)
+		defer func() {
+			_ = os.RemoveAll(parentDir)
+		}()
 
 		repoDir := filepath.Join(parentDir, "main-repo")
 		if err := os.Mkdir(repoDir, 0755); err != nil {
@@ -316,7 +322,9 @@ func TestGit_CreateWorktree(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
-		defer os.RemoveAll(tmpDir)
+		defer func() {
+			_ = os.RemoveAll(tmpDir)
+		}()
 
 		git := NewGit(tmpDir)
 		_, err = git.CreateWorktree(ctx, "test-session")

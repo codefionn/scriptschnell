@@ -36,7 +36,7 @@ type CommandToolConfig struct {
 func NewCommandTool(cfg *CommandToolConfig) *CommandTool {
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = consts.Timeout30Seconds
+		timeout = consts.Timeout30
 	}
 
 	envCopy := make(map[string]string, len(cfg.Env))

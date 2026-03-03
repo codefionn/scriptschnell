@@ -63,7 +63,8 @@ func TestParamsToString(t *testing.T) {
 			result := paramsToString(tt.params)
 			// Since map iteration order is not guaranteed, we need to check that all parts are present
 			// in any order for tests with multiple keys
-			if tt.name == "simple string params" {
+			switch tt.name {
+			case "simple string params":
 				// Check that all expected parts are in the result
 				expectedParts := []string{"key1=value1", "key2=value2"}
 				for _, part := range expectedParts {
@@ -71,7 +72,7 @@ func TestParamsToString(t *testing.T) {
 						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
 					}
 				}
-			} else if tt.name == "mixed types" {
+			case "mixed types":
 				// Check that all expected parts are in the result
 				expectedParts := []string{"string=test", "int=42", "bool=true", "float=3.14"}
 				for _, part := range expectedParts {
@@ -79,7 +80,7 @@ func TestParamsToString(t *testing.T) {
 						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
 					}
 				}
-			} else if tt.name == "nested array" {
+			case "nested array":
 				// Check that all expected parts are in the result in any order
 				expectedParts := []string{"items=[a,b,c]", "count=3"}
 				for _, part := range expectedParts {
@@ -87,7 +88,7 @@ func TestParamsToString(t *testing.T) {
 						t.Errorf("paramsToString() = %q, expected to contain %q", result, part)
 					}
 				}
-			} else if tt.name == "nested map" {
+			case "nested map":
 				// Check that config contains the expected parts in any order
 				expectedParts := []string{"host:localhost", "port:8080"}
 				if !strings.Contains(result, "config={") || !strings.Contains(result, "}") {
@@ -101,7 +102,7 @@ func TestParamsToString(t *testing.T) {
 				if !strings.Contains(result, "debug=true") {
 					t.Errorf("paramsToString() = %q, expected to contain debug=true", result)
 				}
-			} else {
+			default:
 				if result != tt.expected {
 					t.Errorf("paramsToString() = %q, expected %q", result, tt.expected)
 				}

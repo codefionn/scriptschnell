@@ -68,14 +68,20 @@ func TestNewLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			t.Errorf("Failed to close logger: %v", err)
+		}
+	}()
 
 	// Write some logs
 	logger.Info("test message")
 	logger.Debug("should not appear")
 
 	// Close to flush
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		t.Errorf("Failed to close logger: %v", err)
+	}
 
 	// Read log file
 	content, err := os.ReadFile(logPath)
@@ -109,13 +115,19 @@ func TestLoggerWithPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			t.Errorf("Failed to close logger: %v", err)
+		}
+	}()
 
 	// Create child logger with additional prefix
 	childLogger := logger.WithPrefix("child")
 	childLogger.Info("test message")
 
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		t.Errorf("Failed to close logger: %v", err)
+	}
 
 	// Read log file
 	content, err := os.ReadFile(logPath)
@@ -137,7 +149,11 @@ func TestLoggerDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			t.Errorf("Failed to close logger: %v", err)
+		}
+	}()
 
 	// These should not panic or error
 	logger.Debug("debug")
@@ -154,7 +170,11 @@ func TestSetLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			t.Errorf("Failed to close logger: %v", err)
+		}
+	}()
 
 	// Initial level is INFO
 	logger.Info("info1")
@@ -165,7 +185,7 @@ func TestSetLevel(t *testing.T) {
 	logger.Info("info2")
 	logger.Debug("debug2")
 
-	logger.Close()
+	_ = logger.Close()
 
 	// Read log file
 	content, err := os.ReadFile(logPath)

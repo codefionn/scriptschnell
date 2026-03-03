@@ -151,7 +151,9 @@ func (a *DomainBlockerActor) loadCachedBlocklist() ([]string, error) {
 		}
 		return nil, fmt.Errorf("failed to open cache file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	// Check if cached data is still valid (not expired than TTL)
 	info, err := file.Stat()
@@ -200,19 +202,19 @@ func (a *DomainBlockerActor) saveCachedBlocklist(domains []string) error {
 	// Write the domains as JSON
 	encoder := json.NewEncoder(file)
 	if err := encoder.Encode(domains); err != nil {
-		file.Close()
-		os.Remove(tempFile) // Clean up temp file
+		_ = file.Close()
+		_ = os.Remove(tempFile) // Clean up temp file
 		return fmt.Errorf("failed to encode blocklist to cache: %w", err)
 	}
 
 	// Close and rename to final location
 	if err := file.Close(); err != nil {
-		os.Remove(tempFile) // Clean up temp file
+		_ = os.Remove(tempFile) // Clean up temp file
 		return fmt.Errorf("failed to close temp cache file: %w", err)
 	}
 
 	if err := os.Rename(tempFile, cacheFile); err != nil {
-		os.Remove(tempFile) // Clean up temp file
+		_ = os.Remove(tempFile) // Clean up temp file
 		return fmt.Errorf("failed to rename temp cache file: %w", err)
 	}
 
@@ -508,7 +510,11 @@ func (a *DomainBlockerActor) refreshBlocklist() error {
 	if err != nil {
 		return fmt.Errorf("failed to download blocklist: %w", err)
 	}
-	defer body.Close()
+	defer func() {
+		if closeErr := body.Close(); closeErr != nil {
+			logger.Warn("domain blocker actor %s: failed to close response body: %v", a.id, closeErr)
+		}
+	}()
 
 	// Parse RPZ format and extract domains
 	domains, err := a.ParseRPZResponse(body)

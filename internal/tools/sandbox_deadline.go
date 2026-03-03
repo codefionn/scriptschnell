@@ -208,8 +208,8 @@ func (d *adaptiveExecDeadline) Resume() {
 // maybeExtend checks if activity occurred recently and extends the deadline if appropriate.
 // Must be called with the mutex locked.
 func (d *adaptiveExecDeadline) maybeExtend() {
-	d.execDeadline.mu.Lock()
-	defer d.execDeadline.mu.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	// Don't extend if already fired or stopped
 	if d.fired {
@@ -245,7 +245,7 @@ func (d *adaptiveExecDeadline) maybeExtend() {
 // Must be called with the mutex locked.
 func (d *adaptiveExecDeadline) extend() {
 	// Stop the current timer
-	if !d.execDeadline.timer.Stop() {
+	if !d.timer.Stop() {
 		// Timer already fired
 		return
 	}
@@ -272,8 +272,8 @@ func (d *adaptiveExecDeadline) GetStats() map[string]interface{} {
 	if d == nil {
 		return nil
 	}
-	d.execDeadline.mu.Lock()
-	defer d.execDeadline.mu.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	var totalTimeout time.Duration
 	if d.extensions == 0 {

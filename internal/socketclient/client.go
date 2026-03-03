@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/codefionn/scriptschnell/internal/logger"
 )
 
 // ConnectionState represents the current state of the socket connection
@@ -269,18 +271,18 @@ func (c *Client) connect(ctx context.Context, isReconnect bool) error {
 	// Wait for authentication response
 	resp, err := c.SendRequest(authMsg)
 	if err != nil {
-		c.Close()
+		_ = c.Close()
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Check if authentication was successful
 	if respType, ok := resp.GetType(); ok && respType != "auth_response" {
-		c.Close()
+		_ = c.Close()
 		return fmt.Errorf("expected auth_response, got %s", respType)
 	}
 
 	if resp.Error != nil {
-		c.Close()
+		_ = c.Close()
 		return NewSocketError(resp.Error.Code, resp.Error.Message, resp.Error.Details)
 	}
 
@@ -293,12 +295,12 @@ func (c *Client) connect(ctx context.Context, isReconnect bool) error {
 	}
 
 	if err := json.Unmarshal(resp.Data, &authRespData); err != nil {
-		c.Close()
+		_ = c.Close()
 		return fmt.Errorf("failed to parse auth response: %w", err)
 	}
 
 	if !authRespData.Success {
-		c.Close()
+		_ = c.Close()
 		return errors.New("authentication rejected by server")
 	}
 
@@ -365,7 +367,7 @@ func (c *Client) Close() error {
 	// Close connection
 	c.connMu.Lock()
 	if c.conn != nil {
-		c.conn.Close()
+		_ = c.conn.Close()
 		c.conn = nil
 	}
 	c.connMu.Unlock()
@@ -421,7 +423,7 @@ func (c *Client) readPump() {
 			return
 		default:
 			// Set read deadline
-			conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+			_ = conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 
 			// Read message (newline-delimited JSON)
 			line, err := reader.ReadString('\n')
@@ -467,7 +469,7 @@ func (c *Client) writePump() {
 			}
 
 			// Set write deadline
-			conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
+			_ = conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 
 			// Serialize message
 			data, err := json.Marshal(msg)
@@ -486,6 +488,64 @@ func (c *Client) writePump() {
 
 // routeMessage routes incoming messages to the appropriate handler
 func (c *Client) routeMessage(msg *Message) {
+	msgType, _ := msg.GetType()
+
+	// Debug logging for streaming messages
+	if msgType == "chat_message" || msgType == "tool_call" || msgType == "tool_result" || msgType == "progress" {
+		logger.Debug("[SocketClient] Received %s message: request_id=%s", msgType, msg.RequestID)
+	}
+
+	// Route streaming event types to callbacks first, even if they have a request ID.
+	// These events are sent by the server during streaming and should always
+	// be dispatched to their respective callbacks, not captured as request responses.
+	switch msgType {
+	case "chat_message":
+		logger.Debug("[SocketClient] Routing chat_message to callback (callback_set=%v)", c.chatMessageCallback != nil)
+		if c.chatMessageCallback != nil {
+			var chatMsg ChatMessage
+			if err := json.Unmarshal(msg.Data, &chatMsg); err == nil {
+				logger.Debug("[SocketClient] Calling chatMessageCallback with session_id=%s, role=%s", chatMsg.SessionID, chatMsg.Role)
+				c.chatMessageCallback(chatMsg)
+				logger.Debug("[SocketClient] chatMessageCallback completed")
+			} else {
+				logger.Warn("[SocketClient] Failed to unmarshal chat_message: %v", err)
+			}
+		} else {
+			logger.Warn("[SocketClient] chatMessageCallback is nil, message dropped!")
+		}
+		return
+	case "tool_call":
+		if c.toolCallCallback != nil {
+			var toolCall ToolCall
+			if err := json.Unmarshal(msg.Data, &toolCall); err == nil {
+				c.toolCallCallback(toolCall)
+			}
+		}
+		return
+	case "tool_result":
+		if c.toolResultCallback != nil {
+			var toolResult ToolResult
+			if err := json.Unmarshal(msg.Data, &toolResult); err == nil {
+				c.toolResultCallback(toolResult)
+			}
+		}
+		return
+	case "progress":
+		if c.progressCallback != nil {
+			var progress ProgressData
+			if err := json.Unmarshal(msg.Data, &progress); err == nil {
+				c.progressCallback(progress)
+			}
+		}
+		return
+	case "authorization_request":
+		c.handleAuthorizationRequest(msg)
+		return
+	case "question_request":
+		c.handleQuestionRequest(msg)
+		return
+	}
+
 	// Check if this is a response to a request
 	if requestID, ok := msg.GetRequestID(); ok && requestID != "" {
 		c.requestMu.RLock()
@@ -498,42 +558,8 @@ func (c *Client) routeMessage(msg *Message) {
 		}
 	}
 
-	// Route message to callbacks
-	msgType, _ := msg.GetType()
-
+	// Route remaining message types to callbacks
 	switch msgType {
-	case "chat_message":
-		if c.chatMessageCallback != nil {
-			var chatMsg ChatMessage
-			if err := json.Unmarshal(msg.Data, &chatMsg); err == nil {
-				c.chatMessageCallback(chatMsg)
-			}
-		}
-	case "tool_call":
-		if c.toolCallCallback != nil {
-			var toolCall ToolCall
-			if err := json.Unmarshal(msg.Data, &toolCall); err == nil {
-				c.toolCallCallback(toolCall)
-			}
-		}
-	case "tool_result":
-		if c.toolResultCallback != nil {
-			var toolResult ToolResult
-			if err := json.Unmarshal(msg.Data, &toolResult); err == nil {
-				c.toolResultCallback(toolResult)
-			}
-		}
-	case "progress":
-		if c.progressCallback != nil {
-			var progress ProgressData
-			if err := json.Unmarshal(msg.Data, &progress); err == nil {
-				c.progressCallback(progress)
-			}
-		}
-	case "authorization_request":
-		c.handleAuthorizationRequest(msg)
-	case "question_request":
-		c.handleQuestionRequest(msg)
 	case "closed":
 		c.handleServerClosed(msg)
 	case "pong":
@@ -689,7 +715,7 @@ func (c *Client) handleAuthorizationRequest(msg *Message) {
 		"auth_id": authReq.AuthID,
 		"ack":     true,
 	})
-	c.SendMessage(ackMsg)
+	_ = c.SendMessage(ackMsg)
 
 	// Check if callback is set
 	if c.authorizationCallback == nil {
@@ -698,7 +724,7 @@ func (c *Client) handleAuthorizationRequest(msg *Message) {
 			"auth_id":  authReq.AuthID,
 			"approved": false,
 		})
-		c.SendMessage(respMsg)
+		_ = c.SendMessage(respMsg)
 		return
 	}
 
@@ -717,7 +743,7 @@ func (c *Client) handleAuthorizationRequest(msg *Message) {
 		}
 
 		respMsg := NewMessage("authorization_response", respData)
-		c.SendMessage(respMsg)
+		_ = c.SendMessage(respMsg)
 	}()
 }
 
@@ -735,7 +761,7 @@ func (c *Client) handleQuestionRequest(msg *Message) {
 			"question_id": qReq.QuestionID,
 			"answer":      "",
 		})
-		c.SendMessage(respMsg)
+		_ = c.SendMessage(respMsg)
 		return
 	}
 
@@ -761,7 +787,7 @@ func (c *Client) handleQuestionRequest(msg *Message) {
 		}
 
 		respMsg := NewMessage("question_response", respData)
-		c.SendMessage(respMsg)
+		_ = c.SendMessage(respMsg)
 	}()
 }
 

@@ -42,7 +42,9 @@ func TestLockfile_AcquireRelease(t *testing.T) {
 	}
 
 	// Clean up
-	lock.Release()
+	if err := lock.Release(); err != nil {
+		t.Errorf("Failed to release lock: %v", err)
+	}
 }
 
 func TestLockfile_AlreadyLocked(t *testing.T) {
@@ -54,13 +56,21 @@ func TestLockfile_AlreadyLocked(t *testing.T) {
 	if err := lock1.TryAcquire(); err != nil {
 		t.Fatalf("Failed to acquire first lock: %v", err)
 	}
-	defer lock1.Release()
+	defer func() {
+		if err := lock1.Release(); err != nil {
+			t.Errorf("Failed to release lock1: %v", err)
+		}
+	}()
 
 	// Second lock should fail
 	lock2 := New(lockPath)
 	if err := lock2.TryAcquire(); err == nil {
 		t.Error("Expected error when acquiring already held lock")
-		defer lock2.Release()
+		defer func() {
+			if err := lock2.Release(); err != nil {
+				t.Errorf("Failed to release lock2: %v", err)
+			}
+		}()
 	} else if !errors.Is(err, ErrLocked) {
 		t.Errorf("Expected ErrLocked, got: %v", err)
 	}
@@ -83,7 +93,11 @@ func TestLockfile_Stale(t *testing.T) {
 	if err := lock.TryAcquire(); err != nil {
 		t.Fatalf("Failed to acquire stale lock: %v", err)
 	}
-	defer lock.Release()
+	defer func() {
+		if err := lock.Release(); err != nil {
+			t.Errorf("Failed to release lock: %v", err)
+		}
+	}()
 
 	if !lock.Locked() {
 		t.Error("Lock should be locked")
@@ -107,7 +121,11 @@ func TestLockfile_StaleByTime(t *testing.T) {
 	if err := lock.TryAcquire(); err != nil {
 		t.Fatalf("Failed to acquire old lock: %v", err)
 	}
-	defer lock.Release()
+	defer func() {
+		if err := lock.Release(); err != nil {
+			t.Errorf("Failed to release lock: %v", err)
+		}
+	}()
 }
 
 func TestLockfile_ReleaseNotLocked(t *testing.T) {

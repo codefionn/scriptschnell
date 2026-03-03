@@ -565,7 +565,52 @@ func (a *AuthorizationActor) authorizeShell(ctx context.Context, params map[stri
 		return &AuthorizationDecision{Allowed: true}, nil
 	}
 
+	// Fast-path: common formatter commands are safe and should not trigger prompts.
+	if isLikelySafeFormattingCommand(command) {
+		return &AuthorizationDecision{Allowed: true}, nil
+	}
+
 	return a.judgeShellCommandWithLLM(ctx, command)
+}
+
+func isLikelySafeFormattingCommand(command string) bool {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return false
+	}
+
+	// Disallow shell chaining/redirection/substitution in the fast-path.
+	if strings.Contains(trimmed, "&&") || strings.Contains(trimmed, "||") || strings.Contains(trimmed, "$(") {
+		return false
+	}
+	if strings.ContainsAny(trimmed, "|;&><`") {
+		return false
+	}
+
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return false
+	}
+
+	switch fields[0] {
+	case "gofmt", "gofumpt", "rustfmt", "prettier", "black":
+		return true
+	case "go":
+		return len(fields) >= 2 && fields[1] == "fmt"
+	case "cargo":
+		return len(fields) >= 2 && fields[1] == "fmt"
+	case "ruff":
+		return len(fields) >= 2 && fields[1] == "format"
+	case "npm", "pnpm":
+		return len(fields) >= 3 && fields[1] == "run" && (fields[2] == "format" || fields[2] == "fmt")
+	case "yarn":
+		return (len(fields) >= 2 && (fields[1] == "format" || fields[1] == "fmt")) ||
+			(len(fields) >= 3 && fields[1] == "run" && (fields[2] == "format" || fields[2] == "fmt"))
+	case "bun":
+		return len(fields) >= 3 && fields[1] == "run" && (fields[2] == "format" || fields[2] == "fmt")
+	default:
+		return false
+	}
 }
 
 // authorizeAddContextDirectory requires user approval for adding context directories

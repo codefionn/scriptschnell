@@ -115,7 +115,9 @@ func (c *OpenRouterClient) doCompletion(ctx context.Context, req *CompletionRequ
 	if err != nil {
 		return nil, fmt.Errorf("openrouter completion failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -189,7 +191,9 @@ func (c *OpenRouterClient) doStream(ctx context.Context, req *CompletionRequest,
 	if err != nil {
 		return fmt.Errorf("openrouter stream failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

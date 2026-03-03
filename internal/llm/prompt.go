@@ -141,19 +141,14 @@ func (pb *PromptBuilder) projectSpecificContext(ctx context.Context) string {
 func (pb *PromptBuilder) modelSpecificPrompt(modelName string, availableTools []map[string]interface{}) string {
 	modelFamily := DetectModelFamily(modelName)
 
-	switch {
-	case modelFamily == FamilyMistralLarge ||
-		modelFamily == FamilyMistralMedium ||
-		modelFamily == FamilyMistralSmall ||
-		modelFamily == FamilyCodestral ||
-		modelFamily == FamilyPixtral ||
-		modelFamily == FamilyMixtral:
+	switch modelFamily {
+	case FamilyMistralLarge, FamilyMistralMedium, FamilyMistralSmall, FamilyCodestral, FamilyPixtral, FamilyMixtral:
 		return "Shell commands can be executed with the golang sandbox tool call.\n"
-	case modelFamily == FamilyZaiGLM:
+	case FamilyZaiGLM:
 		return `Always use the todo tool calls to track progress and plan ahead.
 Create new todos, sub-todos and check them if done successfully.
 `
-	case modelFamily == FamilyKimi:
+	case FamilyKimi:
 		toolCount := len(availableTools)
 		toolNames := make([]string, 0, len(availableTools))
 		for _, tool := range availableTools {

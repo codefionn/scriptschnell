@@ -104,7 +104,9 @@ func (c *OpenAICompatibleClient) CompleteWithRequest(ctx context.Context, req *C
 	if err != nil {
 		return nil, fmt.Errorf("openai-compatible completion failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -156,7 +158,9 @@ func (c *OpenAICompatibleClient) Stream(ctx context.Context, req *CompletionRequ
 	if err != nil {
 		return fmt.Errorf("openai-compatible stream failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

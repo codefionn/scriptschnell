@@ -261,7 +261,7 @@ func applyUnifiedDiff(original, diffText string) (string, error) {
 						if i == currentOrigLine {
 							prefix = "->"
 						}
-						linesWithNumbers.WriteString(fmt.Sprintf("%s %3d: %s\n", prefix, i+1, originalLines[i]))
+						fmt.Fprintf(&linesWithNumbers, "%s %3d: %s\n", prefix, i+1, originalLines[i])
 					}
 
 					return "", fmt.Errorf("hunk %d, context mismatch at line %d:\n\nExpected:\n%q\n\nActual:\n%q\n\nSurrounding content:\n%s",
@@ -291,7 +291,7 @@ func applyUnifiedDiff(original, diffText string) (string, error) {
 						if i == currentOrigLine {
 							prefix = "->"
 						}
-						linesWithNumbers.WriteString(fmt.Sprintf("%s %3d: %s\n", prefix, i+1, originalLines[i]))
+						fmt.Fprintf(&linesWithNumbers, "%s %3d: %s\n", prefix, i+1, originalLines[i])
 					}
 
 					return "", fmt.Errorf("hunk %d, deletion failure at line %d:\n\nExpected to delete:\n%q\n\nActual content:\n%q\n\nSurrounding content:\n%s",
@@ -341,9 +341,9 @@ func generateGitDiff(path, original, modified string) string {
 	// Handle new file creation (original is empty)
 	if original == "" {
 		diff.WriteString("--- /dev/null\n")
-		diff.WriteString(fmt.Sprintf("+++ b/%s\n", path))
+		fmt.Fprintf(&diff, "+++ b/%s\n", path)
 		modifiedLines := strings.Split(modified, "\n")
-		diff.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(modifiedLines)))
+		fmt.Fprintf(&diff, "@@ -0,0 +1,%d @@\n", len(modifiedLines))
 		for _, line := range modifiedLines {
 			diff.WriteString("+")
 			diff.WriteString(line)
@@ -354,10 +354,10 @@ func generateGitDiff(path, original, modified string) string {
 
 	// Handle file deletion (modified is empty)
 	if modified == "" {
-		diff.WriteString(fmt.Sprintf("--- a/%s\n", path))
+		fmt.Fprintf(&diff, "--- a/%s\n", path)
 		diff.WriteString("+++ /dev/null\n")
 		originalLines := strings.Split(original, "\n")
-		diff.WriteString(fmt.Sprintf("@@ -1,%d +0,0 @@\n", len(originalLines)))
+		fmt.Fprintf(&diff, "@@ -1,%d +0,0 @@\n", len(originalLines))
 		for _, line := range originalLines {
 			diff.WriteString("-")
 			diff.WriteString(line)
@@ -369,8 +369,8 @@ func generateGitDiff(path, original, modified string) string {
 	originalLines := strings.Split(original, "\n")
 	modifiedLines := strings.Split(modified, "\n")
 
-	diff.WriteString(fmt.Sprintf("--- a/%s\n", path))
-	diff.WriteString(fmt.Sprintf("+++ b/%s\n", path))
+	fmt.Fprintf(&diff, "--- a/%s\n", path)
+	fmt.Fprintf(&diff, "+++ b/%s\n", path)
 
 	// Simple diff generation - find common prefix and suffix
 	commonPrefix := 0
@@ -391,7 +391,7 @@ func generateGitDiff(path, original, modified string) string {
 	newStart := commonPrefix + 1
 	newCount := len(modifiedLines) - commonPrefix - commonSuffix
 
-	diff.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount))
+	fmt.Fprintf(&diff, "@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount)
 
 	// Add context lines before changes (up to 3 lines)
 	contextStart := commonPrefix - 3

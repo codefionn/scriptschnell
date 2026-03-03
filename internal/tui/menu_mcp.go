@@ -59,7 +59,7 @@ func (d mcpItemDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 	}
 
 	desc := mcpHelpStyle.Render(i.description)
-	fmt.Fprintf(w, "%s\n%s", str, mcpItemStyle.Render(desc))
+	_, _ = fmt.Fprintf(w, "%s\n%s", str, mcpItemStyle.Render(desc))
 }
 
 type mcpInputField struct {
@@ -215,7 +215,7 @@ func (m *MCPMenuModel) View() string {
 			if field.optional {
 				label += " (optional)"
 			}
-			b.WriteString(fmt.Sprintf("%s:\n", label))
+			fmt.Fprintf(b, "%s:\n", label)
 			b.WriteString(m.inputs[i].View())
 			b.WriteString("\n\n")
 		}

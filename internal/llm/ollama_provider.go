@@ -23,7 +23,7 @@ func NewOllamaProvider(apiKey string) *OllamaProvider {
 	return &OllamaProvider{
 		baseURL: normalizeOllamaBaseURL(apiKey),
 		client: &http.Client{
-			Timeout: consts.Timeout30Seconds,
+			Timeout: consts.Timeout30,
 		},
 	}
 }
@@ -43,7 +43,9 @@ func (p *OllamaProvider) ListModels(ctx context.Context) ([]*ModelInfo, error) {
 	if err != nil {
 		return p.getFallbackModels(), nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return p.getFallbackModels(), nil
@@ -101,7 +103,9 @@ func (p *OllamaProvider) ValidateAPIKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to contact ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

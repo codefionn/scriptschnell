@@ -124,7 +124,7 @@ func (d genericItemDelegate) Render(w io.Writer, m list.Model, index int, listIt
 	}
 
 	renderedDesc := d.itemStyle.Render(d.descStyle.Render(wrappedDesc))
-	fmt.Fprintf(w, "%s\n%s", title, renderedDesc)
+	_, _ = fmt.Fprintf(w, "%s\n%s", title, renderedDesc)
 }
 
 // GenericMenu is a reusable menu component

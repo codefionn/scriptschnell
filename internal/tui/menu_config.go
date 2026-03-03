@@ -55,7 +55,7 @@ func (d settingsItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	}
 
 	desc := settingsHelpStyle.Render(i.description)
-	fmt.Fprintf(w, "%s\n%s", str, settingsItemStyle.Render(desc))
+	_, _ = fmt.Fprintf(w, "%s\n%s", str, settingsItemStyle.Render(desc))
 }
 
 type SettingsMenuModel struct {

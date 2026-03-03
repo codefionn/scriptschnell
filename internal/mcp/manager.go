@@ -30,7 +30,7 @@ func NewManager(cfg *config.Config, workingDir string, providerMgr *provider.Man
 		cfg:         cfg,
 		workingDir:  workingDir,
 		providerMgr: providerMgr,
-		httpClient:  &http.Client{Timeout: consts.Timeout30Seconds},
+		httpClient:  &http.Client{Timeout: consts.Timeout30},
 	}
 }
 
@@ -94,7 +94,7 @@ func (m *Manager) buildCommandTools(serverName string, serverCfg *config.MCPServ
 
 	timeout := time.Duration(cmdCfg.TimeoutSeconds) * time.Second
 	if cmdCfg.TimeoutSeconds == 0 {
-		timeout = consts.Timeout60Seconds
+		timeout = consts.Timeout60
 	}
 
 	name := uniqueToolName(fmt.Sprintf("mcp_%s", sanitizeName(serverName)), nameUsage)
@@ -245,7 +245,7 @@ func (m *Manager) buildOpenAPITools(serverName string, serverCfg *config.MCPServ
 				DefaultHeaders: headers,
 				DefaultQuery:   apiCfg.DefaultQuery,
 				HTTPClient:     m.httpClient,
-				Timeout:        consts.Timeout60Seconds,
+				Timeout:        consts.Timeout60,
 			})
 
 			toolsForServer = append(toolsForServer, openapiTool)

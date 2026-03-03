@@ -38,20 +38,20 @@ const (
 
 // Timeouts for various operations
 const (
-	// Timeout1Second is a 1 second timeout
-	Timeout1Second = 1 * time.Second
-	// Timeout2Seconds is a 2 second timeout
-	Timeout2Seconds = 2 * time.Second
-	// Timeout5Seconds is a 5 second timeout
-	Timeout5Seconds = 5 * time.Second
-	// Timeout10Seconds is a 10 second timeout
-	Timeout10Seconds = 10 * time.Second
-	// Timeout30Seconds is a 30 second timeout
-	Timeout30Seconds = 30 * time.Second
-	// Timeout60Seconds is a 60 second timeout (1 minute)
-	Timeout60Seconds = 60 * time.Second
-	// Timeout90Seconds is a 90 second timeout
-	Timeout90Seconds = 90 * time.Second
+	// Timeout1 is a 1 second timeout
+	Timeout1 = 1 * time.Second
+	// Timeout2 is a 2 second timeout
+	Timeout2 = 2 * time.Second
+	// Timeout5 is a 5 second timeout
+	Timeout5 = 5 * time.Second
+	// Timeout10 is a 10 second timeout
+	Timeout10 = 10 * time.Second
+	// Timeout30 is a 30 second timeout
+	Timeout30 = 30 * time.Second
+	// Timeout60 is a 60 second timeout (1 minute)
+	Timeout60 = 60 * time.Second
+	// Timeout90 is a 90 second timeout
+	Timeout90 = 90 * time.Second
 	// Timeout2Minutes is a 2 minute timeout
 	Timeout2Minutes = 2 * time.Minute
 	// Timeout5Minutes is a 5 minute timeout

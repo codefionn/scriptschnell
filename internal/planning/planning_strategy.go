@@ -226,7 +226,7 @@ func (pr *PlanningResult) IsPartialPlan() bool {
 	if pr.Result == nil {
 		return false
 	}
-	return pr.Result.LoopDetected || pr.Result.HitIterationLimit
+	return pr.LoopDetected || pr.HitIterationLimit
 }
 
 // HasContent returns true if the result has actual plan content

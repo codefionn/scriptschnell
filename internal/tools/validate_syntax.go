@@ -155,8 +155,8 @@ func (e *ValidateSyntaxToolExecutor) validateCode(code, language, sourceName str
 func (e *ValidateSyntaxToolExecutor) formatUIResult(sourceName string, result *syntax.ValidationResult) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("🔍 **Syntax Validation:** `%s`\n\n", sourceName))
-	sb.WriteString(fmt.Sprintf("📊 **Language:** %s | **Parsed:** %d bytes\n\n", result.Language, result.ParsedBytes))
+	fmt.Fprintf(&sb, "🔍 **Syntax Validation:** `%s`\n\n", sourceName)
+	fmt.Fprintf(&sb, "📊 **Language:** %s | **Parsed:** %d bytes\n\n", result.Language, result.ParsedBytes)
 
 	if result.Valid {
 		sb.WriteString("✅ **Validation Passed** - No syntax errors detected")
@@ -164,19 +164,19 @@ func (e *ValidateSyntaxToolExecutor) formatUIResult(sourceName string, result *s
 	}
 
 	// Validation failed
-	sb.WriteString(fmt.Sprintf("❌ **Validation Failed** - Found %d syntax error(s)\n\n", len(result.Errors)))
+	fmt.Fprintf(&sb, "❌ **Validation Failed** - Found %d syntax error(s)\n\n", len(result.Errors))
 
 	// List errors (limit to first 10 for readability)
 	maxErrors := 10
 	for i, syntaxErr := range result.Errors {
 		if i >= maxErrors {
-			sb.WriteString(fmt.Sprintf("*... and %d more error(s)*\n", len(result.Errors)-maxErrors))
+			fmt.Fprintf(&sb, "*... and %d more error(s)*\n", len(result.Errors)-maxErrors)
 			break
 		}
 
-		sb.WriteString(fmt.Sprintf("**Error %d:** Line %d, Column %d\n",
-			i+1, syntaxErr.Line, syntaxErr.Column))
-		sb.WriteString(fmt.Sprintf("```\n%s\n```\n", syntaxErr.Message))
+		fmt.Fprintf(&sb, "**Error %d:** Line %d, Column %d\n",
+			i+1, syntaxErr.Line, syntaxErr.Column)
+		fmt.Fprintf(&sb, "```\n%s\n```\n", syntaxErr.Message)
 
 		if i < len(result.Errors)-1 && i < maxErrors-1 {
 			sb.WriteString("\n---\n\n")

@@ -354,16 +354,16 @@ func (p *PlanningAgent) collectContextFiles(ctx context.Context, paths []string)
 
 		data, err := p.fs.ReadFile(ctx, path)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("Context file: %s\n<error: %v>\n\n", path, err))
+			fmt.Fprintf(&sb, "Context file: %s\n<error: %v>\n\n", path, err)
 			continue
 		}
 
 		// Enforce a size limit to avoid overwhelming the model.
 		if len(data) > maxContextFileBytes {
 			data = data[:maxContextFileBytes]
-			sb.WriteString(fmt.Sprintf("Context file: %s (truncated to %d bytes)\n", path, maxContextFileBytes))
+			fmt.Fprintf(&sb, "Context file: %s (truncated to %d bytes)\n", path, maxContextFileBytes)
 		} else {
-			sb.WriteString(fmt.Sprintf("Context file: %s\n", path))
+			fmt.Fprintf(&sb, "Context file: %s\n", path)
 		}
 
 		content := string(data)
@@ -605,10 +605,10 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 								// Format with options like ask_user_multiple
 								if optsArray, ok := opts.([]interface{}); ok && len(optsArray) == 3 {
 									var questionsText strings.Builder
-									questionsText.WriteString(fmt.Sprintf("1. %s\n", question))
+									fmt.Fprintf(&questionsText, "1. %s\n", question)
 									for j, opt := range optsArray {
 										if optStr, ok := opt.(string); ok {
-											questionsText.WriteString(fmt.Sprintf("   %c. %s\n", 'a'+j, optStr))
+											fmt.Fprintf(&questionsText, "   %c. %s\n", 'a'+j, optStr)
 										}
 									}
 									questionText = questionsText.String()
@@ -661,10 +661,10 @@ func (p *PlanningAgent) processToolCalls(ctx context.Context, toolCalls []map[st
 								if questionMap, ok := q.(map[string]interface{}); ok {
 									question, _ := questionMap["question"].(string)
 									options, _ := questionMap["options"].([]interface{})
-									questionsText.WriteString(fmt.Sprintf("%d. %s\n", i+1, question))
+									fmt.Fprintf(&questionsText, "%d. %s\n", i+1, question)
 									for j, opt := range options {
 										if optStr, ok := opt.(string); ok {
-											questionsText.WriteString(fmt.Sprintf("   %c. %s\n", 'a'+j, optStr))
+											fmt.Fprintf(&questionsText, "   %c. %s\n", 'a'+j, optStr)
 										}
 									}
 									questionsText.WriteString("\n")
@@ -781,9 +781,9 @@ func (p *PlanningAgent) buildFileList(workingDir string) string {
 	var sb strings.Builder
 	for _, entry := range entries {
 		if entry.IsDir {
-			sb.WriteString(fmt.Sprintf("  [DIR]  %s/\n", entry.Path))
+			fmt.Fprintf(&sb, "  [DIR]  %s/\n", entry.Path)
 		} else {
-			sb.WriteString(fmt.Sprintf("  [FILE] %s\n", entry.Path))
+			fmt.Fprintf(&sb, "  [FILE] %s\n", entry.Path)
 		}
 	}
 
@@ -803,7 +803,7 @@ func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 
 	// Add working directory context if available
 	if p.session != nil && p.session.WorkingDir != "" {
-		prompt.WriteString(fmt.Sprintf("Working Directory: %s\n\n", p.session.WorkingDir))
+		fmt.Fprintf(&prompt, "Working Directory: %s\n\n", p.session.WorkingDir)
 
 		// List files in the working directory
 		if p.fs != nil {
@@ -822,9 +822,9 @@ func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 		projectTypes, err := detector.Detect(ctx)
 		if err == nil && len(projectTypes) > 0 {
 			bestMatch := projectTypes[0]
-			prompt.WriteString(fmt.Sprintf("Project Language/Framework: %s", bestMatch.Name))
+			fmt.Fprintf(&prompt, "Project Language/Framework: %s", bestMatch.Name)
 			if bestMatch.Description != "" {
-				prompt.WriteString(fmt.Sprintf(" (%s)", bestMatch.Description))
+				fmt.Fprintf(&prompt, " (%s)", bestMatch.Description)
 			}
 			prompt.WriteString("\n\n")
 		}
@@ -847,7 +847,7 @@ func (p *PlanningAgent) buildSystemPrompt(req *PlanningRequest) string {
 		prompt.WriteString("- Use ask_user_multiple with 3 response options per question for better user experience\n")
 		prompt.WriteString("- Only use ask_user for single, simple questions\n")
 		if req.MaxQuestions > 0 {
-			prompt.WriteString(fmt.Sprintf("- Ask at most %d questions total\n", req.MaxQuestions))
+			fmt.Fprintf(&prompt, "- Ask at most %d questions total\n", req.MaxQuestions)
 		}
 	} else {
 		prompt.WriteString("- Do not ask questions; work with the information provided\n")

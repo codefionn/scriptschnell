@@ -66,7 +66,7 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("rate limit exceeded (429)")
 		}
 
@@ -76,7 +76,9 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]*ModelInfo, error
 	if opErr != nil {
 		return nil, fmt.Errorf("failed to list models: %w", opErr)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

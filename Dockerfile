@@ -6,7 +6,7 @@
 FROM tinygo/tinygo:0.39.0 AS tinygo
 
 # Base stage with Go (Debian) and common dependencies
-FROM golang:1.25-bookworm AS base
+FROM golang:1.26-bookworm AS base
 WORKDIR /app
 
 # Install git, ca-certificates, tzdata, and cross-compilation toolchains
@@ -36,7 +36,7 @@ RUN go mod download
 
 # Linting stage (minimal)
 FROM base AS lint
-RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && \
+RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.10.1 && \
     go install github.com/a-h/templ/cmd/templ@latest
 
 # Copy source code

@@ -67,7 +67,7 @@ func buildTitleGenerationPrompt(userPrompt string, workspaceFiles []string, file
 	var sb strings.Builder
 
 	sb.WriteString("You are a session title generator. Generate a concise, descriptive title (maximum 80 characters) for a coding session based on the user's initial request and context.\n\n")
-	sb.WriteString(fmt.Sprintf("User's request:\n%s\n\n", userPrompt))
+	fmt.Fprintf(&sb, "User's request:\n%s\n\n", userPrompt)
 
 	// Add workspace context if available
 	if len(workspaceFiles) > 0 {
@@ -75,10 +75,10 @@ func buildTitleGenerationPrompt(userPrompt string, workspaceFiles []string, file
 		count := 0
 		for _, file := range workspaceFiles {
 			if count >= 20 {
-				sb.WriteString(fmt.Sprintf("... and %d more files\n", len(workspaceFiles)-20))
+				fmt.Fprintf(&sb, "... and %d more files\n", len(workspaceFiles)-20)
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s\n", file))
+			fmt.Fprintf(&sb, "- %s\n", file)
 			count++
 		}
 		sb.WriteString("\n")
@@ -88,7 +88,7 @@ func buildTitleGenerationPrompt(userPrompt string, workspaceFiles []string, file
 	if len(filesRead) > 0 {
 		sb.WriteString("Files accessed in session:\n")
 		for path := range filesRead {
-			sb.WriteString(fmt.Sprintf("- %s\n", path))
+			fmt.Fprintf(&sb, "- %s\n", path)
 		}
 		sb.WriteString("\n")
 	}

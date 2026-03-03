@@ -572,7 +572,7 @@ func FormatTodoPlanAsText(todos *TodoList) string {
 			for i := 0; i < level; i++ {
 				indent += "  "
 			}
-			builder.WriteString(fmt.Sprintf("%s• %s\n", indent, item.Text))
+			fmt.Fprintf(&builder, "%s• %s\n", indent, item.Text)
 		}
 		builder.WriteString("\n")
 	}
@@ -586,7 +586,7 @@ func FormatTodoPlanAsText(todos *TodoList) string {
 			for i := 0; i < level; i++ {
 				indent += "  "
 			}
-			builder.WriteString(fmt.Sprintf("%s▶ %s\n", indent, item.Text))
+			fmt.Fprintf(&builder, "%s▶ %s\n", indent, item.Text)
 		}
 		builder.WriteString("\n")
 	}
@@ -600,7 +600,7 @@ func FormatTodoPlanAsText(todos *TodoList) string {
 			for i := 0; i < level; i++ {
 				indent += "  "
 			}
-			builder.WriteString(fmt.Sprintf("%s✓ %s\n", indent, item.Text))
+			fmt.Fprintf(&builder, "%s✓ %s\n", indent, item.Text)
 		}
 	}
 

@@ -327,7 +327,7 @@ func (s *Server) handleModelSelect(w http.ResponseWriter, r *http.Request, _ htt
 	// Return the updated button HTML showing "Selected" state
 	w.Header().Set("Content-Type", "text/html")
 	sanitizedID := sanitizeID(modelID)
-	fmt.Fprintf(w, `<div class="ml-4 flex-shrink-0" id="model-button-%s">
+	_, _ = fmt.Fprintf(w, `<div class="ml-4 flex-shrink-0" id="model-button-%s">
 		<button
 			hx-post="/models/deselect"
 			hx-vals='{"model_id": "%s"}'
@@ -355,7 +355,7 @@ func (s *Server) handleModelDeselect(w http.ResponseWriter, r *http.Request, _ h
 	// Return the updated button HTML showing "Select" state
 	w.Header().Set("Content-Type", "text/html")
 	sanitizedID := sanitizeID(modelID)
-	fmt.Fprintf(w, `<div class="ml-4 flex-shrink-0" id="model-button-%s">
+	_, _ = fmt.Fprintf(w, `<div class="ml-4 flex-shrink-0" id="model-button-%s">
 		<button
 			hx-post="/models/select"
 			hx-vals='{"model_id": "%s"}'
@@ -390,7 +390,7 @@ func (s *Server) handleEvalRun(w http.ResponseWriter, r *http.Request, ps httpro
 	w.Header().Set("Content-Type", "text/html")
 	// Return a loading message that polls for completion
 	// We'll poll every 2 seconds and check if all runs are completed
-	fmt.Fprintf(w, `<div
+	_, _ = fmt.Fprintf(w, `<div
 		id="eval-status-%s"
 		hx-get="/evals/%s/status?runs=%v"
 		hx-trigger="load delay:2s"
@@ -436,12 +436,13 @@ func (s *Server) handleEvalStatus(w http.ResponseWriter, r *http.Request, ps htt
 	failedCount := 0
 
 	for _, run := range runs {
-		if run.Status == "completed" {
+		switch run.Status {
+		case "completed":
 			completedCount++
-		} else if run.Status == "failed" {
+		case "failed":
 			failedCount++
 			anyFailed = true
-		} else {
+		default:
 			allCompleted = false
 		}
 	}
@@ -452,7 +453,7 @@ func (s *Server) handleEvalStatus(w http.ResponseWriter, r *http.Request, ps htt
 		// All runs completed - show success message
 		successCount := completedCount
 		if anyFailed {
-			fmt.Fprintf(w, `<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+			_, _ = fmt.Fprintf(w, `<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
 				<div class="text-yellow-800">
 					<div class="font-medium">⚠️ Evaluation completed with some failures</div>
 					<div class="text-sm mt-1">
@@ -462,7 +463,7 @@ func (s *Server) handleEvalStatus(w http.ResponseWriter, r *http.Request, ps htt
 				</div>
 			</div>`, successCount, len(runs), failedCount)
 		} else {
-			fmt.Fprintf(w, `<div class="bg-green-50 border border-green-200 rounded-lg p-4">
+			_, _ = fmt.Fprintf(w, `<div class="bg-green-50 border border-green-200 rounded-lg p-4">
 				<div class="text-green-800">
 					<div class="font-medium">✓ Evaluation completed successfully!</div>
 					<div class="text-sm mt-1">
@@ -475,7 +476,7 @@ func (s *Server) handleEvalStatus(w http.ResponseWriter, r *http.Request, ps htt
 	} else {
 		// Still running - continue polling
 		runningCount := len(runs) - completedCount - failedCount
-		fmt.Fprintf(w, `<div
+		_, _ = fmt.Fprintf(w, `<div
 			id="eval-status-%s"
 			hx-get="/evals/%s/status"
 			hx-trigger="load delay:2s"

@@ -68,7 +68,7 @@ type WebFetchTool struct {
 // NewWebFetchTool constructs a WebFetchTool.
 func NewWebFetchTool(client *http.Client, summarizeClient llm.Client, authorizer Authorizer, detector secretdetect.Detector, featureFlags FeatureFlagsProvider) *WebFetchTool {
 	if client == nil {
-		client = &http.Client{Timeout: consts.Timeout30Seconds}
+		client = &http.Client{Timeout: consts.Timeout30}
 	}
 	var chunkedSummarizer *summarizer.ChunkedSummarizer
 	if summarizeClient != nil {
@@ -155,7 +155,9 @@ func (t *WebFetchTool) Execute(ctx context.Context, params map[string]interface{
 	if err != nil {
 		return &ToolResult{Error: fmt.Sprintf("request failed: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	bodyReader := io.LimitReader(resp.Body, webFetchMaxBodyBytes+1)
 	bodyBytes, err := io.ReadAll(bodyReader)

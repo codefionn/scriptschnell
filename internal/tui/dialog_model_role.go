@@ -43,7 +43,7 @@ func (d roleItemDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 	}
 
 	desc := roleItemStyle.Render(roleDescStyle.Render(item.desc))
-	fmt.Fprintf(w, "%s\n%s", title, desc)
+	_, _ = fmt.Fprintf(w, "%s\n%s", title, desc)
 }
 
 // ModelRoleDialog presents a dialog to choose how to register a model.

@@ -55,7 +55,7 @@ func (d settingsMainItemDelegate) Render(w io.Writer, m list.Model, index int, l
 	}
 
 	desc := settingsMainHelpStyle.Render(i.description)
-	fmt.Fprintf(w, "%s\n%s", str, settingsMainItemStyle.Render(desc))
+	_, _ = fmt.Fprintf(w, "%s\n%s", str, settingsMainItemStyle.Render(desc))
 }
 
 type SettingsMainMenuModel struct {

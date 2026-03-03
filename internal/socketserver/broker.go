@@ -52,8 +52,6 @@ type MessageBroker struct {
 	pendingAuths  map[string]*pendingAuthorization // authID -> pending auth
 	authCounter   int
 
-	sendMessage func(*BaseMessage) // callback to send messages to client
-
 	pendingQuestionMu sync.Mutex
 	pendingQuestions  map[string]*pendingQuestion // questionID -> pending question
 	questionCounter   int
@@ -127,7 +125,9 @@ func (mb *MessageBroker) InitializeSession(
 		mb.requireSandboxAuth,
 	)
 	if err != nil {
-		filesystem.Close()
+		if closeErr := filesystem.Close(); closeErr != nil {
+			return fmt.Errorf("failed to create orchestrator: %w (filesystem close failed: %v)", err, closeErr)
+		}
 		return fmt.Errorf("failed to create orchestrator: %w", err)
 	}
 
@@ -145,9 +145,10 @@ func (mb *MessageBroker) InitializeSession(
 	return nil
 }
 
-// SetMessageCallback sets the callback function for sending messages to the client
+// SetMessageCallback is deprecated - the broker now uses the event bus exclusively
+// This method is kept for backward compatibility but does nothing
 func (mb *MessageBroker) SetMessageCallback(callback func(*BaseMessage)) {
-	mb.sendMessage = callback
+	// Deprecated: Events are now published to the event bus and routed via EventBridge
 }
 
 // ProcessUserMessage processes a user message through the orchestrator
@@ -157,19 +158,15 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 		return fmt.Errorf("session not initialized")
 	}
 
-	if mb.sendMessage == nil {
-		return fmt.Errorf("message callback not set")
+	// Publish user message to event bus - this will be routed to all clients subscribed to this session
+	userMsgData := map[string]interface{}{
+		"role":       "user",
+		"content":    message,
+		"session_id": mb.session.ID,
+		"request_id": requestID,
 	}
-
-	// Send user message to client
-	mb.sendMessage(NewRequest(
-		MessageTypeChatMessage,
-		requestID,
-		map[string]interface{}{
-			"role":    "user",
-			"content": message,
-		},
-	))
+	logger.Debug("[Broker] Publishing user message event: session=%s request=%s", mb.session.ID, requestID)
+	actor.PublishEvent(actor.EventTypeMessage, "broker", mb.session.ID, userMsgData)
 
 	// Create auth callback - sends request to client and waits for response
 	authCallback := func(toolName string, params map[string]interface{}, reason string) (bool, error) {
@@ -195,17 +192,15 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 			}
 		}
 
-		// Send tool call message
-		mb.sendMessage(NewRequest(
-			MessageTypeToolCall,
-			requestID,
-			map[string]interface{}{
-				"tool_id":     toolID,
-				"tool_name":   toolName,
-				"parameters":  parameters,
-				"description": description,
-			},
-		))
+		// Publish tool call to event bus
+		toolCallData := map[string]interface{}{
+			"tool_id":     toolID,
+			"tool_name":   toolName,
+			"parameters":  parameters,
+			"description": description,
+			"session_id":  mb.session.ID,
+		}
+		actor.PublishEvent(actor.EventTypeToolCall, "broker", mb.session.ID, toolCallData)
 		return nil
 	}
 
@@ -221,15 +216,14 @@ func (mb *MessageBroker) ProcessUserMessage(ctx context.Context, message string,
 			data["result"] = result
 		}
 
-		mb.sendMessage(NewRequest(
-			MessageTypeToolResult,
-			requestID,
-			data,
-		))
+		// Publish tool result to event bus
+		data["session_id"] = mb.session.ID
+		actor.PublishEvent(actor.EventTypeToolResult, "broker", mb.session.ID, data)
 		return nil
 	}
 
 	// Create progress callback - filters and forwards progress updates
+	logger.Debug("[Broker] Creating progress callback for session=%s", mb.session.ID)
 	progressCallback := func(msg progress.Update) error {
 		return mb.handleProgress(msg, requestID)
 	}
@@ -263,42 +257,49 @@ func (mb *MessageBroker) handleProgress(msg progress.Update, requestID string) e
 	// Verification agent messages should be sent even if ephemeral
 	if msg.VerificationAgent && msg.Message != "" {
 		logger.Debug("Progress (verification agent): %s", msg.Message)
-		mb.sendMessage(NewRequest(
-			MessageTypeProgress,
-			requestID,
-			map[string]interface{}{
-				"message":    msg.Message,
-				"is_compact": true,
-			},
-		))
+		progressData := map[string]interface{}{
+			"message":    msg.Message,
+			"is_compact": true,
+			"session_id": mb.session.ID,
+		}
+		actor.PublishEvent(actor.EventTypeProgress, "broker", mb.session.ID, progressData)
 		return nil
 	}
 
 	// Handle reasoning content (extended thinking)
 	if msg.Reasoning != "" {
 		logger.Debug("Progress (reasoning): %s", msg.Reasoning)
-		mb.sendMessage(NewRequest(
-			MessageTypeChatMessage,
-			requestID,
-			map[string]interface{}{
-				"role":      "assistant",
-				"content":   msg.Reasoning,
-				"reasoning": true,
-			},
-		))
+		reasoningData := map[string]interface{}{
+			"role":       "assistant",
+			"content":    msg.Reasoning,
+			"reasoning":  true,
+			"session_id": mb.session.ID,
+		}
+		actor.PublishEvent(actor.EventTypeMessage, "broker", mb.session.ID, reasoningData)
 		return nil
 	}
 
-	// Only send non-ephemeral important messages
-	if !msg.Ephemeral && msg.Message != "" {
+	// Handle streaming content from LLM (ReportNoStatus mode means stream to user)
+	// This is the primary way assistant messages are delivered
+	if msg.ShouldStream() && msg.Message != "" {
+		logger.Debug("[Broker] Publishing streaming chat_message: session_id=%s, content_len=%d", mb.session.ID, len(msg.Message))
+		streamData := map[string]interface{}{
+			"role":       "assistant",
+			"content":    msg.Message,
+			"session_id": mb.session.ID,
+		}
+		actor.PublishEvent(actor.EventTypeMessage, "broker", mb.session.ID, streamData)
+		return nil
+	}
+
+	// Send status updates as progress messages (ReportJustStatus or ReportStreamAndStatus)
+	if msg.ShouldStatus() && !msg.Ephemeral && msg.Message != "" {
 		logger.Debug("Progress: %s", msg.Message)
-		mb.sendMessage(NewRequest(
-			MessageTypeProgress,
-			requestID,
-			map[string]interface{}{
-				"message": msg.Message,
-			},
-		))
+		statusData := map[string]interface{}{
+			"message":    msg.Message,
+			"session_id": mb.session.ID,
+		}
+		actor.PublishEvent(actor.EventTypeProgress, "broker", mb.session.ID, statusData)
 	}
 
 	return nil
@@ -371,11 +372,11 @@ func (h *socketInteractionHandler) HandleInteraction(ctx context.Context, req *a
 		return nil, fmt.Errorf("invalid payload type for authorization: expected *AuthorizationPayload, got %T", req.Payload)
 	}
 
-	if h.broker.sendMessage == nil {
+	if !h.broker.initialized || h.broker.session == nil {
 		return &actor.UserInteractionResponse{
 			RequestID: req.RequestID,
 			Approved:  false,
-			Error:     fmt.Errorf("no active socket session to send authorization request"),
+			Error:     fmt.Errorf("broker not initialized or no active session"),
 		}, nil
 	}
 
@@ -429,17 +430,15 @@ func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName strin
 
 	logger.Debug("Authorization request for tool %s (authID: %s)", toolName, authID)
 
-	// Send authorization request to client
-	mb.sendMessage(NewRequest(
-		MessageTypeAuthorizationRequest,
-		requestID,
-		map[string]interface{}{
-			"auth_id":    authID,
-			"tool_name":  toolName,
-			"parameters": params,
-			"reason":     reason,
-		},
-	))
+	// Publish authorization request to event bus
+	authData := map[string]interface{}{
+		"auth_id":    authID,
+		"tool_name":  toolName,
+		"parameters": params,
+		"reason":     reason,
+		"session_id": mb.session.ID,
+	}
+	actor.PublishEvent(actor.EventTypeAuthorization, "broker", mb.session.ID, authData)
 
 	// Phase 1: Wait for ack (client confirmed dialog is displayed) or early response
 	select {
@@ -455,7 +454,7 @@ func (mb *MessageBroker) handleAuthorization(ctx context.Context, toolName strin
 		logger.Debug("Authorization cancelled during ack wait for %s", authID)
 		cleanup()
 		return false, ctx.Err()
-	case <-time.After(consts.Timeout30Seconds):
+	case <-time.After(consts.Timeout30):
 		logger.Error("Authorization ack timeout for %s — dialog was not displayed", authID)
 		cleanup()
 		return false, fmt.Errorf("authorization timed out: dialog was not displayed by the client within 30 seconds")
@@ -549,16 +548,14 @@ func (mb *MessageBroker) handleQuestion(ctx context.Context, question string, qu
 		"question_id": questionID,
 		"question":    question,
 		"multi_mode":  multiMode,
+		"session_id":  mb.session.ID,
 	}
 	if len(questions) > 0 {
 		data["questions"] = questions
 	}
 
-	mb.sendMessage(NewRequest(
-		MessageTypeQuestionRequest,
-		requestID,
-		data,
-	))
+	// Publish question request to event bus
+	actor.PublishEvent(actor.EventTypeQuestion, "broker", mb.session.ID, data)
 
 	// Wait for response with timeout
 	select {

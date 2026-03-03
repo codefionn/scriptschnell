@@ -97,7 +97,9 @@ func (c *MistralClient) CompleteWithRequest(ctx context.Context, req *Completion
 	if err != nil {
 		return nil, fmt.Errorf("mistral completion failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -149,7 +151,9 @@ func (c *MistralClient) Stream(ctx context.Context, req *CompletionRequest, call
 	if err != nil {
 		return fmt.Errorf("mistral stream failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

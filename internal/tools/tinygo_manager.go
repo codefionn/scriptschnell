@@ -212,7 +212,7 @@ func (m *TinyGoManager) GetTinyGoBinary(ctx context.Context) (string, error) {
 
 	// Clear status after a brief moment
 	go func() {
-		time.Sleep(consts.Timeout2Seconds)
+		time.Sleep(consts.Timeout2)
 		m.updateStatus("")
 	}()
 
@@ -268,8 +268,12 @@ func (m *TinyGoManager) downloadTinyGo(ctx context.Context) error {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-	defer tmpFile.Close()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	defer func() {
+		_ = tmpFile.Close()
+	}()
 
 	// Download the file
 	req, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
@@ -281,7 +285,9 @@ func (m *TinyGoManager) downloadTinyGo(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to download TinyGo: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed with status: %s", resp.Status)
@@ -316,7 +322,7 @@ func (m *TinyGoManager) downloadTinyGo(ctx context.Context) error {
 	if _, err := io.Copy(tmpFile, progressReader); err != nil {
 		return fmt.Errorf("failed to save download: %w", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Extract to cache directory
 	m.logger.Info("Extracting TinyGo...")
@@ -376,7 +382,9 @@ func (m *TinyGoManager) extractTarGzData(data []byte, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzr.Close()
+	defer func() {
+		_ = gzr.Close()
+	}()
 
 	tr := tar.NewReader(gzr)
 
@@ -413,10 +421,10 @@ func (m *TinyGoManager) extractTarGzData(data []byte, destDir string) error {
 			}
 
 			if _, err := io.Copy(outFile, tr); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return fmt.Errorf("failed to extract file: %w", err)
 			}
-			outFile.Close()
+			_ = outFile.Close()
 		}
 	}
 
@@ -429,13 +437,17 @@ func (m *TinyGoManager) extractTarGz(archivePath, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open archive: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	gzr, err := gzip.NewReader(file)
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzr.Close()
+	defer func() {
+		_ = gzr.Close()
+	}()
 
 	tr := tar.NewReader(gzr)
 
@@ -472,10 +484,10 @@ func (m *TinyGoManager) extractTarGz(archivePath, destDir string) error {
 			}
 
 			if _, err := io.Copy(outFile, tr); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return fmt.Errorf("failed to extract file: %w", err)
 			}
-			outFile.Close()
+			_ = outFile.Close()
 		}
 	}
 
@@ -517,18 +529,18 @@ func (m *TinyGoManager) extractZipData(data []byte, destDir, fileName string) er
 
 		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, f.Mode())
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return fmt.Errorf("failed to create file: %w", err)
 		}
 
 		if _, err := io.Copy(outFile, rc); err != nil {
-			outFile.Close()
-			rc.Close()
+			_ = outFile.Close()
+			_ = rc.Close()
 			return fmt.Errorf("failed to extract file: %w", err)
 		}
 
-		outFile.Close()
-		rc.Close()
+		_ = outFile.Close()
+		_ = rc.Close()
 	}
 
 	return nil
@@ -540,7 +552,9 @@ func (m *TinyGoManager) extractZip(archivePath, destDir, fileName string) error 
 	if err != nil {
 		return fmt.Errorf("failed to open zip archive: %w", err)
 	}
-	defer r.Close()
+	defer func() {
+		_ = r.Close()
+	}()
 
 	for _, f := range r.File {
 		// Remove the top-level "tinygo" directory from the path
@@ -570,18 +584,18 @@ func (m *TinyGoManager) extractZip(archivePath, destDir, fileName string) error 
 
 		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, f.Mode())
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return fmt.Errorf("failed to create file: %w", err)
 		}
 
 		if _, err := io.Copy(outFile, rc); err != nil {
-			outFile.Close()
-			rc.Close()
+			_ = outFile.Close()
+			_ = rc.Close()
 			return fmt.Errorf("failed to extract file: %w", err)
 		}
 
-		outFile.Close()
-		rc.Close()
+		_ = outFile.Close()
+		_ = rc.Close()
 	}
 
 	return nil

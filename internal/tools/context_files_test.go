@@ -166,7 +166,7 @@ func TestDecompressDataGzip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to write gzip data: %v", err)
 	}
-	gzWriter.Close()
+	_ = gzWriter.Close()
 
 	compressed := buf.Bytes()
 
@@ -375,7 +375,7 @@ func TestReadContextFileTool_CompressedFile(t *testing.T) {
 	if _, err := gzWriter.Write(original); err != nil {
 		t.Fatalf("failed to write to gzip writer: %v", err)
 	}
-	gzWriter.Close()
+	_ = gzWriter.Close()
 
 	filePath := contextDir + "/test.1.gz"
 	mockFS.files[filePath] = buf.Bytes()

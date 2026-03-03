@@ -60,7 +60,7 @@ func (cs *ChunkedSummarizer) Summarize(ctx context.Context, content string, opts
 
 	// Set defaults
 	if opts.Timeout == 0 {
-		opts.Timeout = consts.Timeout60Seconds
+		opts.Timeout = consts.Timeout60
 	}
 	maxBytes := cs.MaxSummaryBytes
 	if opts.MaxBytes > 0 {
@@ -246,10 +246,10 @@ func (cs *ChunkedSummarizer) buildSummaryPrompt(content string, opts SummarizeOp
 	var sb strings.Builder
 
 	if opts.Context != "" {
-		sb.WriteString(fmt.Sprintf("Context: %s\n\n", opts.Context))
+		fmt.Fprintf(&sb, "Context: %s\n\n", opts.Context)
 	}
 
-	sb.WriteString(fmt.Sprintf("Summarize the following content for this goal: %s\n\n", opts.BasePrompt))
+	fmt.Fprintf(&sb, "Summarize the following content for this goal: %s\n\n", opts.BasePrompt)
 	sb.WriteString("Content:\n")
 	sb.WriteString(content)
 
@@ -261,10 +261,10 @@ func (cs *ChunkedSummarizer) buildCombinationPrompt(combinedSummaries string, op
 	var sb strings.Builder
 
 	if opts.Context != "" {
-		sb.WriteString(fmt.Sprintf("Context: %s\n\n", opts.Context))
+		fmt.Fprintf(&sb, "Context: %s\n\n", opts.Context)
 	}
 
-	sb.WriteString(fmt.Sprintf("Combine these partial summaries into a coherent final summary for this goal: \"%s\"\n\n", opts.BasePrompt))
+	fmt.Fprintf(&sb, "Combine these partial summaries into a coherent final summary for this goal: \"%s\"\n\n", opts.BasePrompt)
 	sb.WriteString("Partial summaries:\n")
 	sb.WriteString(combinedSummaries)
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	. "github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 
 	"github.com/codefionn/scriptschnell/internal/actor"
@@ -18,7 +18,7 @@ import (
 )
 
 // registerFetchHostFunction registers the fetch host function
-func (t *SandboxTool) registerFetchHostFunction(envBuilder HostModuleBuilder, adapter *wasiAuthorizerAdapter, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerFetchHostFunction(envBuilder wazero.HostModuleBuilder, adapter *wasiAuthorizerAdapter, tracker *sandboxCallTracker) {
 	// fetch(method_ptr, method_len, url_ptr, url_len, body_ptr, body_len, response_ptr, response_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, responsePtr, responseCap uint32) uint32 {
@@ -28,7 +28,7 @@ func (t *SandboxTool) registerFetchHostFunction(envBuilder HostModuleBuilder, ad
 }
 
 // registerShellHostFunction registers the shell/execute command host function
-func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, adapter *wasiAuthorizerAdapter, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerShellHostFunction(envBuilder wazero.HostModuleBuilder, adapter *wasiAuthorizerAdapter, tracker *sandboxCallTracker) {
 	// shell(command_json_ptr, command_json_len, stdin_ptr, stdin_len, stdout_ptr, stdout_cap, stderr_ptr, stderr_cap) -> exit_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, cmdPtr, cmdLen, stdinPtr, stdinLen, stdoutPtr, stdoutCap, stderrPtr, stderrCap uint32) int32 {
@@ -166,7 +166,7 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 			if t.shellExecutor != nil {
 				// Use the shell executor (actor-based) with direct argv execution
 				var err error
-				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandArgs, "", consts.Timeout30Seconds, string(stdinData))
+				stdoutStr, stderrStr, exitCode, err = t.shellExecutor.ExecuteCommand(ctx, commandArgs, "", consts.Timeout30, string(stdinData))
 				// When the executor returns an error (e.g. command not found, timeout)
 				// and stderr is empty, include the error message so the caller gets context
 				if err != nil && stderrStr == "" {
@@ -207,7 +207,7 @@ func (t *SandboxTool) registerShellHostFunction(envBuilder HostModuleBuilder, ad
 }
 
 // registerSummarizeHostFunction registers the summarize host function
-func (t *SandboxTool) registerSummarizeHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerSummarizeHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// summarize(prompt_ptr, prompt_len, text_ptr, text_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, promptPtr, promptLen, textPtr, textLen, resultPtr, resultCap uint32) int32 {
@@ -270,7 +270,7 @@ Provide a concise summary based on the instructions above.`, prompt, text)
 }
 
 // registerReadFileHostFunction registers the read_file host function
-func (t *SandboxTool) registerReadFileHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerReadFileHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// read_file(path_ptr, path_len, from_line, to_line, content_ptr, content_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, fromLine, toLine int32, contentPtr, contentCap uint32) int32 {
@@ -345,7 +345,7 @@ func (t *SandboxTool) registerReadFileHostFunction(envBuilder HostModuleBuilder,
 }
 
 // registerCreateFileHostFunction registers the create_file host function
-func (t *SandboxTool) registerCreateFileHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerCreateFileHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// create_file(path_ptr, path_len, content_ptr, content_len) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen, contentPtr, contentLen uint32) int32 {
@@ -401,7 +401,7 @@ func (t *SandboxTool) registerCreateFileHostFunction(envBuilder HostModuleBuilde
 }
 
 // registerWriteFileHostFunction registers the write_file host function
-func (t *SandboxTool) registerWriteFileHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerWriteFileHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// write_file(path_ptr, path_len, append_mode, content_ptr, content_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, appendMode int32, contentPtr, contentLen, resultPtr, resultCap uint32) int32 {
@@ -496,7 +496,7 @@ func (t *SandboxTool) registerWriteFileHostFunction(envBuilder HostModuleBuilder
 }
 
 // registerMkdirHostFunction registers the mkdir host function
-func (t *SandboxTool) registerMkdirHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerMkdirHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// mkdir(path_ptr, path_len, recursive, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, recursive int32, resultPtr, resultCap uint32) int32 {
@@ -560,7 +560,7 @@ func (t *SandboxTool) registerMkdirHostFunction(envBuilder HostModuleBuilder, tr
 }
 
 // registerMoveHostFunction registers the move host function
-func (t *SandboxTool) registerMoveHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerMoveHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// move(src_ptr, src_len, dst_ptr, dst_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, srcPtr, srcLen, dstPtr, dstLen, resultPtr, resultCap uint32) int32 {
@@ -652,7 +652,7 @@ func (t *SandboxTool) registerMoveHostFunction(envBuilder HostModuleBuilder, tra
 }
 
 // registerListFilesHostFunction registers the list_files host function
-func (t *SandboxTool) registerListFilesHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerListFilesHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// list_files(pattern_ptr, pattern_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, patternPtr, patternLen, resultPtr, resultCap uint32) int32 {
@@ -719,7 +719,7 @@ func (t *SandboxTool) registerListFilesHostFunction(envBuilder HostModuleBuilder
 }
 
 // registerRemoveFileHostFunction registers the remove_file host function
-func (t *SandboxTool) registerRemoveFileHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerRemoveFileHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// remove_file(path_ptr, path_len, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen, resultPtr, resultCap uint32) int32 {
@@ -782,7 +782,7 @@ func (t *SandboxTool) registerRemoveFileHostFunction(envBuilder HostModuleBuilde
 }
 
 // registerRemoveDirHostFunction registers the remove_dir host function
-func (t *SandboxTool) registerRemoveDirHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerRemoveDirHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// remove_dir(path_ptr, path_len, recursive, result_ptr, result_cap) -> status_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, pathPtr, pathLen uint32, recursive int32, resultPtr, resultCap uint32) int32 {
@@ -849,7 +849,7 @@ func (t *SandboxTool) registerRemoveDirHostFunction(envBuilder HostModuleBuilder
 }
 
 // registerGetLastExitCodeHostFunction registers the get_last_exit_code host function
-func (t *SandboxTool) registerGetLastExitCodeHostFunction(envBuilder HostModuleBuilder) {
+func (t *SandboxTool) registerGetLastExitCodeHostFunction(envBuilder wazero.HostModuleBuilder) {
 	// get_last_exit_code() -> exit_code
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module) int32 {
@@ -864,7 +864,7 @@ func (t *SandboxTool) registerGetLastExitCodeHostFunction(envBuilder HostModuleB
 }
 
 // registerGetLastStdoutHostFunction registers the get_last_stdout host function
-func (t *SandboxTool) registerGetLastStdoutHostFunction(envBuilder HostModuleBuilder) {
+func (t *SandboxTool) registerGetLastStdoutHostFunction(envBuilder wazero.HostModuleBuilder) {
 	// get_last_stdout(buffer_ptr, buffer_cap) -> length
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, bufferPtr, bufferCap uint32) int32 {
@@ -890,7 +890,7 @@ func (t *SandboxTool) registerGetLastStdoutHostFunction(envBuilder HostModuleBui
 }
 
 // registerGetLastStderrHostFunction registers the get_last_stderr host function
-func (t *SandboxTool) registerGetLastStderrHostFunction(envBuilder HostModuleBuilder) {
+func (t *SandboxTool) registerGetLastStderrHostFunction(envBuilder wazero.HostModuleBuilder) {
 	// get_last_stderr(buffer_ptr, buffer_cap) -> length
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, bufferPtr, bufferCap uint32) int32 {
@@ -916,7 +916,7 @@ func (t *SandboxTool) registerGetLastStderrHostFunction(envBuilder HostModuleBui
 }
 
 // registerConvertHTMLHostFunction registers the convert_html host function
-func (t *SandboxTool) registerConvertHTMLHostFunction(envBuilder HostModuleBuilder, tracker *sandboxCallTracker) {
+func (t *SandboxTool) registerConvertHTMLHostFunction(envBuilder wazero.HostModuleBuilder, tracker *sandboxCallTracker) {
 	// convert_html(html_ptr, html_len, markdown_ptr, markdown_cap) -> int32
 	envBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, htmlPtr, htmlLen, markdownPtr, markdownCap uint32) int32 {

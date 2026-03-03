@@ -275,7 +275,11 @@ func TestPlanningAgent_IncludesContextFiles(t *testing.T) {
 
 	sess := session.NewSession("test", ".")
 	agent := NewPlanningAgent("test-planning", mockFS, sess, mockLLM, nil)
-	defer agent.Close(ctx)
+	defer func() {
+		if err := agent.Close(ctx); err != nil {
+			t.Errorf("Failed to close planning agent: %v", err)
+		}
+	}()
 
 	req := &PlanningRequest{
 		Objective:    "use context",
@@ -438,7 +442,9 @@ func TestPlanningAgent_NilRequest(t *testing.T) {
 		t.Errorf("Expected error %s, got %s", expectedErr, err.Error())
 	}
 
-	agent.Close(ctx)
+	if err := agent.Close(ctx); err != nil {
+		t.Errorf("Failed to close planning agent: %v", err)
+	}
 }
 
 func TestPlanningAgent_EmptyObjective(t *testing.T) {
@@ -465,7 +471,9 @@ func TestPlanningAgent_EmptyObjective(t *testing.T) {
 		t.Errorf("Expected error %s, got %s", expectedErr, err.Error())
 	}
 
-	agent.Close(ctx)
+	if err := agent.Close(ctx); err != nil {
+		t.Errorf("Failed to close planning agent: %v", err)
+	}
 }
 
 func TestPlanningAgent_NilClient(t *testing.T) {
@@ -491,7 +499,7 @@ func TestPlanningAgent_NilClient(t *testing.T) {
 		t.Errorf("Expected error %s, got %s", expectedErr, err.Error())
 	}
 
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 func TestPlanningAgent_MaxIterationsReached(t *testing.T) {
@@ -528,7 +536,7 @@ func TestPlanningAgent_MaxIterationsReached(t *testing.T) {
 		t.Error("Expected at least one plan step after max iterations")
 	}
 
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 func TestPlanningAgent_QuestionsDisabled(t *testing.T) {
@@ -561,7 +569,7 @@ func TestPlanningAgent_QuestionsDisabled(t *testing.T) {
 		t.Error("Expected plan steps even when questions disabled")
 	}
 
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 func TestPlanningAgent_ToolRegistry(t *testing.T) {
@@ -696,7 +704,7 @@ func TestPlanningAgent_PlanExtraction(t *testing.T) {
 		})
 	}
 
-	agent.Close(context.Background())
+	_ = agent.Close(context.Background())
 }
 
 func TestPlanningAgent_PartialPlanExtraction(t *testing.T) {
@@ -729,7 +737,7 @@ func TestPlanningAgent_PartialPlanExtraction(t *testing.T) {
 		t.Error("Expected partial plan to not be complete")
 	}
 
-	agent.Close(context.Background())
+	_ = agent.Close(context.Background())
 }
 
 func TestPlanningAgent_ToolExecutionError(t *testing.T) {
@@ -762,7 +770,7 @@ func TestPlanningAgent_ToolExecutionError(t *testing.T) {
 		t.Error("Expected plan steps even with tool errors")
 	}
 
-	agent.Close(ctx)
+	_ = agent.Close(ctx)
 }
 
 func TestPlanningAgent_ContextCancellation(t *testing.T) {
@@ -789,7 +797,7 @@ func TestPlanningAgent_ContextCancellation(t *testing.T) {
 		t.Error("Expected error due to context cancellation")
 	}
 
-	agent.Close(context.Background())
+	_ = agent.Close(context.Background())
 }
 
 // MockLLMClientWithCancellation respects context cancellation

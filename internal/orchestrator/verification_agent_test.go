@@ -83,7 +83,9 @@ func TestNewVerificationAgent(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -102,7 +104,9 @@ func TestDecideVerificationNeeded_NoFilesModified(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 	ctx := context.Background()
@@ -125,7 +129,9 @@ func TestDecideVerificationNeeded_FilesModifiedNoLLM(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	// Remove orchestration client
 	orch.orchestrationClient = nil
@@ -151,7 +157,9 @@ func TestDecideVerificationNeeded_ClassifiedAsQuestion(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -185,7 +193,9 @@ func TestDecideVerificationNeeded_ClassifiedAsImplementation(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -214,7 +224,9 @@ func TestDecideVerificationNeeded_LLMError(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -244,7 +256,9 @@ func TestBuildToolRegistry(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -283,7 +297,9 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -320,7 +336,9 @@ func TestBuildSystemPrompt_UnknownProject(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -427,7 +445,9 @@ func TestFormatVerificationToolCall(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -500,7 +520,9 @@ func TestVerify_NotNeeded(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -529,7 +551,9 @@ func TestVerify_Success(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -575,7 +599,9 @@ func TestVerify_WithToolCalls(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -624,7 +650,9 @@ func TestVerify_LoopDetection(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -670,7 +698,9 @@ func TestVerify_Timeout(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -716,7 +746,9 @@ func TestVerify_NoOrchestrationClient(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -743,7 +775,9 @@ func TestReportResults(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -784,7 +818,9 @@ func TestReportResults_WithErrorsAndWarnings(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -830,7 +866,9 @@ func TestReportResults_NilResult(t *testing.T) {
 
 	orch, err := NewOrchestratorWithFS(cfg, providerMgr, true, fs.NewMockFS())
 	require.NoError(t, err)
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 
@@ -884,7 +922,9 @@ func BenchmarkBuildSystemPrompt(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer orch.Close()
+	defer func() {
+		_ = orch.Close()
+	}()
 
 	agent := NewVerificationAgent(orch)
 

@@ -82,18 +82,21 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 		if stream == nil {
 			return fmt.Errorf("anthropic stream failed: no stream returned")
 		}
-		defer stream.Close()
+		defer func() {
+			_ = stream.Close()
+		}()
 
 		var (
 			contentBuilder strings.Builder
 			toolCalls      []map[string]interface{}
 			// temporary storage for the current tool call being built
-			currentToolIndex int = -1
+			currentToolIndex int
 			currentToolJSON  strings.Builder
 			stopReason       string
 			usage            map[string]interface{}
 			reasoningBuilder strings.Builder
 		)
+		currentToolIndex = -1
 
 		for stream.Next() {
 			event := stream.Current()
@@ -131,13 +134,14 @@ func (c *AnthropicClient) CompleteWithRequest(ctx context.Context, req *Completi
 					reasoningBuilder.Reset()
 				}
 			case anthropic.BetaRawContentBlockDeltaEvent:
-				if e.Delta.Type == "text_delta" {
+				switch e.Delta.Type {
+				case "text_delta":
 					contentBuilder.WriteString(e.Delta.Text)
-				} else if e.Delta.Type == "input_json_delta" {
+				case "input_json_delta":
 					if currentToolIndex >= 0 && currentToolIndex < len(toolCalls) {
 						currentToolJSON.WriteString(e.Delta.PartialJSON)
 					}
-				} else if e.Delta.Type == "thinking_delta" || e.Delta.Type == "reasoning_delta" {
+				case "thinking_delta", "reasoning_delta":
 					// Capture reasoning/thinking content
 					reasoningBuilder.WriteString(e.Delta.Text)
 				}
@@ -187,7 +191,9 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *CompletionRequest, ca
 		if stream == nil {
 			return fmt.Errorf("anthropic stream failed: no stream returned")
 		}
-		defer stream.Close()
+		defer func() {
+			_ = stream.Close()
+		}()
 
 		for stream.Next() {
 			event := stream.Current()

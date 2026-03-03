@@ -51,7 +51,7 @@ type ToolHealthMonitor struct {
 func NewToolHealthMonitor() *ToolHealthMonitor {
 	return &ToolHealthMonitor{
 		executions:       make(map[string]*ToolExecutionHealth),
-		stuckThreshold:   consts.Timeout30Seconds, // No heartbeat for 30s = stuck
+		stuckThreshold:   consts.Timeout30,        // No heartbeat for 30s = stuck
 		maxExecutionTime: consts.Timeout10Minutes, // Max 10 minutes per tool
 	}
 }
@@ -141,7 +141,7 @@ func (m *ToolHealthMonitor) CompleteExecution(toolID string, success bool) {
 
 		// Clean up after a delay (keep history for a bit)
 		go func(id string) {
-			time.Sleep(consts.Timeout30Seconds)
+			time.Sleep(consts.Timeout30)
 			m.RemoveExecution(id)
 		}(toolID)
 	}
@@ -369,21 +369,20 @@ func (m *ToolHealthMonitor) GenerateHealthReport() *HealthCheckReport {
 func (r *HealthCheckReport) FormatHealthReport() string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Tool Execution Health Report (%s)\n", r.Timestamp.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("Total Executions: %d\n", r.TotalExecutions))
-	sb.WriteString(fmt.Sprintf("Active Executions: %d\n", r.ActiveCount))
-	sb.WriteString(fmt.Sprintf("Stuck Executions: %d\n", r.StuckCount))
+	fmt.Fprintf(&sb, "Tool Execution Health Report (%s)\n", r.Timestamp.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "Total Executions: %d\n", r.TotalExecutions)
+	fmt.Fprintf(&sb, "Active Executions: %d\n", r.ActiveCount)
+	fmt.Fprintf(&sb, "Stuck Executions: %d\n", r.StuckCount)
 
 	if r.StuckCount > 0 {
 		sb.WriteString("\nStuck Executions:\n")
 		for _, exec := range r.StuckExecutions {
-			sb.WriteString(fmt.Sprintf("  - %s (%s): %s, elapsed: %s, last heartbeat: %s ago\n",
+			fmt.Fprintf(&sb, "  - %s (%s): %s, elapsed: %s, last heartbeat: %s ago\n",
 				exec.ToolName,
 				exec.ToolID,
 				exec.State,
 				exec.ElapsedTime.Round(time.Second),
-				time.Since(exec.LastHeartbeat).Round(time.Second),
-			))
+				time.Since(exec.LastHeartbeat).Round(time.Second))
 		}
 	}
 

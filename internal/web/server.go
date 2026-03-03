@@ -95,8 +95,8 @@ func (s *Server) Start() error {
 	s.httpServer = &http.Server{
 		Addr:         s.addr,
 		Handler:      mux,
-		ReadTimeout:  consts.Timeout60Seconds,
-		WriteTimeout: consts.Timeout60Seconds,
+		ReadTimeout:  consts.Timeout60,
+		WriteTimeout: consts.Timeout60,
 	}
 
 	// Start hub

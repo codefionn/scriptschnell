@@ -17,7 +17,9 @@ func BenchmarkPlanningAgent_SimplePlanning(b *testing.B) {
 
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Simple benchmark task",
@@ -59,7 +61,9 @@ func BenchmarkPlanningAgent_ComplexPlanning(b *testing.B) {
 
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Complex benchmark task with tools",
@@ -90,7 +94,9 @@ func BenchmarkPlanningAgent_WithQuestions(b *testing.B) {
 
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Interactive benchmark task",
@@ -119,7 +125,9 @@ func BenchmarkPlanningAgent_PlanExtraction(b *testing.B) {
 	sess := session.NewSession("benchmark", ".")
 	mockLLM := NewMockLLMClient("dummy")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	testCases := []string{
 		`{"plan": ["Step 1", "Step 2", "Step 3"], "complete": true}`,
@@ -195,7 +203,9 @@ func BenchmarkPlanningAgent_ConcurrentRequests(b *testing.B) {
 
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Concurrent benchmark task",
@@ -236,7 +246,9 @@ func BenchmarkPlanningAgent_LargeResponse(b *testing.B) {
 	mockLLM := NewMockLLMClient(largePlan)
 	sess := session.NewSession("benchmark", ".")
 	agent := NewPlanningAgent("benchmark-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Large response benchmark task",
@@ -282,7 +294,7 @@ func BenchmarkPlanningAgent_MemoryUsage(b *testing.B) {
 			b.Fatalf("Planning failed: %v", err)
 		}
 
-		agent.Close(ctx)
+		_ = agent.Close(ctx)
 	}
 }
 

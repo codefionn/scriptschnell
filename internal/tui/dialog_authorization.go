@@ -67,7 +67,7 @@ func (d authChoiceDelegate) Render(w io.Writer, m list.Model, index int, listIte
 	}
 
 	desc := authChoiceItemStyle.Render(roleDescStyle.Render(item.desc))
-	fmt.Fprintf(w, "%s\n%s", title, desc)
+	_, _ = fmt.Fprintf(w, "%s\n%s", title, desc)
 }
 
 // AuthorizationDialog presents a dialog to approve or deny a tool execution

@@ -39,7 +39,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize eval service: %v", err)
 	}
-	defer evalService.Close()
+	defer func() {
+		if err := evalService.Close(); err != nil {
+			log.Printf("Failed to close eval service: %v", err)
+		}
+	}()
 
 	// Set assistant logging option
 	evalService.SetLogAssistant(*logAssistant)

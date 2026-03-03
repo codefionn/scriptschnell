@@ -64,13 +64,17 @@ func (l *Lockfile) TryAcquire() error {
 				timestamp := time.Now().Format(time.RFC3339)
 				content := fmt.Sprintf("%d\n%s\n", l.pid, timestamp)
 				if _, err := l.file.WriteString(content); err != nil {
-					l.Release()
+					if releaseErr := l.Release(); releaseErr != nil {
+						return fmt.Errorf("failed to write to lockfile: %w (release failed: %v)", err, releaseErr)
+					}
 					return fmt.Errorf("failed to write to lockfile: %w", err)
 				}
 
 				// Sync to ensure data is written to disk
 				if err := l.file.Sync(); err != nil {
-					l.Release()
+					if releaseErr := l.Release(); releaseErr != nil {
+						return fmt.Errorf("failed to sync lockfile: %w (release failed: %v)", err, releaseErr)
+					}
 					return fmt.Errorf("failed to sync lockfile: %w", err)
 				}
 
@@ -93,13 +97,17 @@ func (l *Lockfile) TryAcquire() error {
 	timestamp := time.Now().Format(time.RFC3339)
 	content := fmt.Sprintf("%d\n%s\n", l.pid, timestamp)
 	if _, err := l.file.WriteString(content); err != nil {
-		l.Release()
+		if releaseErr := l.Release(); releaseErr != nil {
+			return fmt.Errorf("failed to write to lockfile: %w (release failed: %v)", err, releaseErr)
+		}
 		return fmt.Errorf("failed to write to lockfile: %w", err)
 	}
 
 	// Sync to ensure data is written to disk
 	if err := l.file.Sync(); err != nil {
-		l.Release()
+		if releaseErr := l.Release(); releaseErr != nil {
+			return fmt.Errorf("failed to sync lockfile: %w (release failed: %v)", err, releaseErr)
+		}
 		return fmt.Errorf("failed to sync lockfile: %w", err)
 	}
 

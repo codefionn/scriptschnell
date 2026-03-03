@@ -296,14 +296,14 @@ func buildAutoContinueJudgePrompt(userPrompts []string, messages []*session.Mess
 	if len(userPrompts) > 0 {
 		sb.WriteString("Recent user prompts (oldest to newest):\n")
 		for i, prompt := range userPrompts {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, prompt))
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, prompt)
 		}
 	} else {
 		sb.WriteString("Recent user prompts: (none)\n")
 	}
 
 	sb.WriteString("\nConversation excerpt (most recent context, approx last ")
-	sb.WriteString(fmt.Sprintf("%d tokens):\n", autoContinueTokenLimit))
+	fmt.Fprintf(&sb, "%d tokens):\n", autoContinueTokenLimit)
 
 	if len(messages) == 0 {
 		sb.WriteString("(no messages)\n")

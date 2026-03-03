@@ -98,7 +98,7 @@ func TestNormalizeMistralToolCallID(t *testing.T) {
 
 func isAlphanumeric(s string) bool {
 	for _, ch := range s {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+		if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') {
 			return false
 		}
 	}

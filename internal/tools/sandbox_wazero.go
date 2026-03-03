@@ -29,7 +29,9 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 
 	// Create wazero runtime
 	r := wazero.NewRuntime(ctx)
-	defer r.Close(ctx)
+	defer func() {
+		_ = r.Close(ctx)
+	}()
 
 	// Setup stdout/stderr capture
 	stdoutFile := filepath.Join(sandboxDir, "stdout.txt")
@@ -39,13 +41,17 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdout file: %w", err)
 	}
-	defer outFile.Close()
+	defer func() {
+		_ = outFile.Close()
+	}()
 
 	errFile, err := os.Create(stderrFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stderr file: %w", err)
 	}
-	defer errFile.Close()
+	defer func() {
+		_ = errFile.Close()
+	}()
 
 	// Start file monitor for stdout/stderr to track activity for adaptive timeout
 	var fileMonitor *fileMonitor
@@ -159,7 +165,9 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			"error":     "instantiation failed",
 		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, 1, "", fmt.Sprintf("WASM instantiation failed: %v", err), false, callTracker)), nil
 	}
-	defer modInstance.Close(ctx)
+	defer func() {
+		_ = modInstance.Close(ctx)
+	}()
 
 	// Get the _start function and execute
 	startFn := modInstance.ExportedFunction("_start")
@@ -207,8 +215,8 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 			fileMonitor.Stop()
 		}
 		// Close files before reading on timeout
-		outFile.Close()
-		errFile.Close()
+		_ = outFile.Close()
+		_ = errFile.Close()
 
 		return attachExecutionMetadata(map[string]interface{}{
 			"stdout":    "",
@@ -225,8 +233,8 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 	}
 
 	// Close files before reading
-	outFile.Close()
-	errFile.Close()
+	_ = outFile.Close()
+	_ = errFile.Close()
 
 	// Read stdout/stderr from files
 	stdoutBytes, _ := os.ReadFile(stdoutFile)
@@ -415,13 +423,15 @@ func (t *SandboxTool) executeFetch(ctx context.Context, adapter *wasiAuthorizerA
 
 	// Execute HTTP request
 	client := &http.Client{
-		Timeout: consts.Timeout30Seconds,
+		Timeout: consts.Timeout30,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 500 // Internal server error - request failed
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)

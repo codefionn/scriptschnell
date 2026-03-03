@@ -49,10 +49,10 @@ func TestAskUserIntegration(t *testing.T) {
 
 	// Format like the processToolCalls method does
 	var questionsText strings.Builder
-	questionsText.WriteString(fmt.Sprintf("1. %s\n", question))
+	fmt.Fprintf(&questionsText, "1. %s\n", question)
 	for j, opt := range options {
 		if optStr, ok := opt.(string); ok {
-			questionsText.WriteString(fmt.Sprintf("   %c. %s\n", 'a'+j, optStr))
+			fmt.Fprintf(&questionsText, "   %c. %s\n", 'a'+j, optStr)
 		}
 	}
 

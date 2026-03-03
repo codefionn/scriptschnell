@@ -19,10 +19,10 @@ import (
 type Server struct {
 	cfg              *config.Config
 	hub              *Hub
-	broker           *MessageBroker
 	sessionManager   *SessionManager
 	workspaceManager *WorkspaceManager
 	listener         net.Listener
+	eventBridge      *EventBridge
 
 	// Dependencies (set via SetDependencies)
 	providerMgr     *provider.Manager
@@ -74,8 +74,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	}
 	server.workspaceManager = workspaceMgr
 
-	// Create broker
-	server.broker = NewMessageBroker()
+	// Create event bridge to connect actor events to socket clients
+	server.eventBridge = NewEventBridge(server.hub)
 
 	return server, nil
 }
@@ -125,6 +125,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Start hub in background
 	go s.hub.Run()
+
+	// Start event bridge to forward actor events to socket clients
+	s.eventBridge.Start()
 
 	// Start connection accept loop
 	go s.acceptLoop(ctx)
@@ -220,7 +223,9 @@ func (s *Server) acceptLoop(ctx context.Context) {
 		default:
 			// Set accept timeout to allow checking stopChan periodically
 			if s.listener != nil {
-				s.listener.(*net.UnixListener).SetDeadline(time.Now().Add(1 * time.Second))
+				if setDeadlineErr := s.listener.(*net.UnixListener).SetDeadline(time.Now().Add(1 * time.Second)); setDeadlineErr != nil {
+					logger.Warn("Failed to set listener deadline: %v", setDeadlineErr)
+				}
 			}
 
 			conn, err := s.listener.Accept()
@@ -243,13 +248,18 @@ func (s *Server) acceptLoop(ctx context.Context) {
 			// Check connection limit
 			if !s.checkConnectionLimit() {
 				logger.Warn("Connection limit reached, rejecting connection from %s", conn.RemoteAddr())
-				conn.Close()
+				if closeErr := conn.Close(); closeErr != nil {
+					logger.Warn("Failed to close rejected connection: %v", closeErr)
+				}
 				continue
 			}
 
 			// Create and start client handler
+			// Each client gets its own broker because brokers have session-specific state
 			clientID := s.generateConnectionID()
-			client := NewClient(clientID, conn, s.hub, s.sessionManager, s.workspaceManager, s.broker)
+			broker := NewMessageBroker()
+			broker.SetDependencies(s.providerMgr, s.secretsPassword, s.cfg)
+			client := NewClient(clientID, conn, s.hub, s.sessionManager, s.workspaceManager, broker, s.providerMgr, s.secretsPassword, s.cfg, s.eventBridge)
 
 			// Track client
 			s.trackClient(clientID, client)
@@ -279,6 +289,8 @@ func (s *Server) trackClient(clientID string, client *Client) {
 }
 
 // untrackClient removes a client from tracking
+//
+//nolint:unused // Reserved for future use
 func (s *Server) untrackClient(clientID string) {
 	s.connMu.Lock()
 	defer s.connMu.Unlock()
@@ -356,9 +368,4 @@ func (s *Server) GetHub() *Hub {
 func (s *Server) SetDependencies(providerMgr *provider.Manager, secretsPassword *securemem.String) {
 	s.providerMgr = providerMgr
 	s.secretsPassword = secretsPassword
-
-	// Set dependencies on broker
-	if s.broker != nil {
-		s.broker.SetDependencies(providerMgr, secretsPassword, s.cfg)
-	}
 }

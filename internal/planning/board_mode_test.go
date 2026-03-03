@@ -39,7 +39,9 @@ func TestPlanningAgent_BoardModeBasic(t *testing.T) {
 	}</answer>`)
 
 	agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Create a new feature",
@@ -102,7 +104,9 @@ func TestPlanningAgent_BoardModeWithoutComplete(t *testing.T) {
 	}</answer>`)
 
 	agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Create a feature",
@@ -150,7 +154,9 @@ func TestPlanningAgent_BoardModeInference(t *testing.T) {
 	}</answer>`)
 
 	agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Test inference",
@@ -191,7 +197,9 @@ func TestPlanningAgent_SimpleModeStillWorks(t *testing.T) {
 	}</answer>`)
 
 	agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	req := &PlanningRequest{
 		Objective:      "Simple task",
@@ -228,7 +236,9 @@ func TestTryParseJSONPlan_BoardMode(t *testing.T) {
 	sess := session.NewSession("test", ".")
 	mockLLM := NewMockLLMClient("dummy")
 	agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	tests := []struct {
 		name           string
@@ -359,7 +369,9 @@ func TestExtractPartialPlan_BoardMode(t *testing.T) {
 	sess := session.NewSession("test", ".")
 	mockLLM := NewMockLLMClient("dummy")
 	agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-	defer agent.Close(context.Background())
+	defer func() {
+		_ = agent.Close(context.Background())
+	}()
 
 	tests := []struct {
 		name        string
@@ -482,7 +494,9 @@ func TestHasContentCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockLLM := NewMockLLMClient(tt.response)
 			agent := NewPlanningAgent("test-agent", mockFS, sess, mockLLM, nil)
-			defer agent.Close(context.Background())
+			defer func() {
+				_ = agent.Close(context.Background())
+			}()
 
 			req := &PlanningRequest{
 				Objective:      "Test hasContent",

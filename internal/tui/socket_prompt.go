@@ -48,6 +48,8 @@ func (m *Model) startPromptForTabSocket(tabIdx int, input string) tea.Cmd {
 }
 
 // stopChatSocket stops the current chat in socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) stopChatSocket() tea.Cmd {
 	if m.socketFactory == nil {
 		return nil
@@ -66,6 +68,8 @@ func (m *Model) stopChatSocket() tea.Cmd {
 }
 
 // clearChatSocket clears chat history in socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) clearChatSocket(tabIdx int) tea.Cmd {
 	if m.socketFactory == nil {
 		return nil
@@ -97,6 +101,8 @@ func (m *Model) clearChatSocket(tabIdx int) tea.Cmd {
 }
 
 // handleTabGenerationCompleteSocket handles generation completion in socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) handleTabGenerationCompleteSocket(msg TabGenerationCompleteMsg) tea.Cmd {
 	tabIdx := m.findTabIndexByID(msg.TabID)
 	if tabIdx < 0 {
@@ -113,6 +119,8 @@ func (m *Model) handleTabGenerationCompleteSocket(msg TabGenerationCompleteMsg) 
 
 // setTabGeneratingWithUI sets the generating state for a tab and updates UI
 // This is a socket-specific wrapper that adds UI state updates
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) setTabGeneratingWithUI(tabIdx int, generating bool) {
 	// Call the base method to set generation state
 	m.setTabGenerating(tabIdx, generating)
@@ -134,6 +142,8 @@ func (m *Model) setTabGeneratingWithUI(tabIdx int, generating bool) {
 }
 
 // processNextQueuedPromptForTabSocket processes the next queued prompt for a tab in socket mode
+//
+//nolint:unused // Reserved for future socket mode implementation
 func (m *Model) processNextQueuedPromptForTabSocket(tabIdx int) tea.Cmd {
 	if tabIdx < 0 || tabIdx >= len(m.sessions) {
 		return nil

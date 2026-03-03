@@ -144,7 +144,9 @@ func (d *Database) autoMigrateTable(tableName string, model interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	for rows.Next() {
 		var cid int
@@ -384,7 +386,9 @@ func (d *Database) GetModels() ([]*EvalModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var models []*EvalModel
 	for rows.Next() {
@@ -410,7 +414,9 @@ func (d *Database) GetSelectedModels() ([]*EvalModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var models []*EvalModel
 	for rows.Next() {
@@ -548,7 +554,9 @@ func (d *Database) GetEvalRuns(evalID string) ([]*EvalRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var runs []*EvalRun
 	for rows.Next() {
@@ -601,7 +609,9 @@ func (d *Database) GetEvalResults(runID int64) ([]EvalResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var results []EvalResult
 	for rows.Next() {
@@ -688,7 +698,9 @@ func (d *Database) GetEvalStats(evalID string) ([]EvalStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var stats []EvalStats
 	for rows.Next() {

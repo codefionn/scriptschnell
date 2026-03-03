@@ -139,7 +139,7 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 			continue
 		}
 		desc := truncateForPrompt(spec.spec.Description(), descriptionLimit)
-		builtinBuilder.WriteString(fmt.Sprintf("- %s: %s\n", spec.spec.Name(), desc))
+		fmt.Fprintf(&builtinBuilder, "- %s: %s\n", spec.spec.Name(), desc)
 	}
 
 	// Second pass: format MCP summaries
@@ -152,10 +152,10 @@ func (o *Orchestrator) askSummaryForTools(optional []toolSpec, contextPath, cont
 		sort.Strings(keys)
 		for _, key := range keys {
 			summary := mcpSummaries[key]
-			mcpBuilder.WriteString(fmt.Sprintf("- %s provides:\n", summary.displayName))
+			fmt.Fprintf(&mcpBuilder, "- %s provides:\n", summary.displayName)
 			sort.Strings(summary.entries)
 			for _, entry := range summary.entries {
-				mcpBuilder.WriteString(fmt.Sprintf("  • %s\n", truncateForPrompt(entry, descriptionLimit)))
+				fmt.Fprintf(&mcpBuilder, "  • %s\n", truncateForPrompt(entry, descriptionLimit))
 			}
 		}
 	}
@@ -258,7 +258,7 @@ func (o *Orchestrator) listWorkingDirEntries() (string, error) {
 	var builder strings.Builder
 	for i, entry := range entries {
 		if i >= maxEntries {
-			builder.WriteString(fmt.Sprintf("- ... (%d more entries)\n", len(entries)-maxEntries))
+			fmt.Fprintf(&builder, "- ... (%d more entries)\n", len(entries)-maxEntries)
 			break
 		}
 
@@ -267,7 +267,7 @@ func (o *Orchestrator) listWorkingDirEntries() (string, error) {
 		if entry.IsDir {
 			name += "/"
 		}
-		builder.WriteString(fmt.Sprintf("- %s\n", name))
+		fmt.Fprintf(&builder, "- %s\n", name)
 	}
 
 	return builder.String(), nil

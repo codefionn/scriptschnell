@@ -1037,10 +1037,10 @@ func (r *Registry) formatManualSuggestion(baseError string, sugg *ManualSuggesti
 			msg.WriteString(". ")
 
 			if len(validTools) == 1 {
-				msg.WriteString(fmt.Sprintf("Consider using '%s'.", validTools[0]))
+				fmt.Fprintf(&msg, "Consider using '%s'.", validTools[0])
 			} else {
 				toolsList := strings.Join(validTools, "', '")
-				msg.WriteString(fmt.Sprintf("Consider using one of: '%s'.", toolsList))
+				fmt.Fprintf(&msg, "Consider using one of: '%s'.", toolsList)
 			}
 		}
 	}

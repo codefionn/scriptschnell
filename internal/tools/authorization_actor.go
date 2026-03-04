@@ -565,15 +565,15 @@ func (a *AuthorizationActor) authorizeShell(ctx context.Context, params map[stri
 		return &AuthorizationDecision{Allowed: true}, nil
 	}
 
-	// Fast-path: common formatter commands are safe and should not trigger prompts.
-	if isLikelySafeFormattingCommand(command) {
+	// Fast-path: common formatter and linter commands are safe and should not trigger prompts.
+	if isLikelySafeFormattingOrLintCommand(command) {
 		return &AuthorizationDecision{Allowed: true}, nil
 	}
 
 	return a.judgeShellCommandWithLLM(ctx, command)
 }
 
-func isLikelySafeFormattingCommand(command string) bool {
+func isLikelySafeFormattingOrLintCommand(command string) bool {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
 		return false
@@ -593,21 +593,33 @@ func isLikelySafeFormattingCommand(command string) bool {
 	}
 
 	switch fields[0] {
+	// Formatting tools
 	case "gofmt", "gofumpt", "rustfmt", "prettier", "black":
 		return true
+	// Linting tools
+	case "golangci-lint", "eslint", "pylint", "flake8", "mypy", "clippy":
+		return true
+	// Go tools
 	case "go":
-		return len(fields) >= 2 && fields[1] == "fmt"
+		return len(fields) >= 2 && (fields[1] == "fmt" || fields[1] == "vet")
+	// Rust tools
 	case "cargo":
-		return len(fields) >= 2 && fields[1] == "fmt"
+		return len(fields) >= 2 && (fields[1] == "fmt" || fields[1] == "clippy")
+	// Python tools (ruff supports both format and lint)
 	case "ruff":
-		return len(fields) >= 2 && fields[1] == "format"
+		return len(fields) >= 2 && (fields[1] == "format" || fields[1] == "check" || fields[1] == "lint")
+	// NPM package managers
 	case "npm", "pnpm":
-		return len(fields) >= 3 && fields[1] == "run" && (fields[2] == "format" || fields[2] == "fmt")
+		return len(fields) >= 3 && fields[1] == "run" &&
+			(fields[2] == "format" || fields[2] == "fmt" || fields[2] == "lint" || fields[2] == "lint:fix")
 	case "yarn":
-		return (len(fields) >= 2 && (fields[1] == "format" || fields[1] == "fmt")) ||
-			(len(fields) >= 3 && fields[1] == "run" && (fields[2] == "format" || fields[2] == "fmt"))
+		return (len(fields) >= 2 &&
+			(fields[1] == "format" || fields[1] == "fmt" || fields[1] == "lint")) ||
+			(len(fields) >= 3 && fields[1] == "run" &&
+				(fields[2] == "format" || fields[2] == "fmt" || fields[2] == "lint" || fields[2] == "lint:fix"))
 	case "bun":
-		return len(fields) >= 3 && fields[1] == "run" && (fields[2] == "format" || fields[2] == "fmt")
+		return len(fields) >= 3 && fields[1] == "run" &&
+			(fields[2] == "format" || fields[2] == "fmt" || fields[2] == "lint" || fields[2] == "lint:fix")
 	default:
 		return false
 	}

@@ -58,6 +58,7 @@ Consider as harmless (no approval needed):
 - Information commands (pwd, echo, env, printenv, which, whereis, etc.)
 - Build/test commands (go build, go test, npm test, make, cargo build, etc.)
 - Formatting commands (gofmt, go fmt, gofumpt, cargo fmt, rustfmt, black, ruff format, prettier, npm/pnpm/yarn/bun run format)
+- Linting commands (golangci-lint, eslint, pylint, flake8, mypy, ruff check/lint, clippy, go vet, cargo clippy)
 - Git read commands (git status, git log, git diff, git show, etc.)
 - Package manager read commands (npm list, pip list, apt search, etc.)
 

@@ -1283,6 +1283,9 @@ func (o *Orchestrator) rebuildTools(applyFilter bool) []error {
 	addSpec(&tools.WebSearchToolSpec{}, false, tools.NewWebSearchToolFactory(o.config), false, "")
 	addSpec(&tools.WebFetchToolSpec{}, false, tools.NewWebFetchToolFactory(nil, o.summarizeClient, o.authorizer, secretdetect.NewDetector(), o.featureFlags), false, "")
 
+	// Planning agent tool - for complex task breakdown and analysis
+	addSpec(&tools.PlanningToolSpec{}, false, tools.NewPlanningToolFactory(newPlanningAgentAdapter(o)), false, "")
+
 	// Context directory tools
 	addSpec(&tools.SearchContextFilesToolSpec{}, false, tools.NewSearchContextFilesToolFactory(o.fs, o.config, o.session), false, "")
 	addSpec(&tools.GrepContextFilesToolSpec{}, false, tools.NewGrepContextFilesToolFactory(o.fs, o.config, o.session), false, "")

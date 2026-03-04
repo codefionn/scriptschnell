@@ -354,7 +354,7 @@ func TestBuildSystemPrompt_UnknownProject(t *testing.T) {
 func TestExtractVerificationResult_WithTags(t *testing.T) {
 	content := `<verification_result>
 {
-  "success": true,
+  "confidence_score": 95,
   "build_passed": true,
   "lint_passed": false,
   "tests_passed": true,
@@ -367,7 +367,8 @@ func TestExtractVerificationResult_WithTags(t *testing.T) {
 	result := extractVerificationResult(content)
 
 	assert.NotNil(t, result)
-	assert.True(t, result.Success)
+	assert.Equal(t, 95.0, result.ConfidenceScore)
+	assert.True(t, result.IsSuccess())
 	assert.True(t, result.BuildPassed)
 	assert.False(t, result.LintPassed)
 	assert.True(t, result.TestsPassed)
@@ -380,7 +381,7 @@ func TestExtractVerificationResult_WithTags(t *testing.T) {
 func TestExtractVerificationResult_MalformedJSON(t *testing.T) {
 	content := `<verification_result>
 {
-  "success": true,
+  "confidence_score": 95,
   "invalid": json
 }
 </verification_result>`
@@ -398,7 +399,8 @@ func TestExtractVerificationResult_NoTags_Success(t *testing.T) {
 	result := extractVerificationResult(content)
 
 	assert.NotNil(t, result)
-	assert.True(t, result.Success)
+	assert.Equal(t, 100.0, result.ConfidenceScore)
+	assert.True(t, result.IsSuccess())
 	assert.True(t, result.BuildPassed)
 	assert.True(t, result.LintPassed)
 	assert.True(t, result.TestsPassed)
@@ -412,7 +414,8 @@ func TestExtractVerificationResult_NoTags_Failure(t *testing.T) {
 	result := extractVerificationResult(content)
 
 	assert.NotNil(t, result)
-	assert.False(t, result.Success)
+	assert.Equal(t, 0.0, result.ConfidenceScore)
+	assert.False(t, result.IsSuccess())
 	assert.False(t, result.BuildPassed)
 	assert.False(t, result.LintPassed)
 	assert.False(t, result.TestsPassed)
@@ -423,7 +426,7 @@ func TestExtractVerificationResult_NoTags_Failure(t *testing.T) {
 func TestExtractVerificationResult_PartialTags(t *testing.T) {
 	content := `<verification_result>
 {
-  "success": true,
+  "confidence_score": 95,
   "build_passed": true
 </verification_result>`
 
@@ -563,7 +566,7 @@ func TestVerify_Success(t *testing.T) {
 			"IMPLEMENTATION", // For decideVerificationNeeded
 			`<verification_result>
 {
-  "success": true,
+  "confidence_score": 100,
   "build_passed": true,
   "lint_passed": true,
   "tests_passed": true,
@@ -581,7 +584,8 @@ func TestVerify_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotNil(t, result)
-	assert.True(t, result.Success)
+	assert.Equal(t, 100.0, result.ConfidenceScore)
+	assert.True(t, result.IsSuccess())
 	assert.True(t, result.BuildPassed)
 	assert.True(t, result.LintPassed)
 	assert.True(t, result.TestsPassed)
@@ -612,7 +616,7 @@ func TestVerify_WithToolCalls(t *testing.T) {
 			`I'll check the modified file and run tests.`, // First response with tool calls
 			`<verification_result>
 {
-  "success": true,
+  "confidence_score": 100,
   "build_passed": true,
   "lint_passed": true,
   "tests_passed": true,
@@ -636,7 +640,7 @@ func TestVerify_WithToolCalls(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotNil(t, result)
-	assert.True(t, result.Success)
+	assert.True(t, result.IsSuccess())
 }
 
 // Test Verify method with loop detection
@@ -679,7 +683,7 @@ func TestVerify_LoopDetection(t *testing.T) {
 	// Let's check the actual behavior
 	fmt.Printf("Actual result summary: %s\n", result.Summary)
 	// The loop detection might not trigger with our current mock setup, so let's be more flexible
-	if result.Success {
+	if result.IsSuccess() {
 		// If success, the loop detection didn't trigger as expected with our mock
 		assert.NotEmpty(t, result.Summary)
 	} else {
@@ -727,7 +731,7 @@ func TestVerify_Timeout(t *testing.T) {
 	// which doesn't contain verification_result tags, so it defaults to success based on content
 	fmt.Printf("Actual result summary: %s\n", result.Summary)
 	// The timeout might not trigger as expected with our mock setup, so let's be more flexible
-	if result.Success {
+	if result.IsSuccess() {
 		// If success, the timeout didn't trigger as expected with our mock
 		assert.NotEmpty(t, result.Summary)
 	} else {
@@ -789,11 +793,11 @@ func TestReportResults(t *testing.T) {
 
 	// Test successful result
 	result := &VerificationResult{
-		Success:     true,
-		BuildPassed: true,
-		LintPassed:  true,
-		TestsPassed: true,
-		Summary:     "All checks passed",
+		ConfidenceScore: 98,
+		BuildPassed:     true,
+		LintPassed:      true,
+		TestsPassed:     true,
+		Summary:         "All checks passed",
 	}
 
 	agent.reportResults(result, progressCb)
@@ -801,7 +805,8 @@ func TestReportResults(t *testing.T) {
 	assert.Len(t, progressUpdates, 1)
 	message := progressUpdates[0].Message
 	assert.Contains(t, message, "All checks passed")
-	assert.Contains(t, message, "Status:** All checks passed")
+	assert.Contains(t, message, "Status:** Accepted")
+	assert.Contains(t, message, "98%")
 	assert.Contains(t, message, "Build: Passed")
 	assert.Contains(t, message, "Lint: Passed")
 	assert.Contains(t, message, "Tests: Passed")
@@ -832,13 +837,13 @@ func TestReportResults_WithErrorsAndWarnings(t *testing.T) {
 
 	// Test result with failures
 	result := &VerificationResult{
-		Success:     false,
-		BuildPassed: false,
-		LintPassed:  true,
-		TestsPassed: false,
-		Errors:      []string{"build failed", "test failed"},
-		Warnings:    []string{"deprecated function used"},
-		Summary:     "Some checks failed",
+		ConfidenceScore: 45,
+		BuildPassed:     false,
+		LintPassed:      true,
+		TestsPassed:     false,
+		Errors:          []string{"build failed", "test failed"},
+		Warnings:        []string{"deprecated function used"},
+		Summary:         "Some checks failed",
 	}
 
 	agent.reportResults(result, progressCb)
@@ -846,7 +851,8 @@ func TestReportResults_WithErrorsAndWarnings(t *testing.T) {
 	assert.Len(t, progressUpdates, 1)
 	message := progressUpdates[0].Message
 	assert.Contains(t, message, "Some checks failed")
-	assert.Contains(t, message, "Status:** Some checks failed")
+	assert.Contains(t, message, "Status:** Needs Review")
+	assert.Contains(t, message, "45%")
 	assert.Contains(t, message, "Build: Failed")
 	assert.Contains(t, message, "Lint: Passed")
 	assert.Contains(t, message, "Tests: Failed")
@@ -892,7 +898,7 @@ func TestStatusText(t *testing.T) {
 func BenchmarkExtractVerificationResult(b *testing.B) {
 	content := `<verification_result>
 {
-  "success": true,
+  "confidence_score": 98,
   "build_passed": true,
   "lint_passed": true,
   "tests_passed": true,

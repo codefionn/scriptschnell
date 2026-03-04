@@ -27,14 +27,19 @@ type VerificationAgent struct {
 
 // VerificationResult represents the outcome of verification checks.
 type VerificationResult struct {
-	Success      bool     `json:"success"`
-	BuildPassed  bool     `json:"build_passed"`
-	FormatPassed bool     `json:"format_passed"`
-	LintPassed   bool     `json:"lint_passed"`
-	TestsPassed  bool     `json:"tests_passed"`
-	Errors       []string `json:"errors,omitempty"`
-	Warnings     []string `json:"warnings,omitempty"`
-	Summary      string   `json:"summary"`
+	ConfidenceScore float64  `json:"confidence_score"`
+	BuildPassed     bool     `json:"build_passed"`
+	FormatPassed    bool     `json:"format_passed"`
+	LintPassed      bool     `json:"lint_passed"`
+	TestsPassed     bool     `json:"tests_passed"`
+	Errors          []string `json:"errors,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
+	Summary         string   `json:"summary"`
+}
+
+// IsSuccess returns true if the confidence score is above the acceptance threshold (95%).
+func (v *VerificationResult) IsSuccess() bool {
+	return v.ConfidenceScore >= 95.0
 }
 
 // NewVerificationAgent creates a new verification agent.
@@ -250,10 +255,18 @@ Note: Commands will go through normal authorization checks. The system will dete
 - Always re-run verification after making fixes
 - Read files before editing them (read-before-write rule)
 
+## Confidence Score
+After completing all verification checks, you must assign a confidence score (0-100) indicating how certain you are that the implementation is correct and complete:
+
+- **95-100**: All checks passed, code is correct, no issues found - ACCEPT
+- **80-94**: Minor issues or warnings, but core functionality is likely correct - REVIEW RECOMMENDED
+- **50-79**: Some issues found, implementation may have problems - NEEDS ATTENTION
+- **0-49**: Significant issues, build failures, or tests failing - REJECT
+
 When complete, provide a summary wrapped in <verification_result> tags:
 <verification_result>
 {
-  "success": true/false,
+  "confidence_score": 0-100,
   "build_passed": true/false,
   "format_passed": true/false,
   "lint_passed": true/false,
@@ -264,7 +277,7 @@ When complete, provide a summary wrapped in <verification_result> tags:
 }
 </verification_result>
 
-If ALL checks pass, you can provide a short success message. If any check fails, provide details about what failed and why.`,
+If confidence is 95 or above, you can provide a short success message. Otherwise, explain what issues need attention.`,
 		filesModifiedStr, projectInfo, questionsStr)
 }
 
@@ -286,11 +299,17 @@ func extractVerificationResult(content string) *VerificationResult {
 			Summary: content,
 		}
 		contentLower := strings.ToLower(content)
-		result.Success = !strings.Contains(contentLower, "fail") && !strings.Contains(contentLower, "error")
-		result.BuildPassed = result.Success
-		result.FormatPassed = result.Success
-		result.LintPassed = result.Success
-		result.TestsPassed = result.Success
+		// Infer confidence from content
+		hasFail := strings.Contains(contentLower, "fail") || strings.Contains(contentLower, "error")
+		if hasFail {
+			result.ConfidenceScore = 0
+		} else {
+			result.ConfidenceScore = 100
+		}
+		result.BuildPassed = !hasFail
+		result.FormatPassed = !hasFail
+		result.LintPassed = !hasFail
+		result.TestsPassed = !hasFail
 		return result
 	}
 
@@ -302,10 +321,15 @@ func extractVerificationResult(content string) *VerificationResult {
 	var result VerificationResult
 	if err := json.Unmarshal([]byte(jsonContent), &result); err != nil {
 		logger.Debug("Failed to parse verification result JSON: %v", err)
-		// Return a basic result
+		// Return a basic result with inferred confidence
+		hasFail := strings.Contains(strings.ToLower(content), "fail")
+		confidence := 100.0
+		if hasFail {
+			confidence = 0
+		}
 		return &VerificationResult{
-			Summary: content,
-			Success: !strings.Contains(strings.ToLower(content), "fail"),
+			Summary:         content,
+			ConfidenceScore: confidence,
 		}
 	}
 
@@ -425,9 +449,9 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 			if loopDetector.RecordCall(tc) {
 				sendStream("**Warning:** Loop detected in verification, stopping early.\n\n")
 				return &VerificationResult{
-					Success: false,
-					Summary: "Verification stopped due to detected loop in tool calls",
-					Errors:  []string{"Loop detected - verification incomplete"},
+					ConfidenceScore: 0,
+					Summary:         "Verification stopped due to detected loop in tool calls",
+					Errors:          []string{"Loop detected - verification incomplete"},
 				}, nil
 			}
 		}
@@ -473,9 +497,9 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 	}
 
 	return &VerificationResult{
-		Success: false,
-		Summary: "Verification timed out after maximum turns",
-		Errors:  []string{"Verification incomplete - timed out"},
+		ConfidenceScore: 0,
+		Summary:         "Verification timed out after maximum turns",
+		Errors:          []string{"Verification incomplete - timed out"},
 	}, nil
 }
 
@@ -600,7 +624,7 @@ func (a *VerificationAgent) formatVerificationToolCall(toolName string, args map
 
 // formatVerificationFailureFeedback converts a failed verification result into a user prompt for fixes.
 func (a *VerificationAgent) formatVerificationFailureFeedback(result *VerificationResult, attempt int) string {
-	if result == nil || result.Success {
+	if result == nil || result.IsSuccess() {
 		return ""
 	}
 
@@ -651,11 +675,11 @@ func (a *VerificationAgent) reportResults(result *VerificationResult, progressCb
 	var sb strings.Builder
 	sb.WriteString("\n**Verification Results**\n\n")
 
-	// Status emoji
-	if result.Success {
-		sb.WriteString("**Status:** All checks passed\n\n")
+	// Status based on confidence score (95%+ is success)
+	if result.IsSuccess() {
+		sb.WriteString(fmt.Sprintf("**Status:** Accepted (Confidence: %.0f%%)\n\n", result.ConfidenceScore))
 	} else {
-		sb.WriteString("**Status:** Some checks failed\n\n")
+		sb.WriteString(fmt.Sprintf("**Status:** Needs Review (Confidence: %.0f%%)\n\n", result.ConfidenceScore))
 	}
 
 	// Individual check results

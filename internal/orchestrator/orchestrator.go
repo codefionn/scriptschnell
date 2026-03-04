@@ -2747,7 +2747,7 @@ func (o *Orchestrator) ProcessPromptWithVerification(
 		}
 
 		// If verification skipped (nil) or passed, we're done
-		if result == nil || result.Success {
+		if result == nil || result.IsSuccess() {
 			o.session.ResetVerification()
 			return nil
 		}

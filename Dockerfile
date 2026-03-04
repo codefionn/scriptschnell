@@ -36,7 +36,7 @@ RUN go mod download
 
 # Linting stage (minimal)
 FROM base AS lint
-RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.10.1 && \
+RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@2.10.1 && \
     go install github.com/a-h/templ/cmd/templ@latest
 
 # Copy source code

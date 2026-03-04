@@ -28,8 +28,8 @@ func (c *cachingAwareClient) Complete(ctx context.Context, prompt string) (strin
 }
 
 func (c *cachingAwareClient) CompleteWithRequest(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
-	// Disable caching for OpenAI-compatible providers
-	if c.provider == "openai-compatible" && req.EnableCaching {
+	// Disable caching for OpenAI-compatible providers.
+	if isOpenAICompatibleCachingProvider(c.provider) && req.EnableCaching {
 		// Clone the request to avoid modifying the original
 		modifiedReq := *req
 
@@ -57,8 +57,8 @@ func (c *cachingAwareClient) CompleteWithRequest(ctx context.Context, req *Compl
 }
 
 func (c *cachingAwareClient) Stream(ctx context.Context, req *CompletionRequest, callback func(chunk string) error) error {
-	// Disable caching for OpenAI-compatible providers
-	if c.provider == "openai-compatible" && req.EnableCaching {
+	// Disable caching for OpenAI-compatible providers.
+	if isOpenAICompatibleCachingProvider(c.provider) && req.EnableCaching {
 		// Create a modified request
 		modifiedReq := *req
 
@@ -95,4 +95,8 @@ func (c *cachingAwareClient) GetLastResponseID() string {
 
 func (c *cachingAwareClient) SetPreviousResponseID(responseID string) {
 	c.delegate.SetPreviousResponseID(responseID)
+}
+
+func isOpenAICompatibleCachingProvider(provider string) bool {
+	return provider == "openai-compatible" || provider == "z.ai"
 }

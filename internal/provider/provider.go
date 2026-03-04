@@ -83,6 +83,10 @@ type Config struct {
 	SafetyModel        string               `json:"safety_model,omitempty"`
 }
 
+const (
+	zAIGeneralBaseURL = "https://api.z.ai/api/paas/v4"
+)
+
 // Manager manages LLM providers
 type Manager struct {
 	config         *Config
@@ -335,6 +339,9 @@ func (m *Manager) AddProvider(name, apiKey string, models []*Model) error {
 func (m *Manager) AddProviderWithBaseURL(name, apiKey, baseURL string, models []*Model) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if canonicalProviderName(name) == "z.ai" && strings.TrimSpace(baseURL) == "" {
+		baseURL = zAIGeneralBaseURL
+	}
 
 	m.config.Providers[name] = &Provider{
 		Name:    name,
@@ -358,6 +365,10 @@ func (m *Manager) AddProviderWithAPIListing(ctx context.Context, name, apiKey st
 
 // AddProviderWithAPIListingAndBaseURL adds a provider with custom base URL and fetches models from API
 func (m *Manager) AddProviderWithAPIListingAndBaseURL(ctx context.Context, name, apiKey, baseURL string) error {
+	if canonicalProviderName(name) == "z.ai" && strings.TrimSpace(baseURL) == "" {
+		baseURL = zAIGeneralBaseURL
+	}
+
 	// Create provider instance
 	llmProvider, err := m.createLLMProviderWithBaseURL(name, apiKey, baseURL)
 	if err != nil {
@@ -371,12 +382,13 @@ func (m *Manager) AddProviderWithAPIListingAndBaseURL(ctx context.Context, name,
 	}
 
 	// Convert to internal Model format
+	canonicalName := canonicalProviderName(name)
 	models := make([]*Model, len(modelInfos))
 	for i, info := range modelInfos {
 		models[i] = &Model{
 			ID:              info.ID,
 			Name:            info.Name,
-			Provider:        info.Provider,
+			Provider:        canonicalName,
 			Description:     info.Description,
 			ContextWindow:   info.ContextWindow,
 			MaxOutputTokens: info.MaxOutputTokens,
@@ -410,12 +422,13 @@ func (m *Manager) RefreshModels(ctx context.Context, providerName string) error 
 	}
 
 	// Convert to internal Model format
+	canonicalName := canonicalProviderName(providerName)
 	models := make([]*Model, len(modelInfos))
 	for i, info := range modelInfos {
 		models[i] = &Model{
 			ID:              info.ID,
 			Name:            info.Name,
-			Provider:        info.Provider,
+			Provider:        canonicalName,
 			Description:     info.Description,
 			ContextWindow:   info.ContextWindow,
 			MaxOutputTokens: info.MaxOutputTokens,
@@ -536,6 +549,11 @@ func (m *Manager) createLLMProviderWithBaseURL(name, apiKey, baseURL string) (ll
 		return llm.NewOllamaProvider(resolvedKey), nil
 	case "kimi":
 		return llm.NewKimiProvider(resolvedKey), nil
+	case "z.ai":
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = zAIGeneralBaseURL
+		}
+		return llm.NewOpenAICompatibleProvider(resolvedKey, baseURL), nil
 	case "openai-compatible":
 		if baseURL == "" {
 			return nil, fmt.Errorf("base URL is required for openai-compatible provider")
@@ -886,6 +904,12 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 		client, err = llm.NewOllamaClient(apiKey, model.ID)
 	case "kimi":
 		client, err = llm.NewKimiClient(apiKey, model.ID)
+	case "z.ai":
+		baseURL := provider.BaseURL
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = zAIGeneralBaseURL
+		}
+		client, err = llm.NewOpenAICompatibleClient(apiKey, baseURL, model.ID)
 	case "openai-compatible":
 		if provider.BaseURL == "" {
 			return nil, fmt.Errorf("base URL is required for openai-compatible provider")
@@ -1082,6 +1106,19 @@ var PreferredModels = map[string][]string{
 	"cerebras": {"zai-glm-4.6", "qwen-3-235b-a22b-instruct-2507"},
 	"groq":     {"llama-3.3-70b-versatile", "mixtral-8x7b-32768"},
 	"kimi":     {"kimi-k2.5", "kimi-k2-turbo-preview", "kimi-k2-thinking", "moonshot-v1-128k"},
+	"z.ai": {
+		"glm-5",
+		"glm-4.7",
+		"glm-4.7-flash",
+		"glm-4.7-flashx",
+		"glm-4.6",
+		"glm-4.5",
+		"glm-4.5-air",
+		"glm-4.5-x",
+		"glm-4.5-airx",
+		"glm-4.5-flash",
+		"glm-4-32b-0414-128k",
+	},
 }
 
 // ChooseDefaultModel chooses the best default model for a provider based on preferred models list

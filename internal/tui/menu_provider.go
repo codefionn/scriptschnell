@@ -18,6 +18,8 @@ import (
 const (
 	defaultBaseURLPlaceholder = "Base URL (e.g., http://localhost:1234/v1)"
 	defaultAPIKeyPlaceholder  = "API Key (leave empty for local servers)"
+	zAIGeneralBaseURL         = "https://api.z.ai/api/paas/v4"
+	zAICodingBaseURL          = "https://api.z.ai/api/coding/paas/v4"
 )
 
 var (
@@ -112,7 +114,7 @@ type ProviderMenuModel struct {
 	formMode          providerFormMode
 	formInputs        []formInput
 	focusIndex        int
-	addingType        string // provider key (openai, anthropic, google, openrouter, mistral, cerebras, groq, kimi, openai-compatible)
+	addingType        string // provider key (openai, anthropic, google, openrouter, mistral, cerebras, groq, kimi, z.ai, openai-compatible)
 	addingLabel       string // human-friendly provider label
 	editProvider      string
 	editProviderLabel string
@@ -292,8 +294,11 @@ func (m ProviderMenuModel) updateInputMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			switch m.formMode {
 			case formModeAdd:
-				if m.addingType == "openai-compatible" {
+				if providerRequiresBaseURL(m.addingType) {
 					baseURL := strings.TrimSpace(m.getInputValue(inputIDBaseURL))
+					if baseURL == "" {
+						baseURL = providerDefaultBaseURL(m.addingType)
+					}
 					apiKey := m.getInputValue(inputIDAPIKey)
 					if baseURL == "" {
 						m.inputError = "Base URL is required"
@@ -554,9 +559,16 @@ func (m *ProviderMenuModel) enterAddProvider(item providerItem) {
 	m.inputError = ""
 	m.formInputs = nil
 
-	if item.providerType == "openai-compatible" {
+	if providerRequiresBaseURL(item.providerType) {
 		baseLabel := "Enter base URL:"
-		base := newFormInput(inputIDBaseURL, baseLabel, defaultBaseURLPlaceholder, textinput.EchoNormal, "")
+		placeholder := defaultBaseURLPlaceholder
+		initial := ""
+		if item.providerType == "z.ai" {
+			placeholder = zAIGeneralBaseURL
+			initial = zAIGeneralBaseURL
+			baseLabel = fmt.Sprintf("Enter base URL (General: %s, Coding: %s):", zAIGeneralBaseURL, zAICodingBaseURL)
+		}
+		base := newFormInput(inputIDBaseURL, baseLabel, placeholder, textinput.EchoNormal, initial)
 		apiLabel := "Enter API key (optional for local servers):"
 		hints := provider.EnvVarHints(item.providerType)
 		if len(hints) > 0 {
@@ -609,7 +621,7 @@ func (m *ProviderMenuModel) enterEditMode(providerName, displayName, providerTyp
 	m.inputError = ""
 	m.formInputs = make([]formInput, 0, 4)
 
-	if providerType == "openai-compatible" {
+	if providerRequiresBaseURL(providerType) {
 		base := newFormInput(
 			inputIDBaseURL,
 			"Base URL (leave blank to keep current):",
@@ -760,6 +772,13 @@ func buildProviderMenuItems(mgr *provider.Manager) []list.Item {
 			displayName:  "Kimi",
 		},
 		{
+			title:        "Add Z.AI Provider",
+			description:  "Configure Z.AI (GLM) with API key and endpoint (general/coding)",
+			action:       actionAddProvider,
+			providerType: "z.ai",
+			displayName:  "Z.AI",
+		},
+		{
 			title:        "Add OpenAI-Compatible Provider",
 			description:  "Configure any OpenAI-compatible API (LM Studio, LocalAI, vLLM, etc.)",
 			action:       actionAddProvider,
@@ -792,6 +811,8 @@ func friendlyProviderName(name string) string {
 		return "Groq"
 	case "kimi":
 		return "Kimi"
+	case "z.ai":
+		return "Z.AI"
 	case "ollama":
 		return "Ollama"
 	case "openai-compatible":
@@ -860,6 +881,17 @@ func rateLimitEqual(a, b *provider.RateLimitConfig) bool {
 	return a.RequestsPerMinute == b.RequestsPerMinute &&
 		a.MinIntervalMillis == b.MinIntervalMillis &&
 		a.TokensPerMinute == b.TokensPerMinute
+}
+
+func providerRequiresBaseURL(providerType string) bool {
+	return providerType == "openai-compatible" || providerType == "z.ai"
+}
+
+func providerDefaultBaseURL(providerType string) string {
+	if providerType == "z.ai" {
+		return zAIGeneralBaseURL
+	}
+	return ""
 }
 
 func parseOptionalPositiveInt(value, fieldName string) (int, error) {

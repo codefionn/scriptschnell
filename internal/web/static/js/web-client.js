@@ -1529,10 +1529,12 @@ function showAddProvider(providerType) {
     const baseUrlInput = document.getElementById('providerBaseUrl');
 
     typeInput.value = providerType;
-    typeDisplay.value = providerType.charAt(0).toUpperCase() + providerType.slice(1);
+    typeDisplay.value = providerType === 'z.ai'
+        ? 'Z.AI'
+        : providerType.charAt(0).toUpperCase() + providerType.slice(1);
     
-    // Show base URL field for openai-compatible providers
-    if (providerType === 'openai-compatible') {
+    // Show base URL field for providers that require custom endpoints
+    if (providerType === 'openai-compatible' || providerType === 'z.ai') {
         baseUrlField.style.display = 'block';
     } else {
         baseUrlField.style.display = 'none';
@@ -1540,7 +1542,13 @@ function showAddProvider(providerType) {
 
     // Clear inputs
     apiKeyInput.value = '';
-    baseUrlInput.value = '';
+    if (providerType === 'z.ai') {
+        baseUrlInput.value = 'https://api.z.ai/api/paas/v4';
+        baseUrlInput.placeholder = 'https://api.z.ai/api/paas/v4 (coding: https://api.z.ai/api/coding/paas/v4)';
+    } else {
+        baseUrlInput.value = '';
+        baseUrlInput.placeholder = 'http://localhost:1234/v1';
+    }
 
     form.style.display = 'block';
 }
@@ -1560,7 +1568,7 @@ function setupProviderForm() {
             api_key: apiKey
         };
 
-        if (providerType === 'openai-compatible') {
+        if (providerType === 'openai-compatible' || providerType === 'z.ai') {
             data.base_url = document.getElementById('providerBaseUrl').value;
         }
 
@@ -1630,7 +1638,7 @@ function editProvider(providerName) {
     
     // Show/hide base URL field
     const baseUrlField = document.getElementById('editBaseUrlField');
-    if (provider.name === 'openai-compatible' || provider.base_url) {
+    if (provider.name === 'openai-compatible' || provider.name === 'z.ai' || provider.base_url) {
         baseUrlField.style.display = 'block';
         document.getElementById('editProviderBaseUrl').value = provider.base_url || '';
     } else {
@@ -2013,14 +2021,20 @@ function loadSearchConfig() {
 }
 
 function setupSearchForm() {
+    const providerSelect = document.getElementById('searchProvider');
+    providerSelect.addEventListener('change', function() {
+        updateSearchProviderFields(providerSelect.value);
+    });
+
     document.getElementById('searchForm').addEventListener('submit', function(e) {
         e.preventDefault();
         
         const provider = document.getElementById('searchProvider').value;
         const apiKey = document.getElementById('searchApiKey').value;
+        const googleCX = document.getElementById('searchGoogleCX').value;
 
         sendMessage('set_search_config', {
-            data: { provider, api_key: apiKey }
+            data: { provider, api_key: apiKey, google_cx: googleCX }
         });
 
         searchModal.hide();
@@ -2030,6 +2044,34 @@ function setupSearchForm() {
 function renderSearchConfig(config) {
     document.getElementById('searchProvider').value = config.provider || '';
     document.getElementById('searchApiKey').value = config.api_key || '';
+    document.getElementById('searchGoogleCX').value = config.google_cx || '';
+    updateSearchProviderFields(config.provider || '');
+}
+
+function updateSearchProviderFields(provider) {
+    const normalizedProvider = provider === 'google' ? 'google_pse' : provider;
+    const apiKeyLabel = document.getElementById('searchApiKeyLabel');
+    const apiKeyInput = document.getElementById('searchApiKey');
+    const apiKeyHelp = document.getElementById('searchApiKeyHelp');
+    const googleCXGroup = document.getElementById('searchGoogleCXGroup');
+
+    const providerDisplay = normalizedProvider === 'exa'
+        ? 'Exa'
+        : normalizedProvider === 'google_pse'
+            ? 'Google PSE'
+            : normalizedProvider === 'perplexity'
+                ? 'Perplexity'
+                : 'Selected';
+
+    apiKeyLabel.textContent = `${providerDisplay} API Key`;
+    apiKeyInput.placeholder = `Enter ${providerDisplay} API key (leave blank to keep current key)`;
+    apiKeyHelp.textContent = 'Leave blank to keep the current saved key for this provider.';
+
+    if (normalizedProvider === 'google_pse') {
+        googleCXGroup.style.display = 'block';
+    } else {
+        googleCXGroup.style.display = 'none';
+    }
 }
 
 // ==================== Password Management ====================

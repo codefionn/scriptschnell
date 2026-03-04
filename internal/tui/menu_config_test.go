@@ -27,6 +27,13 @@ func TestSearchProviderSelectionIsPersisted(t *testing.T) {
 	menu = updated.(SettingsMenuModel)
 	updated, _ = menu.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	menu = updated.(SettingsMenuModel)
+	if !menu.inputMode {
+		t.Fatalf("expected inputMode to be true after selecting provider")
+	}
+
+	// Keep existing key by submitting an empty value and finish flow.
+	updated, _ = menu.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	menu = updated.(SettingsMenuModel)
 
 	if cfg.Search.Provider != "exa" {
 		t.Fatalf("expected cfg.Search.Provider to be %q, got %q", "exa", cfg.Search.Provider)

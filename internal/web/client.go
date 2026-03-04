@@ -46,6 +46,8 @@ type Client struct {
 	cancelFunc         context.CancelFunc
 }
 
+const zAIGeneralBaseURL = "https://api.z.ai/api/paas/v4"
+
 // NewClient creates a new WebSocket client
 func NewClient(hub *Hub, conn *websocket.Conn, broker *MessageBroker, cfg *config.Config, providerMgr *provider.Manager, secretsPassword *securemem.String, debug bool, requireSandboxAuth bool) *Client {
 	id, _ := generateClientID()
@@ -276,7 +278,7 @@ func (c *Client) handleMessage(msg *WebMessage) error {
 	case MessageTypeGetSearchConfig:
 		// Send search config
 		var apiKey string
-		switch c.cfg.Search.Provider {
+		switch normalizeSearchProvider(c.cfg.Search.Provider) {
 		case "exa":
 			apiKey = c.cfg.Search.Exa.APIKey
 		case "google_pse":
@@ -287,8 +289,9 @@ func (c *Client) handleMessage(msg *WebMessage) error {
 		c.sendResponse(&WebMessage{
 			Type: MessageTypeSearchConfig,
 			Data: map[string]interface{}{
-				"provider": c.cfg.Search.Provider,
-				"api_key":  apiKey,
+				"provider":  normalizeSearchProvider(c.cfg.Search.Provider),
+				"api_key":   apiKey,
+				"google_cx": c.cfg.Search.GooglePSE.CX,
 			},
 		})
 
@@ -584,10 +587,13 @@ func (c *Client) addProvider(msg *WebMessage) error {
 
 	ctx := context.Background()
 
-	if providerType == "openai-compatible" {
+	if requiresBaseURL(providerType) {
 		baseURL, _ := msg.Data["base_url"].(string)
 		if baseURL == "" {
-			return fmt.Errorf("base_url is required for openai-compatible providers")
+			baseURL = defaultBaseURLForProvider(providerType)
+		}
+		if baseURL == "" {
+			return fmt.Errorf("base_url is required for %s provider", providerType)
 		}
 
 		if err := c.providerMgr.AddProviderWithAPIListingAndBaseURL(ctx, providerType, apiKey, baseURL); err != nil {
@@ -726,19 +732,33 @@ func (c *Client) setSearchConfig(msg *WebMessage) error {
 	if !ok {
 		return fmt.Errorf("provider is required")
 	}
+	searchProvider = normalizeSearchProvider(searchProvider)
+	if searchProvider != "" && searchProvider != "exa" && searchProvider != "google_pse" && searchProvider != "perplexity" {
+		return fmt.Errorf("invalid search provider: %s", searchProvider)
+	}
 
 	apiKey, _ := msg.Data["api_key"].(string)
+	googleCX, _ := msg.Data["google_cx"].(string)
 
 	c.cfg.Search.Provider = searchProvider
 
 	// Set API key based on provider type
 	switch searchProvider {
 	case "exa":
-		c.cfg.Search.Exa.APIKey = apiKey
+		if apiKey != "" {
+			c.cfg.Search.Exa.APIKey = apiKey
+		}
 	case "google_pse":
-		c.cfg.Search.GooglePSE.APIKey = apiKey
+		if apiKey != "" {
+			c.cfg.Search.GooglePSE.APIKey = apiKey
+		}
+		if googleCX != "" {
+			c.cfg.Search.GooglePSE.CX = googleCX
+		}
 	case "perplexity":
-		c.cfg.Search.Perplexity.APIKey = apiKey
+		if apiKey != "" {
+			c.cfg.Search.Perplexity.APIKey = apiKey
+		}
 	}
 
 	// Save config
@@ -749,10 +769,34 @@ func (c *Client) setSearchConfig(msg *WebMessage) error {
 	// Send success response
 	c.sendResponse(&WebMessage{
 		Type:    MessageTypeSystem,
-		Content: "Successfully updated search configuration",
+		Content: fmt.Sprintf("Successfully updated search configuration (active provider: %s)", friendlySearchProviderName(searchProvider)),
 	})
 
 	return nil
+}
+
+func normalizeSearchProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "google":
+		return "google_pse"
+	case "exa", "google_pse", "perplexity", "":
+		return strings.ToLower(strings.TrimSpace(provider))
+	default:
+		return strings.ToLower(strings.TrimSpace(provider))
+	}
+}
+
+func friendlySearchProviderName(provider string) string {
+	switch provider {
+	case "exa":
+		return "Exa"
+	case "google_pse":
+		return "Google PSE"
+	case "perplexity":
+		return "Perplexity"
+	default:
+		return "none"
+	}
 }
 
 // setPassword sets the encryption password
@@ -996,6 +1040,8 @@ func friendlyProviderName(name string) string {
 		return "Groq"
 	case "kimi":
 		return "Kimi"
+	case "z.ai":
+		return "Z.AI"
 	case "ollama":
 		return "Ollama"
 	case "openai-compatible":
@@ -1006,4 +1052,15 @@ func friendlyProviderName(name string) string {
 		}
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
+}
+
+func requiresBaseURL(providerType string) bool {
+	return providerType == "openai-compatible" || providerType == "z.ai"
+}
+
+func defaultBaseURLForProvider(providerType string) string {
+	if providerType == "z.ai" {
+		return zAIGeneralBaseURL
+	}
+	return ""
 }

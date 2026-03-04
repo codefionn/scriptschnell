@@ -137,6 +137,7 @@ const (
 	ModelIDDeepSeek = "deepseek"
 	ModelIDCommand  = "command"
 	ModelIDZaiGLM   = "zai-glm"
+	ModelIDGLM      = "glm-"
 	ModelIDKimi     = "kimi"
 	ModelIDK2       = "k2"
 	ModelIDMoonshot = "moonshot"
@@ -286,7 +287,7 @@ func DetectModelFamily(modelID string) ModelFamily {
 	if strings.Contains(id, ModelIDCommand) {
 		return FamilyCommand
 	}
-	if strings.Contains(id, ModelIDZaiGLM) {
+	if strings.Contains(id, ModelIDZaiGLM) || strings.HasPrefix(id, ModelIDGLM) {
 		return FamilyZaiGLM
 	}
 	if strings.Contains(id, ModelIDKimi) || strings.Contains(id, ModelIDK2) || strings.Contains(id, ModelIDMoonshot) {

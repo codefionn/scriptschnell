@@ -14,7 +14,11 @@ func TestAllFieldsPreservedThroughSaveLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temp dir %q: %v", tmpDir, err)
+		}
+	}()
 
 	configPath := filepath.Join(tmpDir, "config.json")
 
@@ -92,7 +96,11 @@ func TestDefaultsUsedForMissingFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temp dir %q: %v", tmpDir, err)
+		}
+	}()
 
 	configPath := filepath.Join(tmpDir, "config.json")
 

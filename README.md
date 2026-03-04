@@ -168,6 +168,7 @@ Supported providers:
 - Cerebras
 - Groq
 - Kimi (Moonshot AI)
+- Z.AI (GLM)
 - Ollama
 - OpenAI-compatible
 

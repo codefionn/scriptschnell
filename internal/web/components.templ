@@ -73,6 +73,9 @@ templ ProvidersModal() {
 							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('mistral')">Mistral</button>
 						</div>
 						<div class="col-md-4">
+							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('z.ai')">Z.AI</button>
+						</div>
+						<div class="col-md-4">
 							<button class="btn btn-outline-primary w-100" onclick="showAddProvider('openai-compatible')">OpenAI-Compatible</button>
 						</div>
 					</div>
@@ -201,14 +204,20 @@ templ SearchModal() {
 							<select class="form-select" id="searchProvider" required>
 								<option value="">Select a provider</option>
 								<option value="exa">Exa</option>
-								<option value="google">Google PSE</option>
+								<option value="google_pse">Google PSE</option>
 								<option value="perplexity">Perplexity</option>
 							</select>
+							<div class="form-text">Choose provider first. Saving makes it the active search API.</div>
 						</div>
 						<div class="mb-3">
-							<label class="form-label">API Key</label>
-							<input type="password" class="form-control" id="searchApiKey" placeholder="Enter your API key (optional)"/>
-							<div class="form-text">Leave empty to use environment variables</div>
+							<label class="form-label" id="searchApiKeyLabel">API Key</label>
+							<input type="password" class="form-control" id="searchApiKey" placeholder="Enter API key (leave blank to keep current key)"/>
+							<div class="form-text" id="searchApiKeyHelp">Leave blank to keep the current saved key for this provider.</div>
+						</div>
+						<div class="mb-3" id="searchGoogleCXGroup" style="display: none;">
+							<label class="form-label">Google PSE CX (Search Engine ID)</label>
+							<input type="text" class="form-control" id="searchGoogleCX" placeholder="Enter CX (leave blank to keep current value)"/>
+							<div class="form-text">Required for Google PSE searches.</div>
 						</div>
 						<button type="submit" class="btn btn-primary">Save Configuration</button>
 					</form>

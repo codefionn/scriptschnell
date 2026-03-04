@@ -17,6 +17,7 @@ var providerEnvVars = map[string][]string{
 	"cerebras":          {"CEREBRAS_API_KEY"},
 	"groq":              {"GROQ_API_KEY"},
 	"kimi":              {"KIMI_API_KEY", "MOONSHOT_API_KEY"},
+	"z.ai":              {"ZAI_API_KEY"},
 	"exa":               {"EXA_API_KEY"},
 	"perplexity":        {"PERPLEXITY_API_KEY"},
 	"openai-compatible": {"OPENAI_COMPATIBLE_API_KEY", "OPENAI_API_KEY"},
@@ -30,6 +31,8 @@ func canonicalProviderName(name string) string {
 		return "google"
 	case "mistral", "mistralai":
 		return "mistral"
+	case "zai", "z-ai", "z.ai":
+		return "z.ai"
 	default:
 		return strings.ToLower(strings.TrimSpace(name))
 	}

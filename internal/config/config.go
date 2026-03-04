@@ -26,7 +26,8 @@ type SearchConfig struct {
 
 // ExaConfig holds Exa AI Search API configuration
 type ExaConfig struct {
-	APIKey string `json:"api_key"`
+	APIKey       string `json:"api_key"`
+	ExaSearchType string `json:"exa_search_type"` // "neural", "auto", "deep", or "deep-reasoning"
 }
 
 // GooglePSEConfig holds Google Programmable Search Engine configuration
@@ -302,7 +303,7 @@ func DefaultConfig() *Config {
 		AuthorizedCommands: make(map[string]bool),
 		Search: SearchConfig{
 			Provider:   "",
-			Exa:        ExaConfig{APIKey: ""},
+			Exa:        ExaConfig{APIKey: "", ExaSearchType: "auto"},
 			GooglePSE:  GooglePSEConfig{APIKey: "", CX: ""},
 			Perplexity: PerplexityConfig{APIKey: ""},
 		},
@@ -392,6 +393,9 @@ func Load(path string) (*Config, error) {
 	}
 	if config.MCP.Servers == nil {
 		config.MCP.Servers = make(map[string]*MCPServerConfig)
+	}
+	if config.Search.Exa.ExaSearchType == "" {
+		config.Search.Exa.ExaSearchType = "auto"
 	}
 	if config.ContextDirectories == nil {
 		config.ContextDirectories = make(map[string][]string)

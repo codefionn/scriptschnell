@@ -146,6 +146,7 @@ type ModelInfo struct {
 type SearchConfigInfo struct {
 	Provider string `json:"provider"`
 	APIKey   string `json:"api_key,omitempty"`
+	GoogleCX string `json:"google_cx,omitempty"`
 }
 
 // MCPServerInfo represents MCP server information

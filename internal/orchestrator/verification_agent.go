@@ -677,9 +677,9 @@ func (a *VerificationAgent) reportResults(result *VerificationResult, progressCb
 
 	// Status based on confidence score (95%+ is success)
 	if result.IsSuccess() {
-		sb.WriteString(fmt.Sprintf("**Status:** Accepted (Confidence: %.0f%%)\n\n", result.ConfidenceScore))
+		fmt.Fprintf(&sb, "**Status:** Accepted (Confidence: %.0f%%)\n\n", result.ConfidenceScore)
 	} else {
-		sb.WriteString(fmt.Sprintf("**Status:** Needs Review (Confidence: %.0f%%)\n\n", result.ConfidenceScore))
+		fmt.Fprintf(&sb, "**Status:** Needs Review (Confidence: %.0f%%)\n\n", result.ConfidenceScore)
 	}
 
 	// Individual check results

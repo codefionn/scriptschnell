@@ -27,6 +27,14 @@ func TestResolveAPIKeyFallsBackToEnv(t *testing.T) {
 	if got := resolveAPIKey("gemini", ""); got != value {
 		t.Fatalf("expected alias gemini to resolve env key %q, got %q", value, got)
 	}
+
+	t.Setenv("ZAI_API_KEY", value)
+	if got := resolveAPIKey("z.ai", ""); got != value {
+		t.Fatalf("expected z.ai to resolve env key %q, got %q", value, got)
+	}
+	if got := resolveAPIKey("zai", ""); got != value {
+		t.Fatalf("expected zai alias to resolve env key %q, got %q", value, got)
+	}
 }
 
 func TestEnvVarHintsCopiesSlice(t *testing.T) {

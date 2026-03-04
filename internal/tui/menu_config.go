@@ -21,11 +21,7 @@ var (
 type settingsAction int
 
 const (
-	actionSelectProvider settingsAction = iota
-	actionEditExaKey
-	actionEditGoogleKey
-	actionEditGoogleCX
-	actionEditPerplexityKey
+	actionConfigureActiveProvider settingsAction = iota
 )
 
 type settingsItem struct {
@@ -68,13 +64,23 @@ type SettingsMenuModel struct {
 	// input mode for editing a single field
 	inputMode bool
 	input     textinput.Model
-	fieldID   settingsAction
+	inputStep int
+	inputFlow []searchProviderInputField
 
 	// provider selection sub-menu
-	providerMode bool
-	providerList list.Model
+	providerMode    bool
+	providerList    list.Model
+	pendingProvider string
 
 	result string
+}
+
+type searchProviderInputField struct {
+	provider     string
+	fieldKey     string
+	label        string
+	placeholder  string
+	passwordMode bool
 }
 
 func NewSettingsMenu(cfg *config.Config, width, height int) SettingsMenuModel {
@@ -103,11 +109,11 @@ func NewSettingsMenu(cfg *config.Config, width, height int) SettingsMenuModel {
 
 func (m *SettingsMenuModel) initLists() {
 	items := []list.Item{
-		settingsItem{title: m.providerTitle(), description: "Choose which provider to use for web search", action: actionSelectProvider},
-		settingsItem{title: fmt.Sprintf("Exa API Key: %s", mask(m.cfg.Search.Exa.APIKey)), description: "Set or update your Exa API key", action: actionEditExaKey},
-		settingsItem{title: fmt.Sprintf("Google PSE API Key: %s", mask(m.cfg.Search.GooglePSE.APIKey)), description: "Set Google Programmable Search Engine API key", action: actionEditGoogleKey},
-		settingsItem{title: fmt.Sprintf("Google PSE CX: %s", emptyIf(m.cfg.Search.GooglePSE.CX, "(unset)")), description: "Set Google Programmable Search Engine CX (Search Engine ID)", action: actionEditGoogleCX},
-		settingsItem{title: fmt.Sprintf("Perplexity API Key: %s", mask(m.cfg.Search.Perplexity.APIKey)), description: "Set or update your Perplexity API key", action: actionEditPerplexityKey},
+		settingsItem{
+			title:       m.providerTitle(),
+			description: m.providerDescription(),
+			action:      actionConfigureActiveProvider,
+		},
 	}
 
 	l := list.New(items, settingsItemDelegate{}, m.width, m.height-4)
@@ -119,10 +125,10 @@ func (m *SettingsMenuModel) initLists() {
 
 	// Provider selection list
 	provItems := []list.Item{
-		settingsItem{title: providerDisplayName(""), description: "Disable external search", action: actionSelectProvider},
-		settingsItem{title: providerDisplayName("exa"), description: "Use Exa AI Search API", action: actionSelectProvider},
-		settingsItem{title: providerDisplayName("google_pse"), description: "Use Google Programmable Search Engine", action: actionSelectProvider},
-		settingsItem{title: providerDisplayName("perplexity"), description: "Use Perplexity Search API", action: actionSelectProvider},
+		settingsItem{title: providerDisplayName(""), description: "Disable external search", action: actionConfigureActiveProvider},
+		settingsItem{title: providerDisplayName("exa"), description: "Use Exa AI Search API", action: actionConfigureActiveProvider},
+		settingsItem{title: providerDisplayName("google_pse"), description: "Use Google Programmable Search Engine", action: actionConfigureActiveProvider},
+		settingsItem{title: providerDisplayName("perplexity"), description: "Use Perplexity Search API", action: actionConfigureActiveProvider},
 	}
 	pl := list.New(provItems, settingsItemDelegate{}, m.width, m.height-4)
 	pl.Title = "Select Search Provider"
@@ -140,7 +146,11 @@ func (m SettingsMenuModel) providerTitle() string {
 	if current == "" {
 		return "Search Provider: (none)"
 	}
-	return fmt.Sprintf("Search Provider: %s", providerDisplayName(current))
+	return fmt.Sprintf("Search Provider: %s (%s)", providerDisplayName(current), m.providerCredentialStatus(current))
+}
+
+func (m SettingsMenuModel) providerDescription() string {
+	return "Choose provider first, then update credentials and make it active"
 }
 
 func providerDisplayName(key string) string {
@@ -167,23 +177,6 @@ func providerIndex(key string) int {
 	default:
 		return 0
 	}
-}
-
-func mask(s string) string {
-	if s == "" {
-		return "(unset)"
-	}
-	if len(s) <= 6 {
-		return "******"
-	}
-	return s[:3] + "***" + s[len(s)-3:]
-}
-
-func emptyIf(value string, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
 }
 
 func (m SettingsMenuModel) Init() tea.Cmd {
@@ -216,45 +209,9 @@ func (m SettingsMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			switch i.action {
-			case actionSelectProvider:
+			case actionConfigureActiveProvider:
 				m.result = ""
 				m.providerMode = true
-				return m, nil
-			case actionEditExaKey:
-				m.result = ""
-				m.fieldID = actionEditExaKey
-				m.inputMode = true
-				m.input.Placeholder = "EXA_API_KEY"
-				m.input.SetValue("")
-				m.input.EchoMode = textinput.EchoPassword
-				m.input.Focus()
-				return m, nil
-			case actionEditGoogleKey:
-				m.result = ""
-				m.fieldID = actionEditGoogleKey
-				m.inputMode = true
-				m.input.Placeholder = "GOOGLE_API_KEY"
-				m.input.SetValue("")
-				m.input.EchoMode = textinput.EchoPassword
-				m.input.Focus()
-				return m, nil
-			case actionEditGoogleCX:
-				m.result = ""
-				m.fieldID = actionEditGoogleCX
-				m.inputMode = true
-				m.input.Placeholder = "GOOGLE_CX"
-				m.input.SetValue("")
-				m.input.EchoMode = textinput.EchoNormal
-				m.input.Focus()
-				return m, nil
-			case actionEditPerplexityKey:
-				m.result = ""
-				m.fieldID = actionEditPerplexityKey
-				m.inputMode = true
-				m.input.Placeholder = "PERPLEXITY_API_KEY"
-				m.input.SetValue("")
-				m.input.EchoMode = textinput.EchoPassword
-				m.input.Focus()
 				return m, nil
 			}
 		}
@@ -271,24 +228,56 @@ func (m SettingsMenuModel) updateInputMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.inputMode = false
+			m.inputFlow = nil
+			m.inputStep = 0
+			m.pendingProvider = ""
 			return m, nil
 		case "enter":
 			v := m.input.Value()
-			switch m.fieldID {
-			case actionEditExaKey:
-				m.cfg.Search.Exa.APIKey = v
-			case actionEditGoogleKey:
-				m.cfg.Search.GooglePSE.APIKey = v
-			case actionEditGoogleCX:
-				m.cfg.Search.GooglePSE.CX = v
-			case actionEditPerplexityKey:
-				m.cfg.Search.Perplexity.APIKey = v
+
+			if len(m.inputFlow) == 0 || m.inputStep >= len(m.inputFlow) {
+				m.inputMode = false
+				return m, nil
 			}
-			m.saveConfig()
-			// Refresh items to show masked values
-			m.initLists()
-			m.inputMode = false
-			return m, nil
+
+			field := m.inputFlow[m.inputStep]
+			trimmed := v
+			switch field.provider {
+			case "exa":
+				if field.fieldKey == "api_key" && trimmed != "" {
+					m.cfg.Search.Exa.APIKey = trimmed
+				}
+			case "google_pse":
+				switch field.fieldKey {
+				case "api_key":
+					if trimmed != "" {
+						m.cfg.Search.GooglePSE.APIKey = trimmed
+					}
+				case "cx":
+					if trimmed != "" {
+						m.cfg.Search.GooglePSE.CX = trimmed
+					}
+				}
+			case "perplexity":
+				if field.fieldKey == "api_key" && trimmed != "" {
+					m.cfg.Search.Perplexity.APIKey = trimmed
+				}
+			}
+
+			m.inputStep++
+			if m.inputStep >= len(m.inputFlow) {
+				m.cfg.Search.Provider = m.pendingProvider
+				m.saveConfig()
+				m.initLists()
+				m.inputMode = false
+				m.inputFlow = nil
+				m.inputStep = 0
+				m.pendingProvider = ""
+				return m, nil
+			}
+
+			m.prepareInputForCurrentStep()
+			return m, textinput.Blink
 		}
 	}
 	var cmd tea.Cmd
@@ -313,17 +302,24 @@ func (m SettingsMenuModel) updateProviderMode(msg tea.Msg) (tea.Model, tea.Cmd) 
 			switch title {
 			case providerDisplayName(""):
 				m.cfg.Search.Provider = ""
+				m.pendingProvider = ""
+				m.inputFlow = nil
+				m.inputStep = 0
+				m.inputMode = false
+				m.providerMode = false
+				m.saveConfig()
+				m.initLists()
+				return m, nil
 			case providerDisplayName("exa"):
-				m.cfg.Search.Provider = "exa"
+				m.pendingProvider = "exa"
 			case providerDisplayName("google_pse"):
-				m.cfg.Search.Provider = "google_pse"
+				m.pendingProvider = "google_pse"
 			case providerDisplayName("perplexity"):
-				m.cfg.Search.Provider = "perplexity"
+				m.pendingProvider = "perplexity"
 			}
-			m.saveConfig()
 			m.providerMode = false
-			m.initLists()
-			return m, nil
+			m.startProviderCredentialsFlow()
+			return m, textinput.Blink
 		}
 	case tea.WindowSizeMsg:
 		m.providerList.SetWidth(msg.Width)
@@ -340,9 +336,13 @@ func (m SettingsMenuModel) View() string {
 	}
 	if m.inputMode {
 		var s string
-		s += settingsTitleStyle.Render("Edit Setting\n\n")
+		s += settingsTitleStyle.Render("Configure Search Provider\n\n")
+		if current := m.currentInputField(); current != nil {
+			step := fmt.Sprintf("Step %d/%d: %s\n", m.inputStep+1, len(m.inputFlow), current.label)
+			s += settingsHelpStyle.Render(step)
+		}
 		s += m.input.View() + "\n\n"
-		s += settingsHelpStyle.Render("Enter: Save • ESC: Cancel")
+		s += settingsHelpStyle.Render("Enter: Next/Save • ESC: Cancel (empty keeps existing value)")
 		return s
 	}
 	if m.providerMode {
@@ -366,4 +366,114 @@ func (m *SettingsMenuModel) saveConfig() {
 		return
 	}
 	m.result = "✓ Settings saved"
+}
+
+func (m *SettingsMenuModel) startProviderCredentialsFlow() {
+	if m.pendingProvider == "" {
+		m.inputMode = false
+		m.inputFlow = nil
+		m.inputStep = 0
+		return
+	}
+
+	m.result = ""
+	m.inputFlow = providerInputFlow(m.pendingProvider)
+	m.inputStep = 0
+	m.inputMode = true
+	m.prepareInputForCurrentStep()
+}
+
+func (m *SettingsMenuModel) prepareInputForCurrentStep() {
+	current := m.currentInputField()
+	if current == nil {
+		m.inputMode = false
+		return
+	}
+
+	m.input.Placeholder = current.placeholder
+	m.input.SetValue("")
+	if current.passwordMode {
+		m.input.EchoMode = textinput.EchoPassword
+	} else {
+		m.input.EchoMode = textinput.EchoNormal
+	}
+	m.input.Focus()
+}
+
+func (m SettingsMenuModel) currentInputField() *searchProviderInputField {
+	if len(m.inputFlow) == 0 || m.inputStep < 0 || m.inputStep >= len(m.inputFlow) {
+		return nil
+	}
+	field := m.inputFlow[m.inputStep]
+	return &field
+}
+
+func providerInputFlow(provider string) []searchProviderInputField {
+	switch provider {
+	case "exa":
+		return []searchProviderInputField{
+			{
+				provider:     "exa",
+				fieldKey:     "api_key",
+				label:        "Exa API Key",
+				placeholder:  "EXA_API_KEY",
+				passwordMode: true,
+			},
+		}
+	case "google_pse":
+		return []searchProviderInputField{
+			{
+				provider:     "google_pse",
+				fieldKey:     "api_key",
+				label:        "Google PSE API Key",
+				placeholder:  "GOOGLE_API_KEY",
+				passwordMode: true,
+			},
+			{
+				provider:     "google_pse",
+				fieldKey:     "cx",
+				label:        "Google PSE CX (Search Engine ID)",
+				placeholder:  "GOOGLE_CX",
+				passwordMode: false,
+			},
+		}
+	case "perplexity":
+		return []searchProviderInputField{
+			{
+				provider:     "perplexity",
+				fieldKey:     "api_key",
+				label:        "Perplexity API Key",
+				placeholder:  "PERPLEXITY_API_KEY",
+				passwordMode: true,
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func (m SettingsMenuModel) providerCredentialStatus(provider string) string {
+	switch provider {
+	case "exa":
+		return credentialStatus(m.cfg.Search.Exa.APIKey)
+	case "google_pse":
+		if m.cfg.Search.GooglePSE.APIKey != "" && m.cfg.Search.GooglePSE.CX != "" {
+			return "configured"
+		}
+		if m.cfg.Search.GooglePSE.APIKey == "" && m.cfg.Search.GooglePSE.CX == "" {
+			return "unset"
+		}
+		return "partial"
+	case "perplexity":
+		return credentialStatus(m.cfg.Search.Perplexity.APIKey)
+	default:
+		return "unset"
+	}
+}
+
+func credentialStatus(value string) string {
+	if value == "" {
+		return "unset"
+	}
+	return "configured"
 }

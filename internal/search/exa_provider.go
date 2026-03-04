@@ -13,15 +13,21 @@ import (
 
 // ExaSearchProvider implements SearchProvider for Exa AI Search API
 type ExaSearchProvider struct {
-	apiKey string
-	client *http.Client
+	apiKey     string
+	searchType string
+	client     *http.Client
 }
 
 // NewExaSearchProvider creates a new Exa search provider
 func NewExaSearchProvider(cfg config.ExaConfig) *ExaSearchProvider {
+	searchType := cfg.ExaSearchType
+	if searchType == "" {
+		searchType = "auto" // Default to auto if not specified
+	}
 	return &ExaSearchProvider{
-		apiKey: cfg.APIKey,
-		client: &http.Client{},
+		apiKey:     cfg.APIKey,
+		searchType: searchType,
+		client:     &http.Client{},
 	}
 }
 
@@ -31,6 +37,7 @@ type exaSearchRequest struct {
 	NumResults    int                `json:"numResults,omitempty"`
 	UseAutoprompt bool               `json:"useAutoprompt,omitempty"`
 	Contents      exaContentsOptions `json:"contents,omitempty"`
+	Type          string             `json:"type,omitempty"` // "neural", "auto", "deep", or "deep-reasoning"
 }
 
 type exaContentsOptions struct {
@@ -62,6 +69,7 @@ func (e *ExaSearchProvider) Search(ctx context.Context, query string, numResults
 		Contents: exaContentsOptions{
 			Text: true,
 		},
+		Type: e.searchType,
 	}
 
 	jsonData, err := json.Marshal(reqBody)

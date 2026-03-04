@@ -185,6 +185,27 @@ func TestDetectContextWindow_Mistral(t *testing.T) {
 	}
 }
 
+func TestDetectModelFamily_GLM(t *testing.T) {
+	tests := []struct {
+		modelID  string
+		expected ModelFamily
+	}{
+		{"glm-5", FamilyZaiGLM},
+		{"glm-4.7", FamilyZaiGLM},
+		{"glm-4-32b-0414-128k", FamilyZaiGLM},
+		{"zai-glm-4.6", FamilyZaiGLM},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			got := DetectModelFamily(tt.modelID)
+			if got != tt.expected {
+				t.Errorf("DetectModelFamily(%q) = %v, want %v", tt.modelID, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestIsMistralModel(t *testing.T) {
 	tests := []struct {
 		modelID  string

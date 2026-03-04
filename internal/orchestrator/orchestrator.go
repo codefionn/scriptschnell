@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -2245,6 +2246,12 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 
 	response, err := o.planningAgent.PlanWithProgress(ctx, req, userInputCb, progressCallback, planningToolCallCb, planningToolResultCb)
 	if err != nil {
+		// Planning is a best-effort pre-pass; cancellation here is expected when the
+		// parent request is interrupted and should not be surfaced as a warning.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			logger.Debug("Planning phase cancelled: %v", err)
+			return nil
+		}
 		return fmt.Errorf("planning failed: %w", err)
 	}
 

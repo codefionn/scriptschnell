@@ -69,7 +69,7 @@ Frontends:
 - [ ] Fix agent client protocol output (zed editor)
 - [x] Implement proper shell sandbox
 - [ ] Continue implementing the eval tooling
-- [ ] After auto compaction tell the model that this happend and it should
+- [ ] After auto compaction tell the model that this happened and it should
       verify that requested changes were fully implemented, if thinks that these were
       fully implemented
 

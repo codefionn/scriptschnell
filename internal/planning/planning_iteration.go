@@ -490,18 +490,18 @@ func (p *PlanningIteration) completeWithRetry(ctx context.Context, req *llm.Comp
 			return response, nil
 		}
 
-		logger.Warn("Planning completion error (attempt %d/%d): %v", attempt, maxAttempts, err)
-
-		// Last attempt - return the error
-		if attempt >= maxAttempts {
-			return nil, err
-		}
-
-		// Check for context cancellation (both actual context and error-wrapped)
+		// Cancellation/deadline errors are terminal control-flow signals, not retryable failures.
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+
+		logger.Warn("Planning completion error (attempt %d/%d): %v", attempt, maxAttempts, err)
+
+		// Last attempt - return the error
+		if attempt >= maxAttempts {
 			return nil, err
 		}
 

@@ -808,6 +808,7 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 		DisableAnimations:       c.DisableAnimations,
 		LogLevel:                c.LogLevel,
 		LogPath:                 c.LogPath,
+		LogToConsole:            c.LogToConsole,
 		AuthorizedDomains:       c.AuthorizedDomains,
 		AuthorizedCommands:      c.AuthorizedCommands,
 		Search:                  c.Search,
@@ -821,7 +822,9 @@ func (c *Config) marshalWithEncryptedSecrets() ([]byte, error) {
 		AutoResume:              c.AutoResume,
 		SandboxOutputCompaction: c.SandboxOutputCompaction,
 		LandlockApprovals:       c.LandlockApprovals,
+		Sandbox:                 c.Sandbox,
 		Socket:                  c.Socket,
+		Loop:                    c.Loop,
 		secretsPassword:         c.secretsPassword,
 	}
 

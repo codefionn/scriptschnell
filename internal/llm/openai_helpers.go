@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	openai "github.com/openai/openai-go"
@@ -33,6 +34,19 @@ func requiresResponsesAPI(modelName string) bool {
 	}
 
 	return false
+}
+
+func shouldUseOpenAIWebSocket(modelName string) bool {
+	transport := strings.ToLower(strings.TrimSpace(os.Getenv("SCRIPTSCHNELL_OPENAI_TRANSPORT")))
+	switch transport {
+	case "websocket", "ws", "realtime":
+		return true
+	case "http", "https", "responses", "chat":
+		return false
+	}
+
+	model := strings.TrimSpace(strings.ToLower(modelName))
+	return strings.Contains(model, "realtime")
 }
 
 func buildResponsesInput(messages []*Message) (responses.ResponseInputParam, error) {

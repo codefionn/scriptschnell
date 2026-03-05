@@ -44,7 +44,7 @@ func NewMistralClient(apiKey, modelName string) (Client, error) {
 		model:   model,
 		baseURL: mistralDefaultBaseURL,
 		httpClient: &http.Client{
-			Timeout: consts.Timeout2Minutes,
+			Timeout: consts.TimeoutClient,
 		},
 	}, nil
 }

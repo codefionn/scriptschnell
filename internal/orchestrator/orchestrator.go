@@ -483,13 +483,17 @@ func NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg *config.Config, 
 	// Set up VCS actor for branch tracking
 	vcsCtx, vcsCancel := context.WithCancel(context.Background())
 	var gitVCS vcs.VCS
+	hasVCS := false
 	// Try to initialize Git VCS
 	gitVCS = vcs.NewGit(cfg.WorkingDir)
-	if _, err := gitVCS.RepositoryRoot(context.Background(), cfg.WorkingDir); err != nil {
+	if _, err := gitVCS.RepositoryRoot(context.Background(), cfg.WorkingDir); err == nil {
+		hasVCS = true
+	} else {
 		// Not in a git repository, use nil VCS
 		gitVCS = nil
 		logger.Debug("Not in a git repository, VCS actor disabled")
 	}
+	sess.SetHasVCS(hasVCS)
 	vcsActor := tools.NewVCSActor("vcs", gitVCS)
 	vcsRef, err := orch.actorSystem.Spawn(vcsCtx, "vcs", vcsActor, 8)
 	if err != nil {
@@ -752,13 +756,17 @@ func NewOrchestratorWithSharedResources(
 	// Set up VCS actor for branch tracking
 	vcsCtx, vcsCancel := context.WithCancel(context.Background())
 	var gitVCS vcs.VCS
+	hasVCS := false
 	// Try to initialize Git VCS
 	gitVCS = vcs.NewGit(sess.WorkingDir)
-	if _, err := gitVCS.RepositoryRoot(context.Background(), sess.WorkingDir); err != nil {
+	if _, err := gitVCS.RepositoryRoot(context.Background(), sess.WorkingDir); err == nil {
+		hasVCS = true
+	} else {
 		// Not in a git repository, use nil VCS
 		gitVCS = nil
 		logger.Debug("Not in a git repository, VCS actor disabled")
 	}
+	sess.SetHasVCS(hasVCS)
 	vcsActor := tools.NewVCSActor("vcs", gitVCS)
 	vcsRef, err := orch.actorSystem.Spawn(vcsCtx, "vcs", vcsActor, 8)
 	if err != nil {

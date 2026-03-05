@@ -40,12 +40,16 @@ func NewOpenAIClient(apiKey, modelName string) (Client, error) {
 		model = "gpt-5.1-codex"
 	}
 
+	if shouldUseOpenAIWebSocket(model) {
+		return NewOpenAIWebSocketClient(apiKey, model)
+	}
+
 	client := &OpenAIClient{
 		apiKey:  apiKey,
 		model:   model,
 		baseURL: openAIDefaultBaseURL,
 		httpClient: &http.Client{
-			Timeout: consts.Timeout2Minutes,
+			Timeout: consts.TimeoutClient,
 		},
 	}
 

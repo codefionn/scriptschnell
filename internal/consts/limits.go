@@ -60,6 +60,11 @@ const (
 	Timeout10Minutes = 10 * time.Minute
 )
 
+// Operation timeouts
+const (
+	TimeoutClient = Timeout5Minutes
+)
+
 // Time durations
 const (
 	// Duration1Hour is 1 hour

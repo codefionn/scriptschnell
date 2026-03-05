@@ -40,7 +40,7 @@ func NewCerebrasClient(apiKey, modelID string) (Client, error) {
 		model:   model,
 		baseURL: cerebrasAPIBaseURL,
 		httpClient: &http.Client{
-			Timeout: consts.Timeout2Minutes,
+			Timeout: consts.TimeoutClient,
 		},
 	}, nil
 }

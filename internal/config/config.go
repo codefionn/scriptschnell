@@ -26,7 +26,7 @@ type SearchConfig struct {
 
 // ExaConfig holds Exa AI Search API configuration
 type ExaConfig struct {
-	APIKey       string `json:"api_key"`
+	APIKey        string `json:"api_key"`
 	ExaSearchType string `json:"exa_search_type"` // "neural", "auto", "deep", or "deep-reasoning"
 }
 

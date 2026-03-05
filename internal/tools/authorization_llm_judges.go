@@ -134,7 +134,7 @@ func (a *AuthorizationActor) judgeDomainWithLLM(ctx context.Context, displayDoma
 	})
 
 	req := &llm.CompletionRequest{
-		SystemPrompt: a.withSessionWorkingDirPrompt(domainAuthSystemPrompt),
+		SystemPrompt: a.withSessionWorkingDirPrompt(domainAuthSystemPrompt, false),
 		Messages:     messages,
 	}
 
@@ -242,7 +242,7 @@ func (a *AuthorizationActor) judgeShellCommandWithLLM(ctx context.Context, comma
 	})
 
 	req := &llm.CompletionRequest{
-		SystemPrompt: a.withSessionWorkingDirPrompt(shellAuthSystemPrompt),
+		SystemPrompt: a.withSessionWorkingDirPrompt(shellAuthSystemPrompt, true),
 		Messages:     messages,
 	}
 
@@ -351,10 +351,12 @@ func commandNameForLog(command string) string {
 	return fields[0]
 }
 
-func (a *AuthorizationActor) withSessionWorkingDirPrompt(basePrompt string) string {
+func (a *AuthorizationActor) withSessionWorkingDirPrompt(basePrompt string, includeVCSContext bool) string {
 	workingDir := ""
+	hasVCS := false
 	if a != nil && a.session != nil {
 		workingDir = strings.TrimSpace(a.session.WorkingDir)
+		hasVCS = a.session.HasVCS
 	}
 	if workingDir == "" && a != nil {
 		workingDir = strings.TrimSpace(a.workingDir)
@@ -362,5 +364,14 @@ func (a *AuthorizationActor) withSessionWorkingDirPrompt(basePrompt string) stri
 	if workingDir == "" {
 		workingDir = "."
 	}
-	return fmt.Sprintf("%s\n\nSession working directory: %s", basePrompt, workingDir)
+
+	var contextInfo strings.Builder
+	fmt.Fprintf(&contextInfo, "Session working directory: %s", workingDir)
+
+	// Add VCS context - if VCS is available, workspace commands are safer because changes can be recovered
+	if hasVCS && includeVCSContext {
+		contextInfo.WriteString("\nVersion control system: Git is available in this workspace\n\nIMPORTANT - Version Control Context:\nIf the session info indicates that Git (or another VCS) is available in the workspace, file modification commands within the working directory are safer because changes can be recovered via version control. In this case:\n- Commands like 'rm', 'mv', 'cp' operating on files within the workspace can be treated as less risky\n- File operations outside the workspace directory still require approval\n- If no VCS is available, file modification commands should still require approval")
+	}
+
+	return fmt.Sprintf("%s\n\n%s", basePrompt, contextInfo.String())
 }

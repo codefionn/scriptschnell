@@ -55,7 +55,7 @@ func NewOpenAICompatibleClient(apiKey, baseURL, modelName string) (*OpenAICompat
 		model:   model,
 		baseURL: trimmedBase,
 		httpClient: &http.Client{
-			Timeout: consts.Timeout2Minutes,
+			Timeout: consts.TimeoutClient,
 		},
 	}, nil
 }

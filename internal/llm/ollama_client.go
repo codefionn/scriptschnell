@@ -32,7 +32,7 @@ func NewOllamaClient(baseURL, model string) (Client, error) {
 		baseURL: normalized,
 		model:   model,
 		client: &http.Client{
-			Timeout: consts.Timeout2Minutes,
+			Timeout: consts.TimeoutClient,
 		},
 	}, nil
 }

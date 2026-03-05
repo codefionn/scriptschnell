@@ -134,8 +134,8 @@ func (a *ErrorJudgeActor) buildErrorJudgePrompt(msg *ErrorJudgeMessage) string {
 	sb.WriteString("REASON: <brief explanation>\n\n")
 
 	sb.WriteString("Guidelines:\n")
-	sb.WriteString("- Rate limit errors: RETRY with exponential backoff (5s, 15s, 30s, 60s)\n")
-	sb.WriteString("- Temporary service errors (500, 503, timeout): RETRY with moderate delays (2s, 5s, 10s, 20s, 30s)\n")
+	sb.WriteString("- Rate limit errors: RETRY with exponential backoff (5s, 15s, 30s, 60s, 120, 240s, 360s)\n")
+	sb.WriteString("- Temporary service errors (500, 503, timeout): RETRY with moderate delays (2s, 5s, 10s, 20s, 30s, 240s, 360s)\n")
 	sb.WriteString("- Network errors: RETRY with short delays (1s, 3s, 5s)\n")
 	sb.WriteString("- Token/context limit errors (context_length_exceeded, max tokens, prompt too long, input too long): RETRY with TRIGGER_COMPACTION=YES\n")
 	sb.WriteString("- Authentication errors: HALT (invalid credentials)\n")
@@ -178,8 +178,8 @@ func (a *ErrorJudgeActor) parseDecision(response string, msg *ErrorJudgeMessage)
 	if decision.SleepSeconds < 0 {
 		decision.SleepSeconds = 0
 	}
-	if decision.SleepSeconds > 120 {
-		decision.SleepSeconds = 120 // Max 2 minutes
+	if decision.SleepSeconds > 5*60 {
+		decision.SleepSeconds = 5 * 60 // Max 5 minutes
 	}
 
 	// Enforce minimum sleep for retries

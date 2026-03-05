@@ -77,6 +77,7 @@ type Session struct {
 	CurrentProvider           string                // Current LLM provider for native message format
 	CurrentModelFamily        string                // Current model family for native message format
 	CurrentBranch             string                // Current Git branch (if in a repository)
+	HasVCS                    bool                  // Whether a VCS (e.g., git) is available in the workspace
 	TaskExecutionSummary      *TaskExecutionSummary // Summary of work completed in this task session
 
 	// Verification retry tracking
@@ -620,6 +621,22 @@ func (s *Session) GetCurrentBranch() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.CurrentBranch
+}
+
+// SetHasVCS sets whether a VCS (e.g., git) is available in the workspace
+func (s *Session) SetHasVCS(hasVCS bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.HasVCS = hasVCS
+	s.UpdatedAt = time.Now()
+	s.Dirty = true
+}
+
+// GetHasVCS returns whether a VCS (e.g., git) is available in the workspace
+func (s *Session) GetHasVCS() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.HasVCS
 }
 
 // NeedsConversion checks if messages need re-conversion for a new provider

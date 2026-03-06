@@ -38,24 +38,18 @@ func (g *ToolSummaryGenerator) GenerateSummary(toolName string, params map[strin
 }
 
 // GenerateCompactSummary creates a very compact one-line summary for headers
+// Returns only the primary parameter value without prefix labels to save space
 func (g *ToolSummaryGenerator) GenerateCompactSummary(toolName string, params map[string]interface{}) string {
 	toolType := GetToolTypeFromName(toolName)
 
-	// Get primary parameter value
-	primaryParam, primaryValue := g.getPrimaryParamDisplay(toolName, toolType, params)
+	// Get primary parameter value only (no label prefix for compactness)
+	_, primaryValue := g.getPrimaryParamDisplay(toolName, toolType, params)
 
 	if primaryValue != "" {
-		if primaryParam != "" {
-			return fmt.Sprintf("%s: %s", primaryParam, primaryValue)
-		}
 		return primaryValue
 	}
 
-	// Count parameters
-	if len(params) > 0 {
-		return fmt.Sprintf("(%d params)", len(params))
-	}
-
+	// No meaningful summary available
 	return ""
 }
 
@@ -333,49 +327,39 @@ func (g *ToolSummaryGenerator) formatGenericSummary(toolType ToolType, params ma
 // Helper functions
 
 func (g *ToolSummaryGenerator) shortenPath(path string) string {
-	if len(path) <= 40 {
+	if len(path) <= 30 {
 		return path
 	}
 
 	// Get filename
 	filename := filepath.Base(path)
-	dir := filepath.Dir(path)
 
-	// If filename is long enough, just show it
-	if len(filename) >= 35 {
-		return "..." + filename[len(filename)-35:]
-	} else if len(filename) >= 30 {
-		return "..." + filename
+	// If filename is long enough, just show it with ellipsis
+	if len(filename) >= 25 {
+		return "..." + filename[len(filename)-22:]
 	}
 
-	// Show shortened dir + filename
-	if len(dir) > 20 {
-		dir = "..." + dir[len(dir)-17:]
-	}
-
-	return filepath.Join(dir, filename)
+	// Show just filename for shorter names
+	return ".../" + filename
 }
 
 func (g *ToolSummaryGenerator) shortenURL(url string) string {
-	if len(url) <= 50 {
+	if len(url) <= 35 {
 		return url
 	}
 
-	// Try to keep the domain and path start
+	// Try to keep the domain and short path indicator
 	parts := strings.SplitN(url, "/", 4)
 	if len(parts) >= 3 {
 		domain := parts[2]
 		if len(parts) > 3 {
-			path := parts[3]
-			if len(path) > 20 {
-				path = path[:17] + "..."
-			}
-			return fmt.Sprintf("...%s/%s", domain, path)
+			// Show domain + /... for path
+			return fmt.Sprintf("...%s/...", domain)
 		}
 		return "..." + domain
 	}
 
-	return url[:47] + "..."
+	return url[:32] + "..."
 }
 
 func (g *ToolSummaryGenerator) truncateString(s string, maxLen int) string {

@@ -449,36 +449,33 @@ templ ErrorMessage(content string) {
 
 templ ToolInteraction(name string, id string, status string, result string, errorMsg string) {
 	if status == "calling" {
-		<div class="tool-card mb-1 tool-interaction" id={ "tool-" + id }>
+		<div class="tool-card tool-interaction tool-collapsed" id={ "tool-" + id }>
 			<div class="tool-header">
-				<i class="bi bi-tools text-secondary"></i>
+				<i class="bi bi-arrow-repeat text-secondary"></i>
 				<span class="tool-name">{ name }</span>
-				<small class="tool-status text-muted">
-					<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-					Running...
-				</small>
+				<span class="tool-status badge bg-secondary ms-auto">Running</span>
 			</div>
 		</div>
 	} else if errorMsg != "" {
-		<div class="tool-card border-danger mb-1 tool-interaction" id={ "tool-" + id }>
-			<div class="tool-header">
+		<div class="tool-card tool-interaction tool-collapsed" id={ "tool-" + id }>
+			<div class="tool-header" onclick="toggleToolBody(this)">
 				<i class="bi bi-x-circle text-danger"></i>
-				<span class="tool-name text-danger">{ name }</span>
-				<small class="tool-status text-danger">Failed</small>
+				<span class="tool-name">{ name }</span>
+				<span class="tool-status badge bg-danger ms-auto">Failed</span>
 			</div>
-			<div class="tool-body">
-				<div class="tool-section-content" style="color: #dc3545;">{ errorMsg }</div>
+			<div class="tool-body" style="display: none;">
+				<div class="tool-preview text-danger">{ errorMsg }</div>
 			</div>
 		</div>
 	} else {
-		<div class="tool-card border-success mb-1 tool-interaction" id={ "tool-" + id }>
-			<div class="tool-header">
+		<div class="tool-card tool-interaction tool-collapsed" id={ "tool-" + id }>
+			<div class="tool-header" onclick="toggleToolBody(this)">
 				<i class="bi bi-check-circle text-success"></i>
 				<span class="tool-name">{ name }</span>
-				<small class="tool-status text-success">Completed</small>
+				<span class="tool-status badge bg-success ms-auto">Done</span>
 			</div>
-			<div class="tool-body">
-				<pre class="tool-section-content mb-0">{ result }</pre>
+			<div class="tool-body" style="display: none;">
+				<pre class="tool-preview">{ result }</pre>
 			</div>
 		</div>
 	}

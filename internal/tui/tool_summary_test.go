@@ -21,42 +21,42 @@ func TestToolSummaryGenerator_GenerateCompactSummary(t *testing.T) {
 			toolName: tools.ToolNameReadFile,
 			params:   map[string]interface{}{"path": "/home/user/project/file.go"},
 			wantLen:  true,
-			contains: "path:",
+			contains: "file.go", // Just contains the filename, no "path:" prefix for compactness
 		},
 		{
 			name:     "create_file with path",
 			toolName: tools.ToolNameCreateFile,
 			params:   map[string]interface{}{"path": "newfile.txt", "content": "hello"},
 			wantLen:  true,
-			contains: "path:",
+			contains: "newfile.txt",
 		},
 		{
 			name:     "shell with command",
 			toolName: tools.ToolNameShell,
 			params:   map[string]interface{}{"command": []interface{}{"ls", "-la"}},
 			wantLen:  true,
-			contains: "cmd:",
+			contains: "ls", // Just the command, no "cmd:" prefix
 		},
 		{
 			name:     "web_search with queries",
 			toolName: tools.ToolNameWebSearch,
 			params:   map[string]interface{}{"queries": []interface{}{"golang test"}},
 			wantLen:  true,
-			contains: "query:",
+			contains: "golang test",
 		},
 		{
 			name:     "web_fetch with url",
 			toolName: tools.ToolNameWebFetch,
 			params:   map[string]interface{}{"url": "https://example.com"},
 			wantLen:  true,
-			contains: "url:",
+			contains: "example.com",
 		},
 		{
 			name:     "go_sandbox with description",
 			toolName: tools.ToolNameGoSandbox,
 			params:   map[string]interface{}{"description": "Run tests"},
 			wantLen:  true,
-			contains: "desc:",
+			contains: "Run tests",
 		},
 		{
 			name:     "empty params",

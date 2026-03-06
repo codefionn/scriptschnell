@@ -2507,10 +2507,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.sessions[tabIdx].Messages[i].status = "complete"
 						m.sessions[tabIdx].Messages[i].toolState = ToolStateCompleted
 					}
+					// Collapse output by default when tool completes (if collapsible)
+					// This shows a preview instead of full output for compactness
+					if m.sessions[tabIdx].Messages[i].isCollapsible {
+						m.sessions[tabIdx].Messages[i].isCollapsed = true
+					}
 					// Update m.messages if this is the active tab
 					if tabIdx == m.activeSessionIdx {
 						m.messages[i].status = m.sessions[tabIdx].Messages[i].status
 						m.messages[i].toolState = m.sessions[tabIdx].Messages[i].toolState
+						m.messages[i].isCollapsed = m.sessions[tabIdx].Messages[i].isCollapsed
 						m.viewportDirty = true
 					}
 					break
@@ -3742,6 +3748,12 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID, descripti
 	config := DefaultParamCollapseConfig()
 	shouldCollapse := shouldAutoCollapseParams(parameters, config)
 
+	// Grouped tools should start collapsed for compactness
+	startCollapsed := false
+	if groupID != "" {
+		startCollapsed = true
+	}
+
 	// Create message with enhanced metadata
 	msg := message{
 		role:            "Tool",
@@ -3752,7 +3764,7 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID, descripti
 		toolState:       ToolStateRunning,
 		toolType:        toolType,
 		isCollapsible:   true,
-		isCollapsed:     false, // Start expanded for visibility
+		isCollapsed:     startCollapsed,
 		groupID:         groupID,
 		progress:        -1, // Indeterminate progress initially
 		status:          "starting...",
@@ -3813,7 +3825,7 @@ func (m *Model) handleParallelToolCall(tabIdx int, toolID string, parameters map
 		toolState:     ToolStateRunning,
 		toolType:      ToolTypeParallel,
 		isCollapsible: true,
-		isCollapsed:   false, // Start expanded
+		isCollapsed:   true, // Start collapsed for compactness
 		groupID:       group.ID,
 		groupIdx:      0,
 		groupTotal:    len(parallelCalls),

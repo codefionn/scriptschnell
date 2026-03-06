@@ -58,64 +58,203 @@ templ Page(token string, title string) {
 				}
 				/* Compact Tool Interaction Styles */
 				.tool-card {
-					border: 1px solid #dee2e6;
-					border-radius: 0.375rem;
-					margin-bottom: 0.5rem;
-					background: #f8f9fa;
-					font-size: 0.875rem;
+					border: 1px solid #e9ecef;
+					border-radius: 0.25rem;
+					margin-bottom: 0.25rem;
+					background: #fff;
+					font-size: 0.8rem;
+				}
+				/* Ultra-compact tool card variant */
+				.tool-card-compact {
+					padding: 0.15rem 0.25rem;
+					margin-bottom: 0.15rem;
+					border-radius: 0.2rem;
+				}
+				.tool-card-compact .tool-header {
+					padding: 0.15rem 0.25rem;
+					gap: 0.25rem;
+				}
+				.tool-card-compact .tool-name {
+					font-size: 0.7rem;
+				}
+				.tool-card-compact .tool-status {
+					font-size: 0.55rem;
 				}
 				.tool-header {
-					padding: 0.375rem 0.5rem;
+					padding: 0.25rem 0.4rem;
 					cursor: pointer;
 					display: flex;
 					align-items: center;
-					gap: 0.5rem;
+					gap: 0.35rem;
+					background: #f8f9fa;
+					border-radius: 0.25rem;
+					/* Single line with ellipsis for compact header */
+					white-space: nowrap;
+					overflow: hidden;
+					min-height: 1.5rem;
 				}
 				.tool-header:hover {
 					background: #e9ecef;
 				}
+				.tool-header i {
+					font-size: 0.75rem;
+					flex-shrink: 0;
+				}
 				.tool-name {
 					font-weight: 600;
 					color: #495057;
+					font-size: 0.75rem;
+					flex-shrink: 0;
+				}
+				/* Parameter preview in header - truncates with ellipsis */
+				.tool-param-preview {
+					flex: 1;
+					min-width: 0;
+					overflow: hidden;
+					text-overflow: ellipsis;
+					white-space: nowrap;
 				}
 				.tool-status {
-					font-size: 0.75rem;
-					margin-left: auto;
+					font-size: 0.65rem;
+					display: flex;
+					align-items: center;
+					flex-shrink: 0;
+				}
+				.tool-status-icon {
+					animation: spin 1s linear infinite;
+				}
+				@keyframes spin {
+					from { transform: rotate(0deg); }
+					to { transform: rotate(360deg); }
+				}
+				.tool-status.badge {
+					font-size: 0.55rem;
+					padding: 0.15rem 0.35rem;
 				}
 				.tool-body {
-					border-top: 1px solid #dee2e6;
-					padding: 0.5rem;
+					border-top: 1px solid #e9ecef;
+					padding: 0.35rem;
 					background: #fff;
+					/* Expand/collapse animation */
+					transition: all 0.2s ease-out;
+					overflow: hidden;
+				}
+				.tool-card.tool-collapsed .tool-body {
+					max-height: 0;
+					padding-top: 0;
+					padding-bottom: 0;
+					opacity: 0;
+					border-width: 0;
+				}
+				.tool-card.tool-expanded .tool-body {
+					max-height: 500px;
+					opacity: 1;
+				}
+				.tool-preview {
+					font-family: monospace;
+					font-size: 0.7rem;
+					background: #f8f9fa;
+					padding: 0.25rem 0.35rem;
+					border-radius: 0.2rem;
+					white-space: pre-wrap;
+					word-break: break-word;
+					max-height: 100px;
+					overflow-y: auto;
+					margin: 0;
+					/* Truncated output display */
+					position: relative;
+					line-height: 1.3;
+				}
+				/* Fade effect for truncated preview */
+				.tool-preview.truncated::after {
+					content: '';
+					position: absolute;
+					bottom: 0;
+					left: 0;
+					right: 0;
+					height: 20px;
+					background: linear-gradient(transparent, #f8f9fa);
+					pointer-events: none;
+				}
+				/* Compact inline preview (for collapsed tools) */
+				.tool-preview-inline {
+					display: inline;
+					font-family: monospace;
+					font-size: 0.65rem;
+					color: #6c757d;
+					white-space: nowrap;
+					overflow: hidden;
+					text-overflow: ellipsis;
+					max-width: 150px;
+					vertical-align: middle;
+				}
+				/* Collapsed tool shows preview on hover */
+				.tool-card.tool-collapsed .tool-body {
+					display: none;
+				}
+				.tool-card.tool-expanded .tool-body {
+					display: block;
+				}
+				/* Expand/collapse transitions */
+				.tool-card {
+					transition: border-color 0.15s ease, box-shadow 0.15s ease;
+				}
+				/* Expand/collapse icon animation */
+				.tool-expand-icon {
+					transition: transform 0.2s ease;
+				}
+				.tool-card.tool-expanded .tool-expand-icon {
+					transform: rotate(90deg);
+				}
+				/* Smooth hover effect for tool cards */
+				.tool-card:hover {
+					border-color: #dee2e6;
+					box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 				}
 				.tool-section {
-					margin-bottom: 0.375rem;
+					margin-bottom: 0.25rem;
 				}
 				.tool-section:last-child {
 					margin-bottom: 0;
 				}
 				.tool-section-header {
-					font-size: 0.7rem;
+					font-size: 0.6rem;
 					text-transform: uppercase;
 					color: #6c757d;
-					margin-bottom: 0.25rem;
+					margin-bottom: 0.15rem;
 					cursor: pointer;
 					display: flex;
 					align-items: center;
-					gap: 0.25rem;
+					gap: 0.2rem;
 				}
 				.tool-section-header:hover {
 					color: #495057;
 				}
+				.tool-section-header i {
+					transition: transform 0.15s ease;
+					font-size: 0.55rem;
+				}
 				.tool-section-content {
 					font-family: monospace;
-					font-size: 0.75rem;
+					font-size: 0.7rem;
 					background: #f8f9fa;
-					padding: 0.25rem 0.375rem;
-					border-radius: 0.25rem;
+					padding: 0.2rem 0.3rem;
+					border-radius: 0.2rem;
 					white-space: pre-wrap;
 					word-break: break-word;
-					max-height: 150px;
+					max-height: 100px;
 					overflow-y: auto;
+					/* Expand/collapse transition */
+					transition: max-height 0.15s ease-out, opacity 0.15s ease;
+				}
+				.tool-section-content[style*="display: none"] {
+					max-height: 0;
+					opacity: 0;
+					padding: 0;
+				}
+				.tool-section-content[style*="display: block"] {
+					max-height: 100px;
+					opacity: 1;
 				}
 				.tool-progress {
 					height: 2px;
@@ -124,7 +263,7 @@ templ Page(token string, title string) {
 				.tool-result {
 					white-space: pre-wrap;
 					word-break: break-word;
-					max-height: 150px;
+					max-height: 100px;
 					overflow-y: auto;
 				}
 				.message-content {
@@ -365,6 +504,64 @@ templ Page(token string, title string) {
 					position: relative;
 					max-height: 400px;
 					overflow: auto;
+				}
+				/* Compact Result Display */
+				.result-compact-container {
+					max-height: none;
+				}
+				.result-compact {
+					position: relative;
+				}
+				.result-size-indicator {
+					padding: 0.125rem 0.25rem;
+					background: #e9ecef;
+					border-radius: 0.2rem;
+					display: inline-block;
+				}
+				.result-preview-content {
+					font-family: 'Courier New', monospace;
+					font-size: 0.75rem;
+					background: #f8f9fa;
+					border-radius: 0.25rem;
+					padding: 0.375rem;
+					max-height: 120px;
+					overflow: hidden;
+				}
+				.result-preview-text,
+				.result-preview-json,
+				.result-preview-code {
+					margin: 0;
+					white-space: pre-wrap;
+					word-break: break-word;
+					font-size: 0.7rem;
+					line-height: 1.35;
+				}
+				.result-preview-code code {
+					background: transparent;
+					padding: 0;
+				}
+				.diff-preview {
+					max-height: 100px;
+					overflow: hidden;
+				}
+				.diff-preview .diff-line {
+					font-size: 0.65rem;
+				}
+				.result-show-more {
+					padding: 0.125rem 0.25rem;
+					font-size: 0.65rem;
+					color: #0d6efd;
+					text-decoration: none;
+				}
+				.result-show-more:hover {
+					text-decoration: underline;
+				}
+				.result-full-content {
+					display: none;
+				}
+				.result-size-badge {
+					font-size: 0.6rem;
+					opacity: 0.8;
 				}
 				.result-header {
 					display: flex;

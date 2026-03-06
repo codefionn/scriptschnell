@@ -129,9 +129,9 @@ func TestNullPointer_ToolGroup_IsExpanded(t *testing.T) {
 	}
 	group := gm.CreateGroup(config)
 
-	// Test default expansion state
-	if !group.IsExpanded() {
-		t.Error("Expected new group to be expanded by default")
+	// Test default collapsed state for compactness
+	if group.IsExpanded() {
+		t.Error("Expected new group to be collapsed by default for compactness")
 	}
 }
 
@@ -226,8 +226,8 @@ func TestNullPointer_ToolGroupManager_CreateGroup_Defaults(t *testing.T) {
 	if group.State != ToolStateRunning {
 		t.Errorf("Expected ToolStateRunning, got %v", group.State)
 	}
-	if !group.IsExpanded() {
-		t.Error("Expected group to start expanded")
+	if group.IsExpanded() {
+		t.Error("Expected group to start collapsed for compactness")
 	}
 }
 

@@ -135,6 +135,121 @@ function toggleToolSection(toolId, section) {
     }
 }
 
+// Toggle tool section by element ID
+function toggleToolSectionById(sectionId) {
+    const content = document.getElementById(sectionId);
+    const icon = document.getElementById(sectionId + '-icon');
+    if (content && icon) {
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+            icon.classList.remove('bi-chevron-right');
+            icon.classList.add('bi-chevron-down');
+        } else {
+            content.style.display = 'none';
+            icon.classList.remove('bi-chevron-down');
+            icon.classList.add('bi-chevron-right');
+        }
+    }
+}
+
+// Toggle tool body visibility (expand/collapse entire tool)
+function toggleToolBody(headerElement) {
+    const toolCard = headerElement.closest('.tool-card');
+    if (!toolCard) return;
+    
+    const body = toolCard.querySelector('.tool-body');
+    if (!body) return;
+    
+    if (toolCard.classList.contains('tool-collapsed')) {
+        toolCard.classList.remove('tool-collapsed');
+        toolCard.classList.add('tool-expanded');
+        body.style.display = 'block';
+    } else {
+        toolCard.classList.remove('tool-expanded');
+        toolCard.classList.add('tool-collapsed');
+        body.style.display = 'none';
+    }
+}
+
+// Extract primary parameter for compact header display
+function extractPrimaryParam(params, toolName) {
+    if (!params || typeof params !== 'object') return '';
+    
+    // Tool-specific primary parameter extraction
+    const toolLower = (toolName || '').toLowerCase();
+    
+    // File-related tools
+    if (params.path) {
+        return truncatePath(params.path, 35);
+    }
+    // Shell/command tools
+    if (params.command) {
+        return truncateCommand(params.command, 40);
+    }
+    // URL-based tools
+    if (params.url) {
+        return truncateUrl(params.url, 35);
+    }
+    // Search/query tools
+    if (params.queries && Array.isArray(params.queries) && params.queries.length > 0) {
+        return params.queries[0].substring(0, 30);
+    }
+    if (params.query) {
+        return truncateText(params.query, 30);
+    }
+    // Code-related tools
+    if (params.code) {
+        return '[code]';
+    }
+    // Directory tools
+    if (params.directory) {
+        return truncatePath(params.directory, 35);
+    }
+    // Working directory
+    if (params.working_dir || params.workingDir) {
+        return truncatePath(params.working_dir || params.workingDir, 35);
+    }
+    
+    // Generic fallback - find first string parameter
+    for (const key of Object.keys(params)) {
+        const value = params[key];
+        if (typeof value === 'string' && value.length > 0 && key !== 'description') {
+            return truncateText(value, 25);
+        }
+    }
+    
+    return '';
+}
+
+// Helper functions for truncation
+function truncatePath(path, maxLen) {
+    if (!path || path.length <= maxLen) return path || '';
+    const parts = path.split('/');
+    if (parts.length <= 2) return '...' + path.substring(path.length - maxLen + 3);
+    // Show last 2 parts
+    return '.../' + parts.slice(-2).join('/');
+}
+
+function truncateCommand(cmd, maxLen) {
+    if (!cmd || cmd.length <= maxLen) return cmd || '';
+    return cmd.substring(0, maxLen - 3) + '...';
+}
+
+function truncateUrl(url, maxLen) {
+    if (!url || url.length <= maxLen) return url || '';
+    try {
+        const u = new URL(url);
+        return u.host + u.pathname.substring(0, maxLen - u.host.length - 3) + '...';
+    } catch (e) {
+        return url.substring(0, maxLen - 3) + '...';
+    }
+}
+
+function truncateText(text, maxLen) {
+    if (!text || text.length <= maxLen) return text || '';
+    return text.substring(0, maxLen - 3) + '...';
+}
+
 // Format parameters for display
 function formatParameters(params) {
     if (!params || Object.keys(params).length === 0) return 'No parameters';
@@ -161,6 +276,166 @@ function formatResult(result, maxLength = 300) {
         return resultStr.substring(0, maxLength) + '\n... (truncated)';
     }
     return resultStr;
+}
+
+// ==================== Compact Result Formatting ====================
+
+// Format bytes to human-readable size
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Get preview lines from content (max 5 lines)
+function getResultPreview(content, maxLines = 5) {
+    const lines = content.split('\n');
+    if (lines.length <= maxLines) {
+        return { preview: content, hasMore: false, totalLines: lines.length };
+    }
+    return {
+        preview: lines.slice(0, maxLines).join('\n'),
+        hasMore: true,
+        totalLines: lines.length,
+        remainingLines: lines.length - maxLines
+    };
+}
+
+// Create compact result display with preview
+function createCompactResultDisplay(result, resultType, toolName, isError) {
+    const resultStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+    const byteSize = new Blob([resultStr]).size;
+    const sizeDisplay = formatBytes(byteSize);
+    const preview = getResultPreview(resultStr, 5);
+    
+    // For small results, show everything
+    if (!preview.hasMore && byteSize < 500) {
+        return null; // Return null to indicate full formatting should be used
+    }
+    
+    // Create compact container with preview
+    const containerId = 'result-preview-' + Date.now();
+    let html = `<div class="result-compact" id="${containerId}">`;
+    
+    // Size indicator
+    html += `<div class="result-size-indicator text-muted small mb-1">${sizeDisplay}`;
+    if (preview.hasMore) {
+        html += ` • ${preview.totalLines} lines`;
+    }
+    html += '</div>';
+    
+    // Preview content
+    html += '<div class="result-preview-content">';
+    
+    // Format preview based on type
+    switch (resultType) {
+        case 'diff':
+            html += formatDiffPreview(preview.preview);
+            break;
+        case 'json':
+            html += formatJsonPreview(preview.preview);
+            break;
+        case 'code':
+            html += formatCodePreview(preview.preview, toolName);
+            break;
+        case 'todo':
+            // Todo results should use full formatting
+            return null;
+        default:
+            html += `<pre class="result-preview-text">${escapeHtml(preview.preview)}</pre>`;
+    }
+    
+    html += '</div>'; // result-preview-content
+    
+    // Show more button if content is truncated
+    if (preview.hasMore) {
+        html += `<button class="btn btn-link btn-sm result-show-more" onclick="expandResultPreview(this, '${containerId}')">
+            <i class="bi bi-chevron-down me-1"></i>Show ${preview.remainingLines} more lines
+        </button>`;
+    }
+    
+    // Hidden full content for expand/copy
+    html += `<div class="result-full-content" style="display: none;">${escapeHtml(resultStr)}</div>`;
+    
+    html += '</div>'; // result-compact
+    
+    return html;
+}
+
+// Format diff preview
+function formatDiffPreview(content) {
+    const lines = content.split('\n');
+    let html = '<div class="diff-block diff-preview">';
+    lines.forEach(line => {
+        let lineClass = '';
+        if (line.startsWith('@@')) lineClass = 'diff-hunk';
+        else if (line.startsWith('---') || line.startsWith('+++')) lineClass = 'diff-header';
+        else if (line.startsWith('+') && !line.startsWith('+++')) lineClass = 'diff-add';
+        else if (line.startsWith('-') && !line.startsWith('---')) lineClass = 'diff-remove';
+        html += `<div class="diff-line ${lineClass}">${escapeHtml(line)}</div>`;
+    });
+    html += '</div>';
+    return html;
+}
+
+// Format JSON preview
+function formatJsonPreview(content) {
+    return `<pre class="result-preview-json">${escapeHtml(content)}</pre>`;
+}
+
+// Format code preview
+function formatCodePreview(content, toolName) {
+    const language = detectLanguage(content, toolName);
+    let highlightedCode;
+    if (typeof hljs !== 'undefined' && language !== 'plaintext') {
+        try {
+            highlightedCode = hljs.highlight(content, { language }).value;
+        } catch (e) {
+            highlightedCode = escapeHtml(content);
+        }
+    } else {
+        highlightedCode = escapeHtml(content);
+    }
+    return `<pre class="result-preview-code"><code>${highlightedCode}</code></pre>`;
+}
+
+// Expand result preview to show full content
+function expandResultPreview(btn, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    const fullContent = container.querySelector('.result-full-content');
+    const previewContent = container.querySelector('.result-preview-content');
+    
+    if (fullContent && previewContent) {
+        // Show full content
+        previewContent.innerHTML = `<pre>${fullContent.textContent}</pre>`;
+        previewContent.style.maxHeight = '400px';
+        previewContent.style.overflow = 'auto';
+        
+        // Change button to collapse
+        btn.innerHTML = '<i class="bi bi-chevron-up me-1"></i>Show less';
+        btn.onclick = function() { collapseResultPreview(btn, containerId); };
+    }
+}
+
+// Collapse expanded result back to preview
+function collapseResultPreview(btn, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    // Re-render the preview (simplified - just scroll to top and reset)
+    const previewContent = container.querySelector('.result-preview-content');
+    if (previewContent) {
+        previewContent.style.maxHeight = '';
+    }
+    
+    // Change button back to expand
+    const remainingLines = btn.dataset.remainingLines || 'more';
+    btn.innerHTML = `<i class="bi bi-chevron-down me-1"></i>Show ${remainingLines} more lines`;
+    btn.onclick = function() { expandResultPreview(btn, containerId); };
 }
 
 // ==================== Compact Parameter Formatting ====================
@@ -801,19 +1076,35 @@ function formatCodeResult(result, toolName = '') {
 function formatToolResult(result, toolName = '', isError = false) {
     const resultType = isError ? 'error' : detectResultType(result, toolName);
     const resultStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+    const byteSize = new Blob([resultStr]).size;
     
-    // Result type badge
+    // Use compact display for large results
+    const compactDisplay = createCompactResultDisplay(result, resultType, toolName, isError);
+    if (compactDisplay) {
+        // Build compact wrapper
+        const wrapper = `
+            <div class="result-container result-compact-container" data-raw-result="${escapeHtml(resultStr.replace(/"/g, '&quot;'))}">
+                <div class="result-body">${compactDisplay}</div>
+            </div>
+        `;
+        return wrapper;
+    }
+    
+    // Result type badge (only for non-compact display)
     const typeBadgeClass = `result-type-${resultType}`;
     const typeBadge = `<span class="result-type-badge ${typeBadgeClass}">${resultType.toUpperCase()}</span>`;
     
-    // Actions (copy, expand)
+    // Size indicator for medium-sized results
+    let sizeIndicator = '';
+    if (byteSize >= 500) {
+        sizeIndicator = `<span class="result-size-badge text-muted ms-1"><small>${formatBytes(byteSize)}</small></span>`;
+    }
+    
+    // Actions (copy only - no expand needed for small results)
     const actions = `
         <div class="result-actions">
             <button class="btn btn-outline-secondary btn-sm" onclick="copyResultToClipboard(this)" title="Copy to clipboard">
                 <i class="bi bi-clipboard"></i>
-            </button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="toggleResultExpand(this)" title="Expand/Collapse">
-                <i class="bi bi-arrows-expand"></i>
             </button>
         </div>
     `;
@@ -847,7 +1138,7 @@ function formatToolResult(result, toolName = '', isError = false) {
     const wrapper = `
         <div class="result-container" data-raw-result="${escapeHtml(resultStr.replace(/"/g, '&quot;'))}">
             <div class="result-header">
-                <span>${typeBadge}</span>
+                <span>${typeBadge}${sizeIndicator}</span>
                 ${actions}
             </div>
             <div class="result-body">${contentHtml}</div>
@@ -1252,9 +1543,9 @@ function handleToolInteraction(msg) {
     const toolId = msg.tool_id;
     
     if (msg.status === "calling") {
-        // Create new compact tool interaction
+        // Create new compact tool interaction - collapsed by default
         const div = document.createElement("div");
-        div.className = "tool-card tool-interaction";
+        div.className = "tool-card tool-interaction tool-collapsed";
         div.id = `tool-${toolId}`;
         div.dataset.toolName = msg.tool_name;
         div.dataset.parameters = JSON.stringify(msg.parameters || {});
@@ -1262,32 +1553,35 @@ function handleToolInteraction(msg) {
         // Build the compact parameter display using new formatter
         const paramsHtml = formatToolParams(msg.parameters, msg.tool_name);
         
-        // Build description HTML if available
+        // Build description HTML if available - compact format
         let descriptionHtml = '';
         if (msg.description) {
-            descriptionHtml = `<span class="tool-description text-muted ms-2"><em>(${escapeHtml(msg.description)})</em></span>`;
+            descriptionHtml = `<span class="tool-description text-muted ms-1"><small>(${escapeHtml(msg.description)})</small></span>`;
         }
         
+        // Extract primary parameter for inline display in header
+        const primaryParam = extractPrimaryParam(msg.parameters, msg.tool_name);
+        
         div.innerHTML = `
-            <div class="tool-header" onclick="toggleToolSection('${toolId}', 'body')">
-                <i class="bi bi-tools text-secondary"></i>
+            <div class="tool-header" onclick="toggleToolBody(this)">
+                <i class="bi bi-arrow-repeat text-secondary tool-status-icon"></i>
                 <span class="tool-name">${escapeHtml(msg.tool_name)}</span>
+                ${primaryParam ? `<span class="tool-param-preview text-muted ms-1"><small>${escapeHtml(primaryParam)}</small></span>` : ''}
                 ${descriptionHtml}
-                <span class="tool-status text-muted">
-                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                    Running...
+                <span class="tool-status ms-auto" title="Running">
+                    <i class="bi bi-three-dots text-secondary"></i>
                 </span>
             </div>
-            <div class="tool-body" id="tool-${toolId}-body" style="display: block;">
+            <div class="tool-body" style="display: none;">
                 <div class="tool-section">
-                    <div class="tool-section-header" onclick="event.stopPropagation(); toggleToolSection('${toolId}', 'input')">
+                    <div class="tool-section-header" onclick="event.stopPropagation(); toggleToolSectionById('tool-${toolId}-input')">
                         <i class="bi bi-chevron-down" id="tool-${toolId}-input-icon"></i>
                         Input
                     </div>
                     <div class="tool-section-content" id="tool-${toolId}-input">${paramsHtml}</div>
                 </div>
                 <div class="tool-section" id="tool-${toolId}-output-section" style="display: none;">
-                    <div class="tool-section-header" onclick="event.stopPropagation(); toggleToolSection('${toolId}', 'output')">
+                    <div class="tool-section-header" onclick="event.stopPropagation(); toggleToolSectionById('tool-${toolId}-output')">
                         <i class="bi bi-chevron-right" id="tool-${toolId}-output-icon"></i>
                         Output
                     </div>
@@ -1328,19 +1622,26 @@ function updateToolResult(toolId, result, error) {
         inputIcon.classList.add('bi-chevron-right');
     }
     
+    // Calculate result size for compact status
+    const resultStr = typeof result === 'object' ? JSON.stringify(result) : String(result || '');
+    const byteSize = new Blob([resultStr]).size;
+    const sizeDisplay = formatBytes(byteSize);
+    
     if (error) {
         div.classList.add('border-danger');
         if (headerIcon) {
-            headerIcon.classList.remove('text-secondary');
-            headerIcon.classList.add('text-danger');
+            headerIcon.className = 'bi bi-x-circle-fill text-danger';
         }
         if (statusSpan) {
-            statusSpan.innerHTML = '<i class="bi bi-x-circle text-danger"></i> Failed';
-            statusSpan.classList.add('text-danger');
+            // Compact status: icon only with hover title
+            statusSpan.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+            statusSpan.className = 'tool-status ms-auto';
+            statusSpan.title = 'Failed';
         }
         if (outputContent) {
             outputContent.innerHTML = formatToolResult(error, toolName, true);
         }
+        // Auto-expand output section for errors
         if (outputSection) {
             outputSection.style.display = 'block';
         }
@@ -1351,22 +1652,30 @@ function updateToolResult(toolId, result, error) {
     } else {
         div.classList.add('border-success');
         if (headerIcon) {
-            headerIcon.classList.remove('text-secondary');
-            headerIcon.classList.add('text-success');
+            headerIcon.className = 'bi bi-check-circle-fill text-success';
         }
         if (statusSpan) {
-            statusSpan.innerHTML = '<i class="bi bi-check-circle text-success"></i> Completed';
-            statusSpan.classList.add('text-success');
+            // Compact status: icon + size indicator
+            statusSpan.innerHTML = `<i class="bi bi-check-circle-fill text-success me-1"></i><small class="text-muted">${sizeDisplay}</small>`;
+            statusSpan.className = 'tool-status ms-auto';
+            statusSpan.title = 'Completed';
         }
         if (outputContent) {
             outputContent.innerHTML = formatToolResult(result, toolName, false);
         }
+        // Keep output section collapsed for successful results
         if (outputSection) {
             outputSection.style.display = 'block';
         }
         if (outputIcon) {
-            outputIcon.classList.remove('bi-chevron-right');
-            outputIcon.classList.add('bi-chevron-down');
+            // Start collapsed for successful results
+            outputIcon.classList.remove('bi-chevron-down');
+            outputIcon.classList.add('bi-chevron-right');
+        }
+        // Collapse the output content initially for successful tools
+        const outputContentDiv = document.getElementById(`tool-${toolId}-output`);
+        if (outputContentDiv && !isLastMessage(div)) {
+            outputContentDiv.style.display = 'none';
         }
     }
     

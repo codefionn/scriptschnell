@@ -529,6 +529,12 @@ func (ts *ToolStyles) FormatToolStats(lines int, bytes int, duration time.Durati
 
 // FormatCompactToolCall creates a compact one-line representation with enhanced styling
 func (ts *ToolStyles) FormatCompactToolCall(toolName string, parameters map[string]interface{}, state ToolState, description string) string {
+	return ts.FormatCompactToolCallWithWidth(toolName, parameters, state, description, 0)
+}
+
+// FormatCompactToolCallWithWidth creates a compact one-line representation with width-aware truncation
+// If maxWidth > 0, truncates the output to fit within the specified width
+func (ts *ToolStyles) FormatCompactToolCallWithWidth(toolName string, parameters map[string]interface{}, state ToolState, description string, maxWidth int) string {
 	toolType := GetToolTypeFromName(toolName)
 	icon := GetIconForToolType(toolType)
 	indicator := GetStateIndicator(state)
@@ -541,19 +547,33 @@ func (ts *ToolStyles) FormatCompactToolCall(toolName string, parameters map[stri
 	indicatorStr := stateStyle.Render(indicator)
 	toolIconStr := toolStyle.Render(icon)
 
-	var result string
+	// Calculate available width for primaryParam
+	// Reserve space for: indicator + space + icon + space + toolName + space + param
+	baseLen := 3 + len(toolName) + 1 // indicator(2) + spaces(3) + toolname + space before param
+
 	if primaryParam != "" {
-		result = fmt.Sprintf("%s %s %s `%s`", indicatorStr, toolIconStr, toolName, primaryParam)
-	} else {
-		result = fmt.Sprintf("%s %s %s", indicatorStr, toolIconStr, toolName)
+		// Truncate primary param to fit within maxWidth if specified
+		if maxWidth > 0 {
+			availableForParam := maxWidth - baseLen - 2 // reserve 2 for backticks
+			if availableForParam > 10 && len(primaryParam) > availableForParam {
+				primaryParam = truncateStringSmart(primaryParam, availableForParam)
+			}
+		}
+		result := fmt.Sprintf("%s %s %s `%s`", indicatorStr, toolIconStr, toolName, primaryParam)
+		// Only add description if we have room
+		if description != "" && (maxWidth == 0 || len(result)+len(description)+20 < maxWidth) {
+			descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
+			result += " " + descStyle.Render(fmt.Sprintf("(%s)", description))
+		}
+		return result
 	}
 
-	// Append description if provided (useful for go_sandbox)
-	if description != "" {
+	result := fmt.Sprintf("%s %s %s", indicatorStr, toolIconStr, toolName)
+	// Only add description if we have room
+	if description != "" && (maxWidth == 0 || len(result)+len(description)+20 < maxWidth) {
 		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
 		result += " " + descStyle.Render(fmt.Sprintf("(%s)", description))
 	}
-
 	return result
 }
 
@@ -583,17 +603,17 @@ func extractPrimaryParameter(toolName string, parameters map[string]interface{})
 	// File operations - path is primary
 	case tools.ToolNameReadFile, tools.ToolNameReadFileSummarized:
 		if path, ok := parameters["path"].(string); ok {
-			return truncatePathSmart(path, 50)
+			return truncatePathSmart(path, 35)
 		}
 	case tools.ToolNameCreateFile, tools.ToolNameEditFile, tools.ToolNameReplaceFile:
 		if path, ok := parameters["path"].(string); ok {
-			return truncatePathSmart(path, 50)
+			return truncatePathSmart(path, 35)
 		}
 
 	// Shell/Command operations - command is primary
 	case tools.ToolNameShell:
 		if command, ok := parameters["command"].(string); ok {
-			return truncateCommandSmart(command, 60)
+			return truncateCommandSmart(command, 40)
 		}
 		if command, ok := parameters["command"].([]interface{}); ok && len(command) > 0 {
 			// Join array elements into a command string
@@ -604,7 +624,7 @@ func extractPrimaryParameter(toolName string, parameters map[string]interface{})
 				}
 			}
 			if len(cmdParts) > 0 {
-				return truncateCommandSmart(strings.Join(cmdParts, " "), 60)
+				return truncateCommandSmart(strings.Join(cmdParts, " "), 40)
 			}
 		}
 
@@ -612,21 +632,21 @@ func extractPrimaryParameter(toolName string, parameters map[string]interface{})
 	case tools.ToolNameWebSearch:
 		if queries, ok := parameters["queries"].([]interface{}); ok && len(queries) > 0 {
 			if first, ok := queries[0].(string); ok {
-				return truncateStringSmart(first, 40)
+				return truncateStringSmart(first, 30)
 			}
 		}
 		if query, ok := parameters["query"].(string); ok {
-			return truncateStringSmart(query, 40)
+			return truncateStringSmart(query, 30)
 		}
 	case tools.ToolNameWebFetch:
 		if url, ok := parameters["url"].(string); ok {
-			return truncateURLSmart(url, 50)
+			return truncateURLSmart(url, 35)
 		}
 
 	// Sandbox - description or summary
 	case tools.ToolNameGoSandbox:
 		if desc, ok := parameters["description"].(string); ok && desc != "" {
-			return truncateStringSmart(desc, 40)
+			return truncateStringSmart(desc, 30)
 		}
 		return "Go code execution"
 
@@ -639,15 +659,15 @@ func extractPrimaryParameter(toolName string, parameters map[string]interface{})
 	// Program control - job_id is primary
 	case tools.ToolNameStatusProgram:
 		if jobID, ok := parameters["job_id"].(string); ok {
-			return truncateStringSmart(jobID, 20)
+			return truncateStringSmart(jobID, 15)
 		}
 	case tools.ToolNameStopProgram:
 		if jobID, ok := parameters["job_id"].(string); ok {
-			return truncateStringSmart(jobID, 20)
+			return truncateStringSmart(jobID, 15)
 		}
 	case tools.ToolNameWaitProgram:
 		if jobID, ok := parameters["job_id"].(string); ok {
-			return truncateStringSmart(jobID, 20)
+			return truncateStringSmart(jobID, 15)
 		}
 
 	// Search operations - pattern is primary

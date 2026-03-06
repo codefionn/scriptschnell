@@ -143,22 +143,22 @@ func TestToolGroupManager(t *testing.T) {
 	}
 
 	// Test ToggleGroupExpansion
-	// Group starts expanded, so ToggleGroupExpansion returns false (new collapsed state)
+	// Group starts collapsed, so ToggleGroupExpansion returns true (new expanded state)
 	newState := gm.ToggleGroupExpansion(group.ID)
-	if newState {
-		t.Error("ToggleGroupExpansion should return false (collapsed state)")
-	}
-	if group.IsExpanded() {
-		t.Error("Group should be collapsed after toggle")
-	}
-
-	// Toggle again to expand
-	newState = gm.ToggleGroupExpansion(group.ID)
 	if !newState {
 		t.Error("ToggleGroupExpansion should return true (expanded state)")
 	}
 	if !group.IsExpanded() {
-		t.Error("Group should be expanded after second toggle")
+		t.Error("Group should be expanded after toggle")
+	}
+
+	// Toggle again to collapse
+	newState = gm.ToggleGroupExpansion(group.ID)
+	if newState {
+		t.Error("ToggleGroupExpansion should return false (collapsed state)")
+	}
+	if group.IsExpanded() {
+		t.Error("Group should be collapsed after second toggle")
 	}
 
 	// Test GetGroupsForTab

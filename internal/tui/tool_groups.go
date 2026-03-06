@@ -57,7 +57,7 @@ func (gm *ToolGroupManager) CreateGroup(config GroupConfig) *ToolGroup {
 		State:      ToolStateRunning,
 		Messages:   make([]*ToolCallMessage, 0),
 		CreatedAt:  time.Now(),
-		isExpanded: true, // Start expanded
+		isExpanded: false, // Start collapsed for compactness
 	}
 
 	gm.mu.Lock()
@@ -266,22 +266,17 @@ func NewGroupFormatter() *GroupFormatter {
 }
 
 // FormatGroupHeader formats the header for a tool group
+// Compact format: state icon + group icon + [N tools] + progress
 func (gf *GroupFormatter) FormatGroupHeader(group *ToolGroup) string {
 	group.mu.RLock()
 	defer group.mu.RUnlock()
 
 	// Get icon and style based on group type
 	icon := gf.getGroupIcon(group.ToolType)
+	stateIndicator := GetStateIndicator(group.State)
 
 	// Build progress indicator
 	completed, total := group.GetProgress()
-	progress := fmt.Sprintf("[%d/%d]", completed, total)
-
-	// Format name with count
-	name := group.Name
-	if total > 0 {
-		name = fmt.Sprintf("%s %s", name, progress)
-	}
 
 	// Expansion indicator
 	expandIndicator := "▶"
@@ -289,15 +284,18 @@ func (gf *GroupFormatter) FormatGroupHeader(group *ToolGroup) string {
 		expandIndicator = "▼"
 	}
 
-	// Build header as plain text for markdown rendering
-	header := fmt.Sprintf("%s %s %s `%s` (%s)",
-		expandIndicator,
-		GetStateIndicator(group.State),
-		icon,
-		name,
-		GetStateLabel(group.State))
+	// Compact format: "▼ ◐ ⚡ [3 tools] 2/3"
+	var parts []string
+	parts = append(parts, expandIndicator, stateIndicator, icon)
 
-	return header
+	if total > 0 {
+		parts = append(parts, fmt.Sprintf("[%d tools]", total))
+		if completed < total {
+			parts = append(parts, fmt.Sprintf("%d/%d", completed, total))
+		}
+	}
+
+	return strings.Join(parts, " ")
 }
 
 // FormatGroupSummary creates a compact summary of all tools in a group
@@ -325,6 +323,7 @@ func (gf *GroupFormatter) FormatGroupSummary(group *ToolGroup) string {
 }
 
 // formatToolCallSummary creates a one-line summary of a tool call
+// Compact format: "  ✓ 📖 read_file .../path/to/file.go"
 func (gf *GroupFormatter) formatToolCallSummary(msg *ToolCallMessage) string {
 	toolType := GetToolTypeFromName(msg.ToolName)
 	icon := GetIconForToolType(toolType)
@@ -332,17 +331,16 @@ func (gf *GroupFormatter) formatToolCallSummary(msg *ToolCallMessage) string {
 	// Extract primary parameter
 	primaryParam := extractPrimaryParameter(msg.ToolName, msg.Parameters)
 
-	var result string
-	if primaryParam != "" {
-		result = fmt.Sprintf("  %s %s `%s` `%s`", GetStateIndicator(msg.State), icon, msg.ToolName, primaryParam)
-	} else {
-		result = fmt.Sprintf("  %s %s `%s`", GetStateIndicator(msg.State), icon, msg.ToolName)
+	// Truncate parameter for compactness
+	if len(primaryParam) > 35 {
+		primaryParam = truncateStringSmart(primaryParam, 35)
 	}
 
-	// Append description if available
-	if msg.Description != "" {
-		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
-		result += " " + descStyle.Render(fmt.Sprintf("(%s)", msg.Description))
+	var result string
+	if primaryParam != "" {
+		result = fmt.Sprintf("  %s %s %s %s", GetStateIndicator(msg.State), icon, msg.ToolName, primaryParam)
+	} else {
+		result = fmt.Sprintf("  %s %s %s", GetStateIndicator(msg.State), icon, msg.ToolName)
 	}
 
 	return result

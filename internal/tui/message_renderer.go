@@ -138,54 +138,6 @@ func (mr *MessageRenderer) renderToolHeader(msg message) string {
 	return strings.Join(parts, " ")
 }
 
-// renderToolHeaderExpanded creates an expanded header with full details
-// Used when the user explicitly expands a tool call
-func (mr *MessageRenderer) renderToolHeaderExpanded(msg message) string {
-	toolType := msg.toolType
-	if toolType == ToolTypeUnknown {
-		toolType = GetToolTypeFromName(msg.toolName)
-	}
-
-	toolStyle := mr.ts.GetToolTypeStyle(toolType)
-	stateStyle := mr.ts.GetStateStyle(msg.toolState)
-
-	icon := GetIconForToolType(toolType)
-	indicator := GetStateIndicator(msg.toolState)
-
-	var parts []string
-	parts = append(parts, stateStyle.Render(indicator))
-	parts = append(parts, toolStyle.Render(fmt.Sprintf("%s %s", icon, msg.toolName)))
-
-	// Add description if present
-	if msg.description != "" {
-		descStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#AAAAAA")).
-			Italic(true)
-		parts = append(parts, descStyle.Render(msg.description))
-	}
-
-	// Add status if present
-	if msg.status != "" {
-		statusStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888")).
-			Italic(true)
-		parts = append(parts, statusStyle.Render(msg.status))
-	}
-
-	// Add statistics for completed tools
-	if msg.toolState == ToolStateCompleted || msg.toolState == ToolStateFailed {
-		stats := CreateStatisticsDisplay(msg.executionMetadata)
-		if stats != "" {
-			statsStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#666666")).
-				Faint(true)
-			parts = append(parts, statsStyle.Render(fmt.Sprintf("[%s]", stats)))
-		}
-	}
-
-	return strings.Join(parts, " ")
-}
-
 // renderGroupedToolHeader creates a header for grouped tool messages
 // Compact format: "  ✓ 📖 read_file .../path/to/file.go"
 func (mr *MessageRenderer) renderGroupedToolHeader(msg message) string {
@@ -288,20 +240,20 @@ func (mr *MessageRenderer) renderToolContent(msg message) string {
 		if msg.fullResult != "" {
 			content = msg.fullResult
 		}
-		
+
 		// Show preview (first 2-3 lines)
 		preview := mr.getContentPreview(content, 3)
 		lines := strings.Count(content, "\n") + 1
 		if content == "" {
 			lines = 0
 		}
-		
+
 		if lines <= 3 {
 			// Small content - just show it all
 			releaseBuilder(sb)
 			return preview
 		}
-		
+
 		// Show preview with indicator for more content
 		moreLines := lines - strings.Count(preview, "\n") - 1
 		if moreLines > 0 {
@@ -334,12 +286,12 @@ func (mr *MessageRenderer) getContentPreview(content string, maxLines int) strin
 	if content == "" {
 		return ""
 	}
-	
+
 	lines := strings.Split(content, "\n")
 	if len(lines) <= maxLines {
 		return content
 	}
-	
+
 	// Return first maxLines lines
 	preview := strings.Join(lines[:maxLines], "\n")
 	return preview
@@ -395,16 +347,6 @@ func (mr *MessageRenderer) ToggleParams(msg *message) bool {
 	}
 	msg.paramsCollapsed = !msg.paramsCollapsed
 	return msg.paramsCollapsed
-}
-
-// isDescriptionInCompactSummary returns true if the tool's compact summary
-// already includes the description parameter
-func isDescriptionInCompactSummary(toolName string) bool {
-	switch toolName {
-	case tools.ToolNameGoSandbox:
-		return true
-	}
-	return false
 }
 
 // Helper function to create a summary of a tool result

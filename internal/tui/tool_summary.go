@@ -49,6 +49,30 @@ func (g *ToolSummaryGenerator) GenerateCompactSummary(toolName string, params ma
 		return primaryValue
 	}
 
+	// Fallback for unknown tools: try to find a meaningful parameter
+	// First check common parameter names in order of priority
+	for _, key := range []string{"path", "url", "query", "command", "message", "text", "name", "file", "id"} {
+		if val, ok := params[key]; ok {
+			strVal := fmt.Sprintf("%v", val)
+			if len(strVal) > 50 {
+				strVal = strVal[:47] + "..."
+			}
+			return strVal
+		}
+	}
+
+	// If no common keys found, use the first available parameter
+	for key, val := range params {
+		strVal := fmt.Sprintf("%v", val)
+		if len(strVal) > 50 {
+			strVal = strVal[:47] + "..."
+		}
+		// Skip very long keys or complex nested structures
+		if len(key) <= 20 && len(strVal) > 0 {
+			return strVal
+		}
+	}
+
 	// No meaningful summary available
 	return ""
 }

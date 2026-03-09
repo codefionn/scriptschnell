@@ -3749,10 +3749,7 @@ func (m *Model) addToolCallMessageForTab(tabIdx int, toolName, toolID, descripti
 	shouldCollapse := shouldAutoCollapseParams(parameters, config)
 
 	// Grouped tools should start collapsed for compactness
-	startCollapsed := false
-	if groupID != "" {
-		startCollapsed = true
-	}
+	startCollapsed := groupID != ""
 
 	// Create message with enhanced metadata
 	msg := message{

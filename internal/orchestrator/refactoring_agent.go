@@ -27,6 +27,15 @@ func NewRefactoringAgent(orch *Orchestrator) *RefactoringAgent {
 
 // Refactor executes multiple refactoring objectives in parallel by spawning child orchestrators
 func (a *RefactoringAgent) Refactor(ctx context.Context, objectives []string) ([]string, error) {
+	// Filter out empty objectives
+	filtered := make([]string, 0, len(objectives))
+	for _, obj := range objectives {
+		if trimmed := strings.TrimSpace(obj); trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	objectives = filtered
+
 	if len(objectives) == 0 {
 		return nil, fmt.Errorf("at least one objective is required")
 	}

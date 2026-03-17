@@ -114,6 +114,27 @@ func (t *WriteFileDiffTool) Parameters() map[string]interface{} {
 	return (&WriteFileDiffToolSpec{}).Parameters()
 }
 
+// PreCheck validates that the file has been read before allowing edits.
+// This runs before the authorization actor to avoid unnecessary user prompts.
+func (t *WriteFileDiffTool) PreCheck(ctx context.Context, params map[string]interface{}) *ToolResult {
+	path := GetStringParam(params, "path", "")
+	if path == "" {
+		return nil // Let Execute handle the error
+	}
+
+	if t.session != nil && t.fs != nil {
+		exists, err := t.fs.Exists(ctx, path)
+		if err != nil {
+			return nil // Let Execute handle the error
+		}
+		if exists && !t.session.WasFileRead(path) {
+			return &ToolResult{Error: fmt.Sprintf("file %s was not read in this session; read it before applying a diff", path)}
+		}
+	}
+
+	return nil
+}
+
 func (t *WriteFileDiffTool) Execute(ctx context.Context, params map[string]interface{}) *ToolResult {
 	path := GetStringParam(params, "path", "")
 	if path == "" {

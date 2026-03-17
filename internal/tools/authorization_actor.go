@@ -433,13 +433,8 @@ func (a *AuthorizationActor) authorizeWriteFileDiff(ctx context.Context, params 
 		}, nil
 	}
 
-	if a.session != nil && !a.session.WasFileRead(path) {
-		return &AuthorizationDecision{
-			Allowed:           false,
-			Reason:            fmt.Sprintf("File %s exists but was not read in this session. The LLM is trying to apply a diff without reading it first.", path),
-			RequiresUserInput: true,
-		}, nil
-	}
+	// Note: WasFileRead check is handled by WriteFileDiffTool.PreCheck
+	// which runs before authorization and returns an immediate error to the LLM.
 
 	return &AuthorizationDecision{Allowed: true}, nil
 }
@@ -472,14 +467,8 @@ func (a *AuthorizationActor) authorizeReplaceFile(ctx context.Context, params ma
 		}, nil
 	}
 
-	// Enforce read-before-write policy
-	if a.session != nil && !a.session.WasFileRead(path) {
-		return &AuthorizationDecision{
-			Allowed:           false,
-			Reason:            fmt.Sprintf("File %s exists but was not read in this session. The LLM is trying to replace content without reading it first.", path),
-			RequiresUserInput: true,
-		}, nil
-	}
+	// Note: WasFileRead check is handled by ReplaceFileTool.PreCheck
+	// which runs before authorization and returns an immediate error to the LLM.
 
 	return &AuthorizationDecision{Allowed: true}, nil
 }

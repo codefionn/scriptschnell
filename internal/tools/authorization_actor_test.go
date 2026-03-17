@@ -58,6 +58,9 @@ func TestAuthorizationActorAuthorizeCreateFileExistingDenied(t *testing.T) {
 }
 
 func TestAuthorizationActorAuthorizeWriteFileDiffExistingNotRead(t *testing.T) {
+	// The "file not read" check is now handled by WriteFileDiffTool.PreCheck
+	// before the authorization actor is invoked. The authorization actor
+	// should allow the call through for existing files.
 	ctx := context.Background()
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test", ".")
@@ -74,14 +77,8 @@ func TestAuthorizationActorAuthorizeWriteFileDiffExistingNotRead(t *testing.T) {
 	if decision == nil {
 		t.Fatalf("expected decision, got nil")
 	}
-	if decision.Allowed {
-		t.Fatalf("expected diff write to be blocked when not read")
-	}
-	if !decision.RequiresUserInput {
-		t.Fatalf("expected existing unread file to require user input")
-	}
-	if decision.Reason == "" {
-		t.Fatalf("expected reason explaining denial")
+	if !decision.Allowed {
+		t.Fatalf("expected authorization to allow (PreCheck handles read-before-write)")
 	}
 }
 
@@ -253,6 +250,9 @@ func TestAuthorizationActorAuthorizeSandboxDomainAllowedByOptions(t *testing.T) 
 }
 
 func TestAuthorizationActorAuthorizeReplaceFileExistingNotRead(t *testing.T) {
+	// The "file not read" check is now handled by ReplaceFileTool.PreCheck
+	// before the authorization actor is invoked. The authorization actor
+	// should allow the call through for existing files.
 	ctx := context.Background()
 	mockFS := fs.NewMockFS()
 	sess := session.NewSession("test", ".")
@@ -272,14 +272,8 @@ func TestAuthorizationActorAuthorizeReplaceFileExistingNotRead(t *testing.T) {
 	if decision == nil {
 		t.Fatalf("expected decision, got nil")
 	}
-	if decision.Allowed {
-		t.Fatalf("expected replace_file to be blocked when file not read")
-	}
-	if !decision.RequiresUserInput {
-		t.Fatalf("expected existing unread file to require user input")
-	}
-	if decision.Reason == "" {
-		t.Fatalf("expected reason explaining denial")
+	if !decision.Allowed {
+		t.Fatalf("expected authorization to allow (PreCheck handles read-before-write)")
 	}
 }
 

@@ -83,6 +83,15 @@ type Tool interface {
 	ToolExecutor
 }
 
+// ToolPreChecker is an optional interface that tool executors can implement
+// to perform fast validation before the authorization actor is invoked.
+// If PreCheck returns a non-nil *ToolResult, that result is returned immediately
+// without going through authorization or execution.
+// If PreCheck returns nil, the normal authorization and execution flow continues.
+type ToolPreChecker interface {
+	PreCheck(ctx context.Context, params map[string]interface{}) *ToolResult
+}
+
 // ToolFactory creates tool executors with specific runtime dependencies.
 // This allows the same tool spec to be instantiated with different dependencies.
 //
@@ -723,6 +732,14 @@ func (r *Registry) ExecuteWithCallbacks(ctx context.Context, call *ToolCall, too
 		return &ToolResult{
 			ID:    call.ID,
 			Error: "tool executor not available: " + call.Name,
+		}
+	}
+
+	// Run pre-check before authorization if the executor supports it
+	if preChecker, ok := executor.(ToolPreChecker); ok {
+		if result := preChecker.PreCheck(ctx, call.Parameters); result != nil {
+			result.ID = call.ID
+			return result
 		}
 	}
 

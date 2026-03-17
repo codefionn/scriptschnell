@@ -181,7 +181,7 @@ func (p *PlanningAgent) initializeTools() {
 }
 
 // initializeLoop creates and initializes the loop abstraction for planning
-func (p *PlanningAgent) initializeLoop(req *PlanningRequest, messages []*llm.Message, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) loop.Loop {
+func (p *PlanningAgent) initializeLoop(req *PlanningRequest, messages []*llm.Message, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, userMsgChan <-chan string) loop.Loop {
 	// Build loop configuration
 	p.loopConfig = &loop.Config{
 		MaxIterations:           96,
@@ -206,6 +206,7 @@ func (p *PlanningAgent) initializeLoop(req *PlanningRequest, messages []*llm.Mes
 		LoopDetector:       p.loopDetector,
 		Messages:           messages,
 		QuestionsAsked:     0,
+		UserMessageChannel: userMsgChan,
 	}
 
 	// Store deps so we can access updated messages after the loop
@@ -383,15 +384,16 @@ func (p *PlanningAgent) collectContextFiles(ctx context.Context, paths []string)
 
 // Plan generates a plan for the given objective
 func (p *PlanningAgent) Plan(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback) (*PlanningResponse, error) {
-	return p.PlanWithProgress(ctx, req, userInputCb, nil, nil, nil)
+	return p.PlanWithProgress(ctx, req, userInputCb, nil, nil, nil, nil)
 }
 
 // PlanWithProgress generates a plan and streams planning output via the provided progress callback.
-func (p *PlanningAgent) PlanWithProgress(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*PlanningResponse, error) {
-	return p.plan(ctx, req, userInputCb, progressCb, toolCallCb, toolResultCb)
+// userMsgChan is an optional channel for receiving user messages to inject during planning.
+func (p *PlanningAgent) PlanWithProgress(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, userMsgChan <-chan string) (*PlanningResponse, error) {
+	return p.plan(ctx, req, userInputCb, progressCb, toolCallCb, toolResultCb, userMsgChan)
 }
 
-func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback) (*PlanningResponse, error) {
+func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, userMsgChan <-chan string) (*PlanningResponse, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -440,7 +442,7 @@ func (p *PlanningAgent) plan(ctx context.Context, req *PlanningRequest, userInpu
 	}
 
 	// Initialize and run the planning loop
-	p.loop = p.initializeLoop(req, messages, userInputCb, progressCb, toolCallCb, toolResultCb)
+	p.loop = p.initializeLoop(req, messages, userInputCb, progressCb, toolCallCb, toolResultCb, userMsgChan)
 
 	// Create a session adapter for the loop
 	sessionAdapter := &planningSessionAdapter{messages: messages}

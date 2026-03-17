@@ -81,7 +81,7 @@ func TestPlanningAgentMessagePrefixStability(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			_, err := agent.plan(ctx, req, nil, nil, nil, nil)
+			_, err := agent.plan(ctx, req, nil, nil, nil, nil, nil)
 			if err != nil {
 				t.Fatalf("Planning failed: %v", err)
 			}

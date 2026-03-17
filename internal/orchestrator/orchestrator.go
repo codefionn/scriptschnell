@@ -123,6 +123,9 @@ type Orchestrator struct {
 	sandboxManager         *sandbox.Manager
 	loop                   loop.Loop // New loop abstraction
 	loopConfig             *loop.Config
+	// Planning user message channel - allows UI to inject messages during planning
+	planningUserMsgChan   chan string
+	planningUserMsgChanMu sync.RWMutex
 }
 
 const (
@@ -2252,7 +2255,7 @@ func (o *Orchestrator) runPlanningPhaseIfNeeded(ctx context.Context, prompt stri
 		return nil
 	}
 
-	response, err := o.planningAgent.PlanWithProgress(ctx, req, userInputCb, progressCallback, planningToolCallCb, planningToolResultCb)
+	response, err := o.planningAgent.PlanWithProgress(ctx, req, userInputCb, progressCallback, planningToolCallCb, planningToolResultCb, o.getPlanningUserMessageChannelReadOnly())
 	if err != nil {
 		// Planning is a best-effort pre-pass; cancellation here is expected when the
 		// parent request is interrupted and should not be surfaced as a warning.
@@ -4861,6 +4864,47 @@ func (o *Orchestrator) SaveCurrentSession(ctx context.Context) error {
 // Deprecated: Use SetUserInteractionHandler instead
 func (o *Orchestrator) SetUserInputCallback(callback UserInputCallback) {
 	o.userInputCb = callback
+}
+
+// GetPlanningUserMessageChannel returns a channel for sending user messages during planning.
+// The returned channel should be used to inject user guidance messages while planning is active.
+// Messages sent to this channel will be picked up before the next planning iteration.
+func (o *Orchestrator) GetPlanningUserMessageChannel() chan<- string {
+	o.planningUserMsgChanMu.Lock()
+	defer o.planningUserMsgChanMu.Unlock()
+
+	// Create channel if it doesn't exist
+	if o.planningUserMsgChan == nil {
+		o.planningUserMsgChan = make(chan string, 10)
+	}
+	return o.planningUserMsgChan
+}
+
+// SendPlanningUserMessage sends a user message to be injected during the next planning iteration.
+// Returns true if the message was queued successfully, false if the channel is full.
+func (o *Orchestrator) SendPlanningUserMessage(message string) bool {
+	o.planningUserMsgChanMu.RLock()
+	defer o.planningUserMsgChanMu.RUnlock()
+
+	if o.planningUserMsgChan == nil {
+		return false
+	}
+
+	select {
+	case o.planningUserMsgChan <- message:
+		return true
+	default:
+		// Channel full, message dropped
+		return false
+	}
+}
+
+// getPlanningUserMessageChannelReadOnly returns a read-only view of the planning user message channel.
+// This is used internally by the planning phase to receive user messages.
+func (o *Orchestrator) getPlanningUserMessageChannelReadOnly() <-chan string {
+	o.planningUserMsgChanMu.RLock()
+	defer o.planningUserMsgChanMu.RUnlock()
+	return o.planningUserMsgChan
 }
 
 // SetUserInteractionHandler sets the handler for user interactions.

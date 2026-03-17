@@ -51,6 +51,10 @@ type PlanningDependencies struct {
 
 	// QuestionsAsked tracks the number of questions asked
 	QuestionsAsked int
+
+	// UserMessageChannel is an optional channel for receiving user messages during planning
+	// When a message is received, it will be injected into the planning conversation
+	UserMessageChannel <-chan string
 }
 
 // PlanningIteration implements the loop.Iteration interface for planning workflows
@@ -95,6 +99,23 @@ func (p *PlanningIteration) Execute(ctx context.Context, state loop.State) (*loo
 			Ephemeral: true,
 		}); err != nil {
 			logger.Debug("planning status callback error: %v", err)
+		}
+	}
+
+	// Check for pending user messages and inject them before making the LLM call
+	if p.deps.UserMessageChannel != nil {
+		select {
+		case userMsg := <-p.deps.UserMessageChannel:
+			// Inject the user message into the conversation
+			logger.Debug("Planning: injecting user message: %d bytes", len(userMsg))
+			p.deps.Messages = append(p.deps.Messages, &llm.Message{
+				Role:    "user",
+				Content: userMsg,
+			})
+			// Notify UI about the injected message
+			streamPlanning(fmt.Sprintf("\n📝 User guidance: %s\n", userMsg))
+		default:
+			// No pending user message, continue
 		}
 	}
 

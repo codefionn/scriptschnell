@@ -92,10 +92,6 @@ func (t *SandboxTool) SetAuthorizer(auth Authorizer) {
 // SetSummarizeClient sets the summarization LLM client
 func (t *SandboxTool) SetSummarizeClient(client llm.Client) {
 	t.summarizeClient = client
-	// Also update the compactor if it exists
-	if t.compactor != nil {
-		t.compactor.SetSummarizeClient(client)
-	}
 }
 
 // SetSecretDetector sets the secret detector for scanning web requests
@@ -121,8 +117,13 @@ func (t *SandboxTool) SetShellExecutor(executor ShellExecutor) {
 // SetCompactionConfig sets the output compaction configuration
 func (t *SandboxTool) SetCompactionConfig(compactionConfig config.SandboxOutputCompactionConfig) {
 	t.compactor = NewOutputCompactor(compactionConfig, t.contextWindow)
-	if t.summarizeClient != nil {
-		t.compactor.SetSummarizeClient(t.summarizeClient)
+	t.compactor.SetTempDir(t.tempDir)
+}
+
+// SetCompactionOutputDir sets the directory where large sandbox output files are stored
+func (t *SandboxTool) SetCompactionOutputDir(dir string) {
+	if t.compactor != nil {
+		t.compactor.SetTempDir(dir)
 	}
 }
 
@@ -131,14 +132,13 @@ func (t *SandboxTool) SetContextWindow(contextWindow int) {
 	t.contextWindow = contextWindow
 	if t.compactor != nil {
 		// Update compactor with new context window
+		oldTempDir := t.compactor.tempDir
 		*t.compactor = *NewOutputCompactor(config.SandboxOutputCompactionConfig{
 			Enabled:              t.compactor.compactionConfig.Enabled,
 			ContextWindowPercent: t.compactor.compactionConfig.ContextWindowPercent,
 			ChunkSize:            t.compactor.compactionConfig.ChunkSize,
 		}, contextWindow)
-		if t.summarizeClient != nil {
-			t.compactor.SetSummarizeClient(t.summarizeClient)
-		}
+		t.compactor.SetTempDir(oldTempDir)
 	}
 }
 

@@ -310,9 +310,16 @@ func NewOrchestratorWithFSAndTodoActorAndRequireSandboxAuth(cfg *config.Config, 
 		}
 	}
 
+	// Allow reading from sandbox output directory so the LLM can read large output files
+	var allowedDirs []string
+	if outputDir := sess.GetSandboxOutputDir(); outputDir != "" {
+		allowedDirs = append(allowedDirs, outputDir)
+	}
+
 	authOpts := &tools.AuthorizationOptions{
 		AllowedCommands:    allowedCommandPrefixes,
 		AllowedDomains:     allowedDomainPatterns,
+		AllowedDirs:        allowedDirs,
 		RequireSandboxAuth: requireSandboxAuth,
 	}
 
@@ -633,9 +640,16 @@ func NewOrchestratorWithSharedResources(
 		}
 	}
 
+	// Allow reading from sandbox output directory so the LLM can read large output files
+	var allowedDirs []string
+	if outputDir := sess.GetSandboxOutputDir(); outputDir != "" {
+		allowedDirs = append(allowedDirs, outputDir)
+	}
+
 	authOpts := &tools.AuthorizationOptions{
 		AllowedCommands:    allowedCommandPrefixes,
 		AllowedDomains:     allowedDomainPatterns,
+		AllowedDirs:        allowedDirs,
 		RequireSandboxAuth: requireSandboxAuth,
 	}
 
@@ -1568,6 +1582,12 @@ func (o *Orchestrator) configureSandboxTool(sandboxTool *tools.SandboxTool) {
 	sandboxTool.SetSummarizeClient(o.summarizeClient)
 	// Set output compaction configuration
 	sandboxTool.SetCompactionConfig(o.config.SandboxOutputCompaction)
+	// Use session's sandbox output directory for large output files
+	if o.session != nil {
+		if outputDir := o.session.GetSandboxOutputDir(); outputDir != "" {
+			sandboxTool.SetCompactionOutputDir(outputDir)
+		}
+	}
 	// Set context window from orchestration model for compaction decisions
 	if o.orchestrationClient != nil {
 		modelID := o.orchestrationClient.GetModelName()

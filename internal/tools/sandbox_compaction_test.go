@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,6 +46,20 @@ func TestOutputCompactor_ShouldCompact(t *testing.T) {
 			strings.Repeat("a", 5000),
 			true,
 		},
+		{
+			"above_hard_limit_128kib",
+			config.SandboxOutputCompactionConfig{Enabled: true, ContextWindowPercent: 0.1, ChunkSize: 50000},
+			0, // zero context window, but hard limit should still trigger
+			strings.Repeat("a", 128*1024),
+			true,
+		},
+		{
+			"below_hard_limit_128kib",
+			config.SandboxOutputCompactionConfig{Enabled: true, ContextWindowPercent: 0.1, ChunkSize: 50000},
+			0, // zero context window and below hard limit
+			strings.Repeat("a", 128*1024-1),
+			false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -55,192 +71,6 @@ func TestOutputCompactor_ShouldCompact(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestOutputCompactor_SplitIntoChunks(t *testing.T) {
-	tests := []struct {
-		name           string
-		chunkSize      int
-		output         string
-		expectedChunks int
-		checkFirst     string
-	}{
-		{
-			"empty",
-			100,
-			"",
-			0,
-			"",
-		},
-		{
-			"shorter_than_chunk",
-			100,
-			"hello world",
-			1,
-			"hello world",
-		},
-		{
-			"exact_chunk_size",
-			5,
-			"12345",
-			1,
-			"12345",
-		},
-		{
-			"two_chunks_no_newline",
-			5,
-			"1234567890",
-			2,
-			"12345",
-		},
-		{
-			"breaks_at_newline",
-			10,
-			"abc\ndef\nghi\njkl",
-			2,
-			"abc\ndef\n",
-		},
-		{
-			"zero_chunk_size_uses_default",
-			0,
-			strings.Repeat("x", 60000),
-			2,
-			"",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.SandboxOutputCompactionConfig{
-				Enabled:   true,
-				ChunkSize: tt.chunkSize,
-			}
-			c := NewOutputCompactor(cfg, 10000)
-			chunks := c.splitIntoChunks(tt.output)
-			if len(chunks) != tt.expectedChunks {
-				t.Fatalf("expected %d chunks, got %d", tt.expectedChunks, len(chunks))
-			}
-			if tt.checkFirst != "" && len(chunks) > 0 && chunks[0] != tt.checkFirst {
-				t.Fatalf("expected first chunk %q, got %q", tt.checkFirst, chunks[0])
-			}
-		})
-	}
-}
-
-func TestOutputCompactor_ChunksToKeep(t *testing.T) {
-	tests := []struct {
-		totalChunks int
-		expected    int
-	}{
-		{1, 1},
-		{5, 1},
-		{10, 1},
-		{11, 2},
-		{50, 2},
-		{51, 3},
-		{100, 3},
-	}
-
-	cfg := config.SandboxOutputCompactionConfig{Enabled: true}
-	c := NewOutputCompactor(cfg, 10000)
-
-	for _, tt := range tests {
-		got := c.chunksToKeep(tt.totalChunks)
-		if got != tt.expected {
-			t.Fatalf("chunksToKeep(%d): expected %d, got %d", tt.totalChunks, tt.expected, got)
-		}
-	}
-}
-
-func TestOutputCompactor_GroupChunksForSummarization(t *testing.T) {
-	tests := []struct {
-		name           string
-		chunkSize      int
-		chunks         []string
-		expectedGroups int
-	}{
-		{
-			"single_chunk",
-			100,
-			[]string{"abc"},
-			1,
-		},
-		{
-			"multiple_small",
-			100,
-			[]string{"a", "b", "c"},
-			1,
-		},
-		{
-			"chunks_exceeding_group",
-			10,
-			[]string{strings.Repeat("x", 15), strings.Repeat("y", 15)},
-			2,
-		},
-		{
-			"empty",
-			100,
-			[]string{},
-			0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.SandboxOutputCompactionConfig{
-				Enabled:   true,
-				ChunkSize: tt.chunkSize,
-			}
-			c := NewOutputCompactor(cfg, 10000)
-			groups := c.groupChunksForSummarization(tt.chunks)
-			if len(groups) != tt.expectedGroups {
-				t.Fatalf("expected %d groups, got %d", tt.expectedGroups, len(groups))
-			}
-		})
-	}
-}
-
-func TestOutputCompactor_TruncateGroup(t *testing.T) {
-	cfg := config.SandboxOutputCompactionConfig{Enabled: true}
-	c := NewOutputCompactor(cfg, 10000)
-
-	t.Run("within_limit", func(t *testing.T) {
-		result := c.truncateGroup([]string{"short"}, 1000)
-		if result != "short" {
-			t.Fatalf("expected %q, got %q", "short", result)
-		}
-	})
-
-	t.Run("exact_limit", func(t *testing.T) {
-		result := c.truncateGroup([]string{"12345"}, 5)
-		if result != "12345" {
-			t.Fatalf("expected %q, got %q", "12345", result)
-		}
-	})
-
-	t.Run("over_limit_no_newline", func(t *testing.T) {
-		result := c.truncateGroup([]string{"1234567890"}, 5)
-		if !strings.Contains(result, "[... output truncated") {
-			t.Fatalf("expected truncation indicator, got %q", result)
-		}
-	})
-
-	t.Run("over_limit_newline_past_midpoint", func(t *testing.T) {
-		result := c.truncateGroup([]string{"abcde\nfghij"}, 8)
-		if !strings.HasPrefix(result, "abcde") {
-			t.Fatalf("expected break at newline, got %q", result)
-		}
-		if !strings.Contains(result, "[... output truncated") {
-			t.Fatalf("expected truncation indicator, got %q", result)
-		}
-	})
-
-	t.Run("multiple_groups_combined", func(t *testing.T) {
-		result := c.truncateGroup([]string{"aaa", "bbb"}, 5)
-		if !strings.Contains(result, "[... output truncated") {
-			t.Fatalf("expected truncation indicator, got %q", result)
-		}
-	})
 }
 
 func TestOutputCompactor_Compact_Disabled(t *testing.T) {
@@ -262,50 +92,19 @@ func TestOutputCompactor_Compact_Disabled(t *testing.T) {
 	}
 }
 
-func TestOutputCompactor_Compact_NoSummarizeClient(t *testing.T) {
-	cfg := config.SandboxOutputCompactionConfig{Enabled: true, ChunkSize: 100}
-	c := NewOutputCompactor(cfg, 10000)
+func TestOutputCompactor_Compact_WritesToFile(t *testing.T) {
+	tmpDir := t.TempDir()
 
-	result, err := c.Compact(context.Background(), "output data")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.WasCompacted {
-		t.Fatal("expected WasCompacted=false without summarize client")
-	}
-	if result.Output != "output data" {
-		t.Fatalf("expected original output, got %q", result.Output)
-	}
-}
-
-func TestOutputCompactor_Compact_EmptyOutput(t *testing.T) {
-	cfg := config.SandboxOutputCompactionConfig{Enabled: true, ChunkSize: 100}
-	c := NewOutputCompactor(cfg, 10000)
-	c.SetSummarizeClient(&MockSummarizeClient{response: "summary"})
-
-	result, err := c.Compact(context.Background(), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.WasCompacted {
-		t.Fatal("expected WasCompacted=false for empty output")
-	}
-	if result.Output != "" {
-		t.Fatalf("expected empty output, got %q", result.Output)
-	}
-}
-
-func TestOutputCompactor_Compact_WithSummarization(t *testing.T) {
 	cfg := config.SandboxOutputCompactionConfig{
 		Enabled:              true,
 		ChunkSize:            10,
 		ContextWindowPercent: 0.1,
 	}
 	c := NewOutputCompactor(cfg, 10000)
-	c.SetSummarizeClient(&MockSummarizeClient{response: "[summarized]"})
+	c.SetTempDir(tmpDir)
 
-	// Create output large enough to produce multiple chunks
-	output := strings.Repeat("abcdefghij", 5) // 50 chars -> 5 chunks of 10
+	// Create output large enough to trigger compaction
+	output := strings.Repeat("line of output\n", 100)
 
 	result, err := c.Compact(context.Background(), output)
 	if err != nil {
@@ -314,16 +113,103 @@ func TestOutputCompactor_Compact_WithSummarization(t *testing.T) {
 	if !result.WasCompacted {
 		t.Fatal("expected WasCompacted=true")
 	}
-	if !strings.Contains(result.Output, "=== COMPACTED OUTPUT ===") {
-		t.Fatalf("expected compaction marker, got %q", result.Output)
+	if !strings.Contains(result.Output, "OUTPUT TOO LARGE FOR CONTEXT WINDOW") {
+		t.Fatalf("expected file-based instructions, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "[summarized]") {
-		t.Fatalf("expected summary content, got %q", result.Output)
+	if !strings.Contains(result.Output, "read_file") {
+		t.Fatalf("expected read_file instructions, got %q", result.Output)
 	}
-	if result.OriginalSize != len(output) {
-		t.Fatalf("expected OriginalSize=%d, got %d", len(output), result.OriginalSize)
+	if !strings.Contains(result.Output, tmpDir) {
+		t.Fatalf("expected temp dir path in output, got %q", result.Output)
 	}
-	if result.ChunksKept < 1 {
-		t.Fatalf("expected at least 1 chunk kept, got %d", result.ChunksKept)
+
+	// Verify the file was actually written
+	matches, err := filepath.Glob(filepath.Join(tmpDir, "sandbox-output-*.txt"))
+	if err != nil {
+		t.Fatalf("glob error: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 output file, got %d", len(matches))
+	}
+
+	// Verify file contents match original output
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("failed to read output file: %v", err)
+	}
+	if string(data) != output {
+		t.Fatalf("output file contents don't match: got %d bytes, expected %d bytes", len(data), len(output))
+	}
+}
+
+func TestOutputCompactor_Compact_FallbackTruncate(t *testing.T) {
+	cfg := config.SandboxOutputCompactionConfig{
+		Enabled:              true,
+		ChunkSize:            10,
+		ContextWindowPercent: 0.1,
+	}
+	c := NewOutputCompactor(cfg, 10000)
+	// Use a non-existent directory to trigger fallback
+	c.SetTempDir("/nonexistent/path/that/should/not/exist")
+
+	output := strings.Repeat("x", 10000)
+
+	result, err := c.Compact(context.Background(), output)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should fall back to truncation
+	if !result.WasCompacted {
+		t.Fatal("expected WasCompacted=true")
+	}
+	if result.CompactedSize >= result.OriginalSize {
+		t.Fatalf("expected compacted size < original, got %d >= %d", result.CompactedSize, result.OriginalSize)
+	}
+	if !strings.Contains(result.Output, "bytes truncated") {
+		t.Fatalf("expected truncation indicator, got %q", result.Output[:200])
+	}
+}
+
+func TestOutputCompactor_SetTempDir(t *testing.T) {
+	cfg := config.SandboxOutputCompactionConfig{Enabled: true}
+	c := NewOutputCompactor(cfg, 10000)
+
+	tmpDir := t.TempDir()
+	c.SetTempDir(tmpDir)
+
+	if c.tempDir != tmpDir {
+		t.Fatalf("expected tempDir=%s, got %s", tmpDir, c.tempDir)
+	}
+}
+
+func TestOutputCompactor_FallbackTruncate_ShortOutput(t *testing.T) {
+	cfg := config.SandboxOutputCompactionConfig{Enabled: true}
+	c := NewOutputCompactor(cfg, 10000)
+
+	// Output shorter than 2*maxKeep (4000) should not be truncated
+	result := c.fallbackTruncate("short output", 12)
+	if result.WasCompacted {
+		t.Fatal("expected WasCompacted=false for short output")
+	}
+	if result.Output != "short output" {
+		t.Fatalf("expected original output, got %q", result.Output)
+	}
+}
+
+func TestOutputCompactor_FallbackTruncate_LongOutput(t *testing.T) {
+	cfg := config.SandboxOutputCompactionConfig{Enabled: true}
+	c := NewOutputCompactor(cfg, 10000)
+
+	output := strings.Repeat("abcdefghij\n", 1000) // ~11000 chars
+	result := c.fallbackTruncate(output, len(output))
+
+	if !result.WasCompacted {
+		t.Fatal("expected WasCompacted=true")
+	}
+	if !strings.Contains(result.Output, "bytes truncated") {
+		t.Fatalf("expected truncation indicator, got %q", result.Output[:200])
+	}
+	if result.CompactedSize >= result.OriginalSize {
+		t.Fatalf("expected compacted < original")
 	}
 }

@@ -164,6 +164,17 @@ func GetSessionStorageDir() (string, error) {
 }
 
 // getSessionStorageDir returns the platform-specific session storage directory
+// getStateDir returns the platform-specific base state directory for scriptschnell.
+// This is the parent of the sessions directory.
+func getStateDir() (string, error) {
+	sessDir, err := getSessionStorageDir()
+	if err != nil {
+		return "", err
+	}
+	// Sessions dir is <state>/scriptschnell/sessions, so parent is <state>/scriptschnell
+	return filepath.Dir(sessDir), nil
+}
+
 func getSessionStorageDir() (string, error) {
 	switch runtime.GOOS {
 	case "linux":

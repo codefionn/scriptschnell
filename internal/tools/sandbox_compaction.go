@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -24,8 +26,8 @@ type CompactionResult struct {
 // OutputCompactor handles compaction of large sandbox outputs
 type OutputCompactor struct {
 	compactionConfig config.SandboxOutputCompactionConfig
-	summarizeClient  llm.Client
-	contextWindow    int // The model's context window in tokens
+	contextWindow    int    // The model's context window in tokens
+	tempDir          string // Directory for writing large output files
 
 	mu sync.RWMutex
 }
@@ -38,14 +40,17 @@ func NewOutputCompactor(compactionConfig config.SandboxOutputCompactionConfig, c
 	}
 }
 
-// SetSummarizeClient sets the summarization LLM client
-func (c *OutputCompactor) SetSummarizeClient(client llm.Client) {
+// SetTempDir sets the directory for writing large output files
+func (c *OutputCompactor) SetTempDir(dir string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.summarizeClient = client
+	c.tempDir = dir
 }
 
-// ShouldCompact determines if output should be compacted based on size
+const compactionHardLimitBytes = 128 * 1024 // 128 KiB
+
+// ShouldCompact determines if output should be compacted based on size.
+// Triggers when output exceeds 10% of the context window OR is >= 128 KiB.
 func (c *OutputCompactor) ShouldCompact(output string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -54,18 +59,24 @@ func (c *OutputCompactor) ShouldCompact(output string) bool {
 		return false
 	}
 
+	// Hard size limit: always compact if output is >= 128 KiB
+	if len(output) >= compactionHardLimitBytes {
+		return true
+	}
+
 	if c.contextWindow == 0 {
 		return false
 	}
 
-	// Estimate token count
+	// Soft limit: compact if output exceeds configured percentage of context window
 	tokens := llm.EstimateTokenCount(output)
 	threshold := int(float64(c.contextWindow) * c.compactionConfig.ContextWindowPercent)
 
 	return tokens >= threshold
 }
 
-// Compact compacts the output using chunking and summarization
+// Compact compacts the output by writing it to a file and returning instructions
+// for the LLM to read it piece by piece, avoiding context window bloat.
 func (c *OutputCompactor) Compact(ctx context.Context, output string) (*CompactionResult, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -79,216 +90,109 @@ func (c *OutputCompactor) Compact(ctx context.Context, output string) (*Compacti
 		}, nil
 	}
 
-	if c.summarizeClient == nil {
-		// No summarization client, just truncate
-		result := &CompactionResult{
-			Output:        output,
-			WasCompacted:  false,
-			OriginalSize:  len(output),
-			CompactedSize: len(output),
-		}
-		logger.Debug("sandbox compaction: no summarization client available, skipping compaction")
-		return result, nil
-	}
-
 	originalSize := len(output)
 
-	// Split output into chunks
-	chunks := c.splitIntoChunks(output)
-	if len(chunks) == 0 {
-		return &CompactionResult{
-			Output:        output,
-			WasCompacted:  false,
-			OriginalSize:  originalSize,
-			CompactedSize: originalSize,
-		}, nil
+	// Write the full output to a temporary file
+	outputFile, err := c.writeOutputToFile(output)
+	if err != nil {
+		logger.Debug("sandbox compaction: failed to write output to file: %v", err)
+		// Fall back to truncation
+		return c.fallbackTruncate(output, originalSize), nil
 	}
 
-	// Determine how many chunks to keep at the beginning and end
-	chunksToKeep := c.chunksToKeep(len(chunks))
+	// Count total lines for the instructions
+	lineCount := strings.Count(output, "\n") + 1
 
-	var resultParts []string
-	var summaryParts []string
-	summariesCount := 0
-
-	// Keep first N chunks
-	if chunksToKeep > 0 {
-		resultParts = append(resultParts, chunks[0:chunksToKeep]...)
+	// Build instructions for the LLM to read the output piece by piece
+	linesPerChunk := 200
+	var instructions strings.Builder
+	instructions.WriteString("=== OUTPUT TOO LARGE FOR CONTEXT WINDOW ===\n")
+	fmt.Fprintf(&instructions, "The sandbox output was %d bytes (%d lines), exceeding 10%% of the context window.\n", originalSize, lineCount)
+	fmt.Fprintf(&instructions, "Full output has been saved to: %s\n\n", outputFile)
+	instructions.WriteString("To read the output, use the read_file tool with offset and limit parameters:\n")
+	fmt.Fprintf(&instructions, "  - File: %s\n", outputFile)
+	fmt.Fprintf(&instructions, "  - Total lines: %d\n", lineCount)
+	fmt.Fprintf(&instructions, "  - Recommended chunk size: %d lines\n", linesPerChunk)
+	fmt.Fprintf(&instructions, "  - Example: read_file(path=\"%s\", offset=1, limit=%d) for the first chunk\n", outputFile, linesPerChunk)
+	fmt.Fprintf(&instructions, "  - Then: read_file(path=\"%s\", offset=%d, limit=%d) for the next chunk, etc.\n\n", outputFile, linesPerChunk+1, linesPerChunk)
+	instructions.WriteString("Start by reading the last chunk (the end of the output) as it often contains the most relevant information (errors, final results):\n")
+	lastOffset := lineCount - linesPerChunk
+	if lastOffset < 1 {
+		lastOffset = 1
 	}
+	fmt.Fprintf(&instructions, "  read_file(path=\"%s\", offset=%d, limit=%d)\n", outputFile, lastOffset, linesPerChunk)
 
-	// Summarize middle chunks
-	if len(chunks) > chunksToKeep*2 {
-		middleChunks := chunks[chunksToKeep : len(chunks)-chunksToKeep]
-
-		if len(middleChunks) > 0 {
-			// Combine middle chunks into groups for summarization
-			groups := c.groupChunksForSummarization(middleChunks)
-
-			for i, group := range groups {
-				groupText := strings.Join(group, "\n")
-				summary, err := c.summarizeChunk(ctx, groupText, i+1, len(groups))
-				if err != nil {
-					logger.Debug("sandbox compaction: failed to summarize chunk group %d: %v", i+1, err)
-					// If summarization fails, keep a truncated portion instead
-					truncated := c.truncateGroup(group, 2000)
-					summaryParts = append(summaryParts, truncated)
-				} else {
-					summaryParts = append(summaryParts, summary)
-					summariesCount++
-				}
-			}
-		}
-	}
-
-	// Keep last N chunks
-	if chunksToKeep > 0 && len(chunks) > chunksToKeep {
-		resultParts = append(resultParts, chunks[len(chunks)-chunksToKeep:]...)
-	}
-
-	// Combine all parts
-	var compactedOutput strings.Builder
-
-	// Add beginning chunks
-	if len(resultParts) > 0 {
-		compactedOutput.WriteString(strings.Join(resultParts, "\n"))
-	}
-
-	// Add summaries
-	if len(summaryParts) > 0 {
-		if compactedOutput.Len() > 0 {
-			compactedOutput.WriteString("\n\n")
-		}
-		compactedOutput.WriteString("=== COMPACTED OUTPUT ===\n")
-		compactedOutput.WriteString("The following output has been summarized to reduce size:\n\n")
-		for i, summary := range summaryParts {
-			if i > 0 {
-				compactedOutput.WriteString("\n\n")
-			}
-			compactedOutput.WriteString(summary)
-		}
-	}
+	compactedOutput := instructions.String()
 
 	result := &CompactionResult{
-		Output:        compactedOutput.String(),
+		Output:        compactedOutput,
 		WasCompacted:  true,
 		OriginalSize:  originalSize,
-		CompactedSize: compactedOutput.Len(),
-		SummaryCount:  summariesCount,
-		ChunksKept:    len(resultParts),
+		CompactedSize: len(compactedOutput),
+		ChunksKept:    0,
 	}
 
-	logger.Debug("sandbox compaction: compacted from %d to %d chars (ratio: %.2f), %d summaries, %d chunks kept",
-		result.OriginalSize, result.CompactedSize,
-		float64(result.CompactedSize)/float64(result.OriginalSize),
-		result.SummaryCount, result.ChunksKept)
+	logger.Debug("sandbox compaction: output saved to %s (%d bytes, %d lines), returning read instructions",
+		outputFile, originalSize, lineCount)
 
 	return result, nil
 }
 
-// splitIntoChunks splits output into chunks based on configured chunk size
-func (c *OutputCompactor) splitIntoChunks(output string) []string {
-	chunkSize := c.compactionConfig.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = 50000 // Default fallback
+// writeOutputToFile writes the output to a temporary file and returns the file path
+func (c *OutputCompactor) writeOutputToFile(output string) (string, error) {
+	dir := c.tempDir
+	if dir == "" {
+		dir = os.TempDir()
 	}
 
-	var chunks []string
-	start := 0
-	outputLen := len(output)
-
-	for start < outputLen {
-		end := start + chunkSize
-		if end > outputLen {
-			end = outputLen
-		}
-
-		// Try to break at a line boundary for better readability
-		if end < outputLen {
-			// Look for the last newline before the chunk size
-			lastNewline := strings.LastIndex(output[start:end], "\n")
-			if lastNewline > 0 && lastNewline > chunkSize/2 {
-				end = start + lastNewline + 1
-			}
-		}
-
-		chunks = append(chunks, output[start:end])
-		start = end
+	// Ensure the directory exists
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
-	return chunks
-}
-
-// chunksToKeep calculates how many chunks to keep at the beginning and end
-func (c *OutputCompactor) chunksToKeep(totalChunks int) int {
-	// Keep a small percentage of chunks at the start and end
-	// Typically 1-2 chunks to preserve context
-	keep := 1
-	if totalChunks > 10 {
-		keep = 2
-	}
-	if totalChunks > 50 {
-		keep = 3
-	}
-	return keep
-}
-
-// groupChunksForSummarization groups chunks for summarization
-func (c *OutputCompactor) groupChunksForSummarization(chunks []string) [][]string {
-	// Group chunks to reduce API calls - aim for groups of ~100K chars
-	targetGroupSize := c.compactionConfig.ChunkSize * 2
-
-	var groups [][]string
-	var currentGroup []string
-	currentSize := 0
-
-	for _, chunk := range chunks {
-		if currentSize+len(chunk) > targetGroupSize && len(currentGroup) > 0 {
-			groups = append(groups, currentGroup)
-			currentGroup = []string{chunk}
-			currentSize = len(chunk)
-		} else {
-			currentGroup = append(currentGroup, chunk)
-			currentSize += len(chunk)
-		}
-	}
-
-	if len(currentGroup) > 0 {
-		groups = append(groups, currentGroup)
-	}
-
-	return groups
-}
-
-// summarizeChunk summarizes a chunk of output using the LLM
-func (c *OutputCompactor) summarizeChunk(ctx context.Context, chunk string, index, total int) (string, error) {
-	prompt := fmt.Sprintf(
-		"Summarize the following output from a Go program execution (part %d of %d). "+
-			"Focus on key information: errors, warnings, important results, and any unexpected behavior. "+
-			"Be concise but preserve important technical details.\n\nOutput:\n%s",
-		index, total, chunk,
-	)
-
-	response, err := c.summarizeClient.Complete(ctx, prompt)
+	f, err := os.CreateTemp(dir, "sandbox-output-*.txt")
 	if err != nil {
-		return "", fmt.Errorf("summarization failed: %w", err)
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(output); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("failed to write output: %w", err)
 	}
 
-	return response, nil
+	return filepath.Abs(f.Name())
 }
 
-// truncateGroup truncates a group of chunks when summarization fails
-func (c *OutputCompactor) truncateGroup(group []string, maxChars int) string {
-	combined := strings.Join(group, "\n")
-	if len(combined) <= maxChars {
-		return combined
+// fallbackTruncate truncates the output when file writing fails
+func (c *OutputCompactor) fallbackTruncate(output string, originalSize int) *CompactionResult {
+	// Keep first and last 2000 chars
+	maxKeep := 2000
+	if len(output) <= maxKeep*2 {
+		return &CompactionResult{
+			Output:        output,
+			WasCompacted:  false,
+			OriginalSize:  originalSize,
+			CompactedSize: len(output),
+		}
 	}
 
-	// Truncate and add indicator
-	truncated := combined[:maxChars]
-	// Find last newline to avoid cutting mid-line
-	if lastNewline := strings.LastIndex(truncated, "\n"); lastNewline > maxChars/2 {
-		truncated = truncated[:lastNewline]
+	head := output[:maxKeep]
+	if idx := strings.LastIndex(head, "\n"); idx > maxKeep/2 {
+		head = head[:idx]
+	}
+	tail := output[len(output)-maxKeep:]
+	if idx := strings.Index(tail, "\n"); idx > 0 && idx < maxKeep/2 {
+		tail = tail[idx+1:]
 	}
 
-	return truncated + "\n\n[... output truncated due to summarization failure ...]"
+	truncated := head + "\n\n[... " + fmt.Sprintf("%d", originalSize-len(head)-len(tail)) + " bytes truncated ...]\n\n" + tail
+
+	return &CompactionResult{
+		Output:        truncated,
+		WasCompacted:  true,
+		OriginalSize:  originalSize,
+		CompactedSize: len(truncated),
+	}
 }
+

@@ -97,6 +97,8 @@ type Session struct {
 
 	// Shell temp directory - a random subdirectory in temp for shell command execution
 	ShellTempDir string
+	// SandboxOutputDir - directory for storing large sandbox output files that exceed context window limits
+	SandboxOutputDir string
 
 	mu          sync.RWMutex
 	CreatedAt   time.Time
@@ -130,6 +132,8 @@ type BackgroundJob struct {
 func NewSession(id, workingDir string) *Session {
 	// Create a random temp subdirectory for shell commands
 	shellTempDir := createShellTempDir()
+	// Create a directory for storing large sandbox output files
+	sandboxOutputDir := createSandboxOutputDir()
 
 	return &Session{
 		ID:                        id,
@@ -145,7 +149,31 @@ func NewSession(id, workingDir string) *Session {
 		UpdatedAt:                 time.Now(),
 		Dirty:                     true, // new session needs an initial save
 		ShellTempDir:              shellTempDir,
+		SandboxOutputDir:          sandboxOutputDir,
 	}
+}
+
+// createSandboxOutputDir creates a directory in the state directory for storing
+// large sandbox output files that exceed context window limits. The LLM is instructed
+// to read these files piece by piece instead of receiving the full output inline.
+func createSandboxOutputDir() string {
+	stateDir, err := getStateDir()
+	if err != nil {
+		logger.Warn("Failed to get state directory for sandbox output: %v", err)
+		// Fall back to temp directory
+		dirPath := filepath.Join(os.TempDir(), "scriptschnell-sandbox-output")
+		os.MkdirAll(dirPath, 0755)
+		return dirPath
+	}
+
+	dirPath := filepath.Join(stateDir, "sandbox-output")
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		logger.Warn("Failed to create sandbox output directory: %v", err)
+		return dirPath
+	}
+
+	logger.Debug("Created sandbox output directory: %s", dirPath)
+	return dirPath
 }
 
 // createShellTempDir creates a random subdirectory in the system temp directory
@@ -284,6 +312,13 @@ func (s *Session) GetShellTempDir() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ShellTempDir
+}
+
+// GetSandboxOutputDir returns the directory for storing large sandbox output files
+func (s *Session) GetSandboxOutputDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.SandboxOutputDir
 }
 
 // CleanupShellTempDir removes the shell temp directory if it exists

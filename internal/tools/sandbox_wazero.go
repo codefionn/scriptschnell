@@ -218,13 +218,24 @@ func (t *SandboxTool) executeWASM(ctx context.Context, wasmBytes []byte, sandbox
 		_ = outFile.Close()
 		_ = errFile.Close()
 
+		// Read any output that was produced before the timeout
+		stdoutBytes, _ := os.ReadFile(stdoutFile)
+		stderrBytes, _ := os.ReadFile(stderrFile)
+		timeoutStdout := string(stdoutBytes)
+		timeoutStderr := string(stderrBytes)
+		if timeoutStderr == "" {
+			timeoutStderr = "Execution timeout"
+		} else {
+			timeoutStderr += "\nExecution timeout"
+		}
+
 		return attachExecutionMetadata(map[string]interface{}{
-			"stdout":    "",
-			"stderr":    "Execution timeout",
+			"stdout":    timeoutStdout,
+			"stderr":    timeoutStderr,
 			"exit_code": -1,
 			"timeout":   true,
 			"error":     "execution timeout",
-		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, -1, "", "Execution timeout", true, callTracker)), nil
+		}, t.buildSandboxMetadata(startTime, commandSummary, timeoutSeconds, -1, timeoutStdout, timeoutStderr, true, callTracker)), nil
 	}
 
 	// Stop file monitor before reading files

@@ -205,8 +205,8 @@ func (d *adaptiveExecDeadline) Resume() {
 	d.execDeadline.Resume()
 }
 
-// maybeExtend checks if activity occurred recently and extends the deadline if appropriate.
-// Must be called with the mutex locked.
+// maybeExtend checks if the deadline is close to expiring and there has been
+// recent activity, extending the deadline if appropriate.
 func (d *adaptiveExecDeadline) maybeExtend() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -226,14 +226,23 @@ func (d *adaptiveExecDeadline) maybeExtend() {
 		return
 	}
 
-	// Check if activity occurred within the grace period after the original timeout would have fired
+	// Only extend when the deadline is close to expiring (within grace period).
+	// This prevents burning through all extensions immediately when output starts.
+	elapsed := time.Since(d.startedAt)
+	timeLeft := d.remaining - elapsed
+	if timeLeft > d.gracePeriod {
+		// Plenty of time remaining, no need to extend yet
+		return
+	}
+
+	// Check if there was recent activity (within the grace period)
 	elapsedSinceActivity := time.Since(lastActivity)
 	if elapsedSinceActivity > d.gracePeriod {
 		// No recent activity, don't extend
 		return
 	}
 
-	// Activity is recent - extend the deadline
+	// Deadline is close to expiring and there's recent activity - extend
 	d.extend()
 	logger.Debug("sandbox: adaptive deadline extended (extension %d/%d, original timeout: %v, total: %v)",
 		d.extensions, d.maxExtensions,

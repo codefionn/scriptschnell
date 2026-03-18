@@ -90,7 +90,7 @@ func (c *OpenAICompatibleClient) CompleteWithRequest(ctx context.Context, req *C
 		return nil, fmt.Errorf("openai-compatible completion request cannot be nil")
 	}
 
-	payload, err := c.buildChatRequest(req, false)
+	payload, err := c.buildChatRequest(req, true)
 	if err != nil {
 		return nil, err
 	}
@@ -113,29 +113,76 @@ func (c *OpenAICompatibleClient) CompleteWithRequest(ctx context.Context, req *C
 		return nil, fmt.Errorf("openai-compatible completion failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	var chatResp openAIChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+	// Accumulate streaming response
+	var contentBuf, reasoningBuf strings.Builder
+	var toolCalls []map[string]interface{}
+	var finishReason string
+
+	scanner := bufio.NewScanner(resp.Body)
+	buffer := make([]byte, 0, consts.BufferSize256KB)
+	scanner.Buffer(buffer, consts.BufferSize1MB)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk openAIStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return nil, fmt.Errorf("openai-compatible completion failed to decode chunk: %w", err)
+		}
+
+		for _, choice := range chunk.Choices {
+			if choice.Delta == nil {
+				continue
+			}
+
+			// Accumulate content
+			if text := extractOpenAIText(choice.Delta.Content); text != "" {
+				contentBuf.WriteString(text)
+			}
+
+			// Accumulate reasoning
+			if r := extractOpenAIDeltaReasoning(choice.Delta); r != "" {
+				reasoningBuf.WriteString(r)
+			}
+
+			// Accumulate tool calls
+			if len(choice.Delta.ToolCalls) > 0 {
+				toolCalls = append(toolCalls, choice.Delta.ToolCalls...)
+			}
+
+			// Capture finish reason
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("openai-compatible completion failed: %w", err)
 	}
 
-	if len(chatResp.Choices) == 0 || chatResp.Choices[0].Message == nil {
-		return &CompletionResponse{StopReason: "stop"}, nil
-	}
-
-	first := chatResp.Choices[0]
-	content := extractOpenAIText(first.Message.Content)
-	reasoning := extractOpenAIMessageReasoning(first.Message)
-	stopReason := first.FinishReason
-	if strings.TrimSpace(stopReason) == "" {
-		stopReason = "stop"
+	// Handle empty choices case
+	if finishReason == "" {
+		finishReason = "stop"
 	}
 
 	return &CompletionResponse{
-		Content:    content,
-		Reasoning:  reasoning,
-		ToolCalls:  convertOpenAIToolCalls(first.Message.ToolCalls),
-		StopReason: stopReason,
-		Usage:      chatResp.Usage,
+		Content:    contentBuf.String(),
+		Reasoning:  reasoningBuf.String(),
+		ToolCalls:  convertOpenAIToolCalls(toolCalls),
+		StopReason: finishReason,
+		Usage:      nil, // Usage not available in streaming mode
 	}, nil
 }
 

@@ -72,6 +72,7 @@ type Model struct {
 	Description     string `json:"description,omitempty"`
 	ContextWindow   int    `json:"context_window,omitempty"`    // Input context window size
 	MaxOutputTokens int    `json:"max_output_tokens,omitempty"` // Maximum output tokens
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`  // Reasoning effort: "xhigh", "high", "medium", "low", "minimal", "none"
 }
 
 // Config stores provider configuration
@@ -909,7 +910,7 @@ func (m *Manager) CreateClient(modelID string) (llm.Client, error) {
 		if strings.TrimSpace(baseURL) == "" {
 			baseURL = zAIGeneralBaseURL
 		}
-		client, err = llm.NewOpenAICompatibleClient(apiKey, baseURL, model.ID)
+		client, err = llm.NewZaiClient(apiKey, baseURL, model.ID)
 	case "openai-compatible":
 		if provider.BaseURL == "" {
 			return nil, fmt.Errorf("base URL is required for openai-compatible provider")

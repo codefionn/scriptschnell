@@ -590,8 +590,8 @@ func TestOrchestrationLoop_MaxIterationsLimit(t *testing.T) {
 	}
 
 	// Should have stopped at or before max iterations
-	if callCount > 256 {
-		t.Errorf("Expected at most 256 iterations, got %d", callCount)
+	if callCount > 512 {
+		t.Errorf("Expected at most 512 iterations, got %d", callCount)
 	}
 }
 

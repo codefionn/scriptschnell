@@ -3504,6 +3504,22 @@ func parseToolCallValidationError(err error) *toolCallValidationError {
 	return nil
 }
 
+// isIllegalMessagesError checks if an error indicates the messages array is structurally invalid.
+// This can happen after async compaction races where the compacted summary produces
+// orphan tool responses, missing tool call pairs, or other structural issues.
+func isIllegalMessagesError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(err.Error())
+	// Z.AI: "The messages parameter is illegal"
+	// OpenAI: "invalid_request_error" with messages-related issues
+	// Generic: status 400 with messages hints
+	return (strings.Contains(errMsg, "messages") && strings.Contains(errMsg, "illegal")) ||
+		(strings.Contains(errMsg, "messages") && strings.Contains(errMsg, "invalid")) ||
+		(strings.Contains(errMsg, "status 400") && strings.Contains(errMsg, "messages"))
+}
+
 // completeWithRetry wraps LLM completion with error retry logic
 func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.CompletionRequest, progressCallback progress.Callback) (*llm.CompletionResponse, error) {
 	modelID := o.providerMgr.GetOrchestrationModel()
@@ -3523,6 +3539,7 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 		})
 	}
 
+	messageSanitized := false
 	for attempt := 1; attempt <= errorRetryMaxAttempts; attempt++ {
 		// Try the completion
 		response, err := o.orchestrationClient.CompleteWithRequest(ctx, req)
@@ -3542,6 +3559,20 @@ func (o *Orchestrator) completeWithRetry(ctx context.Context, req *llm.Completio
 
 		if validationErr := parseToolCallValidationError(err); validationErr != nil {
 			return nil, validationErr
+		}
+
+		// Attempt message sanitization on 400 errors (illegal messages parameter)
+		// This can happen after async compaction races.
+		if !messageSanitized && isIllegalMessagesError(err) {
+			logger.Info("Detected illegal messages error, attempting message sanitization")
+			sanitized, repaired := llm.SanitizeMessages(req.Messages)
+			if repaired {
+				req.Messages = sanitized
+				messageSanitized = true
+				sendStatus("Repairing message structure...")
+				// Retry immediately without counting this as a full attempt
+				continue
+			}
 		}
 
 		// Last attempt - return the error

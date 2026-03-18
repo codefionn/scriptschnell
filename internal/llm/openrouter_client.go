@@ -149,10 +149,13 @@ func (c *OpenRouterClient) doCompletion(ctx context.Context, req *CompletionRequ
 		stopReason = "stop"
 	}
 
-	logger.Debug("OpenRouter: extracted content length=%d, tool_calls=%d, usage=%v", len(content), len(first.Message.ToolCalls), chatResp.Usage)
+	reasoning := extractOpenRouterMessageReasoning(first.Message)
+
+	logger.Debug("OpenRouter: extracted content length=%d, reasoning length=%d, tool_calls=%d, usage=%v", len(content), len(reasoning), len(first.Message.ToolCalls), chatResp.Usage)
 
 	return &CompletionResponse{
 		Content:    content,
+		Reasoning:  reasoning,
 		ToolCalls:  convertOpenRouterToolCalls(first.Message.ToolCalls),
 		StopReason: stopReason,
 		Usage:      chatResp.Usage,
@@ -302,11 +305,23 @@ func (c *OpenRouterClient) buildChatRequest(req *CompletionRequest, stream bool)
 	if len(req.Tools) > 0 {
 		payload.Tools = req.Tools
 		logger.Debug("OpenRouter: set %d tools", len(req.Tools))
+		// Enable parallel tool calls when tools are present
+		parallelToolCalls := true
+		payload.ParallelToolCalls = &parallelToolCalls
+		logger.Debug("OpenRouter: enabled parallel_tool_calls")
 	}
 	if req.PreviousResponseID != "" {
 		payload.PreviousResponseID = req.PreviousResponseID
 		logger.Debug("OpenRouter: set previous_response_id to %s", req.PreviousResponseID)
 	}
+	reasoningEffort := req.ReasoningEffort
+	if reasoningEffort == "" {
+		reasoningEffort = "medium"
+	}
+	payload.Reasoning = &openRouterReasoningConfig{
+		Effort: reasoningEffort,
+	}
+	logger.Debug("OpenRouter: set reasoning effort to %s", reasoningEffort)
 
 	return payload, nil
 }
@@ -432,6 +447,13 @@ func (c *OpenRouterClient) convertMessagesToOpenRouterFromUnified(req *Completio
 			Content: msg.Content,
 		}
 
+		// Preserve reasoning for multi-turn conversations
+		if role == "assistant" && msg.Reasoning != "" {
+			oMsg.Reasoning = msg.Reasoning
+			reasoningContent := msg.Reasoning
+			oMsg.ReasoningContent = &reasoningContent
+		}
+
 		if role == "assistant" && len(msg.ToolCalls) > 0 {
 			// Mistral (via OpenRouter) rejects tool calls with call_id field - only id is allowed
 			if c.getUnderlyingProvider() == "mistralai" {
@@ -544,6 +566,34 @@ func removeCallIDFromToolCalls(toolCalls []map[string]interface{}) []map[string]
 	return result
 }
 
+// extractOpenRouterMessageReasoning extracts reasoning content from a response message
+func extractOpenRouterMessageReasoning(msg *openRouterChatResponseMessage) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Reasoning != "" {
+		return msg.Reasoning
+	}
+	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+		return *msg.ReasoningContent
+	}
+	return ""
+}
+
+// extractOpenRouterDeltaReasoning extracts reasoning content from a stream delta
+func extractOpenRouterDeltaReasoning(delta *openRouterStreamDelta) string {
+	if delta == nil {
+		return ""
+	}
+	if delta.Reasoning != "" {
+		return delta.Reasoning
+	}
+	if delta.ReasoningContent != "" {
+		return delta.ReasoningContent
+	}
+	return ""
+}
+
 func extractOpenRouterText(content interface{}) string {
 	logger.Debug("extractOpenRouterText: processing content of type %T", content)
 
@@ -591,21 +641,29 @@ func extractOpenRouterText(content interface{}) string {
 }
 
 type openRouterChatRequest struct {
-	Model              string                   `json:"model"`
-	Messages           []openRouterChatMessage  `json:"messages"`
-	Tools              []map[string]interface{} `json:"tools,omitempty"`
-	Temperature        *float64                 `json:"temperature,omitempty"`
-	MaxTokens          int                      `json:"max_tokens,omitempty"`
-	Stream             bool                     `json:"stream,omitempty"`
-	PreviousResponseID string                   `json:"previous_response_id,omitempty"` // For prompt caching
+	Model              string                       `json:"model"`
+	Messages           []openRouterChatMessage      `json:"messages"`
+	Tools              []map[string]interface{}     `json:"tools,omitempty"`
+	Temperature        *float64                     `json:"temperature,omitempty"`
+	MaxTokens          int                          `json:"max_tokens,omitempty"`
+	Stream             bool                         `json:"stream,omitempty"`
+	PreviousResponseID string                       `json:"previous_response_id,omitempty"` // For prompt caching
+	Reasoning          *openRouterReasoningConfig   `json:"reasoning,omitempty"`
+	ParallelToolCalls  *bool                        `json:"parallel_tool_calls,omitempty"`
+}
+
+type openRouterReasoningConfig struct {
+	Effort string `json:"effort,omitempty"` // "xhigh", "high", "medium", "low", "minimal", "none"
 }
 
 type openRouterChatMessage struct {
-	Role       string                   `json:"role"`
-	Content    interface{}              `json:"content"` // Can be string or []contentBlock for caching
-	Name       string                   `json:"name,omitempty"`
-	ToolCalls  []map[string]interface{} `json:"tool_calls,omitempty"`
-	ToolCallID string                   `json:"tool_call_id,omitempty"`
+	Role             string                   `json:"role"`
+	Content          interface{}              `json:"content"` // Can be string or []contentBlock for caching
+	Reasoning        string                   `json:"reasoning,omitempty"`
+	ReasoningContent *string                  `json:"reasoning_content,omitempty"`
+	Name             string                   `json:"name,omitempty"`
+	ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
+	ToolCallID       string                   `json:"tool_call_id,omitempty"`
 }
 
 type openRouterContentBlock struct {
@@ -630,9 +688,11 @@ type openRouterChatChoice struct {
 }
 
 type openRouterChatResponseMessage struct {
-	Role      string               `json:"role"`
-	Content   interface{}          `json:"content"`
-	ToolCalls []openRouterToolCall `json:"tool_calls,omitempty"`
+	Role             string               `json:"role"`
+	Content          interface{}          `json:"content"`
+	Reasoning        string               `json:"reasoning,omitempty"`
+	ReasoningContent *string              `json:"reasoning_content,omitempty"`
+	ToolCalls        []openRouterToolCall `json:"tool_calls,omitempty"`
 }
 
 type openRouterToolCall struct {
@@ -659,7 +719,9 @@ type openRouterStreamChoice struct {
 }
 
 type openRouterStreamDelta struct {
-	Role      string               `json:"role"`
-	Content   interface{}          `json:"content"`
-	ToolCalls []openRouterToolCall `json:"tool_calls,omitempty"`
+	Role             string               `json:"role"`
+	Content          interface{}          `json:"content"`
+	Reasoning        string               `json:"reasoning,omitempty"`
+	ReasoningContent string               `json:"reasoning_content,omitempty"`
+	ToolCalls        []openRouterToolCall `json:"tool_calls,omitempty"`
 }

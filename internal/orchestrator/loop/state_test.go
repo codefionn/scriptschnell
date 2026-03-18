@@ -9,8 +9,8 @@ func TestNewDefaultState(t *testing.T) {
 	t.Run("With nil config uses defaults", func(t *testing.T) {
 		state := NewDefaultState(nil)
 
-		if state.maxIterations != 256 {
-			t.Errorf("Expected default MaxIterations 256, got %d", state.maxIterations)
+		if state.maxIterations != 512 {
+			t.Errorf("Expected default MaxIterations 512, got %d", state.maxIterations)
 		}
 
 		if state.maxAutoContinueAttempts != 10 {

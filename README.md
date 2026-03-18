@@ -115,7 +115,7 @@ flowchart TD
     summarizer -->|Allow / Deny| secretAwareAuth
     secretAwareAuth -->|Authorization decision| registry
     secretAuth -->|No| registry
-    registry --> tools["Tool Actors<br/>(read_file, write_file_diff, shell, sandbox, MCP, ...)"]
+    registry --> tools["Tool Actors<br/>(read_file, edit_file, shell, sandbox, MCP, ...)"]
     tools -->|Tool outputs| contentGate{External content?}
     contentGate -->|No| orchestrator
     contentGate -->|Yes| safetyEval[Safety Evaluator]

@@ -220,7 +220,7 @@ The system will prefer AGENTS.local.md if it exists, otherwise it will use AGENT
 
 DO NOT just describe the file. DO NOT just tell me what should be in it.
 YOU MUST ACTUALLY CALL THE create_file TOOL to create the file.
-If AGENTS.md already exists, you must read it first and then call write_file_diff with a diff to update it. GPT models may omit @@ hunk markers as long as headers and +/- lines are present.
+If AGENTS.md already exists, you must read it first and then call edit_file with a diff to update it. GPT models may omit @@ hunk markers as long as headers and +/- lines are present.
 
 ## How to Complete This Task
 
@@ -266,5 +266,5 @@ Examples:
 
 ---
 
-**REMEMBER: Keep it SHORT. After reading dependency files, you MUST call create_file (or write_file_diff for updates). That is the ONLY way to complete this task.**`
+**REMEMBER: Keep it SHORT. After reading dependency files, you MUST call create_file (or edit_file for updates). That is the ONLY way to complete this task.**`
 }

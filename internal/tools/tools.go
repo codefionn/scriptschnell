@@ -336,6 +336,12 @@ func (r *Registry) initializeDefaultSuggestions() {
 	})
 
 	// File operations - guide to correct tools
+	r.AddManualSuggestion("write_file_diff", &ManualSuggestion{
+		SuggestedTools: []string{"edit_file"},
+		Reason:         "To modify files, use 'edit_file' which applies unified diff patches to existing files",
+		MatchPattern:   "exact",
+	})
+
 	r.AddManualSuggestion("edit_file", &ManualSuggestion{
 		SuggestedTools: []string{"edit_file"},
 		Reason:         "To modify files, use 'edit_file' which applies unified diff patches to existing files",
@@ -343,26 +349,26 @@ func (r *Registry) initializeDefaultSuggestions() {
 	})
 
 	r.AddManualSuggestion("modify_file", &ManualSuggestion{
-		SuggestedTools: []string{"edit_file"},
-		Reason:         "To modify files, use 'write_file_diff' which applies unified diff patches to existing files",
+		SuggestedTools: []string{"write_file_diff"},
+		Reason:         "To modify files, use 'edit_file' which applies unified diff patches to existing files",
 		MatchPattern:   "exact",
 	})
 
 	r.AddManualSuggestion("update_file", &ManualSuggestion{
-		SuggestedTools: []string{"edit_file"},
-		Reason:         "To update files, use 'write_file_diff' which applies unified diff patches to existing files",
+		SuggestedTools: []string{"write_file_diff"},
+		Reason:         "To update files, use 'edit_file' which applies unified diff patches to existing files",
 		MatchPattern:   "exact",
 	})
 
 	r.AddManualSuggestion("patch_file", &ManualSuggestion{
-		SuggestedTools: []string{"edit_file"},
-		Reason:         "To patch files, use 'write_file_diff' which applies unified diff patches",
+		SuggestedTools: []string{"write_file_diff"},
+		Reason:         "To patch files, use 'edit_file' which applies unified diff patches",
 		MatchPattern:   "exact",
 	})
 
 	r.AddManualSuggestion("write_file", &ManualSuggestion{
-		SuggestedTools: []string{"create_file", "edit_file"},
-		Reason:         "Use 'create_file' for new files, 'replace_file' to replace entire file content, or 'write_file_diff' to modify existing files with diffs",
+		SuggestedTools: []string{"create_file", "write_file_diff"},
+		Reason:         "Use 'create_file' for new files, 'replace_file' to replace entire file content, or 'edit_file' to modify existing files with diffs",
 		MatchPattern:   "exact",
 	})
 

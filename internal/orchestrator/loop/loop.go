@@ -265,7 +265,7 @@ type Config struct {
 // DefaultConfig returns a Config with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
-		MaxIterations:                     256,
+		MaxIterations:                     512,
 		MaxAutoContinueAttempts:           10,
 		EnableLoopDetection:               true,
 		EnableAutoContinue:                true,
@@ -312,6 +312,10 @@ type Dependencies struct {
 
 	// ProgressCallback sends progress updates to the UI
 	ProgressCallback progress.Callback
+
+	// ReasoningEffort controls reasoning depth for models that support it (e.g., OpenRouter)
+	// Valid values: "xhigh", "high", "medium", "low", "minimal", "none"
+	ReasoningEffort string
 }
 
 // ToolRegistry defines the interface for accessing tools

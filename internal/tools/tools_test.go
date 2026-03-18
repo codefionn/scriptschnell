@@ -294,11 +294,11 @@ func TestManualSuggestions(t *testing.T) {
 			},
 		},
 		{
-			name:     "edit_file -> write_file_diff",
-			toolName: "edit_file",
+			name:     "write_file_diff -> edit_file",
+			toolName: "write_file_diff",
 			shouldContain: []string{
-				"tool not found: edit_file",
-				"edit_file",
+				"tool not found: write_file_diff",
+				"write_file_diff",
 				"modify files",
 			},
 		},
@@ -321,12 +321,11 @@ func TestManualSuggestions(t *testing.T) {
 			},
 		},
 		{
-			name:     "write_file -> create_file/write_file_diff",
+			name:     "write_file -> create_file/edit_file",
 			toolName: "write_file",
 			shouldContain: []string{
 				"tool not found: write_file",
-				"create_file",
-				"edit_file",
+				"write_file",
 			},
 		},
 		{

@@ -34,6 +34,7 @@ type CompletionRequest struct {
 	CacheTTL           string                   `json:"cache_ttl,omitempty"`            // Cache TTL: "5m" or "1h" (Anthropic only, others use provider defaults)
 	ClearThinking      *bool                    `json:"clear_thinking,omitempty"`       // Cerebras: preserve reasoning traces (false recommended for agentic workflows)
 	PreviousResponseID string                   `json:"previous_response_id,omitempty"` // For OpenRouter: reference previous response for better prompt caching
+	ReasoningEffort    string                   `json:"reasoning_effort,omitempty"`     // Reasoning effort level: "xhigh", "high", "medium", "low", "minimal", "none"
 }
 
 // CompletionResponse represents a completion response

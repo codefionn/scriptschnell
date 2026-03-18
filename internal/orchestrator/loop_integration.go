@@ -237,6 +237,9 @@ func (i *orchestratorIteration) Execute(ctx context.Context, state loop.State) (
 		}
 	}
 
+	// Sanitize messages to fix structural issues from compaction races
+	llmMessages, _ = llm.SanitizeMessages(llmMessages)
+
 	// Apply cache control if enabled
 	if i.orch.config != nil && i.orch.config.EnablePromptCache {
 		markCacheControlBreakpoints(llmMessages, cacheControlTokenInterval, cacheControlMaxBreakpoints)
@@ -501,6 +504,14 @@ func (o *Orchestrator) initializeLoop() error {
 		ProgressCallback:     o.currentProgressCb,
 	}
 
+	// Set reasoning effort from model config if available
+	if o.providerMgr != nil {
+		modelID := o.providerMgr.GetOrchestrationModel()
+		if model, ok := o.providerMgr.GetModel(modelID); ok && model.ReasoningEffort != "" {
+			deps.ReasoningEffort = model.ReasoningEffort
+		}
+	}
+
 	// Create strategy based on configuration
 	strategy := o.createLoopStrategy(o.loopConfig)
 
@@ -546,6 +557,13 @@ func (o *Orchestrator) runOrchestrationLoopWithAbstraction(
 			SystemPromptProvider: newOrchestratorSystemPromptProvider(o),
 			ContextManager:       newOrchestratorContextManager(o),
 			ProgressCallback:     progressCallback,
+		}
+		// Set reasoning effort from model config if available
+		if o.providerMgr != nil {
+			modelID := o.providerMgr.GetOrchestrationModel()
+			if model, ok := o.providerMgr.GetModel(modelID); ok && model.ReasoningEffort != "" {
+				deps.ReasoningEffort = model.ReasoningEffort
+			}
 		}
 		o.loop = loop.NewOrchestratorLoop(o.loopConfig, strategy, iteration, deps)
 	}

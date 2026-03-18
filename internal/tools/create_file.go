@@ -80,7 +80,7 @@ func (t *CreateFileTool) Execute(ctx context.Context, params map[string]interfac
 	}
 
 	if exists {
-		return &ToolResult{Error: fmt.Sprintf("file already exists: %s (use write_file_diff to update existing files)", path)}
+		return &ToolResult{Error: fmt.Sprintf("file already exists: %s (use edit_file to update existing files)", path)}
 	}
 
 	// Validate syntax before writing (non-blocking)

@@ -12,8 +12,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	if config.MaxIterations != 256 {
-		t.Errorf("Expected MaxIterations = 256, got %d", config.MaxIterations)
+	if config.MaxIterations != 512 {
+		t.Errorf("Expected MaxIterations = 512, got %d", config.MaxIterations)
 	}
 	if config.MaxAutoContinueAttempts != 10 {
 		t.Errorf("Expected MaxAutoContinueAttempts = 10, got %d", config.MaxAutoContinueAttempts)

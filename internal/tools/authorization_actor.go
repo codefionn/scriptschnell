@@ -496,7 +496,7 @@ func (a *AuthorizationActor) authorizeCreateFile(ctx context.Context, params map
 	if exists {
 		return &AuthorizationDecision{
 			Allowed: false,
-			Reason:  fmt.Sprintf("File %s already exists. Use the write_file_diff tool to update existing files.", path),
+			Reason:  fmt.Sprintf("File %s already exists. Use the %s tool to update existing files.", path, ToolNameEditFile),
 		}, nil
 	}
 

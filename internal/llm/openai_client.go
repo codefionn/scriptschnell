@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/codefionn/scriptschnell/internal/consts"
+	"github.com/codefionn/scriptschnell/internal/logger"
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"
@@ -362,6 +363,13 @@ func convertMessagesToOpenAI(req *CompletionRequest, model string) ([]openAIChat
 }
 
 func convertMessagesToOpenAIFromUnified(req *CompletionRequest, includeReasoning bool) ([]openAIChatMessage, error) {
+	// Sanitize messages to fix structural issues from compaction races
+	sanitized, repaired := SanitizeMessages(req.Messages)
+	if repaired {
+		logger.Info("openai: sanitized %d messages before conversion", len(sanitized))
+		req.Messages = sanitized
+	}
+
 	messages := make([]openAIChatMessage, 0, len(req.Messages)+1)
 
 	if system := strings.TrimSpace(req.SystemPrompt); system != "" {
@@ -589,6 +597,25 @@ func extractOpenAIMessageReasoning(msg *openAIChatMessage) string {
 	return extractOpenAIReasoning(msg.Content)
 }
 
+func extractOpenAIDeltaReasoning(delta *openAIChatDelta) string {
+	if delta == nil {
+		return ""
+	}
+	if delta.Reasoning != "" {
+		return delta.Reasoning
+	}
+	if delta.Thinking != "" {
+		return delta.Thinking
+	}
+	if delta.ReasoningContent != "" {
+		return delta.ReasoningContent
+	}
+	if delta.ThinkingContent != "" {
+		return delta.ThinkingContent
+	}
+	return extractOpenAIReasoning(delta.Content)
+}
+
 type openAIChatRequest struct {
 	Model       string                   `json:"model"`
 	Messages    []openAIChatMessage      `json:"messages"`
@@ -641,10 +668,11 @@ type openAIStreamChoice struct {
 }
 
 type openAIChatDelta struct {
-	Role             string      `json:"role"`
-	Content          interface{} `json:"content"`
-	Reasoning        string      `json:"reasoning,omitempty"`
-	Thinking         string      `json:"thinking,omitempty"`
-	ReasoningContent string      `json:"reasoning_content,omitempty"`
-	ThinkingContent  string      `json:"thinking_content,omitempty"`
+	Role             string                   `json:"role"`
+	Content          interface{}              `json:"content"`
+	Reasoning        string                   `json:"reasoning,omitempty"`
+	Thinking         string                   `json:"thinking,omitempty"`
+	ReasoningContent string                   `json:"reasoning_content,omitempty"`
+	ThinkingContent  string                   `json:"thinking_content,omitempty"`
+	ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
 }

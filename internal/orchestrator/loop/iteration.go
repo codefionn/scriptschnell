@@ -196,6 +196,10 @@ func (e *IterationExecutor) buildCompletionRequest(
 		}
 	}
 
+	if e.deps.ReasoningEffort != "" {
+		req.ReasoningEffort = e.deps.ReasoningEffort
+	}
+
 	return req
 }
 

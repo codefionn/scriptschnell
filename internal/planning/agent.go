@@ -184,7 +184,7 @@ func (p *PlanningAgent) initializeTools() {
 func (p *PlanningAgent) initializeLoop(req *PlanningRequest, messages []*llm.Message, userInputCb UserInputCallback, progressCb progress.Callback, toolCallCb ToolCallCallback, toolResultCb ToolResultCallback, userMsgChan <-chan string) loop.Loop {
 	// Build loop configuration
 	p.loopConfig = &loop.Config{
-		MaxIterations:           96,
+		MaxIterations:           256,
 		MaxAutoContinueAttempts: 0, // Planning doesn't use auto-continue
 		EnableLoopDetection:     true,
 		EnableAutoContinue:      false,

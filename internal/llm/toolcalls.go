@@ -1,18 +1,42 @@
 package llm
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
 )
 
-// NormalizeToolCallIDs ensures every tool call has a stable identifier.
-// Some providers occasionally omit call IDs, which breaks downstream requests
-// that require tool_call_id on tool messages.
+// NormalizeToolCallIDs ensures every tool call has a stable identifier and
+// consistent format across providers. Some providers (e.g. Ollama) omit the
+// "type" field or return "arguments" as a map instead of a JSON string.
+// This function normalizes all tool calls to the canonical format:
+//
+//	{"id": "...", "type": "function", "function": {"name": "...", "arguments": "<json string>"}}
 func NormalizeToolCallIDs(toolCalls []map[string]interface{}) []map[string]interface{} {
 	for i, tc := range toolCalls {
 		if tc == nil {
 			continue
+		}
+
+		// Ensure type is set to "function" (some providers like Ollama omit it)
+		if t, _ := tc["type"].(string); t == "" {
+			tc["type"] = "function"
+		}
+
+		// Ensure arguments within function is a JSON string, not a map
+		if fn, ok := tc["function"].(map[string]interface{}); ok {
+			if _, isString := fn["arguments"].(string); !isString {
+				if fn["arguments"] != nil {
+					if b, err := json.Marshal(fn["arguments"]); err == nil {
+						fn["arguments"] = string(b)
+					} else {
+						fn["arguments"] = "{}"
+					}
+				} else {
+					fn["arguments"] = "{}"
+				}
+			}
 		}
 
 		id := firstNonEmptyString(tc["id"], tc["call_id"])

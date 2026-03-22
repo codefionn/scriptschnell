@@ -323,6 +323,9 @@ func (i *orchestratorIteration) Execute(ctx context.Context, state loop.State) (
 		return outcome, err
 	}
 
+	// Normalize tool calls across providers (fixes missing type, non-string arguments, missing IDs)
+	response.ToolCalls = llm.NormalizeToolCallIDs(response.ToolCalls)
+
 	outcome.Response = response
 	outcome.Content = response.Content
 	outcome.Reasoning = response.Reasoning

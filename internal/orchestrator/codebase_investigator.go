@@ -397,6 +397,9 @@ The requested logic is found in internal/module/file.go function DoWork().
 			}
 		}
 
+		// Normalize tool calls across providers
+		resp.ToolCalls = llm.NormalizeToolCallIDs(resp.ToolCalls)
+
 		// Send progress update for tool calls with details
 		if len(resp.ToolCalls) > 0 {
 			for _, tc := range resp.ToolCalls {

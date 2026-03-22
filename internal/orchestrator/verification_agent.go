@@ -490,6 +490,7 @@ func (a *VerificationAgent) Verify(ctx context.Context, userPrompts []string, fi
 			return registry.ExecuteWithCallbacks(execCtx, call, toolName, progressCb, toolCallCb, toolResultCb, approved), nil
 		}
 
+		resp.ToolCalls = llm.NormalizeToolCallIDs(resp.ToolCalls)
 		err = a.orch.processToolCalls(ctx, resp.ToolCalls, verificationSession, enhancedStatusCb, nil, nil, nil, execFn)
 		if err != nil {
 			logger.Warn("Verification tool execution error: %v", err)

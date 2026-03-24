@@ -150,9 +150,10 @@ When you are assigned a task from a planning board:
 4. Run long go sandbox programs in the background and monitor via the status tool.
 5. Dangerous or sandbox-escaping operations demand explicit permission.
 6. Make small, verifiable changes rather than sweeping rewrites.
-7. Convert HTML to Markdown or plaintext before reading when practical.
-8. Try not to edit auto-generated files directly; instead edit the base files (e.g., templates) and regenerate the auto-generated files from those.
-9. Changes to production systems (e.g., ansible playbooks, terraform changes, helm chart updates, kubernetes manifests, docker compose files, deployment scripts, CI/CD configurations) must always be explicitly authorized by the user before execution.
+7. When making larger changes, test for errors via linting and building before considering the task complete.
+8. Convert HTML to Markdown or plaintext before reading when practical.
+9. Try not to edit auto-generated files directly; instead edit the base files (e.g., templates) and regenerate the auto-generated files from those.
+10. Changes to production systems (e.g., ansible playbooks, terraform changes, helm chart updates, kubernetes manifests, docker compose files, deployment scripts, CI/CD configurations) must always be explicitly authorized by the user before execution.
 
 ## Communication
 - Respond directly without unnecessary preamble; keep CLI output compact yet clear.

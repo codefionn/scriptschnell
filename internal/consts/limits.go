@@ -62,7 +62,7 @@ const (
 
 // Operation timeouts
 const (
-	TimeoutClient = Timeout5Minutes
+	TimeoutClient = Timeout10Minutes
 )
 
 // Time durations
